@@ -202,7 +202,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                     <div className="flex justify-between items-start">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-slate-900 truncate">
-                          {(offer as any).investorName || offer.investorEmail.split('@')[0]}
+                          {(offer as any).investorName || offer.investorEmail}
                         </p>
                         <p className="text-xs text-slate-600">₹{offer.offerAmount}L • {offer.equityPercentage}%</p>
                       </div>
@@ -280,7 +280,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                   <tbody className="divide-y divide-slate-200 bg-white">
                     {offers.map((offer) => (
                       <tr key={offer.id}>
-                        <td className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap text-slate-900">{(offer as any).investorName || offer.investorEmail.split('@')[0]}</td>
+                        <td className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap text-slate-900">{(offer as any).investorName || offer.investorEmail}</td>
                         <td className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap text-slate-900">₹{offer.offerAmount}L</td>
                         <td className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap text-slate-900">{offer.equityPercentage}%</td>
                         <td className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap">

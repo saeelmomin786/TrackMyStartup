@@ -4,7 +4,7 @@ import Button from './ui/Button';
 import EditProfileModal from './EditProfileModal';
 import PaymentSection from './PaymentSection';
 import SubscriptionSummaryCards from './SubscriptionSummaryCards';
-import { ProfileService } from '../services/profileService';
+import { authService } from '../lib/auth';
 import { AuthUser } from '../lib/auth';
 
 interface ProfilePageProps {
@@ -34,7 +34,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ currentUser, onBack, onProfil
       setIsRefreshing(true);
       console.log('🔄 Refreshing profile data for user:', currentUser.id);
       
-      const freshProfile = await ProfileService.getProfile(currentUser.id);
+      const freshProfile = await authService.getCurrentUser();
       console.log('✅ Fresh profile data loaded:', freshProfile);
       
       // Update local state with fresh data

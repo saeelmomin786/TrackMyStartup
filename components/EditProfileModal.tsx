@@ -1,9 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { X, Camera, User, Mail, Phone, MapPin, Calendar, Building, Shield, Save, Edit3, Trash2 } from 'lucide-react';
 import Button from './ui/Button';
-import { ProfileService } from '../services/profileService';
+import { authService } from '../lib/auth';
 import { AuthUser } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { storageService } from '../lib/storage';
 
 interface EditProfileModalProps {
   currentUser?: AuthUser | null;
@@ -84,7 +85,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         
         // Use the new replaceProfilePhoto method for better management
         const oldPhotoUrl = currentUser?.profile_photo_url;
-        const result = await ProfileService.replaceProfilePhoto(file, currentUser.id, oldPhotoUrl);
+        const result = await storageService.replaceProfilePhoto(file, currentUser.id, oldPhotoUrl);
         
         // Update local state
         setProfilePhoto(result.url);
@@ -117,7 +118,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         setIsLoading(true);
         // Use the new replaceVerificationDocument method for better management
         const oldUrl = currentDocuments.government_id;
-        const result = await ProfileService.replaceVerificationDocument(file, currentUser.id, 'government-id', oldUrl);
+        const result = await storageService.replaceVerificationDocument(file, currentUser.id, 'government-id', oldUrl);
         setFormData(prev => ({
           ...prev,
           government_id: result.url
@@ -142,7 +143,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         setIsLoading(true);
         // Use the new replaceVerificationDocument method for better management
         const oldUrl = currentDocuments.ca_license;
-        const result = await ProfileService.replaceVerificationDocument(file, currentUser.id, 'ca-license', oldUrl);
+        const result = await storageService.replaceVerificationDocument(file, currentUser.id, 'ca-license', oldUrl);
         setFormData(prev => ({
           ...prev,
           ca_license: result.url
@@ -168,7 +169,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         // Use the new replaceVerificationDocument method for better management
         // CS licenses are stored in ca_license field (existing working system)
         const oldUrl = currentDocuments.ca_license;
-        const result = await ProfileService.replaceVerificationDocument(file, currentUser.id, 'cs-license', oldUrl);
+        const result = await storageService.replaceVerificationDocument(file, currentUser.id, 'cs-license', oldUrl);
         setFormData(prev => ({
           ...prev,
           ca_license: result.url
@@ -192,7 +193,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
       try {
         setIsLoading(true);
         const oldUrl = currentDocuments.logo_url;
-        const result = await ProfileService.replaceVerificationDocument(file, currentUser.id, 'logo', oldUrl);
+        const result = await storageService.replaceVerificationDocument(file, currentUser.id, 'logo', oldUrl);
         setFormData(prev => ({
           ...prev,
           logo_url: result.url
@@ -216,7 +217,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
       try {
         setIsLoading(true);
         const oldUrl = currentDocuments.financial_advisor_license_url;
-        const result = await ProfileService.replaceVerificationDocument(file, currentUser.id, 'financial-license', oldUrl);
+        const result = await storageService.replaceVerificationDocument(file, currentUser.id, 'financial-license', oldUrl);
         setFormData(prev => ({
           ...prev,
           financial_advisor_license_url: result.url
@@ -252,14 +253,20 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         state: formData.state,
         country: formData.country,
         company: formData.company,
+        company_type: formData.company_type,
         government_id: formData.government_id,
         ca_license: formData.ca_license,
-        profile_photo_url: formData.profile_photo_url,
+        profile_photo_url: profilePhoto || formData.profile_photo_url,
         investment_advisor_code_entered: formData.investment_advisor_code_entered,
+        logo_url: formData.logo_url,
+        financial_advisor_license_url: formData.financial_advisor_license_url,
       };
 
-      // Update profile in database using ProfileService
-      await ProfileService.updateProfile(currentUser.id, profileData);
+      // Update profile in database using authService
+      const updateResult = await authService.updateProfile(currentUser.id, profileData);
+      if (updateResult.error) {
+        throw new Error(updateResult.error);
+      }
 
       // If user is a startup, also update the startups table with startup-specific fields
       if (currentUser.role === 'Startup') {

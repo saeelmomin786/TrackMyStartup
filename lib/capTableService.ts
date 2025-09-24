@@ -335,6 +335,17 @@ class CapTableService {
       throw error;
     }
 
+    // Update startup's total funding
+    const { error: updateError } = await supabase
+      .from('startups')
+      .update({ total_funding: supabase.raw('total_funding + ?', [investmentData.amount]) })
+      .eq('id', startupId);
+
+    if (updateError) {
+      console.error('Error updating startup total funding:', updateError);
+      // Don't throw here as the investment record was already added successfully
+    }
+
     return {
       id: data.id,
       date: data.date,
@@ -353,6 +364,15 @@ class CapTableService {
   }
 
   async updateInvestmentRecord(id: string, investmentData: Partial<InvestmentRecord>): Promise<InvestmentRecord> {
+    // First, get the current record to calculate funding difference
+    const { data: currentRecord, error: fetchError } = await supabase
+      .from('investment_records')
+      .select('startup_id, amount')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
     const updateData: any = {};
     
     if (investmentData.date !== undefined) {
@@ -382,6 +402,20 @@ class CapTableService {
 
     if (error) throw error;
 
+    // Update startup's total funding if amount changed
+    if (investmentData.amount !== undefined && investmentData.amount !== currentRecord.amount) {
+      const fundingDifference = investmentData.amount - currentRecord.amount;
+      const { error: updateError } = await supabase
+        .from('startups')
+        .update({ total_funding: supabase.raw('total_funding + ?', [fundingDifference]) })
+        .eq('id', currentRecord.startup_id);
+
+      if (updateError) {
+        console.error('Error updating startup total funding:', updateError);
+        // Don't throw here as the investment record was already updated successfully
+      }
+    }
+
     return {
       id: data.id,
       date: data.date,
@@ -401,7 +435,19 @@ class CapTableService {
     try {
       console.log('🗑️ Deleting investment record with ID:', id);
       
-      // Delete the investment record directly
+      // First, get the record details to update startup funding
+      const { data: recordToDelete, error: fetchError } = await supabase
+        .from('investment_records')
+        .select('startup_id, amount')
+        .eq('id', id)
+        .single();
+
+      if (fetchError) {
+        console.error('❌ Error fetching investment record:', fetchError);
+        throw fetchError;
+      }
+      
+      // Delete the investment record
       const { error: deleteError } = await supabase
         .from('investment_records')
         .delete()
@@ -412,9 +458,57 @@ class CapTableService {
         throw deleteError;
       }
 
+      // Update startup's total funding by subtracting the deleted amount
+      const { error: updateError } = await supabase
+        .from('startups')
+        .update({ total_funding: supabase.raw('total_funding - ?', [recordToDelete.amount]) })
+        .eq('id', recordToDelete.startup_id);
+
+      if (updateError) {
+        console.error('Error updating startup total funding:', updateError);
+        // Don't throw here as the investment record was already deleted successfully
+      }
+
       console.log('✅ Investment record deleted successfully');
     } catch (error) {
       console.error('❌ Error deleting investment record:', error);
+      throw error;
+    }
+  }
+
+  // Recalculate and sync startup's total funding with investment records
+  async recalculateStartupTotalFunding(startupId: number): Promise<void> {
+    try {
+      console.log('🔄 Recalculating total funding for startup:', startupId);
+      
+      // Get all investment records for this startup
+      const { data: investmentRecords, error: fetchError } = await supabase
+        .from('investment_records')
+        .select('amount')
+        .eq('startup_id', startupId);
+
+      if (fetchError) {
+        console.error('❌ Error fetching investment records:', fetchError);
+        throw fetchError;
+      }
+
+      // Calculate total funding from investment records
+      const calculatedTotalFunding = investmentRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
+      
+      // Update startup's total funding
+      const { error: updateError } = await supabase
+        .from('startups')
+        .update({ total_funding: calculatedTotalFunding })
+        .eq('id', startupId);
+
+      if (updateError) {
+        console.error('❌ Error updating startup total funding:', updateError);
+        throw updateError;
+      }
+
+      console.log('✅ Startup total funding recalculated:', calculatedTotalFunding);
+    } catch (error) {
+      console.error('❌ Error recalculating startup total funding:', error);
       throw error;
     }
   }

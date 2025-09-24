@@ -4,6 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
 import AddStartupModal from './AddStartupModal';
+import AdvisorAwareLogo from './AdvisorAwareLogo';
 import { 
   Building2, 
   TrendingUp, 
@@ -103,7 +104,11 @@ const StartupView: React.FC<StartupViewProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex-1">
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">TrackMyStartup</h1>
+          <AdvisorAwareLogo 
+            currentUser={currentUser}
+            showText={true}
+            textClassName="text-2xl sm:text-3xl font-bold text-slate-900"
+          />
           <p className="text-sm sm:text-base text-slate-600 mt-1">Manage your startup portfolio and investments</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">

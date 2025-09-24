@@ -3,7 +3,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
 import { UserRole } from '../types';
-import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2 } from 'lucide-react';
+import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2, LogOut } from 'lucide-react';
 import LogoTMS from './public/logoTMS.svg';
 import { authService } from '../lib/auth';
 import { storageService } from '../lib/storage';
@@ -96,9 +96,39 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
   // Compute company types for the currently selected country from admin-managed rules
   const companyTypesByCountry = React.useMemo<string[]>(() => {
-    const countryRules = rulesMap[profileData.country] || rulesMap['default'] || {};
-    const keys = Object.keys(countryRules).filter(k => k !== 'default');
-    return keys.length > 0 ? keys : (countryRules['default'] ? ['default'] : []);
+    console.log('🔍 Computing company types for country:', profileData.country);
+    console.log('🗺️ Current rules map:', rulesMap);
+    
+    if (!profileData.country) {
+      return [];
+    }
+    
+    // Find the country code for the selected country name
+    let countryCode = profileData.country;
+    
+    // If profileData.country is a country name (like "India"), find the corresponding country code
+    if (profileData.country && !rulesMap[profileData.country]) {
+      // Look for a country code that matches this country name
+      for (const [code, data] of Object.entries(rulesMap)) {
+        if ((data as any).country_name === profileData.country) {
+          countryCode = code;
+          break;
+        }
+      }
+    }
+    
+    // Get all company types for the selected country from comprehensive rules
+    const countryData = rulesMap[countryCode];
+    console.log('📋 Country data for', countryCode, ':', countryData);
+    
+    if (!countryData || !countryData.company_types) {
+      console.log('❌ No company types found for country:', countryCode);
+      return [];
+    }
+    
+    const companyTypes = Object.keys(countryData.company_types);
+    console.log('✅ Company types for', countryCode, ':', companyTypes);
+    return companyTypes;
   }, [rulesMap, profileData.country]);
 
   useEffect(() => {
@@ -117,34 +147,53 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   useEffect(() => {
     const loadComplianceRules = async () => {
       try {
+        console.log('🔍 Loading compliance rules for company types...');
         const rules = await complianceRulesComprehensiveService.getAllRules();
+        console.log('📊 Loaded compliance rules:', rules.length, 'rules');
+        
         const map: any = {};
         const countries: string[] = [];
         
         rules.forEach(rule => { 
           if (!map[rule.country_code]) {
-            map[rule.country_code] = {};
+            map[rule.country_code] = {
+              country_name: rule.country_name,
+              company_types: {}
+            };
           }
-          if (!map[rule.country_code][rule.company_type]) {
-            map[rule.country_code][rule.company_type] = [];
+          
+          // Only process actual company types, not CA/CS types or setup entries
+          const companyType = rule.company_type;
+          if (companyType && 
+              !companyType.toLowerCase().includes('setup') && 
+              !companyType.toLowerCase().includes('ca type') && 
+              !companyType.toLowerCase().includes('cs type') &&
+              companyType !== rule.ca_type &&
+              companyType !== rule.cs_type) {
+            
+            if (!map[rule.country_code].company_types[companyType]) {
+              map[rule.country_code].company_types[companyType] = [];
+            }
+            map[rule.country_code].company_types[companyType].push({
+              id: rule.id,
+              name: rule.compliance_name,
+              description: rule.compliance_description,
+              frequency: rule.frequency,
+              verification_required: rule.verification_required
+            });
           }
-          map[rule.country_code][rule.company_type].push({
-            id: rule.id,
-            name: rule.compliance_name,
-            description: rule.compliance_description,
-            frequency: rule.frequency,
-            verification_required: rule.verification_required
-          });
           
           if (rule.country_code && rule.country_code !== 'default' && !countries.includes(rule.country_code)) {
             countries.push(rule.country_code);
           }
         });
         
+        console.log('🗺️ Built rules map:', map);
+        console.log('🌍 Available countries:', countries);
         setRulesMap(map);
         setAllCountries(countries.sort());
       } catch (error) {
-        console.error('Error loading compliance rules:', error);
+        console.error('❌ Error loading compliance rules:', error);
       }
     };
 
@@ -342,7 +391,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       setSelectedCountryInfo(countryInfo);
       
       // Auto-select currency based on country
-      const autoSelectedCurrency = getCurrencyForCountryCode(countryCode);
+      const autoSelectedCurrency = getCurrencyForCountry(countryCode);
       
       // Auto-populate CA and CS types in profile data
       setProfileData(prev => ({
@@ -355,14 +404,32 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     }
   };
 
+  // Get company types for a specific subsidiary based on its country
+  const getCompanyTypesForSubsidiary = (subsidiaryCountry: string): string[] => {
+    if (!subsidiaryCountry) return [];
+    
+    const countryData = rulesMap[subsidiaryCountry];
+    if (!countryData || !countryData.company_types) {
+      return [];
+    }
+    
+    return Object.keys(countryData.company_types);
+  };
+
   // Handle subsidiary country selection
   const handleSubsidiaryCountrySelection = async (subsidiaryId: string, countryCode: string) => {
     const countryInfo = countryComplianceInfo.find(c => c.country_code === countryCode);
     if (countryInfo) {
+      // Get company types for the selected country
+      const countryData = rulesMap[countryCode];
+      const availableCompanyTypes = countryData?.company_types ? Object.keys(countryData.company_types) : [];
+      const defaultCompanyType = availableCompanyTypes.length > 0 ? availableCompanyTypes[0] : '';
+      
       setSubsidiaries(prev => prev.map(s => 
         s.id === subsidiaryId ? { 
           ...s, 
           country: countryCode,
+          companyType: defaultCompanyType, // Auto-select first available company type
           caCode: countryInfo.ca_type || '',
           csCode: countryInfo.cs_type || ''
         } : s
@@ -400,6 +467,15 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       case 'Startup Facilitation Center': return 'Proof of Organization Registration';
       case 'Investment Advisor': return 'Proof of Firm Registration';
       default: return 'Document';
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await authService.signOut();
+      onNavigateToRegister();
+    } catch (error) {
+      console.error('Error during logout:', error);
     }
   };
 
@@ -810,6 +886,22 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 py-12">
       <Card className="w-full max-w-2xl">
+        {/* Header with logout button */}
+        <div className="relative">
+          <div className="absolute top-0 right-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleLogout}
+              className="flex items-center gap-2 text-slate-600 hover:text-slate-800"
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
+        </div>
+        
         <div className="text-center mb-8">
           <img src={LogoTMS} alt="TrackMyStartup" className="mx-auto h-40 w-40" />
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-900">Complete Your Registration</h2>
@@ -1331,11 +1423,19 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                           ))}
                         </select>
                       </div>
-                      <Input
-                        label="Company Type"
-                        value={subsidiary.companyType}
-                        onChange={(e) => updateSubsidiary(subsidiary.id, 'companyType', e.target.value)}
-                      />
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Company Type</label>
+                        <select
+                          value={subsidiary.companyType}
+                          onChange={(e) => updateSubsidiary(subsidiary.id, 'companyType', e.target.value)}
+                          className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-slate-900 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="">Select Company Type</option>
+                          {getCompanyTypesForSubsidiary(subsidiary.country).map(type => (
+                            <option key={type} value={type}>{type}</option>
+                          ))}
+                        </select>
+                      </div>
                       <Input
                         label="Registration Date"
                         type="date"

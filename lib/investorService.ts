@@ -22,6 +22,8 @@ class InvestorService {
     // Fetch all active fundraising startups with their pitch data
   async getActiveFundraisingStartups(): Promise<ActiveFundraisingStartup[]> {
     try {
+      console.log('🔍 investorService.getActiveFundraisingStartups() called');
+      
       const { data, error } = await supabase
         .from('fundraising_details')
         .select(`
@@ -39,17 +41,28 @@ class InvestorService {
         .eq('active', true)
         .order('created_at', { ascending: false });
 
+      console.log('🔍 Raw query result:', { data, error });
+
       if (error) {
-        console.error('Error fetching active fundraising startups:', error);
+        console.error('❌ Error fetching active fundraising startups:', error);
         return [];
       }
 
-      if (error) {
-        console.error('Error fetching active fundraising startups:', error);
-        return [];
-      }
+      console.log('🔍 Raw data length:', data?.length || 0);
+      console.log('🔍 Raw data sample:', data?.[0]);
 
-      const filteredData = (data || []).filter(item => item.startups !== null);
+      const filteredData = (data || []).filter(item => {
+        const hasStartup = item.startups !== null;
+        console.log('🔍 Filtering item:', { 
+          fundraisingId: item.id, 
+          startupId: item.startup_id, 
+          hasStartup,
+          startupData: item.startups 
+        });
+        return hasStartup;
+      });
+
+      console.log('🔍 Filtered data length:', filteredData.length);
 
       // Show ALL active fundraising startups, but mark their validation status
       return filteredData.map(item => ({

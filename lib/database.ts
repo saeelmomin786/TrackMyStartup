@@ -740,11 +740,29 @@ export const investmentService = {
       
       console.log('Investment offers fetched successfully:', data?.length || 0);
       
+      // Get unique investor emails to fetch their names
+      const investorEmails = [...new Set((data || []).map(offer => offer.investor_email))];
+      let investorNames: { [email: string]: string } = {};
+      
+      if (investorEmails.length > 0) {
+        const { data: users, error: usersError } = await supabase
+          .from('users')
+          .select('email, name')
+          .in('email', investorEmails);
+        
+        if (!usersError && users) {
+          investorNames = users.reduce((acc, user) => {
+            acc[user.email] = user.name;
+            return acc;
+          }, {} as { [email: string]: string });
+        }
+      }
+      
       // Map database fields to frontend expected format
       const mappedData = (data || []).map(offer => ({
         id: offer.id,
         investorEmail: offer.investor_email,
-        investorName: (offer as any).investor_name || undefined,
+        investorName: (offer as any).investor_name || investorNames[offer.investor_email] || undefined,
         startupName: offer.startup_name,
         startupId: (offer as any).startup_id,
         startup: offer.startup ? {
@@ -836,6 +854,31 @@ export const investmentService = {
     return data;
   },
 
+  // Get investment advisor information by code
+  async getInvestmentAdvisorByCode(advisorCode: string) {
+    try {
+      console.log('🔍 Database: Looking for advisor with code:', advisorCode);
+      
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, email, name, role, investment_advisor_code, logo_url')
+        .eq('investment_advisor_code', advisorCode)
+        .eq('role', 'Investment Advisor')
+        .single();
+
+      if (error) {
+        console.error('❌ Database: Error fetching investment advisor:', error);
+        return null;
+      }
+
+      console.log('✅ Database: Found advisor:', data);
+      return data;
+    } catch (e) {
+      console.error('❌ Database: Error in getInvestmentAdvisorByCode:', e);
+      return null;
+    }
+  },
+
   // Get offers for a specific startup (by startup_id)
   async getOffersForStartup(startupId: number) {
     try {
@@ -853,10 +896,28 @@ export const investmentService = {
         return [];
       }
 
+      // Get unique investor emails to fetch their names
+      const investorEmails = [...new Set((data || []).map(offer => offer.investor_email))];
+      let investorNames: { [email: string]: string } = {};
+      
+      if (investorEmails.length > 0) {
+        const { data: users, error: usersError } = await supabase
+          .from('users')
+          .select('email, name')
+          .in('email', investorEmails);
+        
+        if (!usersError && users) {
+          investorNames = users.reduce((acc, user) => {
+            acc[user.email] = user.name;
+            return acc;
+          }, {} as { [email: string]: string });
+        }
+      }
+
       const mapped = (data || []).map((offer: any) => ({
         id: offer.id,
         investorEmail: offer.investor_email,
-        investorName: offer.investor_name || undefined,
+        investorName: offer.investor_name || investorNames[offer.investor_email] || undefined,
         startupName: offer.startup_name,
         startupId: offer.startup_id,
         startup: offer.startup ? {
@@ -893,6 +954,25 @@ export const investmentService = {
       return data;
     } catch (e) {
       console.error('Error in acceptOfferWithFee:', e);
+      throw e;
+    }
+  },
+
+  // Accept investment offer (simple version without scouting fee)
+  async acceptOfferSimple(offerId: number) {
+    try {
+      const { data, error } = await supabase.rpc('accept_investment_offer_simple', {
+        p_offer_id: offerId
+      });
+
+      if (error) {
+        console.error('Error accepting offer (simple):', error);
+        throw error;
+      }
+
+      return data;
+    } catch (e) {
+      console.error('Error in acceptOfferSimple:', e);
       throw e;
     }
   },

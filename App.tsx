@@ -29,7 +29,7 @@ import { FacilitatorCodeDisplay } from './components/FacilitatorCodeDisplay';
 
 const App: React.FC = () => {
   // Check if we're on a standalone page (footer links)
-  const standalonePages = ['/privacy-policy', '/refund-policy', '/terms-conditions', '/about', '/contact', '/products'];
+  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products'];
   const currentPath = window.location.pathname;
   
   if (standalonePages.includes(currentPath)) {
@@ -990,17 +990,45 @@ const App: React.FC = () => {
     try {
       console.log('🔍 Fetching startup data for facilitator, ID:', startupId);
       
-      const { data: fetchedStartup, error: fetchError } = await supabase
-        .from('startups')
-        .select('*')
-        .eq('id', startupId)
-        .single();
+      // Fetch startup data, share data, and founders data in parallel
+      const [startupResult, sharesResult, foundersResult] = await Promise.allSettled([
+        supabase
+          .from('startups')
+          .select('*')
+          .eq('id', startupId)
+          .single(),
+        supabase
+          .from('startup_shares')
+          .select('total_shares, esop_reserved_shares, price_per_share')
+          .eq('startup_id', startupId)
+          .single(),
+        supabase
+          .from('founders')
+          .select('name, email, shares, equity_percentage')
+          .eq('startup_id', startupId)
+      ]);
       
-      if (fetchError || !fetchedStartup) {
-        console.error('Error fetching startup from database:', fetchError);
+      const startupData = startupResult.status === 'fulfilled' ? startupResult.value : null;
+      const sharesData = sharesResult.status === 'fulfilled' ? sharesResult.value : null;
+      const foundersData = foundersResult.status === 'fulfilled' ? foundersResult.value : null;
+      
+      if (startupData.error || !startupData.data) {
+        console.error('Error fetching startup from database:', startupData.error);
         alert('Unable to access startup. Please check your permissions.');
         return;
       }
+      
+      const fetchedStartup = startupData.data;
+      const shares = sharesData.data;
+      const founders = foundersData.data || [];
+      
+      // Map founders data to include shares
+      const mappedFounders = founders.map((founder: any) => ({
+        name: founder.name,
+        email: founder.email,
+        shares: founder.shares || 0,
+        equityPercentage: founder.equity_percentage || 0
+      }));
       
       // Convert database format to Startup interface
       const startupObj: Startup = {
@@ -1015,10 +1043,16 @@ const App: React.FC = () => {
         totalFunding: fetchedStartup.total_funding,
         totalRevenue: fetchedStartup.total_revenue,
         registrationDate: fetchedStartup.registration_date,
-        founders: fetchedStartup.founders || []
+        founders: mappedFounders,
+        // Add share data
+        esopReservedShares: shares?.esop_reserved_shares || 0,
+        totalShares: shares?.total_shares || 0,
+        pricePerShare: shares?.price_per_share || 0
       };
       
-      console.log('✅ Startup fetched from database:', startupObj);
+      console.log('✅ Startup fetched from database with shares and founders:', startupObj);
+      console.log('📊 Share data:', shares);
+      console.log('👥 Founders data:', mappedFounders);
       
       // Set view-only mode for facilitator
       setIsViewOnly(true);
@@ -1551,6 +1585,18 @@ const App: React.FC = () => {
   }
 
   const MainContent = () => {
+    // Wait for user role to be loaded before showing role-based views
+    if (isAuthenticated && currentUser && !currentUser.role) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary mx-auto mb-4"></div>
+            <p className="text-slate-600">Loading your dashboard...</p>
+          </div>
+        </div>
+      );
+    }
+
     // If a startup is selected for detailed view, show it regardless of role
     if (view === 'startupHealth' && selectedStartup) {
       return (
@@ -1621,6 +1667,9 @@ const App: React.FC = () => {
           startupAdditionRequests={startupAdditionRequests}
           onViewStartup={handleViewStartup}
           onAcceptRequest={handleAcceptStartupRequest}
+          currentUser={currentUser}
+          onProfileUpdate={handleProfileUpdate}
+          onLogout={handleLogout}
         />
       );
     }

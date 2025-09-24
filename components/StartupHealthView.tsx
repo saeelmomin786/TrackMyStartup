@@ -60,6 +60,13 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [showAccountPage, setShowAccountPage] = useState(false);
     
+    // Update currentStartup when startup prop changes (important for facilitator access)
+    useEffect(() => {
+        console.log('🔄 StartupHealthView: Startup prop changed, updating currentStartup');
+        console.log('📊 New startup data:', startup);
+        setCurrentStartup(startup);
+    }, [startup]);
+    
     const offersForStartup = (localOffers || investmentOffers || []).filter((o: any) => {
         return (
             o.startupId === currentStartup.id ||
@@ -197,7 +204,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         </div>
                         <div className="flex-1 min-w-0">
                             <h1 className="text-lg sm:text-xl font-semibold text-slate-900 truncate">
-                                {isFacilitatorAccess ? `${currentStartup.name} - Facilitator Access` : isViewOnly ? `${currentStartup.name} - CA Review` : `${currentStartup.name} Health`}
+                                {isFacilitatorAccess ? `${currentStartup.name} - Facilitator Access` : isViewOnly ? `${currentStartup.name} - CA Review` : currentStartup.name}
                             </h1>
                             <p className="text-xs sm:text-sm text-slate-500 mt-1">
                                 {isFacilitatorAccess 

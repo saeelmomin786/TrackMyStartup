@@ -1,6 +1,7 @@
 import React from 'react';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import RefundPolicyPage from './pages/RefundPolicyPage';
+import ShippingPolicyPage from './pages/ShippingPolicyPage';
 import TermsConditionsPage from './pages/TermsConditionsPage';
 import AboutPage from './pages/AboutPage';
 import ContactPage from './pages/ContactPage';
@@ -12,8 +13,10 @@ const PageRouter: React.FC = () => {
   switch (path) {
     case '/privacy-policy':
       return <PrivacyPolicyPage />;
-    case '/refund-policy':
+    case '/cancellation-refunds':
       return <RefundPolicyPage />;
+    case '/shipping':
+      return <ShippingPolicyPage />;
     case '/terms-conditions':
       return <TermsConditionsPage />;
     case '/about':

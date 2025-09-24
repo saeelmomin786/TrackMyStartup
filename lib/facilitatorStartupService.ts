@@ -128,11 +128,11 @@ class FacilitatorStartupService {
       }
 
              // Fetch cap table data for current valuation
-       const { data: capTableData, error: capError } = await supabase
-         .from('cap_table')
-         .select('*')
-         .in('startup_id', startupIds)
-         .order('created_at', { ascending: false });
+      const { data: capTableData, error: capError } = await supabase
+        .from('cap_table')
+        .select('*')
+        .in('startup_id', startupIds)
+        .order('created_at', { ascending: false });
 
       // Fetch compliance data
       const { data: complianceData, error: complianceError } = await supabase
@@ -151,6 +151,12 @@ class FacilitatorStartupService {
         .from('incubation_programs')
         .select('*')
         .in('startup_id', startupIds);
+
+      // Log errors but don't fail the entire operation
+      if (capError) console.warn('Warning: Could not fetch cap table data:', capError);
+      if (complianceError) console.warn('Warning: Could not fetch compliance data:', complianceError);
+      if (financialError) console.warn('Warning: Could not fetch financial data:', financialError);
+      if (incubationError) console.warn('Warning: Could not fetch incubation data:', incubationError);
 
       // Map the data
       return (startups || []).map(startup => {

@@ -470,19 +470,19 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card>
           <p className="text-sm font-medium text-slate-500">Total Funding Received</p>
-          <p className="text-2xl font-bold">{formatCurrencyCompact(startup.totalFunding, startupCurrency)}</p>
+          <p className="text-2xl font-bold">{formatCurrency(startup.totalFunding, startupCurrency)}</p>
         </Card>
         <Card>
           <p className="text-sm font-medium text-slate-500">Total Revenue Till Date</p>
-          <p className="text-2xl font-bold">{formatCurrencyCompact(summary?.total_revenue || 0, startupCurrency)}</p>
+          <p className="text-2xl font-bold">{formatCurrency(summary?.total_revenue || 0, startupCurrency)}</p>
         </Card>
         <Card>
           <p className="text-sm font-medium text-slate-500">Total Expenditure Till Date</p>
-          <p className="text-2xl font-bold">{formatCurrencyCompact(summary?.total_expenses || 0, startupCurrency)}</p>
+          <p className="text-2xl font-bold">{formatCurrency(summary?.total_expenses || 0, startupCurrency)}</p>
         </Card>
         <Card>
             <p className="text-sm font-medium text-slate-500">Total Available Fund</p>
-          <p className="text-2xl font-bold">{formatCurrencyCompact((summary?.total_revenue || 0) - (summary?.total_expenses || 0), startupCurrency)}</p>
+          <p className="text-2xl font-bold">{formatCurrency((summary?.total_revenue || 0) - (summary?.total_expenses || 0), startupCurrency)}</p>
             <p className="text-xs text-slate-400">Total Revenue - Total Expenditure</p>
         </Card>
       </div>

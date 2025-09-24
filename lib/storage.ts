@@ -253,5 +253,72 @@ export const storageService = {
       .getPublicUrl(path);
     
     return data.publicUrl;
+  },
+
+  // Replace profile photo (delete old, upload new)
+  async replaceProfilePhoto(
+    file: File, 
+    userId: string, 
+    oldPhotoUrl?: string
+  ): Promise<FileUploadResult> {
+    try {
+      // Delete old photo if it exists
+      if (oldPhotoUrl) {
+        try {
+          // Extract path from URL
+          const urlParts = oldPhotoUrl.split('/');
+          const bucketIndex = urlParts.findIndex(part => part === 'storage');
+          if (bucketIndex !== -1 && urlParts[bucketIndex + 1] === 'v1' && urlParts[bucketIndex + 2] === 'object') {
+            const bucket = urlParts[bucketIndex + 3];
+            const path = urlParts.slice(bucketIndex + 4).join('/');
+            await this.deleteFile(bucket, path);
+          }
+        } catch (error) {
+          console.warn('Could not delete old profile photo:', error);
+        }
+      }
+
+      // Upload new photo
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const uniqueId = Math.random().toString(36).substring(2, 15);
+      const fileName = `${userId}/profile_photo_${timestamp}_${uniqueId}_${file.name}`;
+      
+      return this.uploadFile(file, 'verification-documents', fileName);
+    } catch (error) {
+      console.error('Error replacing profile photo:', error);
+      return { success: false, error: 'Failed to replace profile photo' };
+    }
+  },
+
+  // Replace verification document (delete old, upload new)
+  async replaceVerificationDocument(
+    file: File, 
+    userId: string, 
+    documentType: string,
+    oldDocumentUrl?: string
+  ): Promise<FileUploadResult> {
+    try {
+      // Delete old document if it exists
+      if (oldDocumentUrl) {
+        try {
+          // Extract path from URL
+          const urlParts = oldDocumentUrl.split('/');
+          const bucketIndex = urlParts.findIndex(part => part === 'storage');
+          if (bucketIndex !== -1 && urlParts[bucketIndex + 1] === 'v1' && urlParts[bucketIndex + 2] === 'object') {
+            const bucket = urlParts[bucketIndex + 3];
+            const path = urlParts.slice(bucketIndex + 4).join('/');
+            await this.deleteFile(bucket, path);
+          }
+        } catch (error) {
+          console.warn('Could not delete old document:', error);
+        }
+      }
+
+      // Upload new document
+      return this.uploadVerificationDocument(file, userId, documentType);
+    } catch (error) {
+      console.error('Error replacing verification document:', error);
+      return { success: false, error: 'Failed to replace verification document' };
+    }
   }
 };

@@ -202,6 +202,8 @@ export const authService = {
 
       console.log('Found user profile:', profile.email);
       console.log('Profile data:', profile);
+      console.log('Profile role:', profile.role);
+      console.log('Profile role type:', typeof profile.role);
       console.log('Startup name from profile:', profile.startup_name);
       console.log('Profile keys:', Object.keys(profile));
       console.log('Profile startup_name type:', typeof profile.startup_name);
@@ -210,7 +212,7 @@ export const authService = {
       const isComplete = await this.isProfileComplete(user.id);
       console.log('Profile completion status:', isComplete);
 
-      return {
+      const userData = {
         id: profile.id,
         email: profile.email,
         name: profile.name,
@@ -238,7 +240,11 @@ export const authService = {
         proof_of_business_url: profile.proof_of_business_url,
         financial_advisor_license_url: profile.financial_advisor_license_url,
         is_profile_complete: isComplete
-      }
+      };
+      
+      console.log('🔍 Returning user data:', userData);
+      console.log('🔍 User role in return data:', userData.role);
+      return userData;
     } catch (error) {
       console.error('Error getting current user:', error)
       return null
@@ -536,9 +542,11 @@ export const authService = {
     }
   },
 
-  // Update user profile
-  async updateProfile(userId: string, updates: { name?: string; role?: UserRole }): Promise<{ user: AuthUser | null; error: string | null }> {
+  // Update user profile (comprehensive version)
+  async updateProfile(userId: string, updates: any): Promise<{ user: AuthUser | null; error: string | null }> {
     try {
+      console.log('🔍 Updating user profile:', { userId, updates });
+      
       const { data, error } = await supabase
         .from('users')
         .update(updates)
@@ -547,8 +555,11 @@ export const authService = {
         .single()
 
       if (error) {
+        console.error('❌ Profile update error:', error);
         return { user: null, error: error.message }
       }
+
+      console.log('✅ Profile updated successfully:', data);
 
       return {
         user: {
@@ -556,8 +567,27 @@ export const authService = {
           email: data.email,
           name: data.name,
           role: data.role,
-          registration_date: data.registration_date
-        },
+          registration_date: data.registration_date,
+          phone: data.phone,
+          address: data.address,
+          city: data.city,
+          state: data.state,
+          country: data.country,
+          company: data.company,
+          company_type: data.company_type,
+          profile_photo_url: data.profile_photo_url,
+          government_id: data.government_id,
+          ca_license: data.ca_license,
+          cs_license: data.cs_license,
+          investment_advisor_code: data.investment_advisor_code,
+          investment_advisor_code_entered: data.investment_advisor_code_entered,
+          logo_url: data.logo_url,
+          financial_advisor_license_url: data.financial_advisor_license_url,
+          ca_code: data.ca_code,
+          cs_code: data.cs_code,
+          startup_count: data.startup_count,
+          verification_documents: data.verification_documents
+        } as AuthUser,
         error: null
       }
     } catch (error) {

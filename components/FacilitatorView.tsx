@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2 } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2 } from 'lucide-react';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
@@ -12,6 +12,9 @@ import { supabase } from '../lib/supabase';
 import { FacilitatorAccessService } from '../lib/facilitatorAccessService';
 import { recognitionService } from '../lib/recognitionService';
 import { facilitatorStartupService, StartupDashboardData } from '../lib/facilitatorStartupService';
+import { facilitatorCodeService } from '../lib/facilitatorCodeService';
+import { FacilitatorCodeDisplay } from './FacilitatorCodeDisplay';
+import ProfilePage from './ProfilePage';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -19,6 +22,9 @@ interface FacilitatorViewProps {
   startupAdditionRequests: StartupAdditionRequest[];
   onViewStartup: (startup: Startup) => void;
   onAcceptRequest: (requestId: number) => void;
+  currentUser?: any;
+  onProfileUpdate?: (updatedUser: any) => void;
+  onLogout?: () => void;
 }
 
 type FacilitatorTab = 'dashboard' | 'discover';
@@ -72,8 +78,18 @@ const SummaryCard: React.FC<{ title: string; value: string | number; icon: React
   </Card>
 );
 
-const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestments, startupAdditionRequests, onViewStartup, onAcceptRequest }) => {
+const FacilitatorView: React.FC<FacilitatorViewProps> = ({ 
+  startups, 
+  newInvestments, 
+  startupAdditionRequests, 
+  onViewStartup, 
+  onAcceptRequest,
+  currentUser,
+  onProfileUpdate,
+  onLogout
+}) => {
   const [activeTab, setActiveTab] = useState<FacilitatorTab>('dashboard');
+  const [showProfilePage, setShowProfilePage] = useState(false);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [isAcceptModalOpen, setIsAcceptModalOpen] = useState(false);
   const [isDiligenceModalOpen, setIsDiligenceModalOpen] = useState(false);
@@ -102,7 +118,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
     console.log('Share button clicked for startup:', startup.name);
     console.log('Startup object:', startup);
     const videoUrl = startup.pitchVideoUrl || 'Video not available';
-    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: $${(startup.currentValuation || 0).toLocaleString()}\n\nPitch Video: ${videoUrl}`;
+    // Calculate valuation from investment value and equity allocation
+    const valuation = startup.equityAllocation > 0 ? (startup.investmentValue / (startup.equityAllocation / 100)) : 0;
+    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: $${valuation.toLocaleString()}\n\nPitch Video: ${videoUrl}`;
     console.log('Share details:', details);
         try {
             if (navigator.share) {
@@ -158,21 +176,39 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
       
       console.log('🔍 Loading recognition requests for facilitator ID:', facilitatorId);
       
-      // Get facilitator code first
+      // Get facilitator code first, create one if it doesn't exist
       const { data: facilitatorData, error: facilitatorError } = await supabase
         .from('users')
         .select('facilitator_code')
         .eq('id', facilitatorId)
         .single();
 
-      if (facilitatorError || !facilitatorData?.facilitator_code) {
+      if (facilitatorError) {
         console.error('❌ Error getting facilitator code:', facilitatorError);
         return;
       }
 
-      console.log('📋 Facilitator code:', facilitatorData.facilitator_code);
+      let facilitatorCode = facilitatorData?.facilitator_code;
       
-      console.log('🔍 Querying recognition_records with facilitator code:', facilitatorData.facilitator_code);
+      // If no facilitator code exists, create one
+      if (!facilitatorCode) {
+        console.log('📝 No facilitator code found, creating one...');
+        facilitatorCode = await facilitatorCodeService.createOrUpdateFacilitatorCode(facilitatorId);
+        if (!facilitatorCode) {
+          console.error('❌ Failed to create facilitator code');
+          return;
+        }
+      }
+
+      console.log('📋 Facilitator code:', facilitatorCode);
+      
+      if (!facilitatorCode) {
+        console.error('❌ No facilitator code available, cannot load recognition records');
+        setRecognitionRecords([]);
+        return;
+      }
+      
+      console.log('🔍 Querying recognition_records with facilitator code:', facilitatorCode);
       
       // First, let's check if there are any recognition records at all
       const { data: allRecords, error: allRecordsError } = await supabase
@@ -197,13 +233,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
             registration_date
           )
         `)
-        .eq('facilitator_code', facilitatorData.facilitator_code)
+        .eq('facilitator_code', facilitatorCode)
         .order('date_added', { ascending: false });
       
       console.log('📊 Raw query result:', { data, error });
       
       if (error) {
-        console.error('Error loading recognition requests:', error);
+        console.error('❌ Error loading recognition requests:', error);
         console.log('🔄 Trying fallback query without foreign key join...');
         
         // Fallback: Query without foreign key join but with startup data
@@ -220,11 +256,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
               registration_date
             )
           `)
-          .eq('facilitator_code', facilitatorData.facilitator_code)
+          .eq('facilitator_code', facilitatorCode)
           .order('date_added', { ascending: false });
         
         if (fallbackError) {
-          console.error('Fallback query also failed:', fallbackError);
+          console.error('❌ Fallback query also failed:', fallbackError);
+          setRecognitionRecords([]);
           return;
         }
         
@@ -296,22 +333,45 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
   // Load current facilitator and their opportunities
   useEffect(() => {
     let mounted = true;
-    (async () => {
+    let loadingTimeout: NodeJS.Timeout;
+    
+    const loadFacilitatorData = async () => {
+      try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!mounted) return;
-      if (user?.id) {
+        if (!mounted || !user?.id) return;
+        
         setFacilitatorId(user.id);
         console.log('🔍 Facilitator ID set:', user.id);
         
-        // Load facilitator code (now handled by header component)
-        console.log('🏷️ Facilitator code will be displayed in header');
+        // Set loading timeout to prevent infinite loading
+        loadingTimeout = setTimeout(() => {
+          if (mounted) {
+            console.warn('⚠️ Data loading timeout - some data may not have loaded');
+          }
+        }, 30000); // 30 second timeout
         
-        const { data, error } = await supabase
+        // Load all data in parallel with proper error handling
+        const [opportunitiesResult, recognitionResult, portfolioResult] = await Promise.allSettled([
+          // Load opportunities
+          supabase
           .from('incubation_opportunities')
           .select('*')
           .eq('facilitator_id', user.id)
-          .order('created_at', { ascending: false });
-        if (!error && Array.isArray(data)) {
+            .order('created_at', { ascending: false }),
+          
+          // Load recognition records
+          loadRecognitionRecords(user.id),
+          
+          // Load portfolio
+          loadPortfolio(user.id)
+        ]);
+        
+        if (!mounted) return;
+        
+        // Handle opportunities loading
+        if (opportunitiesResult.status === 'fulfilled' && !opportunitiesResult.value.error) {
+          const data = opportunitiesResult.value.data;
+          if (Array.isArray(data)) {
           const mapped: IncubationOpportunity[] = data.map((row: any) => ({
             id: row.id,
             programName: row.program_name,
@@ -324,10 +384,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
           }));
           setMyPostedOpportunities(mapped);
 
-          // Fetch received applications joined with startup name using RPC-style select
+            // Load applications for opportunities
           if (mapped.length > 0) {
             const oppIds = mapped.map(o => o.id);
             console.log('🔍 Loading applications for opportunities:', oppIds);
+              
+              try {
             const { data: apps, error: appsError } = await supabase
               .from('opportunity_applications')
               .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, created_at, startups!inner(id,name)')
@@ -335,7 +397,36 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
               .order('created_at', { ascending: false });
             
             if (appsError) {
-              console.error('Error loading applications:', appsError);
+                  console.error('❌ Error loading opportunity applications:', appsError);
+                  console.log('🔄 Trying fallback query without inner join...');
+                  
+                  // Try without the inner join
+                  const { data: fallbackApps, error: fallbackAppsError } = await supabase
+                    .from('opportunity_applications')
+                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, created_at')
+                    .in('opportunity_id', oppIds)
+                    .order('created_at', { ascending: false });
+                  
+                  if (fallbackAppsError) {
+                    console.error('❌ Fallback query also failed:', fallbackAppsError);
+                    setMyReceivedApplications([]);
+                  } else {
+                    console.log('✅ Fallback applications query successful');
+                    // Map without startup data
+                    const fallbackAppsMapped: ReceivedApplication[] = (fallbackApps || []).map((a: any) => ({
+                      id: a.id,
+                      startupId: a.startup_id,
+                      startupName: 'Unknown Startup', // Fallback name
+                      opportunityId: a.opportunity_id,
+                      status: a.status,
+                      diligenceStatus: a.diligence_status,
+                      agreementUrl: a.agreement_url,
+                      pitchDeckUrl: a.pitch_deck_url,
+                      pitchVideoUrl: a.pitch_video_url,
+                      createdAt: a.created_at
+                    }));
+                    setMyReceivedApplications(fallbackAppsMapped);
+                  }
             } else {
               console.log('📋 Raw applications data:', apps);
               const appsMapped: ReceivedApplication[] = (apps || []).map((a: any) => ({
@@ -352,22 +443,45 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
               }));
               console.log('🎯 Mapped applications:', appsMapped);
               if (mounted) setMyReceivedApplications(appsMapped);
+                }
+              } catch (appsErr) {
+                console.error('Error loading applications:', appsErr);
+                setMyReceivedApplications([]);
             }
           } else {
             setMyReceivedApplications([]);
           }
+          }
+        } else {
+          console.error('Error loading opportunities:', opportunitiesResult.status === 'rejected' ? opportunitiesResult.reason : opportunitiesResult.value.error);
         }
         
-        // Load recognition records and portfolio for this facilitator
-        if (mounted) {
-          await Promise.all([
-            loadRecognitionRecords(user.id),
-            loadPortfolio(user.id)
-          ]);
+        // Handle recognition and portfolio results
+        if (recognitionResult.status === 'rejected') {
+          console.error('Error loading recognition records:', recognitionResult.reason);
+        }
+        
+        if (portfolioResult.status === 'rejected') {
+          console.error('Error loading portfolio:', portfolioResult.reason);
+        }
+        
+      } catch (error) {
+        console.error('Error in loadFacilitatorData:', error);
+      } finally {
+        if (loadingTimeout) {
+          clearTimeout(loadingTimeout);
         }
       }
-    })();
-    return () => { mounted = false; };
+    };
+    
+    loadFacilitatorData();
+    
+    return () => { 
+      mounted = false;
+      if (loadingTimeout) {
+        clearTimeout(loadingTimeout);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -393,18 +507,33 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
   // Realtime: update received applications list when new rows are inserted
   useEffect(() => {
     if (!facilitatorId || myPostedOpportunities.length === 0) return;
+    
     const oppIds = myPostedOpportunities.map(o => o.id);
-    const channel = supabase
+    let channel: any = null;
+    
+    try {
+      channel = supabase
       .channel('opportunity_applications_changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'opportunity_applications' }, async (payload) => {
+        .on('postgres_changes', { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'opportunity_applications' 
+        }, async (payload) => {
         try {
           const row: any = payload.new;
           if (!oppIds.includes(row.opportunity_id)) return;
-          const { data: startup } = await supabase
+            
+            const { data: startup, error: startupError } = await supabase
             .from('startups')
             .select('id,name')
             .eq('id', row.startup_id)
             .single();
+            
+            if (startupError) {
+              console.error('Error fetching startup for new application:', startupError);
+              return;
+            }
+            
           setMyReceivedApplications(prev => [
             {
               id: row.id,
@@ -425,11 +554,26 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
           console.log(`✅ New application received from ${startup?.name || 'Startup'} for opportunity ${row.opportunity_id}`);
           console.log('📝 Application details:', row);
         } catch (e) {
-          // ignore
-        }
-      })
-      .subscribe();
-    return () => { channel.unsubscribe(); };
+            console.error('Error processing new application:', e);
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Subscribed to opportunity applications changes');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Error subscribing to opportunity applications changes');
+          }
+        });
+    } catch (error) {
+      console.error('Error setting up opportunity applications subscription:', error);
+    }
+    
+    return () => { 
+      if (channel) {
+        console.log('🔌 Unsubscribing from opportunity applications changes');
+        channel.unsubscribe();
+      }
+    };
   }, [facilitatorId, myPostedOpportunities]);
 
   // Realtime: update diligence status when startup approves
@@ -437,7 +581,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
     if (!facilitatorId || myPostedOpportunities.length === 0) return;
     
     const oppIds = myPostedOpportunities.map(o => o.id);
-    const channel = supabase
+    let channel: any = null;
+    
+    try {
+      channel = supabase
       .channel('diligence_status_changes')
       .on('postgres_changes', { 
         event: 'UPDATE', 
@@ -461,11 +608,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
           
           // Show notification if diligence was approved
           if (row.diligence_status === 'approved') {
-            const { data: startup } = await supabase
+              const { data: startup, error: startupError } = await supabase
               .from('startups')
               .select('name')
               .eq('id', row.startup_id)
               .single();
+              
+              if (startupError) {
+                console.error('Error fetching startup for diligence approval:', startupError);
+                return;
+              }
               
             console.log(`✅ Due diligence approved by ${startup?.name || 'Startup'} for opportunity ${row.opportunity_id}`);
             
@@ -492,9 +644,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
           console.error('Error handling diligence status update:', e);
         }
       })
-      .subscribe();
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Subscribed to diligence status changes');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Error subscribing to diligence status changes');
+          }
+        });
+    } catch (error) {
+      console.error('Error setting up diligence status subscription:', error);
+    }
     
-    return () => { channel.unsubscribe(); };
+    return () => { 
+      if (channel) {
+        console.log('🔌 Unsubscribing from diligence status changes');
+        channel.unsubscribe();
+      }
+    };
   }, [facilitatorId, myPostedOpportunities]);
 
   const handleOpenPostModal = () => {
@@ -528,6 +694,108 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
   const handleAcceptApplication = (application: ReceivedApplication) => {
     setSelectedApplication(application);
     setIsAcceptModalOpen(true);
+  };
+
+  const handleRejectApplication = async (application: ReceivedApplication) => {
+    if (!confirm(`Are you sure you want to reject the application from ${application.startupName}?`)) {
+      return;
+    }
+
+    try {
+      setIsProcessingAction(true);
+      
+      const { error } = await supabase
+        .from('opportunity_applications')
+        .update({ status: 'rejected' })
+        .eq('id', application.id);
+
+      if (error) {
+        console.error('Error rejecting application:', error);
+        alert('Failed to reject application. Please try again.');
+        return;
+      }
+
+      // Update local state
+      setMyReceivedApplications(prev => 
+        prev.map(app => 
+          app.id === application.id 
+            ? { ...app, status: 'rejected' as const }
+            : app
+        )
+      );
+
+      alert('Application rejected successfully.');
+    } catch (error) {
+      console.error('Error rejecting application:', error);
+      alert('Failed to reject application. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleDeleteStartupFromPortfolio = async (startupId: number) => {
+    if (!confirm('Are you sure you want to remove this startup from your portfolio?')) {
+      return;
+    }
+
+    try {
+      setIsProcessingAction(true);
+      
+      // Remove from facilitator_portfolio table
+      const { error } = await supabase
+        .from('facilitator_portfolio')
+        .delete()
+        .eq('startup_id', startupId)
+        .eq('facilitator_id', facilitatorId);
+
+      if (error) {
+        console.error('Error removing startup from portfolio:', error);
+        alert('Failed to remove startup from portfolio. Please try again.');
+        return;
+      }
+
+      // Update local state
+      setPortfolioStartups(prev => prev.filter(startup => startup.id !== startupId));
+
+      alert('Startup removed from portfolio successfully.');
+    } catch (error) {
+      console.error('Error removing startup from portfolio:', error);
+      alert('Failed to remove startup from portfolio. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleDeleteRecognitionRecord = async (recordId: string) => {
+    if (!confirm('Are you sure you want to delete this recognition record?')) {
+      return;
+    }
+
+    try {
+      setIsProcessingAction(true);
+      
+      // Delete from recognition_records table
+      const { error } = await supabase
+        .from('recognition_records')
+        .delete()
+        .eq('id', parseInt(recordId));
+
+      if (error) {
+        console.error('Error deleting recognition record:', error);
+        alert('Failed to delete recognition record. Please try again.');
+        return;
+      }
+
+      // Update local state
+      setRecognitionRecords(prev => prev.filter(record => record.id !== recordId));
+
+      alert('Recognition record deleted successfully.');
+    } catch (error) {
+      console.error('Error deleting recognition record:', error);
+      alert('Failed to delete recognition record. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
+    }
   };
 
   const handleAgreementFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -668,6 +936,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
 
 
   const handleApproveRecognition = async (recordId: string) => {
+    if (!facilitatorId) {
+      alert('Facilitator ID not found. Please refresh the page.');
+      return;
+    }
+
     try {
       setProcessingRecognitionId(recordId);
       
@@ -688,77 +961,66 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
           return;
         }
         
-        // Resolve DB ID type (supports numeric or UUID)
-        const dbId: any = Number.isNaN(Number(recordId)) ? recordId : Number(recordId);
+      // Convert string ID to number for database operations
+      const dbId = parseInt(recordId);
+      if (isNaN(dbId)) {
+        console.error('❌ Invalid record ID format:', recordId);
+        alert('Invalid record ID. Please try again.');
+        return;
+      }
 
-        // Check if the recognition record exists in the database
-        try {
-          const { data: checkRecord, error: checkError } = await supabase
+      // Validate all required data exists
+      const validationChecks = await Promise.allSettled([
+        // Check recognition record exists
+        supabase
             .from('recognition_records')
             .select('id')
             .eq('id', dbId)
-            .single();
-          
-          if (checkError || !checkRecord) {
-            console.error('❌ Recognition record not found in database:', checkError);
-            alert('Recognition record not found. Please try again.');
-            return;
-          }
-          
-          console.log('✅ Recognition record found in database:', checkRecord);
-        } catch (checkErr) {
-          console.error('❌ Error checking recognition record:', checkErr);
-          alert('Error validating recognition record. Please try again.');
-          return;
-        }
+          .single(),
         
-        // Check if the startup exists in the database
-        try {
-          const { data: checkStartup, error: startupCheckError } = await supabase
+        // Check startup exists
+        supabase
             .from('startups')
             .select('id')
             .eq('id', record.startupId)
-            .single();
-          
-          if (startupCheckError || !checkStartup) {
-            console.error('❌ Startup not found in database:', startupCheckError);
-            alert('Startup not found. Please try again.');
+          .single(),
+        
+        // Check user is facilitator
+        supabase
+          .from('users')
+          .select('id, role')
+          .eq('id', facilitatorId)
+          .single()
+      ]);
+
+      // Check validation results
+      const [recordCheck, startupCheck, userCheck] = validationChecks;
+      
+      if (recordCheck.status === 'rejected' || !recordCheck.value.data) {
+        console.error('❌ Recognition record not found in database:', recordCheck.status === 'rejected' ? recordCheck.reason : 'No data');
+        alert('Recognition record not found. Please try again.');
             return;
           }
           
-          console.log('✅ Startup found in database:', checkStartup);
-        } catch (startupCheckErr) {
-          console.error('❌ Error checking startup:', startupCheckErr);
-          alert('Error validating startup. Please try again.');
+      if (startupCheck.status === 'rejected' || !startupCheck.value.data) {
+        console.error('❌ Startup not found in database:', startupCheck.status === 'rejected' ? startupCheck.reason : 'No data');
+        alert('Startup not found. Please try again.');
           return;
         }
         
-        // Check if the user exists and has facilitator role
-        try {
-          const { data: checkUser, error: userCheckError } = await supabase
-            .from('users')
-            .select('id, role')
-            .eq('id', facilitatorId)
-            .single();
-          
-          if (userCheckError || !checkUser) {
-            console.error('❌ User not found in database:', userCheckError);
+      if (userCheck.status === 'rejected' || !userCheck.value.data) {
+        console.error('❌ User not found in database:', userCheck.status === 'rejected' ? userCheck.reason : 'No data');
             alert('User not found. Please try again.');
             return;
           }
           
-          if (checkUser.role !== 'Startup Facilitation Center') {
-            console.error('❌ User is not a facilitator:', checkUser.role);
+      if (userCheck.value.data.role !== 'Startup Facilitation Center') {
+        console.error('❌ User is not a facilitator:', userCheck.value.data.role);
             alert('User is not authorized as a facilitator. Please try again.');
             return;
           }
           
-          console.log('✅ User validated as facilitator:', checkUser);
-        } catch (userCheckErr) {
-          console.error('❌ Error checking user:', userCheckErr);
-          alert('Error validating user. Please try again.');
-          return;
-        }
+      console.log('✅ All validation checks passed');
         
         // Update the recognition request status in the database
         const { error: updateError } = await supabase
@@ -778,14 +1040,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
         console.log('🔍 Adding startup to portfolio:', {
           facilitatorId: facilitatorId,
           startupId: record.startupId,
-          recognitionRecordId: recordId,
-          recordIdType: typeof recordId
+        recognitionRecordId: dbId
         });
         
         const portfolioEntry = await facilitatorStartupService.addStartupToPortfolio(
-          facilitatorId!,
+        facilitatorId,
           record.startupId,
-          parseInt(recordId)
+        dbId
         );
         
         if (portfolioEntry) {
@@ -801,9 +1062,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
           });
           
           // Reload the portfolio to show the new startup
-          if (facilitatorId) {
             await loadPortfolio(facilitatorId);
-          }
           
           // Show success message
           const successMessage = document.createElement('div');
@@ -976,8 +1235,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
                                                               <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Startup</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Opportunity</th>
                                     <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Pitch Materials</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Diligence</th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-slate-200">
@@ -1008,32 +1266,59 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
         </div>
 
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-left space-x-2">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-center">
+                              <div className="flex flex-col gap-2 items-center">
+                                {/* Status Actions */}
                               {app.status === 'pending' && (
+                                  <>
                                 <Button 
                                   size="sm" 
                                   onClick={() => handleAcceptApplication(app)}
                                   disabled={isProcessingAction}
+                                      className="w-full"
                                 >
                                   Approve Application
                                 </Button>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => handleRejectApplication(app)}
+                                      disabled={isProcessingAction}
+                                      className="w-full text-red-600 border-red-600 hover:bg-red-50"
+                                    >
+                                      Reject Application
+                                    </Button>
+                                  </>
                               )}
                               {app.status === 'accepted' && (
                                 <Button 
                                   size="sm" 
                                   variant="outline"
                                   disabled
+                                    className="w-full"
                                 >
                                   Approved
                                 </Button>
                               )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-left space-x-2">
+                                {app.status === 'rejected' && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    disabled
+                                    className="w-full text-red-600 border-red-600"
+                                  >
+                                    Rejected
+                                  </Button>
+                                )}
+                                
+                                {/* Diligence Actions */}
                               {(app.diligenceStatus === 'none' || app.diligenceStatus == null) && app.status === 'pending' && (
                                 <Button
                                   size="sm"
+                                    variant="outline"
                                   onClick={() => handleRequestDiligence(app)}
                                   disabled={isProcessingAction}
+                                    className="w-full"
                                 >
                                   Request Diligence
                                 </Button>
@@ -1044,6 +1329,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
                                   variant="outline"
                                   disabled
                                   title="Disabled after application approval"
+                                    className="w-full"
                                 >
                                   Unavailable after approval
                                 </Button>
@@ -1053,24 +1339,45 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
                                   size="sm"
                                   variant="outline"
                                   disabled
+                                    className="w-full"
                                 >
-                                  Requested
+                                    Diligence Requested
                                 </Button>
                               )}
                               {app.diligenceStatus === 'approved' && (
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => onViewStartup(app.startupId, 'compliance')}
+                                    onClick={() => {
+                                      // Create a startup object from application data for onViewStartup
+                                      const startupObj: Startup = {
+                                        id: app.startupId,
+                                        name: app.startupName,
+                                        sector: 'Unknown', // Not available in application data
+                                        investmentType: 'equity' as any, // Default value
+                                        investmentValue: 0,
+                                        equityAllocation: 0,
+                                        currentValuation: 0,
+                                        totalFunding: 0,
+                                        totalRevenue: 0,
+                                        registrationDate: new Date().toISOString().split('T')[0],
+                                        currency: 'USD',
+                                        complianceStatus: ComplianceStatus.Pending,
+                                        founders: [] // Not available in application data
+                                      };
+                                      onViewStartup(startupObj);
+                                    }}
+                                    className="w-full"
                                 >
                                   View Diligence
                                 </Button>
                               )}
+                              </div>
                             </td>
                           </tr>
                         ))}
                         {myReceivedApplications.length === 0 && (
-                          <tr><td colSpan={5} className="text-center py-8 text-slate-500">No applications received yet.</td></tr>
+                          <tr><td colSpan={4} className="text-center py-8 text-slate-500">No applications received yet.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -1127,6 +1434,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
                               </td>
 
                                                                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="flex items-center gap-2 justify-end">
                                 {record.status === 'pending' && (
                                     <Button 
                                         size="sm" 
@@ -1159,6 +1467,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
                                         Processing...
                                     </Button>
                                 )}
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => handleDeleteRecognitionRecord(record.id)}
+                                    className="text-red-600 border-red-600 hover:bg-red-50"
+                                    title="Delete recognition record"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                             </td>
                             </tr>
                           ))}
@@ -1194,15 +1512,44 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
                               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="flex items-center gap-2 justify-end">
                                                               <Button 
                                 size="sm" 
                                 variant="outline" 
-                                onClick={() => onViewStartup(startup.id, 'full')}
+                                    onClick={() => {
+                                      // Convert portfolio startup data to Startup object for onViewStartup
+                                      const startupObj: Startup = {
+                                        id: startup.id,
+                                        name: startup.name,
+                                        sector: startup.sector,
+                                        investmentType: 'equity' as any, // Default value
+                                        investmentValue: startup.totalFunding || 0,
+                                        equityAllocation: 0, // Not available in portfolio data
+                                        currentValuation: startup.totalFunding || 0,
+                                        totalFunding: startup.totalFunding || 0,
+                                        totalRevenue: startup.totalRevenue || 0,
+                                        registrationDate: startup.registrationDate || new Date().toISOString().split('T')[0],
+                                        currency: startup.currency || 'USD',
+                                        complianceStatus: startup.complianceStatus || ComplianceStatus.Pending,
+                                        founders: [] // Not available in portfolio data
+                                      };
+                                      onViewStartup(startupObj);
+                                    }}
                                 title="View complete startup dashboard for tracking"
                               >
                                 <Eye className="mr-2 h-4 w-4" /> 
                                 Track Startup
                               </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => handleDeleteStartupFromPortfolio(startup.id)}
+                                    className="text-red-600 border-red-600 hover:bg-red-50"
+                                    title="Remove startup from portfolio"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -1378,8 +1725,40 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({ startups, newInvestme
     }
   };
 
+  // If profile page is open, show it instead of main content
+  if (showProfilePage) {
+    return (
+      <ProfilePage
+        currentUser={currentUser}
+        onBack={() => setShowProfilePage(false)}
+        onProfileUpdate={onProfileUpdate}
+        onLogout={onLogout}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {/* Header with facilitator code display */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Facilitation Center Dashboard</h1>
+          <p className="text-slate-600">Manage your startup portfolio and opportunities</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <FacilitatorCodeDisplay currentUser={currentUser} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowProfilePage(true)}
+            className="flex items-center gap-2"
+          >
+            <Users className="h-4 w-4" />
+            Profile
+          </Button>
+        </div>
+      </div>
+
       <div className="border-b border-slate-200">
         <nav className="-mb-px flex space-x-6" aria-label="Tabs">
           <button onClick={() => setActiveTab('dashboard')} className={`${activeTab === 'dashboard' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>

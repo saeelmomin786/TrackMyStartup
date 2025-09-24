@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { Startup, NewInvestment, ComplianceStatus, StartupAdditionRequest, FundraisingDetails, InvestmentRecord, InvestmentType, UserRole, Founder, User, VerificationRequest, InvestmentOffer } from './types';
 import { authService, AuthUser } from './lib/auth';
 import { startupService, investmentService, verificationService, userService, realtimeService, startupAdditionService } from './lib/database';
@@ -28,19 +29,16 @@ import LogoTMS from './components/public/logoTMS.svg';
 import { FacilitatorCodeDisplay } from './components/FacilitatorCodeDisplay';
 
 const App: React.FC = () => {
-  // Check if we're on a standalone page (footer links)
-  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products'];
-  const currentPath = window.location.pathname;
-  
-  if (standalonePages.includes(currentPath)) {
-    return (
-      <div className="min-h-screen bg-slate-100 flex flex-col">
-        <main className="flex-1">
-          <PageRouter />
-        </main>
-      </div>
-    );
-  }
+  return (
+    <Router>
+      <AppContent />
+    </Router>
+  );
+};
+
+const AppContent: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
 
   // Cookie utility functions
   const setCookie = (name: string, value: string, days: number = 7) => {
@@ -71,24 +69,7 @@ const App: React.FC = () => {
   });
   const [viewKey, setViewKey] = useState(0); // Force re-render key
   const [forceRender, setForceRender] = useState(0); // Additional force render
-  const [currentPage, setCurrentPage] = useState<'landing' | 'login' | 'register' | 'complete-registration' | 'reset-password'>(() => {
-    // Check if we're on a reset password URL
-    if (typeof window !== 'undefined') {
-      const pathname = window.location.pathname;
-      const searchParams = new URLSearchParams(window.location.search);
-      const hash = window.location.hash;
-      
-      // Check for reset password indicators
-      if (pathname === '/reset-password' || 
-          searchParams.get('type') === 'recovery' ||
-          hash.includes('type=recovery') ||
-          searchParams.get('access_token') ||
-          searchParams.get('refresh_token')) {
-        return 'reset-password';
-      }
-    }
-    return 'landing';
-  });
+  // Remove currentPage state - we'll use React Router instead
   
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [assignedInvestmentAdvisor, setAssignedInvestmentAdvisor] = useState<AuthUser | null>(null);
@@ -99,33 +80,7 @@ const App: React.FC = () => {
   const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
   const [ignoreAuthEvents, setIgnoreAuthEvents] = useState(false);
 
-  // Listen for URL changes to handle reset password links
-  useEffect(() => {
-    const handleUrlChange = () => {
-      const pathname = window.location.pathname;
-      const searchParams = new URLSearchParams(window.location.search);
-      const hash = window.location.hash;
-      
-      // Check for reset password indicators
-      if (pathname === '/reset-password' || 
-          searchParams.get('type') === 'recovery' ||
-          hash.includes('type=recovery') ||
-          searchParams.get('access_token') ||
-          searchParams.get('refresh_token')) {
-        setCurrentPage('reset-password');
-      }
-    };
-
-    // Check on mount
-    handleUrlChange();
-
-    // Listen for popstate events (back/forward navigation)
-    window.addEventListener('popstate', handleUrlChange);
-    
-    return () => {
-      window.removeEventListener('popstate', handleUrlChange);
-    };
-  }, []);
+  // URL change handling is now managed by React Router
 
   
   
@@ -267,8 +222,8 @@ const App: React.FC = () => {
         
         const authPromise = (async () => {
           // Handle access token from email confirmation first
-          const hash = window.location.hash;
-          const searchParams = new URLSearchParams(window.location.search);
+          const hash = location.hash;
+          const searchParams = new URLSearchParams(location.search);
           
           // Check for access token in hash or query parameters
           let accessToken = null;
@@ -315,7 +270,7 @@ const App: React.FC = () => {
               }
               
               // Clean up the URL
-              window.history.replaceState({}, document.title, window.location.pathname);
+              navigate(location.pathname, { replace: true });
             } catch (error) {
               console.error('Error during email confirmation:', error);
             }
@@ -540,7 +495,7 @@ const App: React.FC = () => {
                   if (!profileUser.is_profile_complete) {
                     console.log('Profile not complete, redirecting to complete-registration page');
                     setCurrentUser(profileUser);
-                    setCurrentPage('complete-registration');
+                    navigate('/complete-registration');
                     setIsLoading(false);
                     setIsProcessingAuthChange(false);
                     return;
@@ -908,7 +863,7 @@ const App: React.FC = () => {
       setCurrentUser(null);
       setAssignedInvestmentAdvisor(null);
       setSelectedStartup(null);
-      setCurrentPage('login');
+      navigate('/login');
       setView('investor');
       setHasInitialDataLoaded(false); // Reset data loading flag on logout
       setIgnoreAuthEvents(false); // Reset ignore flag on logout
@@ -920,7 +875,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Logout failed:', error);
     }
-  }, []);
+  }, [navigate]);
 
   const handleViewStartup = useCallback((startup: Startup | number, targetTab?: string) => {
     // logDiagnostic disabled to prevent interference
@@ -1471,118 +1426,8 @@ const App: React.FC = () => {
 
 
 
-  // Check if we need to show complete-registration page (even when authenticated)
-  if (currentPage === 'complete-registration') {
-    console.log('🎯 Showing CompleteRegistrationPage (Form 2)');
-    return (
-      <div className="min-h-screen bg-slate-100 flex flex-col">
-        <div className="flex-1 flex items-center justify-center">
-          <CompleteRegistrationPage 
-            onNavigateToRegister={() => setCurrentPage('register')}
-            onNavigateToDashboard={async () => {
-              console.log('🔄 Navigating to dashboard after registration completion');
-              // Refresh the current user data to get updated Investment Advisor code and logo
-              try {
-                const refreshedUser = await authService.getCurrentUser();
-                if (refreshedUser) {
-                  console.log('✅ User data refreshed for dashboard:', refreshedUser);
-                  setCurrentUser(refreshedUser);
-                  setIsAuthenticated(true);
-                  setCurrentPage('login'); // This will show the main dashboard
-                }
-              } catch (error) {
-                console.error('❌ Error refreshing user data:', error);
-                // Still navigate even if refresh fails
-                setIsAuthenticated(true);
-                setCurrentPage('login');
-              }
-            }}
-          />
-        </div>
-        {/* Footer for complete-registration page */}
-        <Footer />
-      </div>
-    );
-  }
-
-  // Check if we need to show reset-password page
-  if (currentPage === 'reset-password') {
-    console.log('🎯 Showing ResetPasswordPage');
-    return (
-      <div className="min-h-screen bg-slate-100 flex flex-col">
-        <div className="flex-1 flex items-center justify-center">
-          <ResetPasswordPage 
-            onNavigateToLogin={() => setCurrentPage('login')}
-          />
-        </div>
-        {/* Footer for reset-password page */}
-        <Footer />
-      </div>
-    );
-  }
-
-  console.log('🔍 App.tsx render - currentPage:', currentPage, 'isAuthenticated:', isAuthenticated);
-  
-  if (!isAuthenticated) {
-    return (
-        <div className="min-h-screen bg-slate-100 flex flex-col">
-            <div className="flex-1 flex items-center justify-center">
-                {currentPage === 'landing' ? (
-                    <LandingPage
-                      onNavigateToLogin={() => setCurrentPage('login')}
-                      onNavigateToRegister={() => setCurrentPage('register')}
-                    />
-                ) : currentPage === 'login' ? (
-                    <LoginPage 
-                        onLogin={handleLogin} 
-                        onNavigateToRegister={() => setCurrentPage('register')} 
-                        onNavigateToCompleteRegistration={() => {
-                            console.log('🔄 Navigating to complete-registration page');
-                            setCurrentPage('complete-registration');
-                        }}
-                        onNavigateToLanding={() => setCurrentPage('landing')}
-                    />
-                ) : currentPage === 'register' ? (
-                    <TwoStepRegistration 
-                        onRegister={handleRegister} 
-                        onNavigateToLogin={() => setCurrentPage('login')} 
-                        onNavigateToLanding={() => setCurrentPage('landing')}
-                    />
-                ) : (
-                    <CompleteRegistrationPage 
-                      onNavigateToRegister={() => setCurrentPage('register')}
-                      onNavigateToDashboard={async () => {
-                        console.log('🔄 Navigating to dashboard after registration completion');
-                        // Refresh the current user data to get updated Investment Advisor code and logo
-                        try {
-                          const refreshedUser = await authService.getCurrentUser();
-                          if (refreshedUser) {
-                            console.log('✅ User data refreshed for dashboard:', refreshedUser);
-                            setCurrentUser(refreshedUser);
-                            setIsAuthenticated(true);
-                            setCurrentPage('login'); // This will show the main dashboard
-                            
-                            // Force refresh startup data after registration
-                            console.log('🔄 Forcing startup data refresh after registration...');
-                            setTimeout(() => {
-                              fetchData(true); // Force refresh with true parameter
-                            }, 1000); // Small delay to ensure database transaction is committed
-                          }
-                        } catch (error) {
-                          console.error('❌ Error refreshing user data:', error);
-                          // Still navigate even if refresh fails
-                          setIsAuthenticated(true);
-                          setCurrentPage('login');
-                        }
-                      }}
-                    />
-                )}
-            </div>
-            {/* Footer only for landing page */}
-            {currentPage === 'landing' && <Footer />}
-        </div>
-    )
-  }
+  // Main render logic using React Router
+  console.log('🔍 App.tsx render - pathname:', location.pathname, 'isAuthenticated:', isAuthenticated);
 
   const MainContent = () => {
     // Wait for user role to be loaded before showing role-based views
@@ -1767,130 +1612,314 @@ const App: React.FC = () => {
 
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
-      <header className="bg-white shadow-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            {/* Show investment advisor logo if user is an Investment Advisor OR has an assigned investment advisor */}
-            {(() => {
-              const isInvestmentAdvisor = currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url;
-              const hasAssignedAdvisor = assignedInvestmentAdvisor && (currentUser?.role === 'Investor' || currentUser?.role === 'Startup');
-              const shouldShowAdvisorLogo = Boolean(isInvestmentAdvisor || hasAssignedAdvisor);
-              
-              console.log('🔍 Header logo display check:', {
-                currentUserRole: currentUser?.role,
-                currentUserLogo: (currentUser as any)?.logo_url,
-                assignedAdvisor: !!assignedInvestmentAdvisor,
-                assignedAdvisorLogo: assignedInvestmentAdvisor?.logo_url,
-                isInvestmentAdvisor,
-                hasAssignedAdvisor,
-                shouldShowAdvisorLogo
-              });
-              return shouldShowAdvisorLogo;
-            })() ? (
-              <div className="flex items-center gap-3">
-                {((currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url) || 
-                  (assignedInvestmentAdvisor?.logo_url)) ? (
-                  <>
-                    <img 
-                      src={currentUser?.role === 'Investment Advisor' 
-                        ? (currentUser as any).logo_url 
-                        : assignedInvestmentAdvisor?.logo_url} 
-                      alt="Company Logo" 
-                      className="h-8 w-8 rounded object-contain bg-white border border-gray-200 p-1"
-                      onError={(e) => {
-                        // Fallback to TrackMyStartup logo if image fails to load
-                        e.currentTarget.style.display = 'none';
-                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                      }}
-                    />
-                    <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left hidden" />
-                  </>
-                ) : (
-                  <div className="h-8 w-8 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
-                    <span className="text-purple-600 font-semibold text-xs">IA</span>
-                  </div>
-                )}
-                <div>
-                  <h1 className="text-lg font-semibold text-gray-800">
-                    {currentUser?.role === 'Investment Advisor' 
-                      ? (currentUser as any).name || 'Investment Advisor'
-                      : assignedInvestmentAdvisor?.name || 'Investment Advisor'}
-                  </h1>
-                  <p className="text-xs text-blue-600">Supported by Track My Startup</p>
-                </div>
-              </div>
-            ) : (
-              <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left" />
-            )}
-          </div>
-           <div className="flex items-center gap-6">
-            {currentUser?.role === 'Investor' && (
-                <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
-                    Investor Code: <span className="font-semibold text-brand-primary">
-                        {currentUser.investor_code || currentUser.investorCode || 'Not Set'}
-                    </span>
-                    {!currentUser.investor_code && !currentUser.investorCode && (
-                        <span className="text-red-500 text-xs ml-2">⚠️ Code missing</span>
-                    )}
-                </div>
-            )}
-
-            {currentUser?.role === 'Startup Facilitation Center' && (
-                <FacilitatorCodeDisplay 
-                    className="bg-blue-100 text-blue-800 px-3 py-1 rounded-md text-sm font-medium" 
-                    currentUser={currentUser}
-                />
-            )}
-
-            {currentUser?.role === 'Investment Advisor' && (
-                <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
-                    Advisor Code: <span className="font-semibold text-brand-primary">
-                        {(currentUser as any)?.investment_advisor_code || 'IA-XXXXXX'}
-                    </span>
-                </div>
-            )}
-
-            {(currentUser?.role === 'Investor' || currentUser?.role === 'Startup') && currentUser?.investment_advisor_code_entered && (
-                <div className="hidden sm:block text-sm text-slate-500 bg-purple-100 px-3 py-1.5 rounded-md font-mono">
-                    Advisor: <span className="font-semibold text-purple-800">
-                        {currentUser.investment_advisor_code_entered}
-                    </span>
-                </div>
-            )}
-
-            <button onClick={handleLogout} className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors">
-                <LogOut className="h-4 w-4" />
-                Logout
-            </button>
-           </div>
+    <Routes>
+      {/* Standalone pages */}
+      <Route path="/privacy-policy" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <main className="flex-1">
+            <PageRouter />
+          </main>
         </div>
-      </header>
-      
-      {/* Error Display */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4 mx-4 mt-4">
-          <div className="flex items-center">
-            <div className="text-sm text-red-800">
-              <strong>Error:</strong> {error}
+      } />
+      <Route path="/cancellation-refunds" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <main className="flex-1">
+            <PageRouter />
+          </main>
+        </div>
+      } />
+      <Route path="/shipping" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <main className="flex-1">
+            <PageRouter />
+          </main>
+        </div>
+      } />
+      <Route path="/terms-conditions" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <main className="flex-1">
+            <PageRouter />
+          </main>
+        </div>
+      } />
+      <Route path="/about" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <main className="flex-1">
+            <PageRouter />
+          </main>
+        </div>
+      } />
+      <Route path="/contact" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <main className="flex-1">
+            <PageRouter />
+          </main>
+        </div>
+      } />
+      <Route path="/products" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <main className="flex-1">
+            <PageRouter />
+          </main>
+        </div>
+      } />
+
+      {/* Complete registration page */}
+      <Route path="/complete-registration" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <div className="flex-1 flex items-center justify-center">
+            <CompleteRegistrationPage 
+              onNavigateToRegister={() => navigate('/register')}
+              onNavigateToDashboard={async () => {
+                console.log('🔄 Navigating to dashboard after registration completion');
+                try {
+                  const refreshedUser = await authService.getCurrentUser();
+                  if (refreshedUser) {
+                    console.log('✅ User data refreshed for dashboard:', refreshedUser);
+                    setCurrentUser(refreshedUser);
+                    setIsAuthenticated(true);
+                    navigate('/dashboard');
+                  }
+                } catch (error) {
+                  console.error('❌ Error refreshing user data:', error);
+                  setIsAuthenticated(true);
+                  navigate('/dashboard');
+                }
+              }}
+            />
+          </div>
+          <Footer />
+        </div>
+      } />
+
+      {/* Reset password page */}
+      <Route path="/reset-password" element={
+        <div className="min-h-screen bg-slate-100 flex flex-col">
+          <div className="flex-1 flex items-center justify-center">
+            <ResetPasswordPage 
+              onNavigateToLogin={() => navigate('/login')}
+            />
+          </div>
+          <Footer />
+        </div>
+      } />
+
+      {/* Landing page */}
+      <Route path="/" element={
+        !isAuthenticated ? (
+          <div className="min-h-screen bg-slate-100 flex flex-col">
+            <div className="flex-1 flex items-center justify-center">
+              <LandingPage
+                onNavigateToLogin={() => navigate('/login')}
+                onNavigateToRegister={() => navigate('/register')}
+              />
             </div>
-            <button 
-              onClick={() => setError(null)} 
-              className="ml-auto text-red-600 hover:text-red-800"
-            >
-              ×
-            </button>
+            <Footer />
           </div>
-        </div>
-      )}
-      
-      <main className="container mx-auto p-4 sm:p-6 lg:p-8 flex-1">
-        <MainContent key={`${viewKey}-${forceRender}`} />
-      </main>
-      
-      {/* Footer removed - only shows on landing page */}
-    </div>
+        ) : (
+          <AuthenticatedApp />
+        )
+      } />
+
+      {/* Login page */}
+      <Route path="/login" element={
+        !isAuthenticated ? (
+          <div className="min-h-screen bg-slate-100 flex flex-col">
+            <div className="flex-1 flex items-center justify-center">
+              <LoginPage 
+                onLogin={handleLogin} 
+                onNavigateToRegister={() => navigate('/register')} 
+                onNavigateToCompleteRegistration={() => navigate('/complete-registration')}
+                onNavigateToLanding={() => navigate('/')}
+              />
+            </div>
+          </div>
+        ) : (
+          <AuthenticatedApp />
+        )
+      } />
+
+      {/* Register page */}
+      <Route path="/register" element={
+        !isAuthenticated ? (
+          <div className="min-h-screen bg-slate-100 flex flex-col">
+            <div className="flex-1 flex items-center justify-center">
+              <TwoStepRegistration 
+                onRegister={handleRegister} 
+                onNavigateToLogin={() => navigate('/login')} 
+                onNavigateToLanding={() => navigate('/')}
+              />
+            </div>
+          </div>
+        ) : (
+          <AuthenticatedApp />
+        )
+      } />
+
+      {/* Dashboard page */}
+      <Route path="/dashboard" element={
+        isAuthenticated ? (
+          <AuthenticatedApp />
+        ) : (
+          <div className="min-h-screen bg-slate-100 flex flex-col">
+            <div className="flex-1 flex items-center justify-center">
+              <LoginPage 
+                onLogin={handleLogin} 
+                onNavigateToRegister={() => navigate('/register')} 
+                onNavigateToCompleteRegistration={() => navigate('/complete-registration')}
+                onNavigateToLanding={() => navigate('/')}
+              />
+            </div>
+          </div>
+        )
+      } />
+
+      {/* Catch all route */}
+      <Route path="*" element={
+        isAuthenticated ? (
+          <AuthenticatedApp />
+        ) : (
+          <div className="min-h-screen bg-slate-100 flex flex-col">
+            <div className="flex-1 flex items-center justify-center">
+              <LoginPage 
+                onLogin={handleLogin} 
+                onNavigateToRegister={() => navigate('/register')} 
+                onNavigateToCompleteRegistration={() => navigate('/complete-registration')}
+                onNavigateToLanding={() => navigate('/')}
+              />
+            </div>
+          </div>
+        )
+      } />
+    </Routes>
   );
+
+  // Authenticated app component
+  function AuthenticatedApp() {
+    return (
+      <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
+        <header className="bg-white shadow-sm sticky top-0 z-50">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              {/* Show investment advisor logo if user is an Investment Advisor OR has an assigned investment advisor */}
+              {(() => {
+                const isInvestmentAdvisor = currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url;
+                const hasAssignedAdvisor = assignedInvestmentAdvisor && (currentUser?.role === 'Investor' || currentUser?.role === 'Startup');
+                const shouldShowAdvisorLogo = Boolean(isInvestmentAdvisor || hasAssignedAdvisor);
+                
+                console.log('🔍 Header logo display check:', {
+                  currentUserRole: currentUser?.role,
+                  currentUserLogo: (currentUser as any)?.logo_url,
+                  assignedAdvisor: !!assignedInvestmentAdvisor,
+                  assignedAdvisorLogo: assignedInvestmentAdvisor?.logo_url,
+                  isInvestmentAdvisor,
+                  hasAssignedAdvisor,
+                  shouldShowAdvisorLogo
+                });
+                return shouldShowAdvisorLogo;
+              })() ? (
+                <div className="flex items-center gap-3">
+                  {((currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url) || 
+                    (assignedInvestmentAdvisor?.logo_url)) ? (
+                    <>
+                      <img 
+                        src={currentUser?.role === 'Investment Advisor' 
+                          ? (currentUser as any).logo_url 
+                          : assignedInvestmentAdvisor?.logo_url} 
+                        alt="Company Logo" 
+                        className="h-8 w-8 rounded object-contain bg-white border border-gray-200 p-1"
+                        onError={(e) => {
+                          // Fallback to TrackMyStartup logo if image fails to load
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
+                      />
+                      <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left hidden" />
+                    </>
+                  ) : (
+                    <div className="h-8 w-8 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
+                      <span className="text-purple-600 font-semibold text-xs">IA</span>
+                    </div>
+                  )}
+                  <div>
+                    <h1 className="text-lg font-semibold text-gray-800">
+                      {currentUser?.role === 'Investment Advisor' 
+                        ? (currentUser as any).name || 'Investment Advisor'
+                        : assignedInvestmentAdvisor?.name || 'Investment Advisor'}
+                    </h1>
+                    <p className="text-xs text-blue-600">Supported by Track My Startup</p>
+                  </div>
+                </div>
+              ) : (
+                <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left" />
+              )}
+            </div>
+             <div className="flex items-center gap-6">
+              {currentUser?.role === 'Investor' && (
+                  <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
+                      Investor Code: <span className="font-semibold text-brand-primary">
+                          {currentUser.investor_code || currentUser.investorCode || 'Not Set'}
+                      </span>
+                      {!currentUser.investor_code && !currentUser.investorCode && (
+                          <span className="text-red-500 text-xs ml-2">⚠️ Code missing</span>
+                      )}
+                  </div>
+              )}
+
+              {currentUser?.role === 'Startup Facilitation Center' && (
+                  <FacilitatorCodeDisplay 
+                      className="bg-blue-100 text-blue-800 px-3 py-1 rounded-md text-sm font-medium" 
+                      currentUser={currentUser}
+                  />
+              )}
+
+              {currentUser?.role === 'Investment Advisor' && (
+                  <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
+                      Advisor Code: <span className="font-semibold text-brand-primary">
+                          {(currentUser as any)?.investment_advisor_code || 'IA-XXXXXX'}
+                      </span>
+                  </div>
+              )}
+
+              {(currentUser?.role === 'Investor' || currentUser?.role === 'Startup') && currentUser?.investment_advisor_code_entered && (
+                  <div className="hidden sm:block text-sm text-slate-500 bg-purple-100 px-3 py-1.5 rounded-md font-mono">
+                      Advisor: <span className="font-semibold text-purple-800">
+                          {currentUser.investment_advisor_code_entered}
+                      </span>
+                  </div>
+              )}
+
+              <button onClick={handleLogout} className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors">
+                  <LogOut className="h-4 w-4" />
+                  Logout
+              </button>
+             </div>
+          </div>
+        </header>
+        
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-md p-4 mx-4 mt-4">
+            <div className="flex items-center">
+              <div className="text-sm text-red-800">
+                <strong>Error:</strong> {error}
+              </div>
+              <button 
+                onClick={() => setError(null)} 
+                className="ml-auto text-red-600 hover:text-red-800"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+        
+        <main className="container mx-auto p-4 sm:p-6 lg:p-8 flex-1">
+          <MainContent key={`${viewKey}-${forceRender}`} />
+        </main>
+      </div>
+    );
+  }
 };
 
 export default App;

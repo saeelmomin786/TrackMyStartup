@@ -225,7 +225,11 @@ class RecognitionService {
         pricePerShare: data.price_per_share,
         investmentAmount: data.investment_amount,
         equityAllocated: data.equity_allocated,
+<<<<<<< HEAD
         postMoneyValuation: data.post_money_valuation,
+=======
+        postMoneyValuation: data.pre_money_valuation,
+>>>>>>> 3485bad0585d42e85878a654e74ad4273c31f0e6
         signedAgreementUrl: data.signed_agreement_url,
         status: data.status || 'pending',
         dateAdded: data.date_added
@@ -287,7 +291,11 @@ class RecognitionService {
         pricePerShare: data.price_per_share,
         investmentAmount: data.investment_amount,
         equityAllocated: data.equity_allocated,
+<<<<<<< HEAD
         postMoneyValuation: data.post_money_valuation,
+=======
+        postMoneyValuation: data.pre_money_valuation,
+>>>>>>> 3485bad0585d42e85878a654e74ad4273c31f0e6
         signedAgreementUrl: data.signed_agreement_url,
         status: data.status || 'pending',
         dateAdded: data.date_added
@@ -370,7 +378,11 @@ class RecognitionService {
           pricePerShare: data.price_per_share,
           investmentAmount: data.investment_amount,
           equityAllocated: data.equity_allocated,
+<<<<<<< HEAD
           postMoneyValuation: data.post_money_valuation,
+=======
+          postMoneyValuation: data.pre_money_valuation,
+>>>>>>> 3485bad0585d42e85878a654e74ad4273c31f0e6
           signedAgreementUrl: data.signed_agreement_url,
           dateAdded: data.date_added
         },

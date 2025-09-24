@@ -11,6 +11,7 @@ import { investorService, ActiveFundraisingStartup } from '../lib/investorServic
 import { paymentService } from '../lib/paymentService';
 import { investmentService } from '../lib/database';
 import ProfilePage from './ProfilePage';
+import AdvisorAwareLogo from './AdvisorAwareLogo';
 
 interface InvestorViewProps {
   startups: Startup[];
@@ -415,7 +416,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             </div>
             
             <div>
-              <h2 className="text-xl font-semibold text-gray-800">TrackMyStartup</h2>
+              <AdvisorAwareLogo 
+                currentUser={currentUser}
+                showText={true}
+                textClassName="text-xl font-semibold text-gray-800"
+              />
             </div>
           </div>
           <div className="flex items-center space-x-6">

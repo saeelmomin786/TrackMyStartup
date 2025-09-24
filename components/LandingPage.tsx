@@ -154,6 +154,167 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
         </div>
       </section>
 
+      {/* Pricing Section */}
+      <section className="py-12 sm:py-16 lg:py-20 px-4 sm:px-6 lg:px-8 bg-slate-100">
+        <div className="container mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-2xl sm:text-4xl font-bold text-slate-900 mb-3 sm:mb-4">
+              Simple, Transparent Pricing
+            </h2>
+            <p className="text-base sm:text-xl text-slate-600 max-w-2xl mx-auto">
+              Choose the plan that fits your needs. All plans include full access to our platform features.
+            </p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 max-w-5xl mx-auto">
+            {/* Startups Plan */}
+            <div className="bg-white rounded-lg shadow-sm p-6 sm:p-8 border border-slate-200">
+              <div className="text-center">
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Startups</h3>
+                <div className="mb-4">
+                  <span className="text-3xl font-bold text-brand-primary">€15</span>
+                  <span className="text-slate-600">/month</span>
+                </div>
+                <div className="text-sm text-slate-500 mb-6">
+                  or <span className="font-semibold text-slate-700">€120/year</span> (save 33%)
+                </div>
+                <ul className="text-left space-y-2 text-slate-600 mb-6">
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Full platform access
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Compliance tracking
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Investment management
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Financial reporting
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Team collaboration
+                  </li>
+                </ul>
+                <Button 
+                  variant="outline" 
+                  size="md" 
+                  onClick={onNavigateToRegister}
+                  className="w-full"
+                >
+                  Get Started
+                </Button>
+              </div>
+            </div>
+
+            {/* Investors Plan */}
+            <div className="bg-white rounded-lg shadow-sm p-6 sm:p-8 border border-slate-200 relative">
+              <div className="text-center">
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Investors</h3>
+                <div className="mb-4">
+                  <span className="text-3xl font-bold text-brand-primary">€15</span>
+                  <span className="text-slate-600">/month</span>
+                </div>
+                <div className="text-sm text-slate-500 mb-2">
+                  per startup
+                </div>
+                <div className="text-sm text-slate-500 mb-6">
+                  or <span className="font-semibold text-slate-700">€120/year</span> per startup (save 33%)
+                </div>
+                <ul className="text-left space-y-2 text-slate-600 mb-6">
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Portfolio management
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Investment tracking
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Due diligence tools
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Performance analytics
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Investment opportunities
+                  </li>
+                </ul>
+                <Button 
+                  variant="outline" 
+                  size="md" 
+                  onClick={onNavigateToRegister}
+                  className="w-full"
+                >
+                  Get Started
+                </Button>
+              </div>
+            </div>
+
+            {/* Startup Facilitation Center Plan */}
+            <div className="bg-white rounded-lg shadow-sm p-6 sm:p-8 border border-slate-200">
+              <div className="text-center">
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Facilitation Center</h3>
+                <div className="mb-4">
+                  <span className="text-3xl font-bold text-brand-primary">€20</span>
+                  <span className="text-slate-600">/month</span>
+                </div>
+                <div className="text-sm text-slate-500 mb-6">
+                  Flat monthly rate
+                </div>
+                <ul className="text-left space-y-2 text-slate-600 mb-6">
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Multi-startup management
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Facilitator dashboard
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Request management
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Team coordination
+                  </li>
+                  <li className="flex items-center">
+                    <span className="text-green-500 mr-2">✓</span>
+                    Advanced reporting
+                  </li>
+                </ul>
+                <Button 
+                  variant="outline" 
+                  size="md" 
+                  onClick={onNavigateToRegister}
+                  className="w-full"
+                >
+                  Get Started
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Additional Info */}
+          <div className="text-center mt-12">
+            <p className="text-slate-600 mb-4">
+              All plans include 24/7 support and regular platform updates
+            </p>
+            <p className="text-sm text-slate-500">
+              Need a custom plan? <a href="mailto:support@trackmystartup.com" className="text-brand-primary hover:underline">Contact us</a> for enterprise solutions
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* CTA Section */}
       <section className="py-12 sm:py-16 lg:py-20 px-4 sm:px-6 lg:px-8 bg-slate-100">
         <div className="container mx-auto text-center">

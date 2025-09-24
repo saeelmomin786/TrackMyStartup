@@ -150,6 +150,24 @@ const Footer: React.FC = () => {
                   <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </button>
               </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/cancellation-refunds')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  Cancellation & Refunds
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/shipping')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  Shipping Policy
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
             </ul>
           </div>
         </div>

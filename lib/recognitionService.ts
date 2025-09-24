@@ -9,8 +9,11 @@ export interface CreateRecognitionRecordData {
   incubationType: IncubationType;
   feeType: FeeType;
   feeAmount?: number;
+  shares?: number;
+  pricePerShare?: number;
+  investmentAmount?: number;
   equityAllocated?: number;
-  preMoneyValuation?: number;
+  postMoneyValuation?: number;
   signedAgreementUrl?: string;
   status?: string;
 }
@@ -22,8 +25,11 @@ export interface UpdateRecognitionRecordData {
   incubationType?: IncubationType;
   feeType?: FeeType;
   feeAmount?: number;
+  shares?: number;
+  pricePerShare?: number;
+  investmentAmount?: number;
   equityAllocated?: number;
-  preMoneyValuation?: number;
+  postMoneyValuation?: number;
   signedAgreementUrl?: string;
   status?: string;
 }
@@ -53,7 +59,7 @@ class RecognitionService {
         feeType: record.fee_type as FeeType,
         feeAmount: record.fee_amount,
         equityAllocated: record.equity_allocated,
-        preMoneyValuation: record.pre_money_valuation,
+        postMoneyValuation: record.pre_money_valuation,
         signedAgreementUrl: record.signed_agreement_url,
         status: record.status || 'pending',
         dateAdded: record.date_added
@@ -98,7 +104,7 @@ class RecognitionService {
         feeType: record.fee_type as FeeType,
         feeAmount: record.fee_amount,
         equityAllocated: record.equity_allocated,
-        preMoneyValuation: record.pre_money_valuation,
+        postMoneyValuation: record.pre_money_valuation,
         signedAgreementUrl: record.signed_agreement_url,
         status: record.status || 'pending',
         dateAdded: record.date_added
@@ -126,8 +132,11 @@ class RecognitionService {
           incubation_type: recordData.incubationType,
           fee_type: recordData.feeType,
           fee_amount: recordData.feeAmount,
+          shares: recordData.shares,
+          price_per_share: recordData.pricePerShare,
+          investment_amount: recordData.investmentAmount,
           equity_allocated: recordData.equityAllocated,
-          pre_money_valuation: recordData.preMoneyValuation,
+          post_money_valuation: recordData.postMoneyValuation,
           signed_agreement_url: recordData.signedAgreementUrl,
           status: recordData.status || 'pending',
           date_added: new Date().toISOString().split('T')[0]
@@ -151,8 +160,11 @@ class RecognitionService {
         incubationType: data.incubation_type as IncubationType,
         feeType: data.fee_type as FeeType,
         feeAmount: data.fee_amount,
+        shares: data.shares,
+        pricePerShare: data.price_per_share,
+        investmentAmount: data.investment_amount,
         equityAllocated: data.equity_allocated,
-        preMoneyValuation: data.pre_money_valuation,
+        postMoneyValuation: data.post_money_valuation,
         signedAgreementUrl: data.signed_agreement_url,
         status: data.status || 'pending',
         dateAdded: data.date_added
@@ -175,7 +187,7 @@ class RecognitionService {
       if (updateData.feeType !== undefined) updatePayload.fee_type = updateData.feeType;
       if (updateData.feeAmount !== undefined) updatePayload.fee_amount = updateData.feeAmount;
       if (updateData.equityAllocated !== undefined) updatePayload.equity_allocated = updateData.equityAllocated;
-      if (updateData.preMoneyValuation !== undefined) updatePayload.pre_money_valuation = updateData.preMoneyValuation;
+      if (updateData.postMoneyValuation !== undefined) updatePayload.post_money_valuation = updateData.postMoneyValuation;
       if (updateData.signedAgreementUrl !== undefined) updatePayload.signed_agreement_url = updateData.signedAgreementUrl;
       if (updateData.status !== undefined) updatePayload.status = updateData.status;
 
@@ -201,7 +213,7 @@ class RecognitionService {
         feeType: data.fee_type as FeeType,
         feeAmount: data.fee_amount,
         equityAllocated: data.equity_allocated,
-        preMoneyValuation: data.pre_money_valuation,
+        postMoneyValuation: data.pre_money_valuation,
         signedAgreementUrl: data.signed_agreement_url,
         status: data.status || 'pending',
         dateAdded: data.date_added
@@ -260,7 +272,7 @@ class RecognitionService {
         feeType: data.fee_type as FeeType,
         feeAmount: data.fee_amount,
         equityAllocated: data.equity_allocated,
-        preMoneyValuation: data.pre_money_valuation,
+        postMoneyValuation: data.pre_money_valuation,
         signedAgreementUrl: data.signed_agreement_url,
         status: data.status || 'pending',
         dateAdded: data.date_added
@@ -340,7 +352,7 @@ class RecognitionService {
           feeType: data.fee_type as FeeType,
           feeAmount: data.fee_amount,
           equityAllocated: data.equity_allocated,
-          preMoneyValuation: data.pre_money_valuation,
+          postMoneyValuation: data.pre_money_valuation,
           signedAgreementUrl: data.signed_agreement_url,
           dateAdded: data.date_added
         },

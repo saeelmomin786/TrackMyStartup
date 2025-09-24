@@ -27,12 +27,11 @@ export interface FacilitatorApplication {
 }
 
 class FacilitatorCodeService {
-  // Generate a unique facilitator code
+  // Generate a unique facilitator code (max 10 characters)
   generateFacilitatorCode(): string {
-    const prefix = 'FAC';
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return `${prefix}-${timestamp}-${random}`;
+    // Use a shorter format: FAC + 7 random characters = 10 total
+    const random = Math.random().toString(36).substring(2, 9).toUpperCase();
+    return `FAC${random}`;
   }
 
   // Get facilitator code for a user
@@ -190,14 +189,18 @@ class FacilitatorCodeService {
   // Create or update facilitator code for a user
   async createOrUpdateFacilitatorCode(userId: string): Promise<string | null> {
     try {
+      console.log('🔍 Creating/updating facilitator code for user:', userId);
+      
       // Check if user already has a facilitator code
       const existingCode = await this.getFacilitatorCodeByUserId(userId);
       if (existingCode) {
+        console.log('✅ User already has facilitator code:', existingCode);
         return existingCode;
       }
 
       // Generate new facilitator code
       const newCode = this.generateFacilitatorCode();
+      console.log('📝 Generated new facilitator code:', newCode, '(length:', newCode.length, ')');
       
       // Update user with new facilitator code
       const { error } = await supabase
@@ -207,13 +210,15 @@ class FacilitatorCodeService {
         .eq('role', 'Startup Facilitation Center');
         
         if (error) {
-        console.error('Error updating user with facilitator code:', error);
+        console.error('❌ Error updating user with facilitator code:', error);
+        console.error('❌ Code that failed:', newCode, '(length:', newCode.length, ')');
             return null;
         }
         
+      console.log('✅ Successfully created facilitator code:', newCode);
       return newCode;
     } catch (error) {
-      console.error('Error in createOrUpdateFacilitatorCode:', error);
+      console.error('❌ Error in createOrUpdateFacilitatorCode:', error);
         return null;
     }
 }

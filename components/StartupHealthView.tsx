@@ -60,6 +60,13 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [showAccountPage, setShowAccountPage] = useState(false);
     
+    // Update currentStartup when startup prop changes (important for facilitator access)
+    useEffect(() => {
+        console.log('🔄 StartupHealthView: Startup prop changed, updating currentStartup');
+        console.log('📊 New startup data:', startup);
+        setCurrentStartup(startup);
+    }, [startup]);
+    
     const offersForStartup = (localOffers || investmentOffers || []).filter((o: any) => {
         return (
             o.startupId === currentStartup.id ||

@@ -58,6 +58,8 @@ export interface Startup {
   financials?: FinancialRecord[];
   investments?: InvestmentRecord[];
   esopReservedShares?: number; // Number of shares reserved for ESOP
+  totalShares?: number; // Total number of shares issued
+  pricePerShare?: number; // Current price per share
 }
 
 export interface NewInvestment {
@@ -233,8 +235,11 @@ export interface RecognitionRecord {
     incubationType: IncubationType;
     feeType: FeeType;
     feeAmount?: number;
+    shares?: number;
+    pricePerShare?: number;
+    investmentAmount?: number;
     equityAllocated?: number;
-    preMoneyValuation?: number;
+    postMoneyValuation?: number;
     signedAgreementUrl: string;
     status?: string;
     dateAdded: string;

@@ -173,6 +173,14 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
     // CA should have view-only access across tabs except compliance. No profile editing.
     const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
     
+    // Debug logging for edit button visibility
+    console.log('🔍 ProfileTab - Edit button visibility check:', {
+        userRole,
+        isViewOnly,
+        canEdit,
+        isEditing
+    });
+    
     // Helper function to sanitize profile data and ensure all values are strings
     const sanitizeProfileData = (data: any): LocalFormData => {
         const sanitized = {
@@ -1359,9 +1367,16 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
           <button 
             onClick={handleEdit} 
             className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-md hover:shadow-lg"
+            style={{ display: 'block' }} // Force visibility for debugging
           >
             <Edit3 size={18} /> Edit Profile
           </button>
+        )}
+        {/* Debug info */}
+        {!canEdit && (
+          <div className="text-sm text-red-600 bg-red-50 p-2 rounded">
+            Debug: Edit button hidden - canEdit: {canEdit.toString()}, userRole: {userRole}, isViewOnly: {isViewOnly.toString()}
+          </div>
         )}
       </div>
 

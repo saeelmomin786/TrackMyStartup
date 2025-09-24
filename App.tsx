@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { Startup, NewInvestment, ComplianceStatus, StartupAdditionRequest, FundraisingDetails, InvestmentRecord, InvestmentType, UserRole, Founder, User, VerificationRequest, InvestmentOffer } from './types';
 import { authService, AuthUser } from './lib/auth';
 import { startupService, investmentService, verificationService, userService, realtimeService, startupAdditionService } from './lib/database';
@@ -28,9 +29,20 @@ import LogoTMS from './components/public/logoTMS.svg';
 import { FacilitatorCodeDisplay } from './components/FacilitatorCodeDisplay';
 
 const App: React.FC = () => {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
+  );
+};
+
+const AppContent: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  
   // Check if we're on a standalone page (footer links)
-  const standalonePages = ['/privacy-policy', '/refund-policy', '/terms-conditions', '/about', '/contact', '/products'];
-  const currentPath = window.location.pathname;
+  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products'];
+  const currentPath = location.pathname;
   
   if (standalonePages.includes(currentPath)) {
     return (
@@ -102,9 +114,9 @@ const App: React.FC = () => {
   // Listen for URL changes to handle reset password links
   useEffect(() => {
     const handleUrlChange = () => {
-      const pathname = window.location.pathname;
-      const searchParams = new URLSearchParams(window.location.search);
-      const hash = window.location.hash;
+      const pathname = location.pathname;
+      const searchParams = new URLSearchParams(location.search);
+      const hash = location.hash;
       
       // Check for reset password indicators
       if (pathname === '/reset-password' || 
@@ -118,14 +130,7 @@ const App: React.FC = () => {
 
     // Check on mount
     handleUrlChange();
-
-    // Listen for popstate events (back/forward navigation)
-    window.addEventListener('popstate', handleUrlChange);
-    
-    return () => {
-      window.removeEventListener('popstate', handleUrlChange);
-    };
-  }, []);
+  }, [location]);
 
   
   
@@ -267,8 +272,8 @@ const App: React.FC = () => {
         
         const authPromise = (async () => {
           // Handle access token from email confirmation first
-          const hash = window.location.hash;
-          const searchParams = new URLSearchParams(window.location.search);
+          const hash = location.hash;
+          const searchParams = new URLSearchParams(location.search);
           
           // Check for access token in hash or query parameters
           let accessToken = null;
@@ -315,7 +320,7 @@ const App: React.FC = () => {
               }
               
               // Clean up the URL
-              window.history.replaceState({}, document.title, window.location.pathname);
+              navigate(location.pathname, { replace: true });
             } catch (error) {
               console.error('Error during email confirmation:', error);
             }
@@ -990,17 +995,45 @@ const App: React.FC = () => {
     try {
       console.log('🔍 Fetching startup data for facilitator, ID:', startupId);
       
-      const { data: fetchedStartup, error: fetchError } = await supabase
-        .from('startups')
-        .select('*')
-        .eq('id', startupId)
-        .single();
+      // Fetch startup data, share data, and founders data in parallel
+      const [startupResult, sharesResult, foundersResult] = await Promise.allSettled([
+        supabase
+          .from('startups')
+          .select('*')
+          .eq('id', startupId)
+          .single(),
+        supabase
+          .from('startup_shares')
+          .select('total_shares, esop_reserved_shares, price_per_share')
+          .eq('startup_id', startupId)
+          .single(),
+        supabase
+          .from('founders')
+          .select('name, email, shares, equity_percentage')
+          .eq('startup_id', startupId)
+      ]);
       
-      if (fetchError || !fetchedStartup) {
-        console.error('Error fetching startup from database:', fetchError);
+      const startupData = startupResult.status === 'fulfilled' ? startupResult.value : null;
+      const sharesData = sharesResult.status === 'fulfilled' ? sharesResult.value : null;
+      const foundersData = foundersResult.status === 'fulfilled' ? foundersResult.value : null;
+      
+      if (startupData.error || !startupData.data) {
+        console.error('Error fetching startup from database:', startupData.error);
         alert('Unable to access startup. Please check your permissions.');
         return;
       }
+      
+      const fetchedStartup = startupData.data;
+      const shares = sharesData.data;
+      const founders = foundersData.data || [];
+      
+      // Map founders data to include shares
+      const mappedFounders = founders.map((founder: any) => ({
+        name: founder.name,
+        email: founder.email,
+        shares: founder.shares || 0,
+        equityPercentage: founder.equity_percentage || 0
+      }));
       
       // Convert database format to Startup interface
       const startupObj: Startup = {
@@ -1015,10 +1048,16 @@ const App: React.FC = () => {
         totalFunding: fetchedStartup.total_funding,
         totalRevenue: fetchedStartup.total_revenue,
         registrationDate: fetchedStartup.registration_date,
-        founders: fetchedStartup.founders || []
+        founders: mappedFounders,
+        // Add share data
+        esopReservedShares: shares?.esop_reserved_shares || 0,
+        totalShares: shares?.total_shares || 0,
+        pricePerShare: shares?.price_per_share || 0
       };
       
-      console.log('✅ Startup fetched from database:', startupObj);
+      console.log('✅ Startup fetched from database with shares and founders:', startupObj);
+      console.log('📊 Share data:', shares);
+      console.log('👥 Founders data:', mappedFounders);
       
       // Set view-only mode for facilitator
       setIsViewOnly(true);
@@ -1621,6 +1660,9 @@ const App: React.FC = () => {
           startupAdditionRequests={startupAdditionRequests}
           onViewStartup={handleViewStartup}
           onAcceptRequest={handleAcceptStartupRequest}
+          currentUser={currentUser}
+          onProfileUpdate={handleProfileUpdate}
+          onLogout={handleLogout}
         />
       );
     }

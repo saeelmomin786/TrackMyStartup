@@ -8,7 +8,7 @@ import Select from '../ui/Select';
 import Modal from '../ui/Modal';
 import DateInput from '../DateInput';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Plus, Trash2, Edit3, Save, X, TrendingUp, Users, DollarSign, PieChart as PieChartIcon, UserPlus, Download, Upload, Check, Eye, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Edit, Edit3, Save, X, TrendingUp, Users, DollarSign, PieChart as PieChartIcon, UserPlus, Download, Upload, Check, Eye, RefreshCw } from 'lucide-react';
 import PricePerShareInput from './PricePerShareInput';
 import { capTableService } from '../../lib/capTableService';
 import { startupAdditionService, investmentService } from '../../lib/database';
@@ -168,6 +168,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [investmentToDelete, setInvestmentToDelete] = useState<InvestmentRecord | null>(null);
     const [isEditInvestmentModalOpen, setIsEditInvestmentModalOpen] = useState(false);
     const [editingInvestment, setEditingInvestment] = useState<InvestmentRecord | null>(null);
+    const [isEditRecognitionModalOpen, setIsEditRecognitionModalOpen] = useState(false);
+    const [editingRecognition, setEditingRecognition] = useState<RecognitionRecord | null>(null);
+    const [isDeleteRecognitionModalOpen, setIsDeleteRecognitionModalOpen] = useState(false);
+    const [recognitionToDelete, setRecognitionToDelete] = useState<RecognitionRecord | null>(null);
     
     // Incubation Programs states
     const [incubationPrograms, setIncubationPrograms] = useState<IncubationProgram[]>([]);
@@ -187,6 +191,25 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [invSharesDraft, setInvSharesDraft] = useState<string>('');
     const [invPricePerShareDraft, setInvPricePerShareDraft] = useState<string>('');
     // Removed isSavingShares - no longer needed since total shares are calculated automatically
+
+    // Recognition form state for equity calculations
+    const [recSharesDraft, setRecSharesDraft] = useState<string>('');
+    const [recPricePerShareDraft, setRecPricePerShareDraft] = useState<string>('');
+    const [recAmountDraft, setRecAmountDraft] = useState<string>('');
+    const [recEquityDraft, setRecEquityDraft] = useState<string>('');
+    const [recPostMoneyDraft, setRecPostMoneyDraft] = useState<string>('');
+
+    // Helper function to calculate total shares including recognition records with equity
+    const calculateTotalShares = () => {
+        const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
+        const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
+        const esopReservedShares = startup.esopReservedShares || 0;
+        const totalRecognitionShares = recognitionRecords
+            .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares)
+            .reduce((sum, rec) => sum + (rec.shares || 0), 0);
+        
+        return totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares;
+    };
 
     // Utility function to validate total shares allocation
     const validateSharesAllocation = (newShares: number, excludeInvestmentId?: string): { isValid: boolean; message?: string; availableShares: number } => {
@@ -243,18 +266,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setInvAmountDraft(String(amount));
             
             // Calculate equity percentage based on shares
-            const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
-            const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-            const esopReservedShares = startup.esopReservedShares || 0;
-            const currentTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares;
+            const currentTotalShares = calculateTotalShares();
             
             // Include the new shares in the total for post-money calculation
             const postMoneyTotalShares = currentTotalShares + shares;
             
             console.log('📊 Share calculation details:', {
-                totalFounderShares,
-                totalInvestorShares,
-                esopReservedShares,
                 currentTotalShares,
                 postMoneyTotalShares,
                 shares
@@ -303,14 +320,79 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setInvEquityDraft('');
             setInvPostMoneyDraft('');
         }
-    }, [invSharesDraft, invPricePerShareDraft, founders, investmentRecords, startup.esopReservedShares]);
+    }, [invSharesDraft, invPricePerShareDraft, founders, investmentRecords, startup.esopReservedShares, recognitionRecords]);
+
+    // Auto-calc recognition amount, equity, and post-money when shares or price changes (for equity/hybrid fee types)
+    useEffect(() => {
+        const shares = Number(recSharesDraft);
+        const pricePerShare = Number(recPricePerShareDraft);
+        
+        console.log('🔄 Recognition auto-calculation triggered:', { shares, pricePerShare, recSharesDraft, recPricePerShareDraft });
+        
+        if (Number.isFinite(shares) && shares > 0 && Number.isFinite(pricePerShare) && pricePerShare > 0) {
+            // Calculate investment amount
+            const amount = shares * pricePerShare;
+            setRecAmountDraft(String(amount));
+            
+            // Calculate equity percentage based on shares
+            const currentTotalShares = calculateTotalShares();
+            
+            // Include the new shares in the total for post-money calculation
+            const postMoneyTotalShares = currentTotalShares + shares;
+            
+            console.log('📊 Recognition share calculation details:', {
+                currentTotalShares,
+                postMoneyTotalShares,
+                shares
+            });
+            
+            if (postMoneyTotalShares > 0) {
+                const equityPercentage = (shares / postMoneyTotalShares) * 100;
+                setRecEquityDraft(String(equityPercentage.toFixed(2)));
+                
+                // Calculate post-money valuation
+                const postMoney = (amount * 100) / equityPercentage;
+                setRecPostMoneyDraft(String(postMoney.toFixed(2)));
+                
+                console.log('✅ Recognition calculations completed:', {
+                    amount,
+                    equityPercentage: equityPercentage.toFixed(2),
+                    postMoney: postMoney.toFixed(2),
+                    currentTotalShares,
+                    postMoneyTotalShares,
+                    shares
+                });
+            } else {
+                // Fallback: if no existing shares, use a reasonable default
+                console.log('⚠️ No existing shares found for recognition, using fallback calculation');
+                
+                // Use a reasonable assumption: if this is the first investment, 
+                // assume founders will have 80% and this recognition gets 20%
+                const assumedFounderShares = shares * 4; // 4x the recognition shares
+                const totalSharesWithFounders = assumedFounderShares + shares;
+                const equityPercentage = (shares / totalSharesWithFounders) * 100;
+                
+                setRecEquityDraft(String(equityPercentage.toFixed(2)));
+                setRecPostMoneyDraft(String(amount.toFixed(2)));
+                
+                console.log('📊 Recognition fallback calculation:', {
+                    assumedFounderShares,
+                    totalSharesWithFounders,
+                    equityPercentage: equityPercentage.toFixed(2),
+                    amount
+                });
+            }
+        } else if (shares === 0 || pricePerShare === 0) {
+            // Clear calculations if either field is empty
+            setRecAmountDraft('');
+            setRecEquityDraft('');
+            setRecPostMoneyDraft('');
+        }
+    }, [recSharesDraft, recPricePerShareDraft, founders, investmentRecords, startup.esopReservedShares, recognitionRecords]);
 
     // Recompute price per share whenever shares or valuation data changes
     useEffect(() => {
-        const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
-        const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-        const esopReservedShares = startup.esopReservedShares || 0;
-        const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares;
+        const calculatedTotalShares = calculateTotalShares();
         
         if (calculatedTotalShares <= 0) {
             setPricePerShare(0);
@@ -327,7 +409,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         }
         const computed = latestValuation > 0 ? (latestValuation / calculatedTotalShares) : 0;
         setPricePerShare(computed);
-    }, [founders, investmentRecords, startup.currentValuation, startup.esopReservedShares]);
+    }, [founders, investmentRecords, startup.currentValuation, startup.esopReservedShares, recognitionRecords]);
 
     // Real-time subscription for offers received
     useEffect(() => {
@@ -440,13 +522,22 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
 
             // Handle each result individually
             setInvestmentRecords(records.status === 'fulfilled' ? records.value : []);
+            
+            // Check if startup already has founders data (e.g., from facilitator access)
+            const hasExistingFoundersData = startup.founders && startup.founders.length > 0;
+            
+            if (hasExistingFoundersData) {
+                console.log('🔍 Startup already has founders data, preserving it:', startup.founders);
+                setFounders(startup.founders);
+            } else {
             const foundersResult = foundersData.status === 'fulfilled' ? foundersData.value : [];
-            console.log('🔍 Founders data loaded:', foundersResult);
+                console.log('🔍 Founders data loaded from database:', foundersResult);
             console.log('🔍 Founders data status:', foundersData.status);
             if (foundersData.status === 'rejected') {
                 console.error('❌ Founders data loading failed:', foundersData.reason);
             }
             setFounders(foundersResult);
+            }
             
             // Debug all the data loading results
             console.log('🔍 All data loading results:');
@@ -481,12 +572,22 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             });
 
             // Handle shares data - only load ESOP reserved shares and price per share
-            if (totalSharesData.status === 'fulfilled') {
+            // Check if startup already has share data (e.g., from facilitator access)
+            const hasExistingShareData = startup.esopReservedShares !== undefined || startup.pricePerShare !== undefined;
+            
+            if (hasExistingShareData) {
+                console.log('🔍 Startup already has share data, preserving it:', {
+                    esopReservedShares: startup.esopReservedShares,
+                    pricePerShare: startup.pricePerShare,
+                    totalShares: startup.totalShares
+                });
+                setPricePerShare(startup.pricePerShare || 0);
+            } else if (totalSharesData.status === 'fulfilled') {
                 const sharesData = totalSharesData.value;
                 const esopShares = Number(sharesData.esopReservedShares) || 0;
                 const pricePerShare = Number(sharesData.pricePerShare) || 0;
                 
-                console.log('🔍 Shares data loaded:', { esopShares, pricePerShare });
+                console.log('🔍 Shares data loaded from database:', { esopShares, pricePerShare });
                 console.log('🔍 Raw shares data:', sharesData);
                 console.log('🔍 Setting price per share to:', pricePerShare);
                 
@@ -1151,8 +1252,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         const incubationType = formData.get('rec-incubation-type') as IncubationType;
         const feeType = formData.get('rec-fee-type') as FeeType;
         const feeAmount = formData.get('rec-fee-amount') ? parseFloat(formData.get('rec-fee-amount') as string) : undefined;
+        const shares = formData.get('rec-shares') ? parseInt(formData.get('rec-shares') as string) : undefined;
+        const pricePerShare = formData.get('rec-price-per-share') ? parseFloat(formData.get('rec-price-per-share') as string) : undefined;
+        const investmentAmount = formData.get('rec-amount') ? parseFloat(formData.get('rec-amount') as string) : undefined;
         const equityAllocated = formData.get('rec-equity') ? parseFloat(formData.get('rec-equity') as string) : undefined;
-        const preMoneyValuation = formData.get('rec-premoney') ? parseFloat(formData.get('rec-premoney') as string) : undefined;
+        const postMoneyValuation = formData.get('rec-postmoney') ? parseFloat(formData.get('rec-postmoney') as string) : undefined;
         const agreementFile = formData.get('rec-agreement') as File;
         
         if (!programName || !facilitatorName || !facilitatorCode || !incubationType || !feeType || !agreementFile) {
@@ -1190,8 +1294,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 incubationType,
                 feeType,
                 feeAmount,
+                shares,
+                pricePerShare,
+                investmentAmount,
                 equityAllocated,
-                preMoneyValuation,
+                postMoneyValuation,
                 signedAgreementUrl
             });
             
@@ -1204,8 +1311,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 incubationType,
                 feeType,
                 feeAmount,
+                shares,
+                pricePerShare,
+                investmentAmount,
                 equityAllocated,
-                preMoneyValuation,
+                postMoneyValuation,
                 signedAgreementUrl
             });
             
@@ -1218,6 +1328,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             }
             setError(null);
             setFeeType(FeeType.Free);
+            
+            // Reset recognition form fields
+            setRecSharesDraft('');
+            setRecPricePerShareDraft('');
+            setRecAmountDraft('');
+            setRecEquityDraft('');
+            setRecPostMoneyDraft('');
             
             console.log('✅ Recognition record added successfully to backend');
             console.log('📋 New record:', newRecognitionRecord);
@@ -1261,6 +1378,50 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         console.log('🔧 Editing investment:', investment);
         setEditingInvestment(investment);
         setIsEditInvestmentModalOpen(true);
+    };
+
+    const handleEditRecognition = (recognition: RecognitionRecord) => {
+        console.log('🔧 Editing recognition:', recognition);
+        setEditingRecognition(recognition);
+        setIsEditRecognitionModalOpen(true);
+    };
+
+    const handleDeleteRecognition = (recognition: RecognitionRecord) => {
+        console.log('🗑️ Deleting recognition:', recognition);
+        setRecognitionToDelete(recognition);
+        setIsDeleteRecognitionModalOpen(true);
+    };
+
+    const handleDeleteRecognitionRecord = async (recordId: string) => {
+        try {
+            setIsLoading(true);
+            
+            // Delete from database
+            const { error } = await supabase
+                .from('recognition_records')
+                .delete()
+                .eq('id', parseInt(recordId));
+
+            if (error) {
+                console.error('Error deleting recognition record:', error);
+                setError('Failed to delete recognition record. Please try again.');
+                return;
+            }
+
+            // Update local state
+            setRecognitionRecords(prev => prev.filter(rec => rec.id !== recordId));
+            
+            // Close modal
+            setIsDeleteRecognitionModalOpen(false);
+            setRecognitionToDelete(null);
+            
+            console.log('✅ Recognition record deleted successfully');
+        } catch (error) {
+            console.error('Error deleting recognition record:', error);
+            setError('Failed to delete recognition record. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleEditIncubationProgram = (program: any) => {
@@ -1672,7 +1833,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             // Transform investment offers into OfferReceived format
             const investmentOffersFormatted: OfferReceived[] = investmentOffers.map((offer: any) => ({
                 id: `investment_${offer.id}`,
-                from: offer.investorEmail,
+                from: offer.investorName || offer.investorEmail || 'Unknown Investor', // Use organization name if available, fallback to email, then unknown
                 type: 'Investment' as const,
                 offerDetails: `${formatCurrency(offer.offerAmount, startupCurrency)} for ${offer.equityPercentage}% equity`,
                 status: offer.status as 'pending' | 'accepted' | 'rejected',
@@ -2788,6 +2949,31 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                      </Button>
                  </div>
              </Modal>
+
+            {/* Delete Recognition Confirmation Modal */}
+            <Modal isOpen={isDeleteRecognitionModalOpen} onClose={() => setIsDeleteRecognitionModalOpen(false)} title="Delete Recognition Record">
+                <div className="space-y-4">
+                    <p className="text-slate-600">
+                        Are you sure you want to delete the recognition record for{' '}
+                        <span className="font-semibold">{recognitionToDelete?.programName}</span>?
+                    </p>
+                    <p className="text-sm text-slate-500">
+                        This action cannot be undone. The recognition record will be permanently removed.
+                    </p>
+                </div>
+                <div className="flex justify-end gap-3 pt-6 border-t mt-4">
+                    <Button type="button" variant="secondary" onClick={() => setIsDeleteRecognitionModalOpen(false)}>
+                        Cancel
+                    </Button>
+                    <Button 
+                        type="button" 
+                        variant="destructive" 
+                        onClick={() => recognitionToDelete && handleDeleteRecognitionRecord(recognitionToDelete.id)}
+                    >
+                        Delete Recognition Record
+                    </Button>
+                </div>
+            </Modal>
  
             {/* Recognition and Incubation */}
             <Card>
@@ -2798,8 +2984,14 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                             <tr>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Program Name</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Facilitator</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Fee Type</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Shares</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Price per Share</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Investment Amount</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Equity (%)</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Date Added</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Signed Agreement</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200">
@@ -2807,17 +2999,68 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 <tr key={rec.id}>
                                     <td className="px-4 py-2 font-medium text-slate-900">{rec.programName}</td>
                                     <td className="px-4 py-2 text-slate-500">{rec.facilitatorName}</td>
+                                    <td className="px-4 py-2 text-slate-500">
+                                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                            rec.feeType === 'Equity' ? 'bg-green-100 text-green-800' :
+                                            rec.feeType === 'Hybrid' ? 'bg-blue-100 text-blue-800' :
+                                            rec.feeType === 'Fees' ? 'bg-yellow-100 text-yellow-800' :
+                                            'bg-gray-100 text-gray-800'
+                                        }`}>
+                                            {rec.feeType}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-2 text-slate-500">
+                                        {(rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares ? 
+                                            rec.shares.toLocaleString() : '—'
+                                        }
+                                    </td>
+                                    <td className="px-4 py-2 text-slate-500">
+                                        {(rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.pricePerShare ? 
+                                            `${startupCurrency} ${rec.pricePerShare.toFixed(2)}` : '—'
+                                        }
+                                    </td>
+                                    <td className="px-4 py-2 text-slate-500">
+                                        {(rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.investmentAmount ? 
+                                            `${startupCurrency} ${rec.investmentAmount.toLocaleString()}` : '—'
+                                        }
+                                    </td>
+                                    <td className="px-4 py-2 text-slate-500">
+                                        {(rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.equityAllocated ? 
+                                            `${rec.equityAllocated.toFixed(2)}%` : '—'
+                                        }
+                                    </td>
                                     <td className="px-4 py-2 text-slate-500">{rec.dateAdded}</td>
-
                                     <td className="px-4 py-2 text-slate-500">
                                         <a href={rec.signedAgreementUrl} className="flex items-center text-brand-primary hover:underline">
                                             <Download className="h-4 w-4 mr-1"/> View Document
                                         </a>
                                     </td>
+                                    <td className="px-4 py-2 text-slate-500">
+                                        <div className="flex items-center gap-2">
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => handleEditRecognition(rec)}
+                                                className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                                                title="Edit recognition record"
+                                            >
+                                                <Edit className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => handleDeleteRecognition(rec)}
+                                                className="text-red-600 border-red-600 hover:bg-red-50"
+                                                title="Delete recognition record"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </td>
                                 </tr>
                             ))}
                              {recognitionRecords.length === 0 && (
-                                <tr><td colSpan={4} className="text-center py-6 text-slate-500">No recognitions added yet.</td></tr>
+                                <tr><td colSpan={10} className="text-center py-6 text-slate-500">No recognitions added yet.</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -3124,8 +3367,51 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 )}
                                 {(feeType === FeeType.Equity || feeType === FeeType.Hybrid) && (
                                     <>
-                                        <Input label="Equity Allocated (%)" name="rec-equity" id="rec-equity" type="number" required/>
-                                        <Input label="Pre-Money Valuation" name="rec-premoney" id="rec-premoney" type="number" required/>
+                                        <Input 
+                                            label="Number of Shares" 
+                                            name="rec-shares" 
+                                            id="rec-shares" 
+                                            type="number" 
+                                            required
+                                            value={recSharesDraft}
+                                            onChange={(e) => setRecSharesDraft(e.target.value)}
+                                            placeholder="e.g., 10000"
+                                        />
+                                        <Input 
+                                            label={`Price per Share (${startupCurrency})`} 
+                                            name="rec-price-per-share" 
+                                            id="rec-price-per-share" 
+                                            type="number" 
+                                            step="0.01"
+                                            required
+                                            value={recPricePerShareDraft}
+                                            onChange={(e) => setRecPricePerShareDraft(e.target.value)}
+                                            placeholder="e.g., 1.50"
+                                        />
+                                        <Input 
+                                            label="Investment Amount (auto)" 
+                                            name="rec-amount" 
+                                            id="rec-amount" 
+                                            type="number" 
+                                            readOnly 
+                                            value={recAmountDraft}
+                                        />
+                                        <Input 
+                                            label="Equity Allocated (%) (auto)" 
+                                            name="rec-equity" 
+                                            id="rec-equity" 
+                                            type="number" 
+                                            readOnly 
+                                            value={recEquityDraft}
+                                        />
+                                        <Input 
+                                            label="Post-Money Valuation (auto)" 
+                                            name="rec-postmoney" 
+                                            id="rec-postmoney" 
+                                            type="number" 
+                                            readOnly 
+                                            value={recPostMoneyDraft}
+                                        />
                                     </>
                                 )}
                                 <Input label="Upload Signed Agreement" name="rec-agreement" id="rec-agreement" type="file" required containerClassName="md:col-span-2" />

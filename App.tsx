@@ -23,6 +23,13 @@ import ResetPasswordPage from './components/ResetPasswordPage';
 import LandingPage from './components/LandingPage';
 import Footer from './components/Footer';
 import PageRouter from './components/PageRouter';
+import PrivacyPolicyPage from './components/pages/PrivacyPolicyPage';
+import RefundPolicyPage from './components/pages/RefundPolicyPage';
+import ShippingPolicyPage from './components/pages/ShippingPolicyPage';
+import TermsConditionsPage from './components/pages/TermsConditionsPage';
+import AboutPage from './components/pages/AboutPage';
+import ContactPage from './components/pages/ContactPage';
+import ProductsPage from './components/pages/ProductsPage';
 
 import { Briefcase, BarChart3, LogOut } from 'lucide-react';
 import LogoTMS from './components/public/logoTMS.svg';
@@ -1617,49 +1624,49 @@ const AppContent: React.FC = () => {
       <Route path="/privacy-policy" element={
         <div className="min-h-screen bg-slate-100 flex flex-col">
           <main className="flex-1">
-            <PageRouter />
+            <PrivacyPolicyPage />
           </main>
         </div>
       } />
       <Route path="/cancellation-refunds" element={
         <div className="min-h-screen bg-slate-100 flex flex-col">
           <main className="flex-1">
-            <PageRouter />
+            <RefundPolicyPage />
           </main>
         </div>
       } />
       <Route path="/shipping" element={
         <div className="min-h-screen bg-slate-100 flex flex-col">
           <main className="flex-1">
-            <PageRouter />
+            <ShippingPolicyPage />
           </main>
         </div>
       } />
       <Route path="/terms-conditions" element={
         <div className="min-h-screen bg-slate-100 flex flex-col">
           <main className="flex-1">
-            <PageRouter />
+            <TermsConditionsPage />
           </main>
         </div>
       } />
       <Route path="/about" element={
         <div className="min-h-screen bg-slate-100 flex flex-col">
           <main className="flex-1">
-            <PageRouter />
+            <AboutPage />
           </main>
         </div>
       } />
       <Route path="/contact" element={
         <div className="min-h-screen bg-slate-100 flex flex-col">
           <main className="flex-1">
-            <PageRouter />
+            <ContactPage />
           </main>
         </div>
       } />
       <Route path="/products" element={
         <div className="min-h-screen bg-slate-100 flex flex-col">
           <main className="flex-1">
-            <PageRouter />
+            <ProductsPage />
           </main>
         </div>
       } />

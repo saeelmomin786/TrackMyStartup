@@ -75,4 +75,7 @@ SELECT
 FROM fundraising_details fd
 LEFT JOIN startups s ON fd.startup_id = s.id
 WHERE fd.id = 'e8fb5e5a-4e9c-4cf6-a85b-5b8cbe4ba6b0'; -- Your Sid startup's fundraising ID
+<<<<<<< HEAD
 
+=======
+>>>>>>> aba79bbb99c116b96581e88ab62621652ed6a6b7

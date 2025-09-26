@@ -36,4 +36,7 @@ SELECT column_name, data_type, is_nullable, column_default
 FROM information_schema.columns 
 WHERE table_name = 'recognition_records' 
 ORDER BY ordinal_position;
+<<<<<<< HEAD
 
+=======
+>>>>>>> aba79bbb99c116b96581e88ab62621652ed6a6b7

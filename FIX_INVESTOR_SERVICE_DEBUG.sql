@@ -88,4 +88,7 @@ SELECT
     COUNT(id) as non_null_id,
     COUNT(*) - COUNT(id) as null_id
 FROM startups;
+<<<<<<< HEAD
 
+=======
+>>>>>>> aba79bbb99c116b96581e88ab62621652ed6a6b7

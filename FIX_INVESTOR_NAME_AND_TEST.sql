@@ -75,4 +75,7 @@ SELECT
 FROM investment_offers io
 WHERE io.investor_email = 'olympiad_info1@startupnationindia.com'
 ORDER BY io.created_at DESC;
+<<<<<<< HEAD
 
+=======
+>>>>>>> aba79bbb99c116b96581e88ab62621652ed6a6b7

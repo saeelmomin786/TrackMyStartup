@@ -56,4 +56,7 @@ WHERE id = 37;
 SELECT '=== TESTING ACCEPT FUNCTION (THIS WILL SHOW THE ERROR) ===' as info;
 -- Note: This might fail, but it will show us the exact error message
 SELECT accept_investment_offer_with_fee(37, 'United States', 255000.00) as test_result;
+<<<<<<< HEAD
 
+=======
+>>>>>>> aba79bbb99c116b96581e88ab62621652ed6a6b7

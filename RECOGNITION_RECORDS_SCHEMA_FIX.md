@@ -86,4 +86,7 @@ Once you run the SQL script, the recognition form should:
 3. Save the recognition record to the database
 4. Display the new record in the recognition records list
 5. Trigger the auto-calculation features for equity distribution
+<<<<<<< HEAD
 
+=======
+>>>>>>> aba79bbb99c116b96581e88ab62621652ed6a6b7

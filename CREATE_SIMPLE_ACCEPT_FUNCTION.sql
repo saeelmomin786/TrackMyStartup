@@ -50,4 +50,7 @@ SELECT
     contact_details_revealed_at
 FROM investment_offers
 WHERE id = 37;
+<<<<<<< HEAD
 
+=======
+>>>>>>> aba79bbb99c116b96581e88ab62621652ed6a6b7

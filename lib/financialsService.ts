@@ -344,6 +344,36 @@ class FinancialsService {
   }
 
   private async calculateFinancialSummaryManually(startupId: number): Promise<FinancialSummary> {
+    // Use the database function for accurate calculations
+    try {
+      const { data, error } = await supabase.rpc('get_financial_data', {
+        startup_id_param: startupId
+      });
+      
+      if (error) {
+        console.error('Error getting financial data from database function:', error);
+        // Fallback to manual calculation
+        return await this.calculateFinancialSummaryFallback(startupId);
+      }
+      
+      const result = data?.[0];
+      if (result) {
+        return {
+          total_funding: result.total_funding || 0,
+          total_revenue: result.total_revenue || 0,
+          total_expenses: result.total_expenses || 0,
+          available_funds: result.available_funds || 0
+        };
+      }
+    } catch (error) {
+      console.error('Error calling get_financial_data:', error);
+    }
+    
+    // Fallback to manual calculation
+    return await this.calculateFinancialSummaryFallback(startupId);
+  }
+
+  private async calculateFinancialSummaryFallback(startupId: number): Promise<FinancialSummary> {
     const records = await this.getFinancialRecords(startupId);
     
     let total_revenue = 0;
@@ -365,7 +395,7 @@ class FinancialsService {
       .single();
     
     const total_funding = startupData?.total_funding || 0;
-    const available_funds = total_funding - total_expenses;
+    const available_funds = total_revenue - total_expenses; // Changed: available funds = revenue - expenses, not funding - expenses
     
     return {
       total_funding,

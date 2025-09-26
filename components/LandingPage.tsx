@@ -172,11 +172,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
               <div className="text-center">
                 <h3 className="text-xl font-semibold text-slate-900 mb-2">Startups</h3>
                 <div className="mb-4">
-                  <span className="text-3xl font-bold text-brand-primary">€15</span>
+                  <span className="text-3xl font-bold text-brand-primary">₹1,200</span>
                   <span className="text-slate-600">/month</span>
                 </div>
                 <div className="text-sm text-slate-500 mb-6">
-                  or <span className="font-semibold text-slate-700">€120/year</span> (save 33%)
+                  or <span className="font-semibold text-slate-700">₹9,600/year</span> (save 33%)
                 </div>
                 <ul className="text-left space-y-2 text-slate-600 mb-6">
                   <li className="flex items-center">
@@ -216,14 +216,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
               <div className="text-center">
                 <h3 className="text-xl font-semibold text-slate-900 mb-2">Investors</h3>
                 <div className="mb-4">
-                  <span className="text-3xl font-bold text-brand-primary">€15</span>
+                  <span className="text-3xl font-bold text-brand-primary">₹1,200</span>
                   <span className="text-slate-600">/month</span>
                 </div>
                 <div className="text-sm text-slate-500 mb-2">
                   per startup
                 </div>
                 <div className="text-sm text-slate-500 mb-6">
-                  or <span className="font-semibold text-slate-700">€120/year</span> per startup (save 33%)
+                  or <span className="font-semibold text-slate-700">₹9,600/year</span> per startup (save 33%)
                 </div>
                 <ul className="text-left space-y-2 text-slate-600 mb-6">
                   <li className="flex items-center">
@@ -263,7 +263,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
               <div className="text-center">
                 <h3 className="text-xl font-semibold text-slate-900 mb-2">Facilitation Center</h3>
                 <div className="mb-4">
-                  <span className="text-3xl font-bold text-brand-primary">€20</span>
+                  <span className="text-3xl font-bold text-brand-primary">₹1,600</span>
                   <span className="text-slate-600">/month</span>
                 </div>
                 <div className="text-sm text-slate-500 mb-6">

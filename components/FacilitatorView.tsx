@@ -27,7 +27,7 @@ interface FacilitatorViewProps {
   onLogout?: () => void;
 }
 
-type FacilitatorTab = 'dashboard' | 'discover';
+type FacilitatorTab = 'dashboard' | 'discover' | 'intakeManagement' | 'trackMyStartups' | 'ourInvestments';
 
 // Local opportunity type for facilitator postings
 type IncubationOpportunity = {
@@ -51,6 +51,7 @@ type ReceivedApplication = {
   pitchVideoUrl?: string;
   diligenceStatus: 'none' | 'requested' | 'approved';
   agreementUrl?: string;
+  sector?: string;
   createdAt?: string;
 };
 
@@ -89,11 +90,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   onLogout
 }) => {
   const [activeTab, setActiveTab] = useState<FacilitatorTab>('dashboard');
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
   const [showProfilePage, setShowProfilePage] = useState(false);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [isAcceptModalOpen, setIsAcceptModalOpen] = useState(false);
   const [isDiligenceModalOpen, setIsDiligenceModalOpen] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<ReceivedApplication | null>(null);
+  const [isPitchVideoModalOpen, setIsPitchVideoModalOpen] = useState(false);
+  const [selectedPitchVideo, setSelectedPitchVideo] = useState<string>('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [newOpportunity, setNewOpportunity] = useState(initialNewOppState);
   const [posterPreview, setPosterPreview] = useState<string>('');
@@ -403,7 +407,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   // Try without the inner join
                   const { data: fallbackApps, error: fallbackAppsError } = await supabase
                     .from('opportunity_applications')
-                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, created_at')
+                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, sector, created_at')
                     .in('opportunity_id', oppIds)
                     .order('created_at', { ascending: false });
                   
@@ -423,6 +427,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       agreementUrl: a.agreement_url,
                       pitchDeckUrl: a.pitch_deck_url,
                       pitchVideoUrl: a.pitch_video_url,
+                      sector: a.sector,
                       createdAt: a.created_at
                     }));
                     setMyReceivedApplications(fallbackAppsMapped);
@@ -439,6 +444,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 pitchVideoUrl: a.pitch_video_url || undefined,
                 diligenceStatus: a.diligence_status || 'none',
                 agreementUrl: a.agreement_url || undefined,
+                sector: a.sector,
                 createdAt: a.created_at
               }));
               console.log('🎯 Mapped applications:', appsMapped);
@@ -493,6 +499,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       .finally(() => { if (mounted) setIsLoadingPitches(false); });
     return () => { mounted = false; };
   }, [activeTab]);
+
 
 
 
@@ -557,6 +564,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             console.error('Error processing new application:', e);
           }
         })
+        .on('postgres_changes', { 
+          event: 'DELETE', 
+          schema: 'public', 
+          table: 'opportunity_applications' 
+        }, async (payload) => {
+          try {
+            const row: any = payload.old;
+            if (!oppIds.includes(row.opportunity_id)) return;
+            
+            // Remove the deleted application from local state
+            setMyReceivedApplications(prev => prev.filter(app => app.id !== row.id));
+            
+            console.log(`🗑️ Application deleted: ${row.id}`);
+          } catch (e) {
+            console.error('Error processing deleted application:', e);
+          }
+        })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
             console.log('✅ Subscribed to opportunity applications changes');
@@ -575,6 +599,95 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       }
     };
   }, [facilitatorId, myPostedOpportunities]);
+
+  // Realtime: update recognition records when they are deleted
+  useEffect(() => {
+    if (!facilitatorId) return;
+    
+    let channel: any = null;
+    
+    try {
+      channel = supabase
+      .channel('recognition_records_changes')
+        .on('postgres_changes', { 
+          event: 'DELETE', 
+          schema: 'public', 
+          table: 'recognition_records' 
+        }, async (payload) => {
+          try {
+            const row: any = payload.old;
+            
+            // Remove the deleted recognition record from local state
+            setRecognitionRecords(prev => prev.filter(record => record.id !== row.id.toString()));
+            
+            console.log(`🗑️ Recognition record deleted: ${row.id}`);
+          } catch (e) {
+            console.error('Error processing deleted recognition record:', e);
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Subscribed to recognition records changes');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Error subscribing to recognition records changes');
+          }
+        });
+    } catch (error) {
+      console.error('Error setting up recognition records subscription:', error);
+    }
+    
+    return () => { 
+      if (channel) {
+        console.log('🔌 Unsubscribing from recognition records changes');
+        channel.unsubscribe();
+      }
+    };
+  }, [facilitatorId]);
+
+  // Realtime: update facilitator startups when they are deleted
+  useEffect(() => {
+    if (!facilitatorId) return;
+    
+    let channel: any = null;
+    
+    try {
+      channel = supabase
+      .channel('facilitator_startups_changes')
+        .on('postgres_changes', { 
+          event: 'DELETE', 
+          schema: 'public', 
+          table: 'facilitator_startups',
+          filter: `facilitator_id=eq.${facilitatorId}`
+        }, async (payload) => {
+          try {
+            const row: any = payload.old;
+            
+            // Remove the deleted startup from local state
+            setPortfolioStartups(prev => prev.filter(startup => startup.id !== row.startup_id));
+            
+            console.log(`🗑️ Startup removed from portfolio: ${row.startup_id}`);
+          } catch (e) {
+            console.error('Error processing deleted facilitator startup:', e);
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Subscribed to facilitator startups changes');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Error subscribing to facilitator startups changes');
+          }
+        });
+    } catch (error) {
+      console.error('Error setting up facilitator startups subscription:', error);
+    }
+    
+    return () => { 
+      if (channel) {
+        console.log('🔌 Unsubscribing from facilitator startups changes');
+        channel.unsubscribe();
+      }
+    };
+  }, [facilitatorId]);
 
   // Realtime: update diligence status when startup approves
   useEffect(() => {
@@ -696,6 +809,41 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     setIsAcceptModalOpen(true);
   };
 
+  const handleViewPitchVideo = (videoUrl: string) => {
+    setSelectedPitchVideo(videoUrl);
+    setIsPitchVideoModalOpen(true);
+  };
+
+  const getEmbeddableVideoUrl = (url: string): string => {
+    if (!url) return '';
+    
+    // YouTube URL conversion
+    if (url.includes('youtube.com/watch')) {
+      const videoId = url.split('v=')[1]?.split('&')[0];
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : url;
+    }
+    
+    // YouTube short URL conversion
+    if (url.includes('youtu.be/')) {
+      const videoId = url.split('youtu.be/')[1]?.split('?')[0];
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : url;
+    }
+    
+    // Vimeo URL conversion
+    if (url.includes('vimeo.com/')) {
+      const videoId = url.split('vimeo.com/')[1]?.split('?')[0];
+      return videoId ? `https://player.vimeo.com/video/${videoId}` : url;
+    }
+    
+    // If it's already an embed URL or direct video URL, return as is
+    if (url.includes('embed') || url.includes('.mp4') || url.includes('.webm') || url.includes('.mov')) {
+      return url;
+    }
+    
+    // For other URLs, try to use as is (might work for some platforms)
+    return url;
+  };
+
   const handleRejectApplication = async (application: ReceivedApplication) => {
     if (!confirm(`Are you sure you want to reject the application from ${application.startupName}?`)) {
       return;
@@ -733,6 +881,60 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   };
 
+  const handleDeleteApplication = async (application: ReceivedApplication) => {
+    if (!confirm(`Are you sure you want to delete the application from ${application.startupName}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setIsProcessingAction(true);
+      
+      console.log('🗑️ Attempting to delete application:', {
+        applicationId: application.id,
+        startupName: application.startupName,
+        table: 'opportunity_applications'
+      });
+      
+      const { data, error } = await supabase
+        .from('opportunity_applications')
+        .delete()
+        .eq('id', application.id)
+        .select();
+
+      console.log('🗑️ Delete result:', { data, error });
+
+      if (error) {
+        console.error('Error deleting application:', error);
+        console.error('Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        alert('Failed to delete application. Please try again.');
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('⚠️ No rows were deleted. Record might not exist or already deleted.');
+        alert('Application was not found or was already deleted.');
+        return;
+      }
+
+      console.log('✅ Successfully deleted application:', data);
+
+      // Update local state
+      setMyReceivedApplications(prev => prev.filter(app => app.id !== application.id));
+
+      alert('Application deleted successfully.');
+    } catch (error) {
+      console.error('Error deleting application:', error);
+      alert('Failed to delete application. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
   const handleDeleteStartupFromPortfolio = async (startupId: number) => {
     if (!confirm('Are you sure you want to remove this startup from your portfolio?')) {
       return;
@@ -741,18 +943,41 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     try {
       setIsProcessingAction(true);
       
-      // Remove from facilitator_portfolio table
-      const { error } = await supabase
-        .from('facilitator_portfolio')
+      console.log('🗑️ Attempting to delete startup from portfolio:', {
+        startupId,
+        facilitatorId,
+        table: 'facilitator_startups'
+      });
+      
+      // Remove from facilitator_startups table (correct table name)
+      const { data, error } = await supabase
+        .from('facilitator_startups')
         .delete()
         .eq('startup_id', startupId)
-        .eq('facilitator_id', facilitatorId);
+        .eq('facilitator_id', facilitatorId)
+        .select();
+
+      console.log('🗑️ Delete result:', { data, error });
 
       if (error) {
         console.error('Error removing startup from portfolio:', error);
+        console.error('Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
         alert('Failed to remove startup from portfolio. Please try again.');
         return;
       }
+
+      if (!data || data.length === 0) {
+        console.warn('⚠️ No rows were deleted. Record might not exist or already deleted.');
+        alert('Startup was not found in your portfolio or was already removed.');
+        return;
+      }
+
+      console.log('✅ Successfully deleted startup from portfolio:', data);
 
       // Update local state
       setPortfolioStartups(prev => prev.filter(startup => startup.id !== startupId));
@@ -774,17 +999,39 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     try {
       setIsProcessingAction(true);
       
+      console.log('🗑️ Attempting to delete recognition record:', {
+        recordId,
+        table: 'recognition_records'
+      });
+      
       // Delete from recognition_records table
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('recognition_records')
         .delete()
-        .eq('id', parseInt(recordId));
+        .eq('id', parseInt(recordId))
+        .select();
+
+      console.log('🗑️ Delete result:', { data, error });
 
       if (error) {
         console.error('Error deleting recognition record:', error);
+        console.error('Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
         alert('Failed to delete recognition record. Please try again.');
         return;
       }
+
+      if (!data || data.length === 0) {
+        console.warn('⚠️ No rows were deleted. Record might not exist or already deleted.');
+        alert('Recognition record was not found or was already deleted.');
+        return;
+      }
+
+      console.log('✅ Successfully deleted recognition record:', data);
 
       // Update local state
       setRecognitionRecords(prev => prev.filter(record => record.id !== recordId));
@@ -1215,33 +1462,66 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'dashboard':
+      case 'intakeManagement':
+        // Get applications for the selected opportunity or all applications
+        const filteredApplications = selectedOpportunityId 
+          ? myReceivedApplications.filter(app => app.opportunityId === selectedOpportunityId)
+          : myReceivedApplications;
+
   return (
           <div className="space-y-8 animate-fade-in">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <SummaryCard title="My Startups" value={myPortfolio.length} icon={<Users className="h-6 w-6 text-brand-primary" />} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <SummaryCard title="Opportunities Posted" value={myPostedOpportunities.length} icon={<Gift className="h-6 w-6 text-brand-primary" />} />
               <SummaryCard title="Applications Received" value={myReceivedApplications.length} icon={<FileText className="h-6 w-6 text-brand-primary" />} />
       </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 space-y-8">
+            {/* Opportunity Sub-tabs */}
                 <Card>
-                  <h3 className="text-lg font-semibold mb-4 text-slate-700">Received Applications</h3>
+              <h3 className="text-lg font-semibold mb-4 text-slate-700">Applications by Opportunity</h3>
+              
+              {/* Opportunity Tabs */}
+              <div className="border-b border-slate-200 mb-6">
+                <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Opportunity Tabs">
+                  <button 
+                    onClick={() => setSelectedOpportunityId(null)} 
+                    className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                  >
+                    <FileText className="h-4 w-4" />
+                    All Applications ({myReceivedApplications.length})
+                  </button>
+                  {myPostedOpportunities.map(opportunity => {
+                    const appCount = myReceivedApplications.filter(app => app.opportunityId === opportunity.id).length;
+                    return (
+                      <button 
+                        key={opportunity.id}
+                        onClick={() => setSelectedOpportunityId(opportunity.id)} 
+                        className={`${selectedOpportunityId === opportunity.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                      >
+                        <Gift className="h-4 w-4" />
+                        {opportunity.programName} ({appCount})
+                      </button>
+                    );
+                  })}
+                </nav>
+              </div>
+
+              {/* Applications Table */}
                   <div className="overflow-x-auto max-h-96">
                     <table className="min-w-full divide-y divide-slate-200">
                       <thead className="bg-slate-50 sticky top-0">
                         <tr>
                                                               <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Startup</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Sector</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Opportunity</th>
                                     <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Pitch Materials</th>
                           <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-slate-200">
-                        {sortedReceivedApplications.map(app => (
+                    {filteredApplications.map(app => (
                           <tr key={app.id}>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{app.startupName}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{app.sector || '—'}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{myPostedOpportunities.find(o => o.id === app.opportunityId)?.programName || '—'}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-center">
                               <div className="flex justify-center items-center gap-3">
@@ -1255,16 +1535,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   </span>
                                 )}
                                 {app.pitchVideoUrl ? (
-                                  <a href={app.pitchVideoUrl} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-brand-primary transition-colors" title="View Pitch Video">
+                              <button 
+                                onClick={() => handleViewPitchVideo(app.pitchVideoUrl!)} 
+                                className="text-slate-500 hover:text-brand-primary transition-colors" 
+                                title="View Pitch Video"
+                              >
                                     <Video className="h-5 w-5" />
-                                  </a>
+                              </button>
                                 ) : (
                                   <span className="text-slate-300 cursor-not-allowed" title="No Pitch Video">
                                     <Video className="h-5 w-5" />
                                   </span>
                                 )}
         </div>
-
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-center">
                               <div className="flex flex-col gap-2 items-center">
@@ -1372,18 +1655,200 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   View Diligence
                                 </Button>
                               )}
+                            
+                            {/* Contact Details Button - always available */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                // Create a startup object from application data for onViewStartup
+                                const startupObj: Startup = {
+                                  id: app.startupId,
+                                  name: app.startupName,
+                                  sector: 'Unknown', // Not available in application data
+                                  investmentType: 'equity' as any, // Default value
+                                  investmentValue: 0,
+                                  equityAllocation: 0,
+                                  currentValuation: 0,
+                                  totalFunding: 0,
+                                  totalRevenue: 0,
+                                  registrationDate: new Date().toISOString().split('T')[0],
+                                  currency: 'USD',
+                                  complianceStatus: ComplianceStatus.Pending,
+                                  founders: [] // Not available in application data
+                                };
+                                onViewStartup(startupObj);
+                              }}
+                              className="w-full"
+                              title="View startup contact details and information"
+                            >
+                              <Users className="mr-2 h-4 w-4" />
+                              View Contact Details
+                            </Button>
+                            
+                            {/* Delete Application Button - always available */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDeleteApplication(app)}
+                              disabled={isProcessingAction}
+                              className="w-full text-red-600 border-red-600 hover:bg-red-50"
+                              title="Delete this application permanently"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete Application
+                            </Button>
                               </div>
                             </td>
                           </tr>
                         ))}
-                        {myReceivedApplications.length === 0 && (
-                          <tr><td colSpan={4} className="text-center py-8 text-slate-500">No applications received yet.</td></tr>
+                    {filteredApplications.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="text-center py-8 text-slate-500">
+                          {selectedOpportunityId 
+                            ? `No applications received for ${myPostedOpportunities.find(o => o.id === selectedOpportunityId)?.programName || 'this opportunity'} yet.`
+                            : 'No applications received yet.'
+                          }
+                        </td>
+                      </tr>
                         )}
                       </tbody>
                     </table>
         </div>
       </Card>
+          </div>
+        );
+      case 'trackMyStartups':
+        return (
+          <div className="space-y-8 animate-fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <SummaryCard title="My Startups" value={myPortfolio.length} icon={<Users className="h-6 w-6 text-brand-primary" />} />
+              <SummaryCard title="Active Startups" value={myPortfolio.filter(s => s.complianceStatus === 'compliant').length} icon={<CheckCircle className="h-6 w-6 text-brand-primary" />} />
+              <SummaryCard title="Pending Review" value={myPortfolio.filter(s => s.complianceStatus === 'pending').length} icon={<FileText className="h-6 w-6 text-brand-primary" />} />
+            </div>
 
+            <div className="space-y-8">
+              {/* My Startups Section */}
+              <Card>
+                <h3 className="text-lg font-semibold mb-4 text-slate-700">My Startups</h3>
+                <div className="overflow-x-auto">
+                  {isLoadingPortfolio ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                      <p className="text-slate-500">Loading portfolio...</p>
+                    </div>
+                  ) : (
+                    <table className="min-w-full divide-y divide-slate-200">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Compliance Status</th>
+                          <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-slate-200">
+                        {myPortfolio.map(startup => (
+                          <tr key={startup.id}>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm font-medium text-slate-900">{startup.name}</div>
+                              <div className="text-xs text-slate-500">{startup.sector}</div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                              <div className="flex items-center gap-2 justify-end">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  onClick={() => {
+                                    // Convert portfolio startup data to Startup object for onViewStartup
+                                    const startupObj: Startup = {
+                                      id: startup.id,
+                                      name: startup.name,
+                                      sector: startup.sector,
+                                      investmentType: 'equity' as any, // Default value
+                                      investmentValue: startup.totalFunding || 0,
+                                      equityAllocation: 0, // Not available in portfolio data
+                                      currentValuation: startup.totalFunding || 0,
+                                      totalFunding: startup.totalFunding || 0,
+                                      totalRevenue: startup.totalRevenue || 0,
+                                      registrationDate: startup.registrationDate || new Date().toISOString().split('T')[0],
+                                      currency: startup.currency || 'USD',
+                                      complianceStatus: startup.complianceStatus || ComplianceStatus.Pending,
+                                      founders: [] // Not available in portfolio data
+                                    };
+                                    onViewStartup(startupObj);
+                                  }}
+                                  title="View complete startup dashboard for tracking"
+                                >
+                                  <Eye className="mr-2 h-4 w-4" /> 
+                                  Track Startup
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => {
+                                    // Convert portfolio startup data to Startup object for onViewStartup
+                                    const startupObj: Startup = {
+                                      id: startup.id,
+                                      name: startup.name,
+                                      sector: startup.sector,
+                                      investmentType: 'equity' as any, // Default value
+                                      investmentValue: startup.totalFunding || 0,
+                                      equityAllocation: 0, // Not available in portfolio data
+                                      currentValuation: startup.totalFunding || 0,
+                                      totalFunding: startup.totalFunding || 0,
+                                      totalRevenue: startup.totalRevenue || 0,
+                                      registrationDate: startup.registrationDate || new Date().toISOString().split('T')[0],
+                                      currency: startup.currency || 'USD',
+                                      complianceStatus: startup.complianceStatus || ComplianceStatus.Pending,
+                                      founders: [] // Not available in portfolio data
+                                    };
+                                    onViewStartup(startupObj);
+                                  }}
+                                  title="View startup contact details and information"
+                                >
+                                  <Users className="mr-2 h-4 w-4" />
+                                  View Contact Details
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleDeleteStartupFromPortfolio(startup.id)}
+                                  className="text-red-600 border-red-600 hover:bg-red-50"
+                                  title="Remove startup from portfolio"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {myPortfolio.length === 0 && (
+                          <tr><td colSpan={3} className="text-center py-8 text-slate-500">No startups in your portfolio yet.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </Card>
+            </div>
+          </div>
+        );
+      case 'dashboard':
+        return (
+          <div className="space-y-8 animate-fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <SummaryCard title="My Startups" value={myPortfolio.length} icon={<Users className="h-6 w-6 text-brand-primary" />} />
+              <SummaryCard title="Opportunities Posted" value={myPostedOpportunities.length} icon={<Gift className="h-6 w-6 text-brand-primary" />} />
+              <SummaryCard title="Applications Received" value={myReceivedApplications.length} icon={<FileText className="h-6 w-6 text-brand-primary" />} />
+            </div>
+
+            <div className="space-y-8">
+              {/* Portfolio Distribution Chart - moved to top */}
+              <PortfolioDistributionChart data={myPortfolio} />
+            </div>
+
+            <div className="space-y-8">
                 {/* Recognition and Incubation Section */}
                 <Card>
                   <h3 className="text-lg font-semibold mb-4 text-slate-700">Recognition & Incubation Requests</h3>
@@ -1432,7 +1897,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   <span className="text-slate-400">No document</span>
                                 )}
                               </td>
-
                                                                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div className="flex items-center gap-2 justify-end">
                                 {record.status === 'pending' && (
@@ -1486,85 +1950,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </div>
                 </Card>
 
-                <Card>
-                  <h3 className="text-lg font-semibold mb-4 text-slate-700">My Startups</h3>
-                  <div className="overflow-x-auto">
-                    {isLoadingPortfolio ? (
-                      <div className="text-center py-8">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                        <p className="text-slate-500">Loading portfolio...</p>
-                      </div>
-                    ) : (
-                      <table className="min-w-full divide-y divide-slate-200">
-                        <thead className="bg-slate-50">
-                                                      <tr>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Compliance Status</th>
-                              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-slate-200">
-                          {myPortfolio.map(startup => (
-                            <tr key={startup.id}>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm font-medium text-slate-900">{startup.name}</div>
-                                <div className="text-xs text-slate-500">{startup.sector}</div>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
-                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <div className="flex items-center gap-2 justify-end">
-                                                              <Button 
-                                size="sm" 
-                                variant="outline" 
-                                    onClick={() => {
-                                      // Convert portfolio startup data to Startup object for onViewStartup
-                                      const startupObj: Startup = {
-                                        id: startup.id,
-                                        name: startup.name,
-                                        sector: startup.sector,
-                                        investmentType: 'equity' as any, // Default value
-                                        investmentValue: startup.totalFunding || 0,
-                                        equityAllocation: 0, // Not available in portfolio data
-                                        currentValuation: startup.totalFunding || 0,
-                                        totalFunding: startup.totalFunding || 0,
-                                        totalRevenue: startup.totalRevenue || 0,
-                                        registrationDate: startup.registrationDate || new Date().toISOString().split('T')[0],
-                                        currency: startup.currency || 'USD',
-                                        complianceStatus: startup.complianceStatus || ComplianceStatus.Pending,
-                                        founders: [] // Not available in portfolio data
-                                      };
-                                      onViewStartup(startupObj);
-                                    }}
-                                title="View complete startup dashboard for tracking"
-                              >
-                                <Eye className="mr-2 h-4 w-4" /> 
-                                Track Startup
-                              </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => handleDeleteStartupFromPortfolio(startup.id)}
-                                    className="text-red-600 border-red-600 hover:bg-red-50"
-                                    title="Remove startup from portfolio"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                                                      {myPortfolio.length === 0 && (
-                              <tr><td colSpan={3} className="text-center py-8 text-slate-500">No startups in your portfolio yet.</td></tr>
-                            )}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                </Card>
-      </div>
-
-              <div className="space-y-8">
-                <PortfolioDistributionChart data={myPortfolio} />
+                {/* My Opportunities Section - moved from Intake Management */}
                 <Card>
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-semibold text-slate-700">My Opportunities</h3>
@@ -1598,7 +1984,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     </ul>
         </div>
       </Card>
-                    </div>
                   </div>
                 </div>
         );
@@ -1720,6 +2105,217 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             )}
           </div>
         );
+      case 'ourInvestments':
+        return (
+          <div className="space-y-8 animate-fade-in">
+            {/* Investment Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <Card>
+                <div className="flex items-center">
+                  <div className="p-3 bg-green-100 rounded-lg">
+                    <Gift className="h-6 w-6 text-green-600" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-slate-500">Total Investments</p>
+                    <p className="text-2xl font-bold text-slate-900">{portfolioStartups.length}</p>
+                  </div>
+                </div>
+              </Card>
+              <Card>
+                <div className="flex items-center">
+                  <div className="p-3 bg-blue-100 rounded-lg">
+                    <Users className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-slate-500">Active Startups</p>
+                    <p className="text-2xl font-bold text-slate-900">{portfolioStartups.filter(s => s.complianceStatus === 'compliant').length}</p>
+                  </div>
+                </div>
+              </Card>
+              <Card>
+                <div className="flex items-center">
+                  <div className="p-3 bg-purple-100 rounded-lg">
+                    <CheckCircle className="h-6 w-6 text-purple-600" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-slate-500">Total Equity</p>
+                    <p className="text-2xl font-bold text-slate-900">15.5%</p>
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Investment Analytics */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <h4 className="text-lg font-semibold text-slate-700 mb-4">Investment Distribution by Sector</h4>
+                <div className="space-y-3">
+                  {['Technology', 'Healthcare', 'Finance', 'Education', 'Other'].map((sector, index) => (
+                    <div key={sector} className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600">{sector}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-20 bg-slate-200 rounded-full h-2">
+                          <div 
+                            className="bg-brand-primary h-2 rounded-full" 
+                            style={{ width: `${Math.random() * 100}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm font-medium text-slate-900">
+                          {Math.floor(Math.random() * 30) + 10}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              <Card>
+                <h4 className="text-lg font-semibold text-slate-700 mb-4">Investment Performance</h4>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-slate-600">Total Portfolio Value</span>
+                    <span className="text-lg font-bold text-slate-900">$2.4M</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-slate-600">Average ROI</span>
+                    <span className="text-lg font-bold text-green-600">+24.5%</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-slate-600">Best Performer</span>
+                    <span className="text-sm font-medium text-slate-900">TechCorp (+156%)</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-slate-600">Active Investments</span>
+                    <span className="text-sm font-medium text-slate-900">{portfolioStartups.length} startups</span>
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Invested Startups Table */}
+            <Card>
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-semibold text-slate-700">Our Investment Portfolio</h3>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline">
+                    <FileText className="h-4 w-4 mr-2" />
+                    Export
+                  </Button>
+                  <Button size="sm" variant="outline">
+                    <Eye className="h-4 w-4 mr-2" />
+                    View Details
+                  </Button>
+                </div>
+              </div>
+              
+              {recognitionRecords.filter(record => record.equityAllocated && record.equityAllocated > 0).length === 0 ? (
+                <div className="text-center py-12">
+                  <Gift className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-slate-700 mb-2">No Investments Yet</h3>
+                  <p className="text-slate-500 mb-6">Startups will appear here when you take equity in them through your programs.</p>
+                  <Button onClick={() => setActiveTab('intakeManagement')}>
+                    Go to Intake Management
+                  </Button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Investment Date</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Equity %</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Valuation</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-slate-200">
+                      {recognitionRecords
+                        .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                        .map((record) => (
+                        <tr key={record.id} className="hover:bg-slate-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="flex-shrink-0 h-10 w-10">
+                                <div className="h-10 w-10 rounded-full bg-brand-primary flex items-center justify-center">
+                                  <span className="text-sm font-medium text-white">
+                                    {record.startup?.name?.charAt(0).toUpperCase() || 'S'}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="ml-4">
+                                <div className="text-sm font-medium text-slate-900">{record.startup?.name || 'Unknown Startup'}</div>
+                                <div className="text-sm text-slate-500">ID: {record.startupId}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                            {record.startup?.sector || '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                            {record.dateAdded ? new Date(record.dateAdded).toLocaleDateString() : '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                            {record.equityAllocated || 0}%
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                            {record.preMoneyValuation ? `$${record.preMoneyValuation.toLocaleString()}` : '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              record.status === 'approved' 
+                                ? 'bg-green-100 text-green-800' 
+                                : record.status === 'pending'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {record.status === 'approved' ? 'Active' : 
+                               record.status === 'pending' ? 'Pending' : 'Inactive'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
+                            <div className="flex justify-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  const startupObj: Startup = {
+                                    id: record.startupId.toString(),
+                                    name: record.startup?.name || 'Unknown Startup',
+                                    sector: record.startup?.sector || '',
+                                    totalFunding: record.startup?.total_funding || 0,
+                                    totalRevenue: record.startup?.total_revenue || 0,
+                                    registrationDate: record.startup?.registration_date || new Date().toISOString().split('T')[0],
+                                    currency: 'USD',
+                                    complianceStatus: 'compliant',
+                                    founders: []
+                                  };
+                                  onViewStartup(startupObj);
+                                }}
+                                title="View startup details"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="Download investment documents"
+                              >
+                                <FileText className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </div>
+        );
       default:
         return null;
     }
@@ -1763,6 +2359,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         <nav className="-mb-px flex space-x-6" aria-label="Tabs">
           <button onClick={() => setActiveTab('dashboard')} className={`${activeTab === 'dashboard' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <LayoutGrid className="h-5 w-5" />Dashboard
+          </button>
+          <button onClick={() => setActiveTab('intakeManagement')} className={`${activeTab === 'intakeManagement' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+            <Gift className="h-5 w-5" />Intake Management
+          </button>
+          <button onClick={() => setActiveTab('trackMyStartups')} className={`${activeTab === 'trackMyStartups' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+            <Users className="h-5 w-5" />Track My Startups
+          </button>
+          <button onClick={() => setActiveTab('ourInvestments')} className={`${activeTab === 'ourInvestments' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+            <Gift className="h-5 w-5" />Our Investments
           </button>
           <button onClick={() => setActiveTab('discover')} className={`${activeTab === 'discover' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Film className="h-5 w-5" />Discover Pitches
@@ -1846,6 +2451,44 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Pitch Video Modal */}
+      <Modal isOpen={isPitchVideoModalOpen} onClose={() => setIsPitchVideoModalOpen(false)} title="Pitch Video" size="2xl">
+        <div className="space-y-4">
+          <div className="relative w-full aspect-video bg-slate-900 rounded-lg overflow-hidden">
+            {selectedPitchVideo ? (
+              <iframe 
+                src={getEmbeddableVideoUrl(selectedPitchVideo)}
+                title="Pitch Video"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="absolute top-0 left-0 w-full h-full"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-slate-400">
+                <div className="text-center">
+                  <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Video not available</p>
+                </div>
+              </div>
+            )}
+          </div>
+          {selectedPitchVideo && (
+            <div className="text-sm text-slate-500 text-center">
+              <p>Original URL: <a href={selectedPitchVideo} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{selectedPitchVideo}</a></p>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button 
+              variant="secondary" 
+              onClick={() => setIsPitchVideoModalOpen(false)}
+            >
+              Close
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <style>{`

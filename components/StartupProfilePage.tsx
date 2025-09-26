@@ -274,6 +274,7 @@ const StartupProfilePage: React.FC<StartupProfilePageProps> = ({
           <SubscriptionSummaryCards
             userId={refreshedProfile.id}
             userType="Startup"
+            userCountry={refreshedProfile.country}
           />
         </div>
       )}

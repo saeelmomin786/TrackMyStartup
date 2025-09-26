@@ -396,7 +396,35 @@ export function getCountryProfessionalTitles(countryCode: string): { caTitle: st
     'AM': { caTitle: 'Tax Advisor', csTitle: 'Management' }, // Armenia
     'BT': { caTitle: 'Chartered Accountant', csTitle: 'Company Secretary' }, // Bhutan
     'LK': { caTitle: 'Chartered Accountant', csTitle: 'Company Secretary' }, // Sri Lanka
-    'RU': { caTitle: 'Tax Advisor', csTitle: 'Management' } // Russia
+    'RU': { caTitle: 'Tax Advisor', csTitle: 'Management' }, // Russia
+    // Additional countries
+    'CA': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Canada
+    'AU': { caTitle: 'CPA', csTitle: 'Company Secretary' }, // Australia
+    'FR': { caTitle: 'Expert-Comptable', csTitle: 'Secrétaire Général' }, // France
+    'JP': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Japan
+    'CN': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // China
+    'MX': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Mexico
+    'ZA': { caTitle: 'Chartered Accountant', csTitle: 'Company Secretary' }, // South Africa
+    'KE': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Kenya
+    'EG': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Egypt
+    'AE': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // UAE
+    'SA': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Saudi Arabia
+    'IT': { caTitle: 'Dottore Commercialista', csTitle: 'Segretario Generale' }, // Italy
+    'ES': { caTitle: 'CPA', csTitle: 'Secretario General' }, // Spain
+    'PT': { caTitle: 'CPA', csTitle: 'Secretário Geral' }, // Portugal
+    'BE': { caTitle: 'Expert-Comptable', csTitle: 'Secrétaire Général' }, // Belgium
+    'CH': { caTitle: 'Expert-Comptable', csTitle: 'Secrétaire Général' }, // Switzerland
+    'SE': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Sweden
+    'NO': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Norway
+    'DK': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Denmark
+    'IE': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Ireland
+    'NZ': { caTitle: 'CPA', csTitle: 'Company Secretary' }, // New Zealand
+    'KR': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // South Korea
+    'TH': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Thailand
+    'MY': { caTitle: 'CPA', csTitle: 'Company Secretary' }, // Malaysia
+    'ID': { caTitle: 'CPA', csTitle: 'Corporate Secretary' }, // Indonesia
+    'BD': { caTitle: 'Chartered Accountant', csTitle: 'Company Secretary' }, // Bangladesh
+    'NP': { caTitle: 'Chartered Accountant', csTitle: 'Company Secretary' } // Nepal
   };
   
   return professionalTitles[countryCode] || { caTitle: 'CA', csTitle: 'CS' };

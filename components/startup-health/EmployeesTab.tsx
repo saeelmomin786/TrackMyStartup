@@ -112,25 +112,71 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             setError(null);
             
             // Load all data in parallel
-            const [monthlyData, deptData, employeesData, summaryData, profileData, pps, shares, esopShares] = await Promise.all([
+            const [monthlyData, deptData, employeesData, summaryData, profileData, shares, esopShares] = await Promise.all([
                 generateMonthlyExpenseData(startup),
                 generateDepartmentData(startup),
                 generateMockEmployees(startup),
                 employeesService.getEmployeeSummary(startup.id),
                 profileService.getStartupProfile(startup.id),
-                capTableService.getPricePerShare(startup.id),
                 capTableService.getTotalShares(startup.id),
                 capTableService.getEsopReservedShares(startup.id)
             ]);
+            
+            // Calculate price per share dynamically (same logic as CapTableTab)
+            let calculatedPricePerShare = 0;
+            if (shares > 0) {
+                let latestValuation = startup.currentValuation || 0;
+                // Try to get latest valuation from investment records
+                try {
+                    const investmentRecords = await capTableService.getInvestmentRecords(startup.id);
+                    if (investmentRecords && investmentRecords.length > 0) {
+                        const latest = [...investmentRecords]
+                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
+                        if (latest?.postMoneyValuation && latest.postMoneyValuation > 0) {
+                            latestValuation = latest.postMoneyValuation;
+                        }
+                    }
+                } catch (err) {
+                    console.log('Could not load investment records for price calculation:', err);
+                }
+                calculatedPricePerShare = latestValuation / shares;
+            }
+            
+            // Debug: Log the loaded values
+            console.log('🔍 Loaded ESOP data:', {
+                startupId: startup.id,
+                calculatedPricePerShare,
+                totalShares: shares,
+                esopReservedShares: esopShares,
+                summaryData: summaryData
+            });
+            
+            // Check if startup_shares record exists, if not, create it with default ESOP
+            if (esopShares === 0 && shares === 0 && calculatedPricePerShare === 0) {
+                console.log('⚠️ No startup_shares record found, creating default record...');
+                try {
+                    const defaultEsopShares = 10000;
+                    await capTableService.upsertEsopReservedShares(startup.id, defaultEsopShares);
+                    console.log('✅ Created default startup_shares record with ESOP:', defaultEsopShares);
+                    
+                    // Reload the ESOP data
+                    const newEsopShares = await capTableService.getEsopReservedShares(startup.id);
+                    setEsopReservedShares(newEsopShares);
+                    setEsopReservedDraft(String(newEsopShares));
+                } catch (err) {
+                    console.error('❌ Failed to create default startup_shares record:', err);
+                }
+            } else {
+                setEsopReservedShares(esopShares || 0);
+                setEsopReservedDraft(String(esopShares || 0));
+            }
             
             setMonthlyExpenseData(monthlyData);
             setDepartmentData(deptData);
             setMockEmployees(employeesData);
             setSummary(summaryData);
-            setPricePerShare(pps || 0);
+            setPricePerShare(calculatedPricePerShare);
             setTotalShares(shares || 0);
-            setEsopReservedShares(esopShares || 0);
-            setEsopReservedDraft(String(esopShares || 0));
             
             // Populate entities from profile data
             const entityList = ['Parent Company'];
@@ -151,11 +197,21 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     };
 
     const handleAddEmployee = async (e: React.FormEvent) => {
+        console.log('🔍 FORM SUBMISSION TRIGGERED!');
         e.preventDefault();
         const formData = new FormData(e.target as HTMLFormElement);
         
         try {
             console.log('🔍 Starting employee creation process...');
+            console.log('🔍 Form data:', {
+                name: formData.get('name'),
+                joiningDate: formData.get('joiningDate'),
+                entity: formData.get('entity'),
+                department: formData.get('department'),
+                salary: formData.get('salary'),
+                esopAllocation: formData.get('esopAllocation'),
+                esopPerAllocation: formData.get('esopPerAllocation')
+            });
             
             // Use controlled state for ESOP fields to ensure calculated values are saved
             const esopAllocationValue = esopAllocationDraft !== '' 
@@ -169,26 +225,51 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             const currentAllocatedTotal = summary?.total_esop_allocated || mockEmployees.reduce((acc, emp) => acc + emp.esopAllocation, 0);
             const prospectiveAllocatedTotal = currentAllocatedTotal + (esopAllocationValue || 0);
             
+            console.log('🔍 ESOP Validation:', {
+                currentAllocatedTotal,
+                esopAllocationValue,
+                prospectiveAllocatedTotal,
+                pricePerShare,
+                reservedEsopValue,
+                wouldExceed: pricePerShare > 0 && reservedEsopValue > 0 && prospectiveAllocatedTotal > reservedEsopValue
+            });
+            
             // Check if this would exceed reserved amount
             if (pricePerShare > 0 && reservedEsopValue > 0 && prospectiveAllocatedTotal > reservedEsopValue) {
-                setError(`Total ESOP allocation would exceed the reserved ESOPs value. Current: ${formatCurrencyUtil(currentAllocatedTotal, startupCurrency)}, Adding: ${formatCurrencyUtil(esopAllocationValue || 0, startupCurrency)}, Reserved: ${formatCurrencyUtil(reservedEsopValue, startupCurrency)}. Reduce the allocation or increase reserved ESOPs.`);
+                const errorMsg = `Total ESOP allocation would exceed the reserved ESOPs value. Current: ${formatCurrencyUtil(currentAllocatedTotal, startupCurrency)}, Adding: ${formatCurrencyUtil(esopAllocationValue || 0, startupCurrency)}, Reserved: ${formatCurrencyUtil(reservedEsopValue, startupCurrency)}. Reduce the allocation or increase reserved ESOPs.`;
+                console.log('❌ ESOP validation failed:', errorMsg);
+                setError(errorMsg);
                 return;
             }
             
             // Check if no ESOP shares are reserved but trying to allocate
             if (esopReservedShares === 0 && (esopAllocationValue || 0) > 0) {
+                console.log('❌ ESOP shares validation failed: No reserved shares but trying to allocate');
                 setError('Cannot allocate ESOPs when no shares are reserved for ESOP. Please set ESOP reserved shares first.');
                 return;
             }
 
             // Validation: Employee joining date must not be before company registration date
             const joiningDate = formData.get('joiningDate') as string;
+            console.log('🔍 Date validation:', {
+                joiningDate,
+                startupRegistrationDate: startup.registrationDate
+            });
+            
             if (joiningDate && startup.registrationDate) {
                 const joiningDateObj = new Date(joiningDate);
                 const registrationDateObj = new Date(startup.registrationDate);
                 
+                console.log('🔍 Date comparison:', {
+                    joiningDateObj: joiningDateObj.toISOString(),
+                    registrationDateObj: registrationDateObj.toISOString(),
+                    isBefore: joiningDateObj < registrationDateObj
+                });
+                
                 if (joiningDateObj < registrationDateObj) {
-                    setError(`Employee joining date cannot be before the company registration date (${startup.registrationDate}). Please select a date on or after the registration date.`);
+                    const errorMsg = `Employee joining date cannot be before the company registration date (${startup.registrationDate}). Please select a date on or after the registration date.`;
+                    console.log('❌ Date validation failed:', errorMsg);
+                    setError(errorMsg);
                     return;
                 }
             }
@@ -211,7 +292,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             // Create the employee first
             console.log('🔄 Creating employee in database...');
             const created = await employeesService.addEmployee(startup.id, employeeData);
-            console.log('✅ Employee created:', created);
+            console.log('✅ Employee created successfully:', created);
 
             // If a contract file was provided, upload and update the record
             const contractInput = (e.target as HTMLFormElement).elements.namedItem('contract') as HTMLInputElement | null;
@@ -301,13 +382,14 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     
     // Debug ESOP calculations
     console.log('🔍 ESOP Calculation Debug:', {
-        esopReservedShares,
-        pricePerShare,
-        reservedEsopValue,
-        allocatedEsopValue,
-        esopPercentage,
-        isOverAllocated,
-        mockEmployees: mockEmployees.map(emp => ({ 
+        esopReservedShares: esopReservedShares,
+        pricePerShare: pricePerShare,
+        reservedEsopValue: reservedEsopValue,
+        allocatedEsopValue: allocatedEsopValue,
+        esopPercentage: esopPercentage,
+        isOverAllocated: isOverAllocated,
+        totalEmployees: mockEmployees.length,
+        employeeEsopAllocations: mockEmployees.map(emp => ({ 
             name: emp.name, 
             esopAllocation: emp.esopAllocation
         }))
@@ -331,6 +413,22 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             {error && (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
                     {error}
+                </div>
+            )}
+
+            {/* ESOP Data Missing Warning */}
+            {esopReservedShares === 0 && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 rounded-lg">
+                    <div className="flex items-center">
+                        <span className="text-amber-500 mr-2">⚠️</span>
+                        <div>
+                            <p className="font-medium">ESOP Configuration Missing</p>
+                            <p className="text-sm">
+                                No ESOP shares are reserved for this startup. 
+                                Please set ESOP reserved shares to enable employee stock option allocations.
+                            </p>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -540,7 +638,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             {/* Add Employee Form */}
             <Card>
                 <h3 className="text-lg font-semibold mb-4 text-slate-700">Add New Employee</h3>
-                <fieldset disabled={!canEdit}>
+                {console.log('🔍 Form canEdit status:', canEdit, 'userRole:', userRole, 'isViewOnly:', isViewOnly)}
+                <fieldset disabled={false}>
                     <form onSubmit={handleAddEmployee} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <Input label="Employee Name" name="name" required />
                         <Input 

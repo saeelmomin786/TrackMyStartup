@@ -106,6 +106,14 @@ class CapTableService {
   }
 
   async getStartupSharesData(startupId: number): Promise<{totalShares: number, esopReservedShares: number, pricePerShare: number}> {
+    // Try to recalculate shares first, but don't fail if the function doesn't exist
+    try {
+      await this.recalculateShares(startupId);
+    } catch (error) {
+      console.warn('⚠️ Could not recalculate shares (function may not exist):', error);
+      // Continue with loading data even if recalculation fails
+    }
+    
     const { data, error } = await supabase
       .from('startup_shares')
       .select('total_shares, esop_reserved_shares, price_per_share')
@@ -125,6 +133,42 @@ class CapTableService {
     
     console.log('🔍 Shares data loaded from startup_shares table:', result);
     return result;
+  }
+
+  // New method to recalculate shares using database function
+  async recalculateShares(startupId: number): Promise<void> {
+    try {
+      const { error } = await supabase.rpc('recalculate_all_startup_funding', {
+        startup_id_param: startupId
+      });
+      
+      if (error) {
+        console.error('Error recalculating shares:', error);
+        throw error; // Throw error so it can be caught by the calling function
+      }
+    } catch (error) {
+      console.error('Error calling recalculate_all_startup_funding:', error);
+      throw error; // Re-throw to be caught by the calling function
+    }
+  }
+
+  // New method to get accurate cap table data
+  async getCapTableData(startupId: number): Promise<any> {
+    try {
+      const { data, error } = await supabase.rpc('get_cap_table_data', {
+        startup_id_param: startupId
+      });
+      
+      if (error) {
+        console.error('Error getting cap table data:', error);
+        return null;
+      }
+      
+      return data?.[0] || null;
+    } catch (error) {
+      console.error('Error calling get_cap_table_data:', error);
+      return null;
+    }
   }
 
   async upsertTotalShares(startupId: number, totalShares: number, pricePerShare?: number): Promise<number> {
@@ -336,14 +380,27 @@ class CapTableService {
     }
 
     // Update startup's total funding
-    const { error: updateError } = await supabase
+    // First get current total funding
+    const { data: currentStartup, error: fetchError } = await supabase
       .from('startups')
-      .update({ total_funding: supabase.raw('total_funding + ?', [investmentData.amount]) })
-      .eq('id', startupId);
+      .select('total_funding')
+      .eq('id', startupId)
+      .single();
 
-    if (updateError) {
-      console.error('Error updating startup total funding:', updateError);
-      // Don't throw here as the investment record was already added successfully
+    if (fetchError) {
+      console.error('Error fetching current startup funding:', fetchError);
+    } else {
+      // Update with new total
+      const newTotalFunding = (currentStartup?.total_funding || 0) + investmentData.amount;
+      const { error: updateError } = await supabase
+        .from('startups')
+        .update({ total_funding: newTotalFunding })
+        .eq('id', startupId);
+
+      if (updateError) {
+        console.error('Error updating startup total funding:', updateError);
+        // Don't throw here as the investment record was already added successfully
+      }
     }
 
     return {
@@ -405,14 +462,28 @@ class CapTableService {
     // Update startup's total funding if amount changed
     if (investmentData.amount !== undefined && investmentData.amount !== currentRecord.amount) {
       const fundingDifference = investmentData.amount - currentRecord.amount;
-      const { error: updateError } = await supabase
+      
+      // Get current total funding
+      const { data: currentStartup, error: fetchError2 } = await supabase
         .from('startups')
-        .update({ total_funding: supabase.raw('total_funding + ?', [fundingDifference]) })
-        .eq('id', currentRecord.startup_id);
+        .select('total_funding')
+        .eq('id', currentRecord.startup_id)
+        .single();
 
-      if (updateError) {
-        console.error('Error updating startup total funding:', updateError);
-        // Don't throw here as the investment record was already updated successfully
+      if (fetchError2) {
+        console.error('Error fetching current startup funding:', fetchError2);
+      } else {
+        // Update with new total
+        const newTotalFunding = (currentStartup?.total_funding || 0) + fundingDifference;
+        const { error: updateError } = await supabase
+          .from('startups')
+          .update({ total_funding: newTotalFunding })
+          .eq('id', currentRecord.startup_id);
+
+        if (updateError) {
+          console.error('Error updating startup total funding:', updateError);
+          // Don't throw here as the investment record was already updated successfully
+        }
       }
     }
 
@@ -459,14 +530,27 @@ class CapTableService {
       }
 
       // Update startup's total funding by subtracting the deleted amount
-      const { error: updateError } = await supabase
+      // First get current total funding
+      const { data: currentStartup, error: fetchError3 } = await supabase
         .from('startups')
-        .update({ total_funding: supabase.raw('total_funding - ?', [recordToDelete.amount]) })
-        .eq('id', recordToDelete.startup_id);
+        .select('total_funding')
+        .eq('id', recordToDelete.startup_id)
+        .single();
 
-      if (updateError) {
-        console.error('Error updating startup total funding:', updateError);
-        // Don't throw here as the investment record was already deleted successfully
+      if (fetchError3) {
+        console.error('Error fetching current startup funding:', fetchError3);
+      } else {
+        // Update with new total
+        const newTotalFunding = Math.max(0, (currentStartup?.total_funding || 0) - recordToDelete.amount);
+        const { error: updateError } = await supabase
+          .from('startups')
+          .update({ total_funding: newTotalFunding })
+          .eq('id', recordToDelete.startup_id);
+
+        if (updateError) {
+          console.error('Error updating startup total funding:', updateError);
+          // Don't throw here as the investment record was already deleted successfully
+        }
       }
 
       console.log('✅ Investment record deleted successfully');

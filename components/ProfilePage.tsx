@@ -343,6 +343,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ currentUser, onBack, onProfil
           <SubscriptionSummaryCards
             userId={refreshedProfile.id}
             userType={refreshedProfile.role}
+            userCountry={refreshedProfile.country}
           />
         </div>
       )}

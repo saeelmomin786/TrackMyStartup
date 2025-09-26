@@ -710,7 +710,12 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
                     console.log('🔍 Sanitized data for form:', sanitizedData);
                     setFormData(sanitizedData);
                     // Notify parent so other tabs receive updated profile
+                    console.log('🔍 ProfileTab: Checking if onProfileUpdate callback exists...', { hasCallback: !!onProfileUpdate });
                     if (onProfileUpdate) {
+                        console.log('🔄 ProfileTab: Calling onProfileUpdate callback with updated profile data...', {
+                            subsidiaries: updatedProfile.subsidiaries?.length || 0,
+                            hasProfile: true
+                        });
                         onProfileUpdate({
                             ...startup,
                             // Update direct fields for compatibility with other tabs
@@ -748,6 +753,7 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
                 } else {
                   console.log('ℹ️ No primary/entity change detected. Skipping compliance sync.');
                 }
+
             } else {
                 console.error('❌ Failed to update profile - success was false');
                 setValidationErrors(['Failed to update profile']);
@@ -788,6 +794,24 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
         
         return newData;
       });
+    } else if (name === 'registrationDate') {
+      // Validate that registration date is not in the future
+      const selectedDate = new Date(value);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999); // Set to end of today to allow today's date
+      
+      if (selectedDate > today) {
+        // Show error notification
+        setNotifications(prev => [...prev, {
+          id: Date.now(),
+          type: 'error',
+          message: 'Registration date cannot be in the future',
+          timestamp: new Date()
+        }]);
+        return; // Don't update the date
+      }
+      
+      setFormData(prev => ({ ...prev, [name]: value }));
     } else {
       console.log('🔍 Form field changed:', name, 'value:', value);
       if (name === 'companyType') {
@@ -864,13 +888,12 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
           setValidationErrors(prev => [...prev, errorMessage]);
         }
         
-        // If this is a CS code, automatically create an assignment request and save profile
-        // (regardless of whether provider was found)
-        if (!isCA && value) {
+        // If this is a CS code and provider was found, automatically create an assignment request and save profile
+        if (!isCA && value && provider) {
             setCsRequestLoading(true);
             try {
               // First, save the profile to ensure CS code is stored in database
-              console.log('🔍 Auto-saving profile with CS code:', value);
+              console.log('🔍 Auto-saving profile with valid CS code:', value);
               const saveSuccess = await profileService.updateStartupProfile(startup.id, {
                 ...formData,
                 csServiceCode: value
@@ -937,6 +960,20 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
         setCaCodeValidation({ isValid: false, isInvalid: false, isLoading: false, errorMessage: '' });
       } else {
         setCsCodeValidation({ isValid: false, isInvalid: false, isLoading: false, errorMessage: '' });
+      }
+      
+      // If CA or CS code is cleared (empty), save the profile with empty code
+      if (value === '') {
+        try {
+          console.log(`🔍 Auto-saving profile with cleared ${isCA ? 'CA' : 'CS'} code`);
+          await profileService.updateStartupProfile(startup.id, {
+            ...formData,
+            [isCA ? 'caServiceCode' : 'csServiceCode']: ''
+          });
+          console.log(`Profile saved with cleared ${isCA ? 'CA' : 'CS'} code`);
+        } catch (error) {
+          console.error(`Error saving profile with cleared ${isCA ? 'CA' : 'CS'} code:`, error);
+        }
       }
     }
   }
@@ -1015,8 +1052,8 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
           setValidationErrors(prev => [...prev, errorMessage]);
         }
           
-        // If this is a CS code, automatically create an assignment request and save profile
-        if (name === 'csCode' && value) {
+        // If this is a CS code and provider was found, automatically create an assignment request and save profile
+        if (name === 'csCode' && value && provider) {
           setCsRequestLoading(true);
           try {
             // First, save the profile to ensure CS code is stored in database
@@ -1089,6 +1126,17 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
           [isCA ? 'ca' : 'cs']: { isValid: false, isInvalid: false, isLoading: false, errorMessage: '' }
         }
       }));
+      
+      // If CA or CS code is cleared (empty), save the profile with empty code
+      if (value === '') {
+        try {
+          console.log(`🔍 Auto-saving profile with cleared subsidiary ${isCA ? 'CA' : 'CS'} code`);
+          await profileService.updateStartupProfile(startup.id, formData);
+          console.log(`Profile saved with cleared subsidiary ${isCA ? 'CA' : 'CS'} code`);
+        } catch (error) {
+          console.error(`Error saving profile with cleared subsidiary ${isCA ? 'CA' : 'CS'} code:`, error);
+        }
+      }
     }
   };
   
@@ -1154,6 +1202,24 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
       const keys = Object.keys(cr).filter(k => k !== 'default');
       const newCountryTypes = keys.length > 0 ? keys : (cr['default'] ? ['default'] : []);
       newSubs[index] = { ...newSubs[index], country: value, companyType: newCountryTypes[0] };
+    } else if (name === 'registrationDate') {
+      // Validate that registration date is not in the future
+      const selectedDate = new Date(value);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999); // Set to end of today to allow today's date
+      
+      if (selectedDate > today) {
+        // Show error notification
+        setNotifications(prev => [...prev, {
+          id: Date.now(),
+          type: 'error',
+          message: 'Registration date cannot be in the future',
+          timestamp: new Date()
+        }]);
+        return; // Don't update the date
+      }
+      
+      newSubs[index] = { ...newSubs[index], [name]: value };
     } else {
       newSubs[index] = { ...newSubs[index], [name]: value };
     }

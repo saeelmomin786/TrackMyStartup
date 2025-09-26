@@ -129,26 +129,30 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       name: user.name,
       email: user.email,
       role: user.role,
-      investment_advisor_code_entered: (user as any).investment_advisor_code_entered
+      investment_advisor_code_entered: (user as any).investment_advisor_code_entered,
+      advisor_accepted: (user as any).advisor_accepted,
+      advisor_accepted_date: (user as any).advisor_accepted_date
     })));
 
     // Debug: Check each user individually
     allUsersWithCodes.forEach(user => {
       const userCode = (user as any).investment_advisor_code_entered;
       const advisorCode = currentUser?.investment_advisor_code;
+      const isAccepted = (user as any).advisor_accepted === true;
       
       console.log(`🔍 User ${user.name} (${user.role}):`, {
         userCode: userCode,
         advisorCode: advisorCode,
         codesMatch: userCode === advisorCode,
-        shouldShow: userCode === advisorCode
+        isAccepted: isAccepted,
+        shouldShow: userCode === advisorCode && !isAccepted
       });
     });
 
     const pendingRequests = allUsersWithCodes.filter(user => {
       const hasCode = (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
-      // Since advisor_accepted field doesn't exist, treat all users with matching codes as pending requests
-      return hasCode;
+      const notAccepted = (user as any).advisor_accepted !== true;
+      return hasCode && notAccepted;
     });
 
     console.log('🔍 Pending requests found:', pendingRequests.length);
@@ -170,18 +174,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const myInvestors = useMemo(() => {
     if (!users || !Array.isArray(users)) return [];
     
-    // Since advisor_accepted field doesn't exist, we'll show all investors with matching codes
-    // In the future, this can be enhanced with a proper acceptance mechanism
     const acceptedInvestors = users.filter(user => 
       user.role === 'Investor' &&
-      (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code
+      (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code &&
+      (user as any).advisor_accepted === true
     );
     
     console.log('🔍 Accepted investors found:', acceptedInvestors.length, acceptedInvestors.map(inv => ({
       id: inv.id,
       name: inv.name,
       email: inv.email,
-      code: (inv as any).investment_advisor_code_entered
+      code: (inv as any).investment_advisor_code_entered,
+      accepted: (inv as any).advisor_accepted
     })));
     
     return acceptedInvestors;

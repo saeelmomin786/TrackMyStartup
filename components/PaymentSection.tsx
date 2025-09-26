@@ -3,6 +3,8 @@ import { paymentService, SubscriptionPlan, UserSubscription, DiscountCoupon } fr
 import Button from './ui/Button';
 import Card from './ui/Card';
 import { CreditCard, CheckCircle, AlertCircle, Percent, Calendar, RefreshCw, Settings, Download, Clock, DollarSign, Users, Building2 } from 'lucide-react';
+import { getCurrencyForCountry } from '../lib/utils';
+import { formatCurrencyFromEUR } from '../lib/currencyUtils';
 
 interface PaymentSectionProps {
   userId: string;
@@ -20,6 +22,14 @@ export default function PaymentSection({ userId, userType, country, startupCount
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Get currency based on user's country
+  const userCurrency = getCurrencyForCountry(country);
+  
+  // Format currency function - convert from EUR to user's currency
+  const formatCurrency = (eurAmount: number) => {
+    return formatCurrencyFromEUR(eurAmount, userCurrency);
+  };
 
   useEffect(() => {
     loadSubscriptionData();
@@ -57,7 +67,7 @@ export default function PaymentSection({ userId, userType, country, startupCount
       const result = await paymentService.applyDiscountCoupon(couponCode, userId);
       setAppliedCoupon(result.coupon);
       setError(null);
-      setSuccess(`Coupon applied! ${result.coupon.discount_type === 'percentage' ? `${result.coupon.discount_value}%` : `€${result.coupon.discount_value}`} discount`);
+      setSuccess(`Coupon applied! ${result.coupon.discount_type === 'percentage' ? `${result.coupon.discount_value}%` : formatCurrency(result.coupon.discount_value)} discount`);
     } catch (error) {
       setError('Invalid or expired coupon code');
       setAppliedCoupon(null);
@@ -170,7 +180,7 @@ export default function PaymentSection({ userId, userType, country, startupCount
                     <DollarSign className="h-4 w-4 text-slate-500" />
                     <span className="text-xs font-medium text-slate-600">Amount</span>
                   </div>
-                  <p className="text-sm font-semibold text-slate-900">€{currentSubscription.amount}</p>
+                  <p className="text-sm font-semibold text-slate-900">{formatCurrency(currentSubscription.amount)}</p>
                 </div>
                 
                 <div className="bg-white rounded-lg p-3 border border-green-100">
@@ -246,8 +256,8 @@ export default function PaymentSection({ userId, userType, country, startupCount
                   <p className="text-xs text-slate-600">{startupCount} startup{startupCount !== 1 ? 's' : ''} requiring subscription</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-semibold text-slate-900">€{startupCount * 15}/month</p>
-                  <p className="text-xs text-slate-600">or €{startupCount * 120}/year</p>
+                  <p className="text-sm font-semibold text-slate-900">{formatCurrency(startupCount * 15)}/month</p>
+                  <p className="text-xs text-slate-600">or {formatCurrency(startupCount * 120)}/year</p>
                 </div>
               </div>
             </div>
@@ -289,7 +299,7 @@ export default function PaymentSection({ userId, userType, country, startupCount
                     </div>
                     <div className="text-right">
                       <div className="text-lg font-semibold text-slate-900">
-                        €{plan.price}/{plan.interval === 'monthly' ? 'mo' : 'yr'}
+                        {formatCurrency(plan.price)}/{plan.interval === 'monthly' ? 'mo' : 'yr'}
                       </div>
                       <div className="text-sm text-slate-500">per startup</div>
                     </div>
@@ -312,7 +322,7 @@ export default function PaymentSection({ userId, userType, country, startupCount
                     {plan.interval === 'yearly' && (
                       <div className="flex items-center gap-2 text-sm text-green-600">
                         <CheckCircle className="h-4 w-4 text-green-500" />
-                        <span>2 months free (€{Math.round(plan.price * 0.5)} savings)</span>
+                        <span>2 months free ({formatCurrency(Math.round(plan.price * 0.5))} savings)</span>
                       </div>
                     )}
                   </div>
@@ -323,17 +333,17 @@ export default function PaymentSection({ userId, userType, country, startupCount
                       <div className="space-y-2">
                         <div className="flex justify-between text-sm">
                           <span>Base price for {startupCount} startup{startupCount !== 1 ? 's' : ''}:</span>
-                          <span>€{(plan.price * startupCount).toFixed(2)}</span>
+                          <span>{formatCurrency(plan.price * startupCount)}</span>
                         </div>
                         {appliedCoupon && (
                           <div className="flex justify-between text-sm text-green-600">
-                            <span>Discount ({appliedCoupon.discount_type === 'percentage' ? `${appliedCoupon.discount_value}%` : `€${appliedCoupon.discount_value}`}):</span>
-                            <span>-€{((plan.price * startupCount) - calculatePrice(plan)).toFixed(2)}</span>
+                            <span>Discount ({appliedCoupon.discount_type === 'percentage' ? `${appliedCoupon.discount_value}%` : formatCurrency(appliedCoupon.discount_value)}):</span>
+                            <span>-{formatCurrency((plan.price * startupCount) - calculatePrice(plan))}</span>
                           </div>
                         )}
                         <div className="flex justify-between text-sm font-semibold border-t border-slate-200 pt-2">
                           <span>Total:</span>
-                          <span>€{calculatePrice(plan).toFixed(2)}</span>
+                          <span>{formatCurrency(calculatePrice(plan))}</span>
                         </div>
                       </div>
                     </div>
@@ -396,7 +406,7 @@ export default function PaymentSection({ userId, userType, country, startupCount
                       <p className="text-sm font-medium text-green-800">
                         Coupon applied: {appliedCoupon.discount_type === 'percentage' 
                           ? `${appliedCoupon.discount_value}% off` 
-                          : `€${appliedCoupon.discount_value} off`}
+                          : `${formatCurrency(appliedCoupon.discount_value)} off`}
                       </p>
                       <p className="text-xs text-green-600 mt-1">
                         Code: {appliedCoupon.code}
@@ -450,18 +460,18 @@ export default function PaymentSection({ userId, userType, country, startupCount
                   </div>
                   <div className="flex justify-between text-sm">
                     <span>Base amount:</span>
-                    <span className="font-medium">€{(selectedPlan.price * startupCount).toFixed(2)}</span>
+                    <span className="font-medium">{formatCurrency(selectedPlan.price * startupCount)}</span>
                   </div>
                   {appliedCoupon && (
                     <div className="flex justify-between text-sm text-green-600">
-                      <span>Discount ({appliedCoupon.discount_type === 'percentage' ? `${appliedCoupon.discount_value}%` : `€${appliedCoupon.discount_value}`}):</span>
-                      <span>-€{((selectedPlan.price * startupCount) - calculatePrice(selectedPlan)).toFixed(2)}</span>
+                      <span>Discount ({appliedCoupon.discount_type === 'percentage' ? `${appliedCoupon.discount_value}%` : formatCurrency(appliedCoupon.discount_value)}):</span>
+                      <span>-{formatCurrency((selectedPlan.price * startupCount) - calculatePrice(selectedPlan))}</span>
                     </div>
                   )}
                   <div className="border-t border-slate-200 pt-2">
                     <div className="flex justify-between text-base font-semibold">
                       <span>Total:</span>
-                      <span>€{calculatePrice(selectedPlan).toFixed(2)}</span>
+                      <span>{formatCurrency(calculatePrice(selectedPlan))}</span>
                     </div>
                   </div>
                 </div>
@@ -497,7 +507,7 @@ export default function PaymentSection({ userId, userType, country, startupCount
                 ) : (
                   <div className="flex items-center justify-center gap-2">
                     <CreditCard className="h-4 w-4" />
-                    Subscribe for €{calculatePrice(selectedPlan).toFixed(2)}
+                    Subscribe for {formatCurrency(calculatePrice(selectedPlan))}
                   </div>
                 )}
               </Button>
@@ -533,7 +543,7 @@ export default function PaymentSection({ userId, userType, country, startupCount
             <div className="space-y-2">
               <h6 className="text-sm font-medium text-slate-800">Subscription Details</h6>
               <div className="text-sm text-slate-600 space-y-1">
-                <p>• €15/month or €120/year per invested startup</p>
+                <p>• {formatCurrency(15)}/month or {formatCurrency(120)}/year per invested startup</p>
                 <p>• Billing based on active startup investments</p>
                 <p>• Update subscription anytime</p>
                 <p>• Cancel anytime with no fees</p>

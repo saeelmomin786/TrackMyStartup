@@ -178,11 +178,12 @@ export const profileService = {
         updateData.currency = profileData.currency;
         console.log('🔍 Adding currency to update:', profileData.currency);
       }
-      if (profileData.caServiceCode || (profileData as any).caCode) {
-        updateData.ca_service_code = profileData.caServiceCode || (profileData as any).caCode;
+      // Always include CA/CS service codes (even if empty to allow clearing values)
+      if (profileData.caServiceCode !== undefined || (profileData as any).caCode !== undefined) {
+        updateData.ca_service_code = profileData.caServiceCode || (profileData as any).caCode || null;
       }
-      if (profileData.csServiceCode || (profileData as any).csCode) {
-        updateData.cs_service_code = profileData.csServiceCode || (profileData as any).csCode;
+      if (profileData.csServiceCode !== undefined || (profileData as any).csCode !== undefined) {
+        updateData.cs_service_code = profileData.csServiceCode || (profileData as any).csCode || null;
       }
       if (profileData.investmentAdvisorCode !== undefined && profileData.investmentAdvisorCode !== null) {
         updateData.investment_advisor_code = profileData.investmentAdvisorCode;

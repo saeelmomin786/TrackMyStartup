@@ -91,6 +91,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [isAddInvestorModalOpen, setIsAddInvestorModalOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [esopData, setEsopData] = useState<{esopReservedShares: number, totalShares: number, pricePerShare: number} | null>(null);
     
     // Debug startup object - FORCE VISIBLE
     // Component initialized successfully
@@ -199,16 +200,39 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [recEquityDraft, setRecEquityDraft] = useState<string>('');
     const [recPostMoneyDraft, setRecPostMoneyDraft] = useState<string>('');
 
+    // Edit recognition form state for auto-calculations
+    const [editRecSharesDraft, setEditRecSharesDraft] = useState<string>('');
+    const [editRecPricePerShareDraft, setEditRecPricePerShareDraft] = useState<string>('');
+    const [editRecAmountDraft, setEditRecAmountDraft] = useState<string>('');
+    const [editRecEquityDraft, setEditRecEquityDraft] = useState<string>('');
+    const [editRecPostMoneyDraft, setEditRecPostMoneyDraft] = useState<string>('');
+
     // Helper function to calculate total shares including recognition records with equity
     const calculateTotalShares = () => {
         const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
         const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-        const esopReservedShares = startup.esopReservedShares || 0;
+        const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
         const totalRecognitionShares = recognitionRecords
-            .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares)
+            .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
             .reduce((sum, rec) => sum + (rec.shares || 0), 0);
         
-        return totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares;
+        const totalShares = totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares;
+        
+        console.log('📊 Total Shares Calculation:', {
+            totalFounderShares,
+            totalInvestorShares,
+            esopReservedShares,
+            totalRecognitionShares,
+            totalShares,
+            recognitionRecords: recognitionRecords.map(rec => ({
+                id: rec.id,
+                feeType: rec.feeType,
+                shares: rec.shares,
+                programName: rec.programName
+            }))
+        });
+        
+        return totalShares;
     };
 
     // Utility function to validate total shares allocation
@@ -390,6 +414,85 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         }
     }, [recSharesDraft, recPricePerShareDraft, founders, investmentRecords, startup.esopReservedShares, recognitionRecords]);
 
+    // Auto-calc edit recognition amount, equity, and post-money when shares or price changes
+    useEffect(() => {
+        const shares = Number(editRecSharesDraft);
+        const pricePerShare = Number(editRecPricePerShareDraft);
+        
+        console.log('🔄 Edit Recognition auto-calculation triggered:', { shares, pricePerShare, editRecSharesDraft, editRecPricePerShareDraft });
+        
+        if (Number.isFinite(shares) && shares > 0 && Number.isFinite(pricePerShare) && pricePerShare > 0) {
+            // Calculate investment amount
+            const amount = shares * pricePerShare;
+            setEditRecAmountDraft(String(amount));
+            
+            // Calculate equity percentage based on shares
+            const currentTotalShares = calculateTotalShares();
+            
+            // Include the new shares in the total for post-money calculation
+            const postMoneyTotalShares = currentTotalShares + shares;
+            
+            console.log('📊 Edit Recognition share calculation details:', {
+                currentTotalShares,
+                postMoneyTotalShares,
+                shares
+            });
+            
+            if (postMoneyTotalShares > 0) {
+                const equityPercentage = (shares / postMoneyTotalShares) * 100;
+                setEditRecEquityDraft(String(equityPercentage.toFixed(2)));
+                
+                // Calculate post-money valuation
+                const postMoney = (amount * 100) / equityPercentage;
+                setEditRecPostMoneyDraft(String(postMoney.toFixed(2)));
+                
+                console.log('✅ Edit Recognition calculations completed:', {
+                    amount,
+                    equityPercentage: equityPercentage.toFixed(2),
+                    postMoney: postMoney.toFixed(2),
+                    currentTotalShares,
+                    postMoneyTotalShares,
+                    shares
+                });
+            } else {
+                // Fallback: if no existing shares, use a reasonable default
+                console.log('⚠️ No existing shares found for edit recognition, using fallback calculation');
+                
+                // Use a reasonable assumption: if this is the first investment, 
+                // assume founders will have 80% and this recognition gets 20%
+                const assumedFounderShares = shares * 4; // 4x the recognition shares
+                const totalSharesWithFounders = assumedFounderShares + shares;
+                const equityPercentage = (shares / totalSharesWithFounders) * 100;
+                
+                setEditRecEquityDraft(String(equityPercentage.toFixed(2)));
+                setEditRecPostMoneyDraft(String(amount.toFixed(2)));
+                
+                console.log('📊 Edit Recognition fallback calculation:', {
+                    assumedFounderShares,
+                    totalSharesWithFounders,
+                    equityPercentage: equityPercentage.toFixed(2),
+                    amount
+                });
+            }
+        } else if (shares === 0 || pricePerShare === 0) {
+            // Clear calculations if either field is empty
+            setEditRecAmountDraft('');
+            setEditRecEquityDraft('');
+            setEditRecPostMoneyDraft('');
+        }
+    }, [editRecSharesDraft, editRecPricePerShareDraft, founders, investmentRecords, startup.esopReservedShares, recognitionRecords]);
+
+    // Initialize edit recognition form state when modal opens
+    useEffect(() => {
+        if (isEditRecognitionModalOpen && editingRecognition) {
+            setEditRecSharesDraft(editingRecognition.shares?.toString() || '');
+            setEditRecPricePerShareDraft(editingRecognition.pricePerShare?.toString() || '');
+            setEditRecAmountDraft(editingRecognition.investmentAmount?.toString() || '');
+            setEditRecEquityDraft(editingRecognition.equityAllocated?.toString() || '');
+            setEditRecPostMoneyDraft(editingRecognition.postMoneyValuation?.toString() || '');
+        }
+    }, [isEditRecognitionModalOpen, editingRecognition]);
+
     // Recompute price per share whenever shares or valuation data changes
     useEffect(() => {
         const calculatedTotalShares = calculateTotalShares();
@@ -484,6 +587,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         
         console.log('🔍 CapTableTab loading data for startup ID:', startup.id);
         console.log('🔍 Startup object:', startup);
+        console.log('🔍 Startup ESOP data:', {
+            esopReservedShares: startup.esopReservedShares,
+            pricePerShare: startup.pricePerShare,
+            totalShares: startup.totalShares
+        });
         
         setIsLoading(true);
         setError(null);
@@ -596,6 +704,38 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 // Update startup object with ESOP reserved shares
                 if (startup) {
                     startup.esopReservedShares = esopShares;
+                    startup.totalShares = sharesData.totalShares || 0;
+                    startup.pricePerShare = pricePerShare;
+                    console.log('✅ Updated startup object with fresh data:', {
+                        esopReservedShares: startup.esopReservedShares,
+                        totalShares: startup.totalShares,
+                        pricePerShare: startup.pricePerShare
+                    });
+                    console.log('🔍 Startup object after update:', startup);
+                    
+                    // Update ESOP data state to force re-render
+                    setEsopData({
+                        esopReservedShares: esopShares,
+                        totalShares: sharesData.totalShares || 0,
+                        pricePerShare: pricePerShare
+                    });
+                }
+                
+                // Check if startup_shares record exists, if not, create it with default ESOP
+                if (esopShares === 0 && pricePerShare === 0) {
+                    console.log('⚠️ No startup_shares record found, creating default record...');
+                    try {
+                        const defaultEsopShares = 10000;
+                        await capTableService.upsertEsopReservedShares(startup.id, defaultEsopShares);
+                        console.log('✅ Created default startup_shares record with ESOP:', defaultEsopShares);
+                        
+                        // Update startup object with new ESOP data
+                        if (startup) {
+                            startup.esopReservedShares = defaultEsopShares;
+                        }
+                    } catch (err) {
+                        console.error('❌ Failed to create default startup_shares record:', err);
+                    }
                 }
             } else {
                 console.error('❌ Shares data loading failed:', totalSharesData.reason);
@@ -650,6 +790,30 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             if (startupDataResult) {
                 setStartupProfileData(startupDataResult);
                 console.log('✅ Startup profile data loaded and set:', startupDataResult);
+                
+                // Update ESOP data state with fresh data from database
+                const esopReservedShares = startupDataResult.esop_reserved_shares || 0;
+                const totalShares = startupDataResult.total_shares || 0;
+                const pricePerShare = startupDataResult.price_per_share || 0;
+                
+                console.log('🔍 ESOP data from database:', {
+                    esopReservedShares,
+                    totalShares,
+                    pricePerShare
+                });
+                
+                setEsopData({
+                    esopReservedShares,
+                    totalShares,
+                    pricePerShare
+                });
+                
+                // Also update startup object
+                if (startup) {
+                    startup.esopReservedShares = esopReservedShares;
+                    startup.totalShares = totalShares;
+                    startup.pricePerShare = pricePerShare;
+                }
             } else {
                 console.log('⚠️ No startup profile data available');
             }
@@ -2278,10 +2442,20 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         <div className="flex-1">
                             <div className="text-2xl font-bold text-slate-900">
                                 {(() => {
-                                    const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
-                                    const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-                                    const esopReservedShares = startup.esopReservedShares || 0;
-                                    const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares;
+                                    const calculatedTotalShares = calculateTotalShares();
+                                    
+                                    console.log('🔍 Total Shares Display - Using calculateTotalShares():', {
+                                        calculatedTotalShares,
+                                        breakdown: {
+                                            totalFounderShares: founders.reduce((sum, founder) => sum + (founder.shares || 0), 0),
+                                            totalInvestorShares: investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0),
+                                            esopReservedShares: startup.esopReservedShares || 0,
+                                            totalRecognitionShares: recognitionRecords
+                                                .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
+                                                .reduce((sum, rec) => sum + (rec.shares || 0), 0)
+                                        }
+                                    });
+                                    
                                     return calculatedTotalShares.toLocaleString();
                                 })()}
                             </div>
@@ -2290,10 +2464,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         <div className="text-right">
                             <p className="text-sm text-slate-500">
                                 {(() => {
-                                    const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
-                                    const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-                                    const esopReservedShares = startup.esopReservedShares || 0;
-                                    const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares;
+                                    const calculatedTotalShares = calculateTotalShares();
                                     
                                     if (calculatedTotalShares > 0) {
                                         let latestValuation = startup.currentValuation || 0;
@@ -2317,8 +2488,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                      {(() => {
                          const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
                          const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-                         const esopReservedShares = startup.esopReservedShares || 0;
-                         const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares;
+                         const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
+                         const totalRecognitionShares = recognitionRecords
+                             .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
+                             .reduce((sum, rec) => sum + (rec.shares || 0), 0);
+                         const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares;
                          
                          if (calculatedTotalShares > 0) {
                              return (
@@ -2337,8 +2511,24 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                          </div>
                                          <div className="flex justify-between">
                                              <span className="text-slate-500">ESOP Reserved:</span>
-                                             <span className="text-slate-700">{esopReservedShares.toLocaleString()}</span>
+                                             <span className="text-slate-700">
+                                                 {(() => {
+                                                     const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
+                                                     console.log('🔍 ESOP Reserved Display:', {
+                                                         esopReservedShares,
+                                                         esopDataEsopReservedShares: esopData?.esopReservedShares,
+                                                         startupEsopReservedShares: startup.esopReservedShares
+                                                     });
+                                                     return esopReservedShares.toLocaleString();
+                                                 })()}
+                                             </span>
                                          </div>
+                                         {totalRecognitionShares > 0 && (
+                                             <div className="flex justify-between">
+                                                 <span className="text-slate-500">Incubation Center:</span>
+                                                 <span className="text-slate-700">{totalRecognitionShares.toLocaleString()}</span>
+                                             </div>
+                                         )}
                                          <div className="flex justify-between font-medium pt-1 border-t border-slate-100">
                                              <span className="text-slate-600">Total:</span>
                                              <span className="text-slate-900 font-bold">
@@ -3043,143 +3233,115 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
              </Modal>
 
             {/* Edit Recognition Modal */}
-            <Modal isOpen={isEditRecognitionModalOpen} onClose={() => setIsEditRecognitionModalOpen(false)} title="Edit Recognition Record">
+            <Modal isOpen={isEditRecognitionModalOpen} onClose={() => setIsEditRecognitionModalOpen(false)} title="Edit Recognition Record" size="2xl">
+                <div className="max-h-[80vh] overflow-y-auto pr-2">
                 <form onSubmit={handleUpdateRecognition} className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Program Name</label>
-                            <input
-                                type="text"
+                            <Input 
+                                label="Program Name" 
                                 name="rec-program-name"
+                                id="rec-program-name" 
                                 defaultValue={editingRecognition?.programName || ''}
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 required
+                                containerClassName="md:col-span-2"
                             />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Facilitator Name</label>
-                            <input
-                                type="text"
+                            <Input 
+                                label="Facilitator Name" 
                                 name="rec-facilitator-name"
+                                id="rec-facilitator-name" 
                                 defaultValue={editingRecognition?.facilitatorName || ''}
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 required
                             />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Facilitator Code</label>
-                            <input
-                                type="text"
+                            <Input 
+                                label="Facilitator Code" 
                                 name="rec-facilitator-code"
+                                id="rec-facilitator-code" 
                                 defaultValue={editingRecognition?.facilitatorCode || ''}
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="e.g., FAC-D4E5F6" 
                                 required
                             />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Incubation Type</label>
-                            <select
+                            <Select 
+                                label="Incubation Type" 
                                 name="rec-incubation-type"
+                                id="rec-incubation-type" 
                                 defaultValue={editingRecognition?.incubationType || ''}
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 required
                             >
-                                <option value="">Select Type</option>
-                                <option value="Incubation Center">Incubation Center</option>
-                                <option value="Accelerator Program">Accelerator Program</option>
-                                <option value="Government Scheme">Government Scheme</option>
-                                <option value="Private Program">Private Program</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Fee Type</label>
-                            <select
+                                {Object.values(IncubationType).map(t => <option key={t} value={t}>{t}</option>)}
+                            </Select>
+                            <Select 
+                                label="Fee Type" 
                                 name="rec-fee-type"
+                                id="rec-fee-type" 
                                 defaultValue={editingRecognition?.feeType || ''}
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 required
                             >
-                                <option value="">Select Fee Type</option>
-                                <option value="Free">Free</option>
-                                <option value="Paid">Paid</option>
-                                <option value="Equity">Equity</option>
-                                <option value="Revenue Share">Revenue Share</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Fee Amount</label>
-                            <input
-                                type="number"
+                                {Object.values(FeeType).map(t => <option key={t} value={t}>{t}</option>)}
+                            </Select>
+                            <Input 
+                                label="Fee Amount" 
                                 name="rec-fee-amount"
+                                id="rec-fee-amount" 
+                                type="number" 
                                 defaultValue={editingRecognition?.feeAmount || ''}
                                 step="0.01"
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Shares</label>
-                            <input
-                                type="number"
+                            <Input 
+                                label="Number of Shares" 
                                 name="rec-shares"
-                                defaultValue={editingRecognition?.shares || ''}
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Price per Share</label>
-                            <input
+                                id="rec-shares" 
                                 type="number"
-                                name="rec-price-per-share"
-                                defaultValue={editingRecognition?.pricePerShare || ''}
+                                value={editRecSharesDraft || editingRecognition?.shares || ''}
+                                onChange={(e) => setEditRecSharesDraft(e.target.value)}
+                                placeholder="e.g., 10000"
+                            />
+                            <Input 
+                                label={`Price per Share (${startupCurrency})`} 
+                                name="rec-price-per-share" 
+                                id="rec-price-per-share" 
+                                type="number"
                                 step="0.01"
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                value={editRecPricePerShareDraft || editingRecognition?.pricePerShare || ''}
+                                onChange={(e) => setEditRecPricePerShareDraft(e.target.value)}
+                                placeholder="e.g., 1.50"
                             />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Investment Amount</label>
-                            <input
+                            <Input 
+                                label="Investment Amount (auto)" 
+                                name="rec-amount" 
+                                id="rec-amount" 
                                 type="number"
-                                name="rec-amount"
-                                defaultValue={editingRecognition?.investmentAmount || ''}
-                                step="0.01"
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                value={editRecAmountDraft || editingRecognition?.investmentAmount || ''}
+                                readOnly 
                             />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Equity Allocated (%)</label>
-                            <input
+                            <Input 
+                                label="Equity Allocated (%) (auto)" 
+                                name="rec-equity" 
+                                id="rec-equity" 
                                 type="number"
-                                name="rec-equity"
-                                defaultValue={editingRecognition?.equityAllocated || ''}
-                                step="0.01"
-                                min="0"
-                                max="100"
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                value={editRecEquityDraft || editingRecognition?.equityAllocated || ''}
+                                readOnly 
                             />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Post-Money Valuation</label>
-                            <input
-                                type="number"
+                            <Input 
+                                label="Post-Money Valuation (auto)" 
                                 name="rec-postmoney"
-                                defaultValue={editingRecognition?.postMoneyValuation || ''}
-                                step="0.01"
-                                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                id="rec-postmoney" 
+                                type="number" 
+                                value={editRecPostMoneyDraft || editingRecognition?.postMoneyValuation || ''}
+                                readOnly 
                             />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Signed Agreement (Optional)</label>
-                        <input
-                            type="file"
+                            <Input 
+                                label="Upload Signed Agreement" 
                             name="rec-agreement"
-                            accept=".pdf,.doc,.docx"
-                            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                id="rec-agreement" 
+                                type="file" 
+                                containerClassName="md:col-span-2"
                         />
                         {editingRecognition?.signedAgreementUrl && (
+                                <div className="md:col-span-2">
                             <p className="text-sm text-slate-500 mt-1">
                                 Current file: <a href={editingRecognition.signedAgreementUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View current agreement</a>
                             </p>
+                                </div>
                         )}
                     </div>
                     <div className="flex justify-end gap-3 pt-6 border-t mt-4">
@@ -3191,6 +3353,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         </Button>
                     </div>
                 </form>
+                </div>
             </Modal>
 
             {/* Delete Recognition Confirmation Modal */}

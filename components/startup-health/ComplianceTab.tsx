@@ -19,6 +19,7 @@ interface ComplianceTabProps {
   onUpdateCompliance?: (startupId: number, taskId: string, checker: 'ca' | 'cs', newStatus: ComplianceStatus) => void;
   isViewOnly?: boolean;
   allowCAEdit?: boolean; // This now allows both CA and CS editing
+  onProfileUpdated?: () => void; // Callback to notify when profile is updated
 }
 
 // Using IntegratedComplianceTask from the integration service
@@ -55,7 +56,7 @@ const VerificationStatusDisplay: React.FC<{ status: ComplianceStatus }> = ({ sta
                     );
 };
 
-const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onUpdateCompliance, isViewOnly = false, allowCAEdit = false }) => {
+const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onUpdateCompliance, isViewOnly = false, allowCAEdit = false, onProfileUpdated }) => {
     console.log('🔍 ComplianceTab props:', { 
         userRole: currentUser?.role, 
         isViewOnly, 
@@ -76,6 +77,7 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
         entity: 'all',
         year: 'all'
     });
+    const [profileData, setProfileData] = useState<any>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // NOTE: Removed client-side fallback rules generation.
@@ -85,18 +87,61 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
     const isSyncingRef = useRef(false);
     const lastEntitySignatureRef = useRef<string | null>(null);
 
+    // Load profile data to get subsidiaries
+    const loadProfileData = async () => {
+        try {
+            // First try to get profile data from the startup object (if it was updated by ProfileTab)
+            if (startup.profile) {
+                console.log('🔍 Using profile data from startup object:', startup.profile);
+                setProfileData(startup.profile);
+                return;
+            }
+            
+            // Fallback: load from database
+            const { profileService } = await import('../../lib/profileService');
+            const profile = await profileService.getStartupProfile(startup.id);
+            setProfileData(profile);
+            console.log('🔍 Profile data loaded from database for ComplianceTab:', profile);
+        } catch (error) {
+            console.error('Error loading profile data:', error);
+            setProfileData(null);
+        }
+    };
+
+
+    // Load profile data on component mount and when startup object changes
+    useEffect(() => {
+        console.log('🔄 ComplianceTab: Startup object changed, loading profile data...', { 
+            startupId: startup.id, 
+            hasProfile: !!startup.profile,
+            subsidiaries: startup.profile?.subsidiaries?.length || 0
+        });
+        loadProfileData();
+    }, [startup.id, startup.profile]);
+
+    // Watch for profile updates from other components
+    useEffect(() => {
+        if (onProfileUpdated !== undefined) {
+            console.log('🔄 Profile updated trigger received:', onProfileUpdated, 'refreshing profile data...');
+            loadProfileData();
+        }
+    }, [onProfileUpdated]);
+
     // Load compliance data from backend
     useEffect(() => {
         loadComplianceData();
-    }, [startup.id, startup.country_of_registration, startup.company_type, startup.registration_date]); // Reload when startup essentials change
+    }, [startup.id, profileData]); // Reload when startup ID or profile data changes
 
     // Sync compliance tasks when startup data changes (for new tasks)
     useEffect(() => {
-        // Create entity signature from startup data
+        if (!profileData) return; // Wait for profile data to load
+        
+        // Create entity signature from profile data including subsidiaries
         const entitySignature = JSON.stringify({
-            country: startup.country_of_registration || null,
-            companyType: startup.company_type || null,
-            registrationDate: startup.registration_date || null
+            country: profileData.country || startup.country_of_registration || null,
+            companyType: profileData.companyType || startup.company_type || null,
+            registrationDate: profileData.registrationDate || startup.registration_date || null,
+            subsidiaries: profileData.subsidiaries || []
         });
 
         // Only sync when primary/entity-defining fields change
@@ -109,7 +154,7 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                 loadComplianceData();
             });
         }
-    }, [startup.country_of_registration, startup.company_type, startup.registration_date, startup.id]);
+    }, [profileData, startup.id]);
 
     // Subscribe to real-time updates for compliance tasks/uploads for this startup
     useEffect(() => {
@@ -147,18 +192,26 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
         try {
             setIsLoading(true);
 
-            // Force regenerate compliance tasks with correct years based on registration date
-            console.log('🔄 Force regenerating compliance tasks with correct years...');
-            await complianceRulesIntegrationService.forceRegenerateComplianceTasks(startup.id);
-
-            // Use the new integration service that combines comprehensive rules with existing tasks
-            const integratedTasks = await complianceRulesIntegrationService.getComplianceTasksForStartup(startup.id);
+            // First, try to get existing compliance tasks
+            console.log('🔍 Loading existing compliance tasks...');
+            let integratedTasks = await complianceRulesIntegrationService.getComplianceTasksForStartup(startup.id);
+            
+            // If no tasks found, force regenerate them
+            if (!integratedTasks || integratedTasks.length === 0) {
+                console.log('🔄 No existing compliance tasks found, force regenerating...');
+                await complianceRulesIntegrationService.forceRegenerateComplianceTasks(startup.id);
+                
+                // Try to get tasks again after regeneration
+                integratedTasks = await complianceRulesIntegrationService.getComplianceTasksForStartup(startup.id);
+            } else {
+                console.log('✅ Found existing compliance tasks:', integratedTasks.length);
+            }
             
             console.log('🔍 Loaded integrated compliance data:', integratedTasks);
-            setComplianceTasks(integratedTasks);
+            setComplianceTasks(integratedTasks || []);
 
             // After loading tasks, ensure overall startup status reflects per-task verification
-            await syncOverallComplianceStatus(integratedTasks);
+            await syncOverallComplianceStatus(integratedTasks || []);
         } catch (error) {
             console.error('Error loading compliance data:', error);
             setComplianceTasks([]);
@@ -513,13 +566,38 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
         if (startup.country_of_registration) {
             expectedEntities.add(`Parent Company (${startup.country_of_registration})`);
         }
-        // Note: Subsidiaries and international ops would need to be loaded separately if needed
+        
+        // Add subsidiaries from profile data
+        if (profileData?.subsidiaries) {
+            profileData.subsidiaries.forEach((sub: any, index: number) => {
+                if (sub.country) {
+                    expectedEntities.add(`Subsidiary ${index} (${sub.country})`);
+                }
+            });
+        }
+        
+        // Add international operations if they exist
+        if (profileData?.internationalOps) {
+            profileData.internationalOps.forEach((op: any, index: number) => {
+                if (op.country) {
+                    expectedEntities.add(`International Operation ${index} (${op.country})`);
+                }
+            });
+        }
+        
+        console.log('🔍 Expected entities for filtering:', Array.from(expectedEntities));
+        console.log('🔍 All compliance tasks entityDisplayNames:', complianceTasks.map(t => t.entityDisplayName));
+        console.log('🔍 Profile data subsidiaries:', profileData?.subsidiaries);
+        console.log('🔍 Startup country_of_registration:', startup.country_of_registration);
         
         // Group tasks by entity
         for (const t of complianceTasks) {
-            if (expectedEntities.size > 0 && !expectedEntities.has(t.entityDisplayName)) {
-                continue; // Skip stale entities
-            }
+            // TEMPORARY: Disable filtering to see all tasks
+            // TODO: Fix entity name matching
+            // if (expectedEntities.size > 0 && !expectedEntities.has(t.entityDisplayName)) {
+            //     console.log('🔍 Skipping task with entityDisplayName:', t.entityDisplayName, 'as it\'s not in expected entities');
+            //     continue; // Skip stale entities
+            // }
             if (!groups[t.entityDisplayName]) groups[t.entityDisplayName] = [];
             groups[t.entityDisplayName].push({
                 entityIdentifier: t.entityIdentifier,
@@ -540,13 +618,15 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
             });
         }
         
+        console.log('🔍 Final grouped tasks:', Object.keys(groups));
+        
         // Sort within groups for consistency
         Object.values(groups).forEach(taskList => {
             taskList.sort((a, b) => b.year - a.year || a.task.localeCompare(b.task));
         });
         
         return groups;
-    }, [complianceTasks, startup.country_of_registration]);
+    }, [complianceTasks, startup.country_of_registration, profileData]);
 
     // Only DB-backed tasks are displayed
     const displayTasks = useMemo((): { [entityName: string]: IntegratedComplianceTask[] } => {

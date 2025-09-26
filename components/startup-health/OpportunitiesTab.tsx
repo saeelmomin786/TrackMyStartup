@@ -34,6 +34,32 @@ interface OpportunitiesTabProps {
     startup: StartupRef;
 }
 
+const SECTOR_OPTIONS = [
+    'Agriculture',
+    'AI',
+    'Climate',
+    'Consumer Goods',
+    'Defence',
+    'E-commerce',
+    'Education',
+    'EV',
+    'Finance',
+    'Food & Beverage',
+    'Healthcare',
+    'Manufacturing',
+    'Media & Entertainment',
+    'Others',
+    'PaaS',
+    'Renewable Energy',
+    'Retail',
+    'SaaS',
+    'Social Impact',
+    'Space',
+    'Transportation and Logistics',
+    'Waste Management',
+    'Web 3.0'
+];
+
 const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
     const [applications, setApplications] = useState<ApplicationItem[]>([]);
@@ -43,6 +69,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     const [applyingOppId, setApplyingOppId] = useState<string | null>(null);
     const [applyPitchVideoUrl, setApplyPitchVideoUrl] = useState('');
     const [applyPitchDeckFile, setApplyPitchDeckFile] = useState<File | null>(null);
+    const [applySector, setApplySector] = useState('');
     const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
     // Image modal state
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
@@ -117,6 +144,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
         setApplyingOppId(opportunityId);
         setApplyPitchDeckFile(null);
         setApplyPitchVideoUrl('');
+        setApplySector('');
         setIsApplyModalOpen(true);
     };
 
@@ -147,6 +175,10 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             alert('Please provide either a pitch deck file or a pitch video URL.');
             return;
         }
+        if (!applySector.trim()) {
+            alert('Please select a sector for your startup.');
+            return;
+        }
 
         setIsSubmittingApplication(true);
         try {
@@ -173,7 +205,8 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     opportunity_id: applyingOppId,
                     status: 'pending',
                     pitch_deck_url: pitchDeckUrl,
-                    pitch_video_url: pitchVideo
+                    pitch_video_url: pitchVideo,
+                    sector: applySector.trim()
                 })
                 .select()
                 .single();
@@ -344,6 +377,21 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             <Modal isOpen={isApplyModalOpen} onClose={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null);} }} title="Submit Application">
                 <div className="space-y-4">
                     <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Startup Sector *</label>
+                        <select
+                            value={applySector}
+                            onChange={(e) => setApplySector(e.target.value)}
+                            className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
+                            required
+                        >
+                            <option value="">Select your startup sector</option>
+                            {SECTOR_OPTIONS.map(sector => (
+                                <option key={sector} value={sector}>{sector}</option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-slate-500 mt-1">Required field</p>
+                    </div>
+                    <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
                         <input
                             type="file"
@@ -366,7 +414,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     </div>
                     <div className="flex justify-end gap-3 pt-2">
                         <Button variant="secondary" type="button" onClick={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null);} }} disabled={isSubmittingApplication}>Cancel</Button>
-                        <Button type="button" onClick={submitApplication} disabled={isSubmittingApplication || (!applyPitchDeckFile && !applyPitchVideoUrl.trim())}>
+                        <Button type="button" onClick={submitApplication} disabled={isSubmittingApplication || (!applyPitchDeckFile && !applyPitchVideoUrl.trim()) || !applySector.trim()}>
                             {isSubmittingApplication ? 'Submitting...' : 'Submit Application'}
                         </Button>
                     </div>

@@ -245,7 +245,9 @@ export const startupService = {
         currency: startup.currency || 'USD', // Include currency field
         founders: startup.founders || [],
         // Include shares data from startup_shares table
-        esopReservedShares: startup.startup_shares?.[0]?.esop_reserved_shares || 0
+        esopReservedShares: startup.startup_shares?.[0]?.esop_reserved_shares || 0,
+        totalShares: startup.startup_shares?.[0]?.total_shares || 0,
+        pricePerShare: startup.startup_shares?.[0]?.price_per_share || 0
       }));
       
       console.log('🔍 Mapped startup data with ESOP:', mappedData);
@@ -294,7 +296,9 @@ export const startupService = {
         currency: startup.currency || 'USD', // Include currency field
         founders: startup.founders || [],
         // Include shares data from startup_shares table
-        esopReservedShares: startup.startup_shares?.[0]?.esop_reserved_shares || 0
+        esopReservedShares: startup.startup_shares?.[0]?.esop_reserved_shares || 0,
+        totalShares: startup.startup_shares?.[0]?.total_shares || 0,
+        pricePerShare: startup.startup_shares?.[0]?.price_per_share || 0
       }));
       
       return mappedData;

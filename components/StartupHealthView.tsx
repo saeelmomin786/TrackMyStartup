@@ -59,6 +59,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [localOffers, setLocalOffers] = useState<InvestmentOffer[]>(investmentOffers || []);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [showAccountPage, setShowAccountPage] = useState(false);
+    const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
     
     // Update currentStartup when startup prop changes (important for facilitator access)
     useEffect(() => {
@@ -100,7 +101,14 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     }, [activeTab]);
 
     const handleProfileUpdate = (updatedStartup: Startup) => {
+        console.log('🔄 StartupHealthView: Profile updated, updating currentStartup and triggering ComplianceTab refresh...', {
+            startupId: updatedStartup.id,
+            hasProfile: !!updatedStartup.profile,
+            subsidiaries: updatedStartup.profile?.subsidiaries?.length || 0
+        });
         setCurrentStartup(updatedStartup);
+        // Trigger profile update for ComplianceTab
+        setProfileUpdateTrigger(prev => prev + 1);
     };
 
     const handleUpdateCompliance = (startupId: number, taskId: string, checker: 'ca' | 'cs', newStatus: ComplianceStatus) => {
@@ -158,6 +166,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                     onUpdateCompliance={handleUpdateCompliance}
                     isViewOnly={isViewOnly}
                     allowCAEdit={userRole === 'CA' || userRole === 'CS'}
+                    onProfileUpdated={profileUpdateTrigger}
                 />;
             case 'financials':
                 return <FinancialsTab startup={currentStartup} userRole={userRole} isViewOnly={isViewOnly} />;

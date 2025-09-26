@@ -128,11 +128,26 @@ class ComplianceRulesIntegrationService {
       console.log('🔍 getComplianceTasksForStartup called for startup:', startupId);
       
       // First, try to get compliance tasks from the database function that handles subsidiaries
-      try {
-        const { data: dbTasks, error: dbError } = await supabase
-          .rpc('generate_compliance_tasks_for_startup', {
-            startup_id_param: startupId
-          });
+    try {
+      console.log('🔍 Calling database function generate_compliance_tasks_for_startup for startup:', startupId);
+      
+      // First, let's check what subsidiary data exists in the database
+      const { data: subsidiaryData, error: subsidiaryError } = await supabase
+        .from('subsidiaries')
+        .select('*')
+        .eq('startup_id', startupId);
+      
+      console.log('🔍 Subsidiary data in database for startup', startupId, ':', subsidiaryData);
+      if (subsidiaryError) {
+        console.error('❌ Error fetching subsidiary data:', subsidiaryError);
+      }
+      
+      const { data: dbTasks, error: dbError } = await supabase
+        .rpc('generate_compliance_tasks_for_startup', {
+          startup_id_param: startupId
+        });
+
+        console.log('🔍 Database function response:', { dbTasks, dbError });
 
         if (!dbError && dbTasks && dbTasks.length > 0) {
           console.log('🔍 Found compliance tasks from database function:', dbTasks);
@@ -162,6 +177,10 @@ class ComplianceRulesIntegrationService {
 
           console.log('🔍 Transformed integrated tasks:', integratedTasks);
           return integratedTasks;
+        } else if (!dbError && dbTasks && dbTasks.length === 0) {
+          console.log('🔍 Database function returned empty results, falling back to comprehensive rules');
+        } else if (dbError) {
+          console.log('🔍 Database function error, falling back to comprehensive rules:', dbError);
         }
       } catch (dbError) {
         console.log('🔍 Database function not available, falling back to comprehensive rules:', dbError);
@@ -179,24 +198,89 @@ class ComplianceRulesIntegrationService {
         return [];
       }
 
-      const countryCode = startup.country_of_registration;
+      const countryName = startup.country_of_registration;
       const companyType = startup.company_type;
       const registrationDate = startup.registration_date;
 
-      if (!countryCode || !companyType) {
+      if (!countryName || !companyType) {
         console.log('Startup missing country or company type, cannot load compliance rules');
         return [];
       }
 
+      // Convert country name to country code
+      const countryCodeMap: { [key: string]: string } = {
+        'United States': 'US',
+        'India': 'IN',
+        'United Kingdom': 'GB',
+        'Canada': 'CA',
+        'Australia': 'AU',
+        'Germany': 'DE',
+        'France': 'FR',
+        'Singapore': 'SG',
+        'Japan': 'JP',
+        'China': 'CN',
+        'Brazil': 'BR',
+        'Mexico': 'MX',
+        'South Africa': 'ZA',
+        'Nigeria': 'NG',
+        'Kenya': 'KE',
+        'Egypt': 'EG',
+        'UAE': 'AE',
+        'Saudi Arabia': 'SA',
+        'Israel': 'IL',
+        'Austria': 'AT',
+        'Hong Kong': 'HK',
+        'Netherlands': 'NL',
+        'Finland': 'FI',
+        'Greece': 'GR',
+        'Vietnam': 'VN',
+        'Myanmar': 'MM',
+        'Azerbaijan': 'AZ',
+        'Serbia': 'RS',
+        'Monaco': 'MC',
+        'Pakistan': 'PK',
+        'Philippines': 'PH',
+        'Jordan': 'JO',
+        'Georgia': 'GE',
+        'Belarus': 'BY',
+        'Armenia': 'AM',
+        'Bhutan': 'BT',
+        'Sri Lanka': 'LK',
+        'Russia': 'RU',
+        'Italy': 'IT',
+        'Spain': 'ES',
+        'Portugal': 'PT',
+        'Belgium': 'BE',
+        'Switzerland': 'CH',
+        'Sweden': 'SE',
+        'Norway': 'NO',
+        'Denmark': 'DK',
+        'Ireland': 'IE',
+        'New Zealand': 'NZ',
+        'South Korea': 'KR',
+        'Thailand': 'TH',
+        'Malaysia': 'MY',
+        'Indonesia': 'ID',
+        'Bangladesh': 'BD',
+        'Nepal': 'NP'
+      };
+
+      const countryCode = countryCodeMap[countryName] || countryName; // Fallback to original value if not found
+      console.log(`🔍 Converting country name "${countryName}" to country code "${countryCode}"`);
+
       // Calculate the registration year for first-year compliance tasks
       const registrationYear = registrationDate ? new Date(registrationDate).getFullYear() : new Date().getFullYear();
       const currentYear = new Date().getFullYear();
+
+      console.log(`🔍 Looking for compliance rules for country: ${countryCode}, company type: ${companyType}`);
 
       // Get comprehensive compliance rules for this startup's country and company type
       const comprehensiveRules = await complianceRulesComprehensiveService.getRulesByCountryAndCompanyType(
         countryCode, 
         companyType
       );
+
+      console.log(`🔍 Found ${comprehensiveRules.length} comprehensive rules for ${countryCode}/${companyType}`);
 
       // Get existing compliance tasks from the old system
       const existingTasks = await complianceService.getComplianceTasksWithRealtime(startupId);
@@ -210,7 +294,10 @@ class ComplianceRulesIntegrationService {
       const firstYearCompleted = await this.checkFirstYearTasksCompleted(startupId, firstYearTasks, registrationYear);
       
       // For each comprehensive rule, create tasks for each applicable period
+      console.log(`🔍 Processing ${comprehensiveRules.length} comprehensive rules...`);
       for (const rule of comprehensiveRules) {
+        console.log(`🔍 Processing rule: ${rule.compliance_name} (${rule.frequency})`);
+        
         // For now, show all tasks but we can add visual indicators later for prioritization
         // if (rule.frequency !== 'first-year' && !firstYearCompleted) {
         //   console.log(`Skipping ${rule.frequency} task "${rule.compliance_name}" - first-year tasks not completed`);
@@ -219,6 +306,7 @@ class ComplianceRulesIntegrationService {
         
         // Always generate tasks for each applicable period based on frequency and registration date
         const applicablePeriods = this.getApplicablePeriods(rule.frequency, registrationYear, currentYear);
+        console.log(`🔍 Rule "${rule.compliance_name}" has ${applicablePeriods.length} applicable periods:`, applicablePeriods);
         
         for (const period of applicablePeriods) {
           const taskId = `rule_${rule.id}_${startupId}_${period.year}${period.period ? `_${period.period}` : ''}`;
@@ -277,6 +365,8 @@ class ComplianceRulesIntegrationService {
         }
       }
 
+      console.log(`🔍 Generated ${integratedTasks.length} integrated tasks from comprehensive rules`);
+
       // Add any existing tasks that don't have corresponding comprehensive rules
       for (const existingTask of existingTasks) {
         const hasComprehensiveRule = integratedTasks.some(task => task.taskId === existingTask.taskId);
@@ -288,6 +378,8 @@ class ComplianceRulesIntegrationService {
           integratedTasks.push(taskWithUploads);
         }
       }
+
+      console.log(`🔍 Final integrated tasks count: ${integratedTasks.length}`);
 
       // Sort tasks to prioritize first-year tasks at the top
       // Note: The UI displays tasks in descending year order (newest first), so we need to account for this

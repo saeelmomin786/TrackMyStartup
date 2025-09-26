@@ -75,13 +75,28 @@ class PaymentService {
   // Get subscription plans for a specific user type and country
   async getSubscriptionPlans(userType: string, country: string): Promise<SubscriptionPlan[]> {
     try {
-      const { data, error } = await supabase
+      // First try to get plans for the specific country
+      let { data, error } = await supabase
         .from('subscription_plans')
         .select('*')
         .eq('user_type', userType)
         .eq('country', country)
         .eq('is_active', true)
         .order('price', { ascending: true });
+
+      // If no country-specific plans found, fall back to Global plans
+      if (!data || data.length === 0) {
+        const { data: globalData, error: globalError } = await supabase
+          .from('subscription_plans')
+          .select('*')
+          .eq('user_type', userType)
+          .eq('country', 'Global')
+          .eq('is_active', true)
+          .order('price', { ascending: true });
+        
+        if (globalError) throw globalError;
+        data = globalData;
+      }
 
       if (error) throw error;
       return data || [];

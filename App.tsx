@@ -1766,131 +1766,131 @@ const App: React.FC = () => {
   };
 
 
-  return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
-      <header className="bg-white shadow-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            {/* Show investment advisor logo if user is an Investment Advisor OR has an assigned investment advisor */}
-            {(() => {
-              const isInvestmentAdvisor = currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url;
-              const hasAssignedAdvisor = assignedInvestmentAdvisor && (currentUser?.role === 'Investor' || currentUser?.role === 'Startup');
-              const shouldShowAdvisorLogo = Boolean(isInvestmentAdvisor || hasAssignedAdvisor);
-              
-              console.log('🔍 Header logo display check:', {
-                currentUserRole: currentUser?.role,
-                currentUserLogo: (currentUser as any)?.logo_url,
-                assignedAdvisor: !!assignedInvestmentAdvisor,
-                assignedAdvisorLogo: assignedInvestmentAdvisor?.logo_url,
-                isInvestmentAdvisor,
-                hasAssignedAdvisor,
-                shouldShowAdvisorLogo
-              });
-              return shouldShowAdvisorLogo;
-            })() ? (
-              <div className="flex items-center gap-3">
-                {((currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url) || 
-                  (assignedInvestmentAdvisor?.logo_url)) ? (
-                  <>
-                    <img 
-                      src={currentUser?.role === 'Investment Advisor' 
-                        ? (currentUser as any).logo_url 
-                        : assignedInvestmentAdvisor?.logo_url} 
-                      alt="Company Logo" 
-                      className="h-8 w-8 rounded object-contain bg-white border border-gray-200 p-1"
-                      onError={(e) => {
-                        // Fallback to TrackMyStartup logo if image fails to load
-                        e.currentTarget.style.display = 'none';
-                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                      }}
-                    />
-                    <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left hidden" />
-                  </>
-                ) : (
-                  <div className="h-8 w-8 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
-                    <span className="text-purple-600 font-semibold text-xs">IA</span>
+    return (
+      <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
+        <header className="bg-white shadow-sm sticky top-0 z-50">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              {/* Show investment advisor logo if user is an Investment Advisor OR has an assigned investment advisor */}
+              {(() => {
+                const isInvestmentAdvisor = currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url;
+                const hasAssignedAdvisor = assignedInvestmentAdvisor && (currentUser?.role === 'Investor' || currentUser?.role === 'Startup');
+                const shouldShowAdvisorLogo = Boolean(isInvestmentAdvisor || hasAssignedAdvisor);
+                
+                console.log('🔍 Header logo display check:', {
+                  currentUserRole: currentUser?.role,
+                  currentUserLogo: (currentUser as any)?.logo_url,
+                  assignedAdvisor: !!assignedInvestmentAdvisor,
+                  assignedAdvisorLogo: assignedInvestmentAdvisor?.logo_url,
+                  isInvestmentAdvisor,
+                  hasAssignedAdvisor,
+                  shouldShowAdvisorLogo
+                });
+                return shouldShowAdvisorLogo;
+              })() ? (
+                <div className="flex items-center gap-3">
+                  {((currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url) || 
+                    (assignedInvestmentAdvisor?.logo_url)) ? (
+                    <>
+                      <img 
+                        src={currentUser?.role === 'Investment Advisor' 
+                          ? (currentUser as any).logo_url 
+                          : assignedInvestmentAdvisor?.logo_url} 
+                        alt="Company Logo" 
+                        className="h-8 w-8 rounded object-contain bg-white border border-gray-200 p-1"
+                        onError={(e) => {
+                          // Fallback to TrackMyStartup logo if image fails to load
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
+                      />
+                      <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left hidden" />
+                    </>
+                  ) : (
+                    <div className="h-8 w-8 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
+                      <span className="text-purple-600 font-semibold text-xs">IA</span>
+                    </div>
+                  )}
+                  <div>
+                    <h1 className="text-lg font-semibold text-gray-800">
+                      {currentUser?.role === 'Investment Advisor' 
+                        ? (currentUser as any).name || 'Investment Advisor'
+                        : assignedInvestmentAdvisor?.name || 'Investment Advisor'}
+                    </h1>
+                    <p className="text-xs text-blue-600">Supported by Track My Startup</p>
                   </div>
-                )}
-                <div>
-                  <h1 className="text-lg font-semibold text-gray-800">
-                    {currentUser?.role === 'Investment Advisor' 
-                      ? (currentUser as any).name || 'Investment Advisor'
-                      : assignedInvestmentAdvisor?.name || 'Investment Advisor'}
-                  </h1>
-                  <p className="text-xs text-blue-600">Supported by Track My Startup</p>
                 </div>
-              </div>
-            ) : (
-              <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left" />
-            )}
-          </div>
-           <div className="flex items-center gap-6">
-            {currentUser?.role === 'Investor' && (
-                <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
-                    Investor Code: <span className="font-semibold text-brand-primary">
-                        {currentUser.investor_code || currentUser.investorCode || 'Not Set'}
-                    </span>
-                    {!currentUser.investor_code && !currentUser.investorCode && (
-                        <span className="text-red-500 text-xs ml-2">⚠️ Code missing</span>
-                    )}
-                </div>
-            )}
-
-            {currentUser?.role === 'Startup Facilitation Center' && (
-                <FacilitatorCodeDisplay 
-                    className="bg-blue-100 text-blue-800 px-3 py-1 rounded-md text-sm font-medium" 
-                    currentUser={currentUser}
-                />
-            )}
-
-            {currentUser?.role === 'Investment Advisor' && (
-                <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
-                    Advisor Code: <span className="font-semibold text-brand-primary">
-                        {(currentUser as any)?.investment_advisor_code || 'IA-XXXXXX'}
-                    </span>
-                </div>
-            )}
-
-            {(currentUser?.role === 'Investor' || currentUser?.role === 'Startup') && currentUser?.investment_advisor_code_entered && (
-                <div className="hidden sm:block text-sm text-slate-500 bg-purple-100 px-3 py-1.5 rounded-md font-mono">
-                    Advisor: <span className="font-semibold text-purple-800">
-                        {currentUser.investment_advisor_code_entered}
-                    </span>
-                </div>
-            )}
-
-            <button onClick={handleLogout} className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors">
-                <LogOut className="h-4 w-4" />
-                Logout
-            </button>
-           </div>
-        </div>
-      </header>
-      
-      {/* Error Display */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4 mx-4 mt-4">
-          <div className="flex items-center">
-            <div className="text-sm text-red-800">
-              <strong>Error:</strong> {error}
+              ) : (
+                <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left" />
+              )}
             </div>
-            <button 
-              onClick={() => setError(null)} 
-              className="ml-auto text-red-600 hover:text-red-800"
-            >
-              ×
-            </button>
+             <div className="flex items-center gap-6">
+              {currentUser?.role === 'Investor' && (
+                  <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
+                      Investor Code: <span className="font-semibold text-brand-primary">
+                          {currentUser.investor_code || currentUser.investorCode || 'Not Set'}
+                      </span>
+                      {!currentUser.investor_code && !currentUser.investorCode && (
+                          <span className="text-red-500 text-xs ml-2">⚠️ Code missing</span>
+                      )}
+                  </div>
+              )}
+
+              {currentUser?.role === 'Startup Facilitation Center' && (
+                  <FacilitatorCodeDisplay 
+                      className="bg-blue-100 text-blue-800 px-3 py-1 rounded-md text-sm font-medium" 
+                      currentUser={currentUser}
+                  />
+              )}
+
+              {currentUser?.role === 'Investment Advisor' && (
+                  <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
+                      Advisor Code: <span className="font-semibold text-brand-primary">
+                          {(currentUser as any)?.investment_advisor_code || 'IA-XXXXXX'}
+                      </span>
+                  </div>
+              )}
+
+              {(currentUser?.role === 'Investor' || currentUser?.role === 'Startup') && currentUser?.investment_advisor_code_entered && (
+                  <div className="hidden sm:block text-sm text-slate-500 bg-purple-100 px-3 py-1.5 rounded-md font-mono">
+                      Advisor: <span className="font-semibold text-purple-800">
+                          {currentUser.investment_advisor_code_entered}
+                      </span>
+                  </div>
+              )}
+
+              <button onClick={handleLogout} className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors">
+                  <LogOut className="h-4 w-4" />
+                  Logout
+              </button>
+             </div>
           </div>
-        </div>
-      )}
-      
-      <main className="container mx-auto p-4 sm:p-6 lg:p-8 flex-1">
-        <MainContent key={`${viewKey}-${forceRender}`} />
-      </main>
+        </header>
+        
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-md p-4 mx-4 mt-4">
+            <div className="flex items-center">
+              <div className="text-sm text-red-800">
+                <strong>Error:</strong> {error}
+              </div>
+              <button 
+                onClick={() => setError(null)} 
+                className="ml-auto text-red-600 hover:text-red-800"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+        
+        <main className="container mx-auto p-4 sm:p-6 lg:p-8 flex-1">
+          <MainContent key={`${viewKey}-${forceRender}`} />
+        </main>
       
       {/* Footer removed - only shows on landing page */}
-    </div>
-  );
+      </div>
+    );
 };
 
 export default App;

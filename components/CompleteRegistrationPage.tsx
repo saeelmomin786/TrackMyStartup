@@ -9,7 +9,7 @@ import { authService } from '../lib/auth';
 import { storageService } from '../lib/storage';
 import { complianceRulesComprehensiveService } from '../lib/complianceRulesComprehensiveService';
 import { userComplianceService, CountryComplianceInfo } from '../lib/userComplianceService';
-import { getCurrencyForCountry } from '../lib/utils';
+import { getCurrencyForCountry, getCountryProfessionalTitles } from '../lib/utils';
 
 interface Founder {
   id: string;
@@ -77,8 +77,23 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   const [shareData, setShareData] = useState({
     totalShares: 1000000,
     pricePerShare: 0.01,
-    esopReservedShares: 100000
+    esopReservedShares: 10000  // Fixed: Changed from 100000 to 10000 to match database default
   });
+
+  // Auto-calculate founder shares when total shares or ESOP reserved shares change
+  const autoCalculateFounderShares = (newTotalShares: number, newEsopReservedShares: number) => {
+    if (newTotalShares > 0 && newEsopReservedShares >= 0 && newTotalShares >= newEsopReservedShares) {
+      const availableShares = newTotalShares - newEsopReservedShares;
+      const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
+      
+      // If this is the first founder or all founders have 0 shares, distribute all available shares to the first founder
+      if (founders.length === 1 && (totalFounderShares === 0 || founders[0].shares === 0)) {
+        setFounders(prev => prev.map((founder, index) => 
+          index === 0 ? { ...founder, shares: availableShares } : founder
+        ));
+      }
+    }
+  };
 
   // Subsidiaries and international operations
   const [subsidiaries, setSubsidiaries] = useState<Subsidiary[]>([]);
@@ -240,20 +255,16 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
   // Auto-update CA/CS types when country changes
   useEffect(() => {
-    if (profileData.country && countryComplianceInfo.length > 0) {
-      // Find country info by country name
+    if (profileData.country) {
+      // First try to find in database compliance info
       const countryInfo = countryComplianceInfo.find(c => c.country_name === profileData.country);
-      if (countryInfo) {
+      if (countryInfo && (countryInfo.ca_type || countryInfo.cs_type)) {
         setSelectedCountryInfo(countryInfo);
-        // Update profile data with CA/CS codes
-        setProfileData(prev => ({
-          ...prev,
-          caServiceCode: countryInfo.ca_type || '',
-          csServiceCode: countryInfo.cs_type || ''
-        }));
+        // Don't auto-populate the fields, just set the suggestions
+        // Users can manually enter their preferred values
         console.log(`🔧 Auto-updating CA/CS types for country: ${profileData.country}`, countryInfo);
       } else {
-        // If not found by name, try to find by country code mapping
+        // If not found in database, use comprehensive country mapping
         const countryCodeMap: { [key: string]: string } = {
           'United States': 'US',
           'India': 'IN',
@@ -273,22 +284,70 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           'Egypt': 'EG',
           'UAE': 'AE',
           'Saudi Arabia': 'SA',
-          'Israel': 'IL'
+          'Israel': 'IL',
+          'Austria': 'AT',
+          'Hong Kong': 'HK',
+          'Netherlands': 'NL',
+          'Finland': 'FI',
+          'Greece': 'GR',
+          'Vietnam': 'VN',
+          'Myanmar': 'MM',
+          'Azerbaijan': 'AZ',
+          'Serbia': 'RS',
+          'Monaco': 'MC',
+          'Pakistan': 'PK',
+          'Philippines': 'PH',
+          'Jordan': 'JO',
+          'Georgia': 'GE',
+          'Belarus': 'BY',
+          'Armenia': 'AM',
+          'Bhutan': 'BT',
+          'Sri Lanka': 'LK',
+          'Russia': 'RU',
+          'Italy': 'IT',
+          'Spain': 'ES',
+          'Portugal': 'PT',
+          'Belgium': 'BE',
+          'Switzerland': 'CH',
+          'Sweden': 'SE',
+          'Norway': 'NO',
+          'Denmark': 'DK',
+          'Ireland': 'IE',
+          'New Zealand': 'NZ',
+          'South Korea': 'KR',
+          'Thailand': 'TH',
+          'Malaysia': 'MY',
+          'Indonesia': 'ID',
+          'Bangladesh': 'BD',
+          'Nepal': 'NP'
         };
         
         const countryCode = countryCodeMap[profileData.country];
         if (countryCode) {
-          const countryInfoByCode = countryComplianceInfo.find(c => c.country_code === countryCode);
-          if (countryInfoByCode) {
-            setSelectedCountryInfo(countryInfoByCode);
-            // Update profile data with CA/CS codes
-            setProfileData(prev => ({
-              ...prev,
-              caServiceCode: countryInfoByCode.ca_type || '',
-              csServiceCode: countryInfoByCode.cs_type || ''
-            }));
-            console.log(`🔧 Auto-updating CA/CS types for country: ${profileData.country} (code: ${countryCode})`, countryInfoByCode);
-          }
+          // Get professional titles from utils
+          const professionalTitles = getCountryProfessionalTitles(countryCode);
+          
+          // Create a mock country info object with the professional titles
+          const mockCountryInfo: CountryComplianceInfo = {
+            country_code: countryCode,
+            country_name: profileData.country,
+            ca_type: professionalTitles.caTitle,
+            cs_type: professionalTitles.csTitle
+          };
+          
+          setSelectedCountryInfo(mockCountryInfo);
+          // Don't auto-populate the fields, just set the suggestions
+          // Users can manually enter their preferred values
+          console.log(`🔧 Auto-updating CA/CS types for country: ${profileData.country} (code: ${countryCode})`, professionalTitles);
+        } else {
+          // No mapping found, clear the fields
+          setSelectedCountryInfo(null);
+          setProfileData(prev => ({
+            ...prev,
+            caServiceCode: '',
+            csServiceCode: ''
+          }));
+          console.log(`❌ No CA/CS mapping found for country: ${profileData.country}`);
         }
       }
     }
@@ -540,13 +599,14 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         return;
       }
 
-      // Validate that founder shares don't exceed total shares
+      // Validate that allocated shares don't exceed total authorized shares
       const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
       const esopReservedShares = shareData.esopReservedShares || 0;
       const totalAllocatedShares = totalFounderShares + esopReservedShares;
       
+      // Allow allocated shares to be less than total shares (remaining shares available for future allocation)
       if (totalAllocatedShares > shareData.totalShares) {
-        setError(`Total allocated shares (${totalAllocatedShares.toLocaleString()}) exceeds total shares (${shareData.totalShares.toLocaleString()}). Please adjust founder shares or ESOP reserved shares.`);
+        setError(`Total allocated shares (${totalAllocatedShares.toLocaleString()}) cannot exceed total authorized shares (${shareData.totalShares.toLocaleString()}). Please reduce founder shares or ESOP reserved shares.`);
         setIsLoading(false);
         return;
       }
@@ -777,6 +837,17 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               throw startupUpdateError;
             }
             console.log('✅ Startup updated with profile data successfully:', updatedStartup);
+
+            // Generate compliance tasks after saving profile data
+            try {
+              console.log('🔄 Generating compliance tasks for startup after profile save...');
+              const { complianceRulesIntegrationService } = await import('../lib/complianceRulesIntegrationService');
+              await complianceRulesIntegrationService.forceRegenerateComplianceTasks(startup.id);
+              console.log('✅ Compliance tasks generated successfully');
+            } catch (complianceError) {
+              console.error('❌ Error generating compliance tasks:', complianceError);
+              // Don't throw error here as the main registration is complete
+            }
 
             // Also save shares data to startup_shares table for Cap Table compatibility
             console.log('💾 Syncing shares data to startup_shares table...');
@@ -1145,6 +1216,10 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   onChange={(e) => {
                     const newTotalShares = parseInt(e.target.value) || 0;
                     setShareData(prev => ({ ...prev, totalShares: newTotalShares }));
+                    
+                    // Auto-calculate founder shares when total shares change
+                    autoCalculateFounderShares(newTotalShares, shareData.esopReservedShares);
+                    
                     // Recalculate founder equity percentages when total shares change (only after initialization)
                     if (isInitialized && newTotalShares > 0) {
                       setFounders(prev => prev.map(founder => {
@@ -1176,7 +1251,13 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   type="number"
                   min="0"
                   value={shareData.esopReservedShares}
-                  onChange={(e) => setShareData(prev => ({ ...prev, esopReservedShares: parseInt(e.target.value) || 0 }))}
+                  onChange={(e) => {
+                    const newEsopReservedShares = parseInt(e.target.value) || 0;
+                    setShareData(prev => ({ ...prev, esopReservedShares: newEsopReservedShares }));
+                    
+                    // Auto-calculate founder shares when ESOP reserved shares change
+                    autoCalculateFounderShares(shareData.totalShares, newEsopReservedShares);
+                  }}
                   required
                 />
               </div>
@@ -1350,32 +1431,44 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 Service Provider Codes
               </h3>
               <p className="text-sm text-slate-600">
-                CA and CS types are automatically determined based on your selected country.
+                Enter the appropriate professional service types for your country. Suggestions are provided based on your selected country.
               </p>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
-                    CA Type (Auto-populated)
+                    CA Type
                   </label>
                   <input
                     type="text"
-                    value={selectedCountryInfo?.ca_type || 'Not available for this country'}
-                    readOnly
-                    className="w-full bg-slate-50 border border-slate-300 rounded-md px-3 py-2 text-slate-600"
+                    value={profileData.caServiceCode || ''}
+                    onChange={(e) => setProfileData(prev => ({ ...prev, caServiceCode: e.target.value }))}
+                    placeholder="Enter CA type for your country"
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  {selectedCountryInfo?.ca_type && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Suggested: {selectedCountryInfo.ca_type}
+                    </p>
+                  )}
                 </div>
                 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
-                    CS Type (Auto-populated)
+                    CS Type
                   </label>
                   <input
                     type="text"
-                    value={selectedCountryInfo?.cs_type || 'Not available for this country'}
-                    readOnly
-                    className="w-full bg-slate-50 border border-slate-300 rounded-md px-3 py-2 text-slate-600"
+                    value={profileData.csServiceCode || ''}
+                    onChange={(e) => setProfileData(prev => ({ ...prev, csServiceCode: e.target.value }))}
+                    placeholder="Enter CS type for your country"
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  {selectedCountryInfo?.cs_type && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Suggested: {selectedCountryInfo.cs_type}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

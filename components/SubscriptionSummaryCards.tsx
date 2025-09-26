@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { paymentService, SubscriptionSummary } from '../lib/paymentService';
 import Card from './ui/Card';
-import { Euro, CreditCard, Calendar, TrendingUp } from 'lucide-react';
+import { Euro, CreditCard, Calendar, TrendingUp, DollarSign, IndianRupee, PoundSterling } from 'lucide-react';
+import { getCurrencyForCountry } from '../lib/utils';
+import { formatCurrencyFromEUR } from '../lib/currencyUtils';
 
 interface SubscriptionSummaryCardsProps {
   userId: string;
   userType: string;
+  userCountry?: string;
 }
 
-export default function SubscriptionSummaryCards({ userId, userType }: SubscriptionSummaryCardsProps) {
+export default function SubscriptionSummaryCards({ userId, userType, userCountry }: SubscriptionSummaryCardsProps) {
   const [summary, setSummary] = useState<SubscriptionSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,12 +67,10 @@ export default function SubscriptionSummaryCards({ userId, userType }: Subscript
     return null;
   }
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-EU', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 2
-    }).format(amount);
+  const formatCurrency = (eurAmount: number) => {
+    // Get currency based on user's country
+    const userCurrency = userCountry ? getCurrencyForCountry(userCountry) : 'EUR';
+    return formatCurrencyFromEUR(eurAmount, userCurrency);
   };
 
   const formatDate = (dateString: string) => {
@@ -95,7 +96,15 @@ export default function SubscriptionSummaryCards({ userId, userType }: Subscript
             </p>
           </div>
           <div className="h-12 w-12 bg-red-100 rounded-full flex items-center justify-center">
-            <Euro className="h-6 w-6 text-red-600" />
+            {userCountry && getCurrencyForCountry(userCountry) === 'INR' ? (
+              <IndianRupee className="h-6 w-6 text-red-600" />
+            ) : userCountry && getCurrencyForCountry(userCountry) === 'USD' ? (
+              <DollarSign className="h-6 w-6 text-red-600" />
+            ) : userCountry && getCurrencyForCountry(userCountry) === 'GBP' ? (
+              <PoundSterling className="h-6 w-6 text-red-600" />
+            ) : (
+              <Euro className="h-6 w-6 text-red-600" />
+            )}
           </div>
         </div>
         {summary.totalDue > 0 && (

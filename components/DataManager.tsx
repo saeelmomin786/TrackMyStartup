@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { dataMigrationService } from '../lib/dataMigration';
+import { databaseFixService } from '../lib/databaseFixService';
 import Card from './ui/Card';
 import Button from './ui/Button';
-import { Database, RefreshCw, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Database, RefreshCw, Trash2, CheckCircle, AlertCircle, Wrench, Shield } from 'lucide-react';
 
 const DataManager: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -45,6 +46,63 @@ const DataManager: React.FC = () => {
       }
     } catch (error) {
       setMessage({ type: 'error', text: 'An unexpected error occurred while clearing data.' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleFixDatabase = async () => {
+    setIsLoading(true);
+    setMessage(null);
+    
+    try {
+      const result = await databaseFixService.fixAllDatabaseIssues();
+      
+      if (result.success) {
+        setMessage({ type: 'success', text: result.message });
+      } else {
+        setMessage({ type: 'error', text: result.message });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'An unexpected error occurred while fixing database issues.' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setIsLoading(true);
+    setMessage(null);
+    
+    try {
+      const result = await databaseFixService.testDatabaseConnection();
+      
+      if (result.success) {
+        setMessage({ type: 'success', text: `${result.message} - Users: ${result.data?.usersCount}, Startups: ${result.data?.startupsCount}` });
+      } else {
+        setMessage({ type: 'error', text: result.message });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'An unexpected error occurred while testing database connection.' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreateMissingOffers = async () => {
+    setIsLoading(true);
+    setMessage(null);
+    
+    try {
+      const result = await databaseFixService.createMissingInvestmentOffers();
+      
+      if (result.success) {
+        setMessage({ type: 'success', text: `${result.message}` });
+      } else {
+        setMessage({ type: 'error', text: result.message });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'An unexpected error occurred while creating missing offers.' });
     } finally {
       setIsLoading(false);
     }
@@ -136,6 +194,44 @@ const DataManager: React.FC = () => {
               )}
               {isLoading ? 'Clearing...' : 'Clear All Data'}
             </Button>
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          <div className="p-4 bg-green-50 rounded-lg">
+            <h3 className="font-semibold text-green-900 mb-2">Database Management</h3>
+            <p className="text-green-700 text-sm mb-4">
+              Fix database issues including RLS policies and assign investment advisor codes.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                onClick={handleTestConnection}
+                disabled={isLoading}
+                variant="outline"
+                className="flex items-center gap-2"
+              >
+                <Database className="h-4 w-4" />
+                Test Connection
+              </Button>
+              
+              <Button
+                onClick={handleFixDatabase}
+                disabled={isLoading}
+                className="flex items-center gap-2"
+              >
+                <Wrench className="h-4 w-4" />
+                Fix Database Issues
+              </Button>
+              
+              <Button
+                onClick={handleCreateMissingOffers}
+                disabled={isLoading}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
+              >
+                <Shield className="h-4 w-4" />
+                Create Missing Offers
+              </Button>
+            </div>
           </div>
         </div>
 

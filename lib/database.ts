@@ -142,26 +142,13 @@ export const userService = {
       console.log('🔍 Cleaned financial matrix:', cleanFinancialMatrix);
       console.log('🔍 User ID to update:', userId);
 
-      // Update the user's advisor acceptance status
-      const updateData = {
-        advisor_accepted: true,
-        advisor_accepted_date: new Date().toISOString(),
-        minimum_investment: cleanFinancialMatrix.minimum_investment,
-        maximum_investment: cleanFinancialMatrix.maximum_investment,
-        success_fee: cleanFinancialMatrix.success_fee,
-        success_fee_type: cleanFinancialMatrix.success_fee_type,
-        scouting_fee: cleanFinancialMatrix.scouting_fee,
-        updated_at: new Date().toISOString()
-      };
-      
-      console.log('🔍 Update data being sent:', updateData);
-
+      // Use the SECURITY DEFINER function to bypass RLS
       const { data: userData, error: userError } = await supabase
-        .from('users')
-        .update(updateData)
-        .eq('id', userId)
-        .select()
-        .single()
+        .rpc('accept_startup_advisor_request', {
+          p_user_id: userId,
+          p_advisor_id: (await supabase.auth.getUser()).data.user?.id,
+          p_financial_matrix: cleanFinancialMatrix
+        })
 
       if (userError) {
         console.error('Error updating user advisor acceptance:', userError)
@@ -182,6 +169,54 @@ export const userService = {
 
       if (relationshipError) {
         console.error('Error creating advisor relationship:', relationshipError)
+        // Don't throw here as the main operation succeeded
+      }
+
+      // Create investment offers for the startup
+      console.log('💰 Creating investment offers for startup:', startupId);
+      try {
+        // Get the startup details
+        const { data: startupData, error: startupError } = await supabase
+          .from('startups')
+          .select('name, user_id')
+          .eq('id', startupId)
+          .single();
+
+        if (startupError) {
+          console.error('Error fetching startup data:', startupError);
+        } else if (startupData) {
+          // Get the advisor details
+          const { data: advisorData, error: advisorError } = await supabase
+            .from('users')
+            .select('name, email, investment_advisor_code')
+            .eq('id', (await supabase.auth.getUser()).data.user?.id)
+            .single();
+
+          if (!advisorError && advisorData) {
+            // Create investment offers for the startup
+            const { data: offerData, error: offerError } = await supabase
+              .from('investment_offers')
+              .insert({
+                startup_id: startupId,
+                startup_name: startupData.name,
+                investor_email: advisorData.email,
+                investor_name: advisorData.name,
+                offer_amount: cleanFinancialMatrix.minimum_investment || 0,
+                equity_percentage: 0, // Will be set when actual offers are made
+                status: 'pending',
+                created_at: new Date().toISOString()
+              })
+              .select();
+
+            if (offerError) {
+              console.error('Error creating investment offer:', offerError);
+            } else {
+              console.log('✅ Investment offer created successfully:', offerData);
+            }
+          }
+        }
+      } catch (offerCreationError) {
+        console.error('Error in investment offer creation:', offerCreationError);
         // Don't throw here as the main operation succeeded
       }
       
@@ -880,6 +915,140 @@ export const investmentService = {
     } catch (e) {
       console.error('❌ Database: Error in getInvestmentAdvisorByCode:', e);
       return null;
+    }
+  },
+
+  // Get pending investment advisor relationships (service requests)
+  async getPendingInvestmentAdvisorRelationships(advisorId: string) {
+    try {
+      console.log('🔍 Database: Fetching pending relationships for advisor:', advisorId);
+      
+      // Get the advisor's code first
+      const { data: advisorData, error: advisorError } = await supabase
+        .from('users')
+        .select('investment_advisor_code')
+        .eq('id', advisorId)
+        .eq('role', 'Investment Advisor')
+        .single();
+
+      if (advisorError || !advisorData) {
+        console.error('❌ Database: Error fetching advisor code:', advisorError);
+        return [];
+      }
+
+      const advisorCode = advisorData.investment_advisor_code;
+      console.log('🔍 Database: Advisor code:', advisorCode);
+
+      // Get all relationships for this advisor directly
+      const { data: allRelations, error: relationsError } = await supabase
+        .from('investment_advisor_relationships')
+        .select('*')
+        .eq('investment_advisor_id', advisorId)
+        .order('created_at', { ascending: false });
+
+      if (relationsError) {
+        console.error('❌ Database: Error fetching relationships:', relationsError);
+        return [];
+      }
+
+      console.log('🔍 Database: Found relationships:', allRelations?.length || 0);
+
+      // Get startup details for startup relationships
+      const startupRelations = allRelations?.filter(rel => rel.relationship_type === 'advisor_startup') || [];
+      const startupIds = startupRelations.map(rel => rel.startup_id);
+      
+      let startupDetails = [];
+      if (startupIds.length > 0) {
+        const { data: startups, error: startupError } = await supabase
+          .from('startups')
+          .select('id, name, created_at')
+          .in('id', startupIds);
+        
+        if (!startupError && startups) {
+          startupDetails = startups;
+        }
+      }
+
+      // Get investor details for investor relationships
+      const investorRelations = allRelations?.filter(rel => rel.relationship_type === 'advisor_investor') || [];
+      const investorIds = investorRelations.map(rel => rel.investor_id);
+      
+      let investorDetails = [];
+      if (investorIds.length > 0) {
+        const { data: investors, error: investorError } = await supabase
+          .from('users')
+          .select('id, name, email, created_at')
+          .in('id', investorIds);
+        
+        if (!investorError && investors) {
+          investorDetails = investors;
+        }
+      }
+
+      // Build the response
+      const pendingRequests = [
+        ...startupRelations.map(rel => {
+          const startup = startupDetails.find(s => s.id === rel.startup_id);
+          return {
+            id: rel.id,
+            type: 'startup',
+            name: startup?.name || 'Unknown',
+            email: 'N/A',
+            created_at: rel.created_at
+          };
+        }),
+        ...investorRelations.map(rel => {
+          const investor = investorDetails.find(i => i.id === rel.investor_id);
+          return {
+            id: rel.id,
+            type: 'investor',
+            name: investor?.name || 'Unknown',
+            email: investor?.email || 'Unknown',
+            created_at: rel.created_at
+          };
+        })
+      ];
+
+      console.log('✅ Database: Found pending relationships:', pendingRequests.length);
+      console.log('🔍 Database: Pending relationships details:', pendingRequests.map(req => ({
+        id: req.id,
+        type: req.type,
+        name: req.name,
+        email: req.email,
+        created_at: req.created_at
+      })));
+      return pendingRequests;
+    } catch (e) {
+      console.error('❌ Database: Error in getPendingInvestmentAdvisorRelationships:', e);
+      return [];
+    }
+  },
+
+  // Accept investment advisor relationship
+  async acceptInvestmentAdvisorRelationship(relationshipId: number, financialMatrix: any, agreementFile?: File) {
+    try {
+      console.log('🔍 Database: Accepting relationship:', relationshipId);
+      
+      // Update the relationship status (you might need to add a status field to the relationships table)
+      const { data, error } = await supabase
+        .from('investment_advisor_relationships')
+        .update({ 
+          // Add any status fields here if they exist
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', relationshipId)
+        .select();
+
+      if (error) {
+        console.error('❌ Database: Error accepting relationship:', error);
+        throw error;
+      }
+
+      console.log('✅ Database: Relationship accepted successfully');
+      return data;
+    } catch (e) {
+      console.error('❌ Database: Error in acceptInvestmentAdvisorRelationship:', e);
+      throw e;
     }
   },
 

@@ -6,6 +6,8 @@ import { useInvestmentAdvisorCurrency } from '../lib/hooks/useInvestmentAdvisorC
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { AuthUser } from '../lib/auth';
 import ProfilePage from './ProfilePage';
+import { fixCurrentUser } from '../lib/fixCurrentUser';
+import UserDataManager from './UserDataManager';
 
 interface InvestmentAdvisorViewProps {
   currentUser: AuthUser | null;
@@ -14,6 +16,7 @@ interface InvestmentAdvisorViewProps {
   investments: any[];
   offers: InvestmentOffer[];
   interests: any[];
+  pendingRelationships?: any[];
 }
 
 const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({ 
@@ -22,9 +25,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   startups,
   investments,
   offers,
-  interests
+  interests,
+  pendingRelationships = []
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'system'>('dashboard');
   const [showProfilePage, setShowProfilePage] = useState(false);
   const [isAcceptRequestModalOpen, setIsAcceptRequestModalOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
@@ -108,95 +112,275 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     }
   }, [activeTab, activeFundraisingStartups]);
 
-  // Get all pending requests (both investors and startups) who have entered the advisor code but haven't been accepted
-  const serviceRequests = useMemo(() => {
-    if (!users || !Array.isArray(users) || !startups || !Array.isArray(startups)) return [];
-    
-    console.log('🔍 InvestmentAdvisorView Debug - serviceRequests:', {
-      totalUsers: users.length,
+  // Get pending startup requests - FIXED VERSION
+  const pendingStartupRequests = useMemo(() => {
+    if (!startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
+      console.log('🔍 Pending Startup Requests: Missing data', { startups: !!startups, users: !!users });
+      return [];
+    }
+
+    console.log('🔍 Pending Startup Requests Debug:', {
       totalStartups: startups.length,
+      totalUsers: users.length,
       currentAdvisorCode: currentUser?.investment_advisor_code,
-      currentUserRole: currentUser?.role,
       currentUserId: currentUser?.id
     });
-    
-    const allUsersWithCodes = users.filter(user => 
-      user.role === 'Investor' || user.role === 'Startup'
-    );
 
-    console.log('🔍 All users with Investor/Startup roles:', allUsersWithCodes.map(user => ({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      investment_advisor_code_entered: (user as any).investment_advisor_code_entered,
-      advisor_accepted: (user as any).advisor_accepted,
-      advisor_accepted_date: (user as any).advisor_accepted_date
-    })));
-
-    // Debug: Check each user individually
-    allUsersWithCodes.forEach(user => {
-      const userCode = (user as any).investment_advisor_code_entered;
-      const advisorCode = currentUser?.investment_advisor_code;
-      const isAccepted = (user as any).advisor_accepted === true;
+    // Find startups whose users have entered the investment advisor code but haven't been accepted
+    const pendingStartups = startups.filter(startup => {
+      // Find the user who owns this startup
+      const startupUser = users.find(user => 
+        user.role === 'Startup' && 
+        user.id === startup.user_id
+      );
       
-      console.log(`🔍 User ${user.name} (${user.role}):`, {
-        userCode: userCode,
-        advisorCode: advisorCode,
-        codesMatch: userCode === advisorCode,
-        isAccepted: isAccepted,
-        shouldShow: userCode === advisorCode && !isAccepted
+      if (!startupUser) {
+        console.log('🔍 No startup user found for startup:', startup.id, startup.name);
+        return false;
+      }
+
+      // Check if this user has entered the investment advisor code
+      const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
+      const isNotAccepted = !(startupUser as any).advisor_accepted;
+
+      console.log('🔍 Startup user check:', {
+        startupId: startup.id,
+        startupName: startup.name,
+        userId: startupUser.id,
+        userName: startupUser.name,
+        userEmail: startupUser.email,
+        enteredCode: (startupUser as any).investment_advisor_code_entered,
+        currentAdvisorCode: currentUser?.investment_advisor_code,
+        hasEnteredCode,
+        advisorAccepted: (startupUser as any).advisor_accepted,
+        isNotAccepted,
+        shouldInclude: hasEnteredCode && isNotAccepted
       });
+
+      return hasEnteredCode && isNotAccepted;
     });
 
-    const pendingRequests = allUsersWithCodes.filter(user => {
-      const hasCode = (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
-      const notAccepted = (user as any).advisor_accepted !== true;
-      return hasCode && notAccepted;
+    console.log('🔍 Pending Startup Requests Result:', {
+      totalPending: pendingStartups.length,
+      pendingStartups: pendingStartups.map(s => ({
+        id: s.id,
+        name: s.name,
+        userId: s.user_id
+      }))
     });
 
-    console.log('🔍 Pending requests found:', pendingRequests.length);
-    console.log('🔍 Pending requests details:', pendingRequests.map(req => ({
-      id: req.id,
-      name: req.name,
-      email: req.email,
-      role: req.role,
-      code: (req as any).investment_advisor_code_entered
-    })));
+    return pendingStartups;
+  }, [startups, users, currentUser?.investment_advisor_code]);
 
-    return pendingRequests.map(user => ({
-      ...user,
-      type: user.role === 'Investor' ? 'investor' : 'startup'
-    }));
-  }, [users, startups, currentUser?.investment_advisor_code]);
+  // Get pending investor requests - FIXED VERSION
+  const pendingInvestorRequests = useMemo(() => {
+    if (!users || !Array.isArray(users)) {
+      console.log('🔍 Pending Investor Requests: Missing users data');
+      return [];
+    }
 
-  // Get accepted investors and startups
+    console.log('🔍 Pending Investor Requests Debug:', {
+      totalUsers: users.length,
+      currentAdvisorCode: currentUser?.investment_advisor_code
+    });
+
+    // Find investors who have entered the investment advisor code but haven't been accepted
+    const pendingInvestors = users.filter(user => {
+      const hasEnteredCode = user.role === 'Investor' && 
+        (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
+      const isNotAccepted = !(user as any).advisor_accepted;
+
+      console.log('🔍 Investor check:', {
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        userRole: user.role,
+        enteredCode: (user as any).investment_advisor_code_entered,
+        currentAdvisorCode: currentUser?.investment_advisor_code,
+        hasEnteredCode,
+        advisorAccepted: (user as any).advisor_accepted,
+        isNotAccepted,
+        shouldInclude: hasEnteredCode && isNotAccepted
+      });
+
+      return hasEnteredCode && isNotAccepted;
+    });
+
+    console.log('🔍 Pending Investor Requests Result:', {
+      totalPending: pendingInvestors.length,
+      pendingInvestors: pendingInvestors.map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email
+      }))
+    });
+
+    return pendingInvestors;
+  }, [users, currentUser?.investment_advisor_code]);
+
+  // Get accepted startups - FIXED VERSION
+  const myStartups = useMemo(() => {
+    if (!startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
+      console.log('🔍 My Startups: Missing data');
+      return [];
+    }
+
+    console.log('🔍 My Startups Debug:', {
+      totalStartups: startups.length,
+      totalUsers: users.length,
+      currentAdvisorCode: currentUser?.investment_advisor_code
+    });
+
+    // Find startups whose users have entered the investment advisor code and have been accepted
+    const acceptedStartups = startups.filter(startup => {
+      // Find the user who owns this startup
+      const startupUser = users.find(user => 
+        user.role === 'Startup' && 
+        user.id === startup.user_id
+      );
+      
+      if (!startupUser) {
+        return false;
+      }
+
+      // Check if this user has entered the investment advisor code and has been accepted
+      const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
+      const isAccepted = (startupUser as any).advisor_accepted === true;
+
+      console.log('🔍 Accepted startup check:', {
+        startupId: startup.id,
+        startupName: startup.name,
+        userId: startupUser.id,
+        userName: startupUser.name,
+        hasEnteredCode,
+        isAccepted,
+        shouldInclude: hasEnteredCode && isAccepted
+      });
+
+      return hasEnteredCode && isAccepted;
+    });
+
+    console.log('🔍 My Startups Result:', {
+      totalAccepted: acceptedStartups.length,
+      acceptedStartups: acceptedStartups.map(s => ({
+        id: s.id,
+        name: s.name,
+        userId: s.user_id
+      }))
+    });
+
+    return acceptedStartups;
+  }, [startups, users, currentUser?.investment_advisor_code]);
+
+  // Get accepted investors - FIXED VERSION
   const myInvestors = useMemo(() => {
-    if (!users || !Array.isArray(users)) return [];
-    
-    const acceptedInvestors = users.filter(user => 
-      user.role === 'Investor' &&
-      (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code &&
-      (user as any).advisor_accepted === true
-    );
-    
-    console.log('🔍 Accepted investors found:', acceptedInvestors.length, acceptedInvestors.map(inv => ({
-      id: inv.id,
-      name: inv.name,
-      email: inv.email,
-      code: (inv as any).investment_advisor_code_entered,
-      accepted: (inv as any).advisor_accepted
-    })));
-    
+    if (!users || !Array.isArray(users)) {
+      console.log('🔍 My Investors: Missing users data');
+      return [];
+    }
+
+    console.log('🔍 My Investors Debug:', {
+      totalUsers: users.length,
+      currentAdvisorCode: currentUser?.investment_advisor_code
+    });
+
+    // Find investors who have entered the investment advisor code and have been accepted
+    const acceptedInvestors = users.filter(user => {
+      const hasEnteredCode = user.role === 'Investor' && 
+        (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
+      const isAccepted = (user as any).advisor_accepted === true;
+
+      console.log('🔍 Accepted investor check:', {
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        hasEnteredCode,
+        isAccepted,
+        shouldInclude: hasEnteredCode && isAccepted
+      });
+
+      return hasEnteredCode && isAccepted;
+    });
+
+    console.log('🔍 My Investors Result:', {
+      totalAccepted: acceptedInvestors.length,
+      acceptedInvestors: acceptedInvestors.map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email
+      }))
+    });
+
     return acceptedInvestors;
   }, [users, currentUser?.investment_advisor_code]);
 
-  const myStartups = useMemo(() => {
-    if (!startups || !Array.isArray(startups)) return [];
-    return startups.filter(startup => 
-      (startup as any).investment_advisor_code === currentUser?.investment_advisor_code
-    );
-  }, [startups, currentUser?.investment_advisor_code]);
+  // Create serviceRequests by combining pending startups and investors - FIXED VERSION
+  const serviceRequests = useMemo(() => {
+    const startupRequests = pendingStartupRequests.map(startup => {
+      const startupUser = users.find(user => user.id === startup.user_id);
+      return {
+        id: startup.id,
+        name: startup.name,
+        email: startupUser?.email || '',
+        type: 'startup',
+        created_at: startup.created_at || new Date().toISOString()
+      };
+    });
+
+    const investorRequests = pendingInvestorRequests.map(user => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      type: 'investor',
+      created_at: user.created_at || new Date().toISOString()
+    }));
+
+    const allRequests = [...startupRequests, ...investorRequests];
+
+    console.log('🔍 Service Requests Combined:', {
+      totalRequests: allRequests.length,
+      startupRequests: startupRequests.length,
+      investorRequests: investorRequests.length,
+      allRequests: allRequests.map(req => ({
+        id: req.id,
+        name: req.name,
+        email: req.email,
+        type: req.type
+      }))
+    });
+
+    return allRequests;
+  }, [pendingStartupRequests, pendingInvestorRequests, users]);
+
+  // Debug logging for the complete state
+  console.log('🔍 Investment Advisor Complete Debug:', {
+    currentUser: {
+      id: currentUser?.id,
+      name: currentUser?.name,
+      email: currentUser?.email,
+      role: currentUser?.role,
+      investment_advisor_code: currentUser?.investment_advisor_code
+    },
+    dataCounts: {
+      totalUsers: users?.length || 0,
+      totalStartups: startups?.length || 0,
+      pendingStartupRequests: pendingStartupRequests.length,
+      pendingInvestorRequests: pendingInvestorRequests.length,
+      myStartups: myStartups.length,
+      myInvestors: myInvestors.length,
+      serviceRequests: serviceRequests.length
+    },
+    pendingStartupDetails: pendingStartupRequests.map(s => ({
+      id: s.id,
+      name: s.name,
+      userId: s.user_id
+    })),
+    pendingInvestorDetails: pendingInvestorRequests.map(u => ({
+      id: u.id,
+      name: u.name,
+      email: u.email
+    }))
+  });
 
   // Get offers made by my investors or received by my startups
   const offersMade = useMemo(() => {
@@ -282,17 +466,22 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       if (request.type === 'investor') {
         await (userService as any).acceptInvestmentAdvisorRequest(request.id, financialMatrix);
       } else {
-        // For startup requests, we need to find the startup ID associated with the user
-        console.log('🔍 Finding startup for user:', request.id);
-        const userStartup = startups.find(startup => startup.user_id === request.id);
+        // For startup requests, request.id is the startup ID, we need to find the user ID
+        console.log('🔍 Finding user for startup:', request.id);
+        const startup = startups.find(s => s.id === request.id);
         
-        if (!userStartup) {
-          throw new Error('Startup not found for this user');
+        if (!startup) {
+          throw new Error('Startup not found');
         }
         
-        console.log('🔍 Found startup:', userStartup);
+        const startupUser = users.find(user => user.id === startup.user_id);
+        if (!startupUser) {
+          throw new Error('Startup user not found');
+        }
+        
+        console.log('🔍 Found startup and user:', { startup, startupUser });
         // Pass both startup ID and user ID to the function
-        await (userService as any).acceptStartupAdvisorRequest(userStartup.id, request.id, financialMatrix);
+        await (userService as any).acceptStartupAdvisorRequest(startup.id, startupUser.id, financialMatrix);
       }
       
       alert(`${request.type === 'investor' ? 'Investor' : 'Startup'} request accepted successfully!`);
@@ -439,6 +628,28 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         <p><strong>Investors with your code:</strong> {users?.filter(u => u.role === 'Investor' && (u as any).investment_advisor_code_entered === currentUser?.investment_advisor_code).length || 0}</p>
         <p><strong>Pending Requests:</strong> {serviceRequests.length}</p>
         <p><strong>Accepted Investors:</strong> {myInvestors.length}</p>
+        
+        {/* Fix Button - Only show for Investment Advisor role users */}
+        {!currentUser?.investment_advisor_code && currentUser?.role === 'Investment Advisor' && (
+          <div className="mt-3 p-3 bg-red-100 border border-red-300 rounded">
+            <p className="text-red-800 font-medium mb-2">⚠️ No Investment Advisor Code Found</p>
+            <button
+              onClick={async () => {
+                const result = await fixCurrentUser.assignInvestmentAdvisorCode();
+                if (result.success) {
+                  alert(`✅ ${result.message}\nYour new advisor code: ${result.code}`);
+                  window.location.reload();
+                } else {
+                  alert(`❌ ${result.message}`);
+                }
+              }}
+              className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
+            >
+              🔧 Fix: Assign Investment Advisor Code
+            </button>
+          </div>
+        )}
+        
         <details className="mt-2">
           <summary className="cursor-pointer font-medium">Show All Users with Advisor Codes</summary>
           <pre className="mt-2 text-xs bg-white p-2 rounded overflow-auto max-h-40">
@@ -573,6 +784,23 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
                 Investment Interests
+              </div>
+            </button>
+            
+            <button
+              onClick={() => setActiveTab('system')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'system'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                System Manager
               </div>
             </button>
           </nav>
@@ -1319,6 +1547,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {activeTab === 'system' && (
+        <UserDataManager />
       )}
 
       {/* Accept Request Modal */}

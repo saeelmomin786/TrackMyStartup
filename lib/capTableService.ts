@@ -106,19 +106,16 @@ class CapTableService {
   }
 
   async getStartupSharesData(startupId: number): Promise<{totalShares: number, esopReservedShares: number, pricePerShare: number}> {
-    // Try to recalculate shares first, but don't fail if the function doesn't exist
-    try {
-      await this.recalculateShares(startupId);
-    } catch (error) {
-      console.warn('⚠️ Could not recalculate shares (function may not exist):', error);
-      // Continue with loading data even if recalculation fails
-    }
+    console.log('🚨 CRITICAL - getStartupSharesData called for startupId:', startupId);
     
+    // Load shares data directly from startup_shares table
     const { data, error } = await supabase
       .from('startup_shares')
       .select('total_shares, esop_reserved_shares, price_per_share')
       .eq('startup_id', startupId)
       .single();
+
+    console.log('🚨 CRITICAL - getStartupSharesData database query result:', { data, error });
 
     if (error && error.code !== 'PGRST116') { // PGRST116: row not found
       console.error('❌ Error loading startup shares data:', error);
@@ -131,26 +128,21 @@ class CapTableService {
       pricePerShare: data?.price_per_share ?? 0
     };
     
-    console.log('🔍 Shares data loaded from startup_shares table:', result);
+    console.log('🚨 CRITICAL - getStartupSharesData returning:', result);
+    
+    // DETAILED DEBUG: Track what data is being returned
+    console.log('🔍 DETAILED DEBUG - getStartupSharesData Data Analysis:', {
+      'rawData': data,
+      'totalShares': result.totalShares,
+      'esopReservedShares': result.esopReservedShares,
+      'pricePerShare': result.pricePerShare,
+      'hasPricePerShare': result.pricePerShare > 0,
+      'dataSource': 'startup_shares table'
+    });
+    
     return result;
   }
 
-  // New method to recalculate shares using database function
-  async recalculateShares(startupId: number): Promise<void> {
-    try {
-      const { error } = await supabase.rpc('recalculate_all_startup_funding', {
-        startup_id_param: startupId
-      });
-      
-      if (error) {
-        console.error('Error recalculating shares:', error);
-        throw error; // Throw error so it can be caught by the calling function
-      }
-    } catch (error) {
-      console.error('Error calling recalculate_all_startup_funding:', error);
-      throw error; // Re-throw to be caught by the calling function
-    }
-  }
 
   // New method to get accurate cap table data
   async getCapTableData(startupId: number): Promise<any> {

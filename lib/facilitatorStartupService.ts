@@ -127,36 +127,78 @@ class FacilitatorStartupService {
         throw startupError;
       }
 
-             // Fetch cap table data for current valuation
-      const { data: capTableData, error: capError } = await supabase
-        .from('cap_table')
+      // Fetch investment records for current valuation (using existing table)
+      const { data: investmentData, error: investmentError } = await supabase
+        .from('investment_records')
         .select('*')
         .in('startup_id', startupIds)
-        .order('created_at', { ascending: false });
+        .order('date', { ascending: false });
 
-      // Fetch compliance data
-      const { data: complianceData, error: complianceError } = await supabase
-        .from('compliance_tasks')
-        .select('*')
-        .in('startup_id', startupIds);
+      // Initialize empty arrays for missing tables
+      let capTableData = [];
+      let complianceData = [];
+      let financialData = [];
+      let incubationData = [];
 
-      // Fetch financial data
-      const { data: financialData, error: financialError } = await supabase
-        .from('financials')
-        .select('*')
-        .in('startup_id', startupIds);
+      // Try to fetch cap table data (if table exists)
+      try {
+        const { data: capData, error: capError } = await supabase
+          .from('cap_table')
+          .select('*')
+          .in('startup_id', startupIds)
+          .order('created_at', { ascending: false });
+        
+        if (!capError) {
+          capTableData = capData || [];
+        }
+      } catch (err) {
+        console.warn('Cap table not available, using investment records instead');
+      }
 
-      // Fetch incubation programs data
-      const { data: incubationData, error: incubationError } = await supabase
-        .from('incubation_programs')
-        .select('*')
-        .in('startup_id', startupIds);
+      // Try to fetch compliance data (if table exists)
+      try {
+        const { data: complianceDataResult, error: complianceError } = await supabase
+          .from('compliance_tasks')
+          .select('*')
+          .in('startup_id', startupIds);
+        
+        if (!complianceError) {
+          complianceData = complianceDataResult || [];
+        }
+      } catch (err) {
+        console.warn('Compliance tasks table not available');
+      }
+
+      // Try to fetch financial data (if table exists)
+      try {
+        const { data: financialDataResult, error: financialError } = await supabase
+          .from('financials')
+          .select('*')
+          .in('startup_id', startupIds);
+        
+        if (!financialError) {
+          financialData = financialDataResult || [];
+        }
+      } catch (err) {
+        console.warn('Financials table not available');
+      }
+
+      // Try to fetch incubation programs data (if table exists)
+      try {
+        const { data: incubationDataResult, error: incubationError } = await supabase
+          .from('incubation_programs')
+          .select('*')
+          .in('startup_id', startupIds);
+        
+        if (!incubationError) {
+          incubationData = incubationDataResult || [];
+        }
+      } catch (err) {
+        console.warn('Incubation programs table not available');
+      }
 
       // Log errors but don't fail the entire operation
-      if (capError) console.warn('Warning: Could not fetch cap table data:', capError);
-      if (complianceError) console.warn('Warning: Could not fetch compliance data:', complianceError);
-      if (financialError) console.warn('Warning: Could not fetch financial data:', financialError);
-      if (incubationError) console.warn('Warning: Could not fetch incubation data:', incubationError);
+      if (investmentError) console.warn('Warning: Could not fetch investment data:', investmentError);
 
       // Map the data
       return (startups || []).map(startup => {
@@ -164,11 +206,15 @@ class FacilitatorStartupService {
         const startupCompliance = complianceData?.filter(c => c.startup_id === startup.id) || [];
         const startupFinancial = financialData?.filter(c => c.startup_id === startup.id) || [];
         const startupIncubation = incubationData?.filter(c => c.startup_id === startup.id) || [];
+        const startupInvestments = investmentData?.filter(c => c.startup_id === startup.id) || [];
 
-                 // Calculate current valuation from cap table (latest entry)
-         const latestCapTableEntry = startupCapTable[0]; // Already ordered by created_at DESC
-         
-         const currentValuation = latestCapTableEntry?.post_money_valuation || startup.current_valuation || 0;
+        // Calculate current valuation from investment records (latest entry)
+        const latestInvestment = startupInvestments[0]; // Already ordered by date DESC
+        const latestCapTableEntry = startupCapTable[0]; // Fallback to cap table if available
+        
+        const currentValuation = latestInvestment?.post_money_valuation || 
+                                latestCapTableEntry?.post_money_valuation || 
+                                startup.current_valuation || 0;
 
         // Calculate overall compliance status
         const complianceStatus = this.calculateOverallComplianceStatus(startupCompliance);
@@ -185,7 +231,8 @@ class FacilitatorStartupService {
           capTableData: startupCapTable,
           complianceData: startupCompliance,
           financialData: startupFinancial,
-          incubationData: startupIncubation
+          incubationData: startupIncubation,
+          investmentData: startupInvestments
         };
       });
     } catch (error) {

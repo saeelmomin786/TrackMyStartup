@@ -118,6 +118,12 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         setProfileUpdateTrigger(prev => prev + 1);
     };
 
+    const handleEsopUpdate = () => {
+        console.log('🔄 StartupHealthView: ESOP updated, refreshing startup data...');
+        // Force a refresh of the startup data to get updated price per share
+        setCurrentStartup(prev => ({ ...prev }));
+    };
+
     const handleUpdateCompliance = (startupId: number, taskId: string, checker: 'ca' | 'cs', newStatus: ComplianceStatus) => {
         // Update the compliance check in the startup
         const updatedComplianceChecks = currentStartup.complianceChecks?.map(check => 
@@ -178,7 +184,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             case 'financials':
                 return <FinancialsTab startup={currentStartup} userRole={userRole} isViewOnly={isViewOnly} />;
             case 'employees':
-                return <EmployeesTab startup={currentStartup} userRole={userRole} isViewOnly={isViewOnly} />;
+                return <EmployeesTab startup={currentStartup} userRole={userRole} isViewOnly={isViewOnly} onEsopUpdated={handleEsopUpdate} />;
             case 'capTable':
                 return <CapTableTab 
                             startup={currentStartup}

@@ -24,6 +24,7 @@ import { Loader2 } from 'lucide-react';
 import { formatCurrency, formatCurrencyCompact, getCurrencyForCountry } from '../../lib/utils';
 import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
 import { generateInvestorListPDF, generateIndividualInvestorPDF, downloadBlob, InvestorReportData, IndividualInvestorReportData, PDFReportOptions } from '../../lib/pdfGenerator';
+import { testInvestmentOffers } from '../../lib/testInvestmentOffers';
 
 interface CapTableTabProps {
   startup: Startup;
@@ -109,12 +110,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     .eq('startup_id', startup.id);
                 console.log('🔍 Direct founders query result:', foundersData, foundersError);
                 
-                // Check startup_shares directly
+                // Check startup_shares directly - THIS IS CRITICAL
                 const { data: sharesData, error: sharesError } = await supabase
                     .from('startup_shares')
                     .select('*')
                     .eq('startup_id', startup.id);
-                console.log('🔍 Direct shares query result:', sharesData, sharesError);
+                console.log('🚨 CRITICAL - Direct startup_shares query result:', sharesData, sharesError);
+                console.log('🚨 CRITICAL - ESOP reserved shares from database:', sharesData?.[0]?.esop_reserved_shares);
                 
                 // Check startups table for profile data
                 const { data: profileData, error: profileError } = await supabase
@@ -211,25 +213,21 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const calculateTotalShares = () => {
         const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
         const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-        const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
+        const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0; // Use startup object as fallback
         const totalRecognitionShares = recognitionRecords
             .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
             .reduce((sum, rec) => sum + (rec.shares || 0), 0);
         
         const totalShares = totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares;
         
-        console.log('📊 Total Shares Calculation:', {
+        console.log('📊 RECREATED Total Shares Calculation:', {
             totalFounderShares,
             totalInvestorShares,
             esopReservedShares,
             totalRecognitionShares,
             totalShares,
-            recognitionRecords: recognitionRecords.map(rec => ({
-                id: rec.id,
-                feeType: rec.feeType,
-                shares: rec.shares,
-                programName: rec.programName
-            }))
+            esopData: esopData,
+            esopDataEsopReservedShares: esopData?.esopReservedShares
         });
         
         return totalShares;
@@ -263,6 +261,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setupRealTimeSubscriptions();
         }
     }, [startup?.id]); // Only depend on startup.id, not the entire startup object
+
+    // Monitor esopData changes
+    useEffect(() => {
+        console.log('🚨 CRITICAL - esopData changed:', esopData);
+    }, [esopData]);
 
     // Validate shares allocation when data changes
     useEffect(() => {
@@ -624,7 +627,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 financialsService.getFinancialRecords(startup.id),
                 recognitionService.getRecognitionRecordsByStartupId(startup.id),
                 // Load startup data to get country, registration info, and profile data (all from startups table)
-                supabase.from('startups').select('country_of_registration, company_type, registration_date, currency, country, total_shares, price_per_share, esop_reserved_shares').eq('id', startup.id).single(),
+                supabase.from('startups').select('country_of_registration, company_type, registration_date, currency, country, total_shares, price_per_share').eq('id', startup.id).single(),
                 employeesService.getEmployees(startup.id)
             ]);
 
@@ -681,7 +684,16 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
 
             // Handle shares data - only load ESOP reserved shares and price per share
             // Check if startup already has share data (e.g., from facilitator access)
-            const hasExistingShareData = startup.esopReservedShares !== undefined || startup.pricePerShare !== undefined;
+            // Only consider it existing if the values are meaningful (not 0 or undefined)
+            const hasExistingShareData = (startup.esopReservedShares !== undefined && startup.esopReservedShares > 0) || 
+                                       (startup.pricePerShare !== undefined && startup.pricePerShare > 0);
+            
+            console.log('🚨 CRITICAL - totalSharesData status check:', {
+                totalSharesDataStatus: totalSharesData.status,
+                hasExistingShareData,
+                startupEsopReservedShares: startup.esopReservedShares,
+                startupPricePerShare: startup.pricePerShare
+            });
             
             if (hasExistingShareData) {
                 console.log('🔍 Startup already has share data, preserving it:', {
@@ -691,7 +703,9 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 });
                 setPricePerShare(startup.pricePerShare || 0);
             } else if (totalSharesData.status === 'fulfilled') {
+                console.log('🚨 CRITICAL - totalSharesData.status is fulfilled');
                 const sharesData = totalSharesData.value;
+                console.log('🚨 CRITICAL - sharesData from totalSharesData:', sharesData);
                 const esopShares = Number(sharesData.esopReservedShares) || 0;
                 const pricePerShare = Number(sharesData.pricePerShare) || 0;
                 
@@ -712,13 +726,50 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         pricePerShare: startup.pricePerShare
                     });
                     console.log('🔍 Startup object after update:', startup);
+                }
                     
                     // Update ESOP data state to force re-render
-                    setEsopData({
+                const newEsopData = {
                         esopReservedShares: esopShares,
                         totalShares: sharesData.totalShares || 0,
                         pricePerShare: pricePerShare
-                    });
+                };
+                setEsopData(newEsopData);
+                
+                console.log('✅ ESOP data state updated from startup_shares table:', newEsopData);
+                console.log('🚨 CRITICAL DEBUG - setEsopData called with:', newEsopData);
+                
+                // Calculate and save price per share if not already saved
+                if (pricePerShare === 0 && sharesData.totalShares > 0) {
+                    console.log('🔄 No price per share in database, calculating and saving...');
+                    try {
+                        // Get latest valuation
+                        let latestValuation = startup.currentValuation || 0;
+                        if (investmentRecords && investmentRecords.length > 0) {
+                            const latest = [...investmentRecords]
+                                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
+                            if (latest?.postMoneyValuation && latest.postMoneyValuation > 0) {
+                                latestValuation = latest.postMoneyValuation;
+                            }
+                        }
+                        
+                        if (latestValuation > 0) {
+                            const calculatedPricePerShare = latestValuation / sharesData.totalShares;
+                            console.log('✅ Calculated price per share:', calculatedPricePerShare, '(Valuation:', latestValuation, '/ Shares:', sharesData.totalShares, ')');
+                            
+                            // Save to database
+                            await capTableService.upsertPricePerShare(startup.id, calculatedPricePerShare);
+                            console.log('✅ Saved calculated price per share to database:', calculatedPricePerShare);
+                            
+                            // Update local state
+                            setPricePerShare(calculatedPricePerShare);
+                            if (startup) {
+                                startup.pricePerShare = calculatedPricePerShare;
+                            }
+                        }
+                    } catch (err) {
+                        console.error('❌ Failed to calculate and save price per share:', err);
+                    }
                 }
                 
                 // Check if startup_shares record exists, if not, create it with default ESOP
@@ -753,8 +804,24 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         if (startup) {
                             startup.esopReservedShares = profileData.esop_reserved_shares || 0;
                         }
+                        
+                        // Update ESOP data state from fallback
+                        const fallbackEsopData = {
+                            esopReservedShares: profileData.esop_reserved_shares || 0,
+                            totalShares: 0,
+                            pricePerShare: profileData.price_per_share || 0
+                        };
+                        setEsopData(fallbackEsopData);
+                        console.log('🚨 CRITICAL DEBUG - setEsopData called from fallback with:', fallbackEsopData);
                     } else {
                         setPricePerShare(0);
+                        const defaultEsopData = {
+                            esopReservedShares: 0,
+                            totalShares: 0,
+                            pricePerShare: 0
+                        };
+                        setEsopData(defaultEsopData);
+                        console.log('🚨 CRITICAL DEBUG - setEsopData called with default values:', defaultEsopData);
                     }
                 } catch (fallbackError) {
                     console.error('❌ Fallback shares loading also failed:', fallbackError);
@@ -775,7 +842,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 console.error('Failed to load recognition records:', recognitionData.reason);
             }
 
-            // Handle startup profile data
+            // Handle startup profile data (without ESOP data - that comes from startup_shares)
             console.log('🔍 Processing startup profile data...');
             console.log('🔍 Startup data status:', startupData.status);
             
@@ -790,30 +857,6 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             if (startupDataResult) {
                 setStartupProfileData(startupDataResult);
                 console.log('✅ Startup profile data loaded and set:', startupDataResult);
-                
-                // Update ESOP data state with fresh data from database
-                const esopReservedShares = startupDataResult.esop_reserved_shares || 0;
-                const totalShares = startupDataResult.total_shares || 0;
-                const pricePerShare = startupDataResult.price_per_share || 0;
-                
-                console.log('🔍 ESOP data from database:', {
-                    esopReservedShares,
-                    totalShares,
-                    pricePerShare
-                });
-                
-                setEsopData({
-                    esopReservedShares,
-                    totalShares,
-                    pricePerShare
-                });
-                
-                // Also update startup object
-                if (startup) {
-                    startup.esopReservedShares = esopReservedShares;
-                    startup.totalShares = totalShares;
-                    startup.pricePerShare = pricePerShare;
-                }
             } else {
                 console.log('⚠️ No startup profile data available');
             }
@@ -1918,22 +1961,53 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
              }
          });
          
-         // Add investor equity - use shares-based calculation
+         // Add investor equity - merge investors with same investor code
+         const investorGroups = new Map<string, { name: string; totalShares: number; totalEquity: number }>();
+         
          investmentRecords.forEach(inv => {
              if (inv.shares && inv.shares > 0 && calculatedTotalShares > 0) {
                  const investorPercentage = (inv.shares / calculatedTotalShares) * 100;
                  
                  if (investorPercentage > 0) {
-                     distribution.push({
-                         name: `Investor (${inv.investorName})`,
-                         value: investorPercentage
-                     });
+                     const key = inv.investorCode || inv.investorName;
+                     if (investorGroups.has(key)) {
+                         const existing = investorGroups.get(key)!;
+                         existing.totalShares += inv.shares;
+                         existing.totalEquity += investorPercentage;
+                     } else {
+                         investorGroups.set(key, {
+                             name: inv.investorName,
+                             totalShares: inv.shares,
+                             totalEquity: investorPercentage
+                         });
+                     }
                  }
              } else if (inv.equityAllocated && inv.equityAllocated > 0) {
                  // Fallback to stored equity percentage if no shares data
+                 const key = inv.investorCode || inv.investorName;
+                 if (investorGroups.has(key)) {
+                     const existing = investorGroups.get(key)!;
+                     existing.totalEquity += inv.equityAllocated;
+                 } else {
+                     investorGroups.set(key, {
+                         name: inv.investorName,
+                         totalShares: 0,
+                         totalEquity: inv.equityAllocated
+                     });
+                 }
+             }
+         });
+         
+         // Add merged investor groups to distribution
+         investorGroups.forEach((group, key) => {
+             if (group.totalEquity > 0) {
+                 const displayName = group.totalShares > 0 
+                     ? `Investor (${group.name})` 
+                     : `Investor (${group.name})`;
+                 
                  distribution.push({
-                     name: `Investor (${inv.investorName})`,
-                     value: inv.equityAllocated
+                     name: displayName,
+                     value: group.totalEquity
                  });
              }
          });
@@ -1946,6 +2020,22 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                  distribution.push({
                      name: 'ESOP Pool',
                      value: esopPercentage
+                 });
+             }
+         }
+         
+         // Add Recognition and Incubation equity from shares
+         const totalRecognitionShares = recognitionRecords
+             .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
+             .reduce((sum, rec) => sum + (rec.shares || 0), 0);
+             
+         if (totalRecognitionShares > 0 && calculatedTotalShares > 0) {
+             const recognitionPercentage = (totalRecognitionShares / calculatedTotalShares) * 100;
+             
+             if (recognitionPercentage > 0) {
+                 distribution.push({
+                     name: 'Recognition & Incubation',
+                     value: recognitionPercentage
                  });
              }
          }
@@ -1996,8 +2086,28 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             
             // Fetch investment offers for this startup
             console.log('💰 Fetching investment offers...');
+            console.log('💰 Startup ID:', startup.id);
+            console.log('💰 Startup object:', startup);
             const investmentOffers = await investmentService.getOffersForStartup(startup.id);
             console.log('💰 Investment offers fetched:', investmentOffers);
+            console.log('💰 Investment offers count:', investmentOffers?.length || 0);
+            
+            // Debug: Check if any offers exist in the database
+            const { data: debugOffers, error: debugOffersError } = await supabase
+                .from('investment_offers')
+                .select('*')
+                .eq('startup_id', startup.id);
+            console.log('💰 Direct database query result:', { debugOffers, debugOffersError });
+            console.log('💰 Direct database offers count:', debugOffers?.length || 0);
+            
+            // Debug: Check all offers to see their startup_ids
+            const { data: allDebugOffers, error: allDebugError } = await supabase
+                .from('investment_offers')
+                .select('id, startup_id, investor_email, offer_amount, status');
+            console.log('💰 All offers in database:', allDebugOffers);
+            console.log('💰 Current startup ID:', startup.id);
+            console.log('💰 Offers with matching startup_id:', allDebugOffers?.filter(offer => offer.startup_id === startup.id));
+            console.log('💰 All startup_ids in offers:', allDebugOffers?.map(offer => ({ id: offer.id, startup_id: offer.startup_id, investor: offer.investor_email })));
             
             // Fetch applications for this startup with all necessary data
             const { data: applications, error } = await supabase
@@ -2079,20 +2189,28 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             console.log('🔍 Applications that will pass filter:', applications?.filter(app => app.status === 'accepted' || app.diligence_status === 'requested'));
 
             // Transform investment offers into OfferReceived format
-            const investmentOffersFormatted: OfferReceived[] = investmentOffers.map((offer: any) => ({
-                id: `investment_${offer.id}`,
-                from: offer.investorName || offer.investorEmail || 'Unknown Investor', // Use organization name if available, fallback to email, then unknown
-                type: 'Investment' as const,
-                offerDetails: `${formatCurrency(offer.offerAmount, startupCurrency)} for ${offer.equityPercentage}% equity`,
-                status: offer.status as 'pending' | 'accepted' | 'rejected',
-                code: offer.id.toString(),
-                createdAt: offer.createdAt,
-                isInvestmentOffer: true,
-                investmentOfferId: offer.id,
-                startupScoutingFee: offer.startup_scouting_fee_paid || 0,
-                investorScoutingFee: offer.investor_scouting_fee_paid || 0,
-                contactDetailsRevealed: offer.contact_details_revealed || false
-            }));
+            console.log('💰 Formatting investment offers...');
+            console.log('💰 Raw investment offers to format:', investmentOffers);
+            const investmentOffersFormatted: OfferReceived[] = investmentOffers.map((offer: any) => {
+                console.log('💰 Formatting individual offer:', offer);
+                const formatted = {
+                    id: `investment_${offer.id}`,
+                    from: offer.investorName || offer.investorEmail || 'Unknown Investor', // Use organization name if available, fallback to email, then unknown
+                    type: 'Investment' as const,
+                    offerDetails: `${formatCurrency(offer.offerAmount, startupCurrency)} for ${offer.equityPercentage}% equity`,
+                    status: offer.status as 'pending' | 'accepted' | 'rejected',
+                    code: offer.id.toString(),
+                    createdAt: offer.createdAt,
+                    isInvestmentOffer: true,
+                    investmentOfferId: offer.id,
+                    startupScoutingFee: offer.startup_scouting_fee_paid || 0,
+                    investorScoutingFee: offer.investor_scouting_fee_paid || 0,
+                    contactDetailsRevealed: offer.contact_details_revealed || false
+                };
+                console.log('💰 Formatted offer:', formatted);
+                return formatted;
+            });
+            console.log('💰 All formatted investment offers:', investmentOffersFormatted);
 
             // Transform applications into offers - Show both accepted applications and pending diligence requests
             const incubationOffers: OfferReceived[] = (applications || [])
@@ -2476,6 +2594,28 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             }
                                         }
                                         const computedPricePerShare = latestValuation / calculatedTotalShares;
+                                        
+                                        // DETAILED DEBUG: Track Cap Table price calculation
+                                        console.log('🔍 DETAILED DEBUG - Cap Table Price Per Share Calculation:', {
+                                            'startup.currentValuation': startup.currentValuation,
+                                            'latestValuation': latestValuation,
+                                            'calculatedTotalShares': calculatedTotalShares,
+                                            'computedPricePerShare': computedPricePerShare,
+                                            'formattedPrice': formatCurrency(computedPricePerShare, startupCurrency),
+                                            'calculation': `${latestValuation} / ${calculatedTotalShares} = ${computedPricePerShare}`
+                                        });
+                                        
+                                        // Save the calculated price per share to database
+                                        if (computedPricePerShare > 0) {
+                                            capTableService.upsertPricePerShare(startup.id, computedPricePerShare)
+                                                .then(() => {
+                                                    console.log('✅ Saved calculated price per share to database:', computedPricePerShare);
+                                                })
+                                                .catch(err => {
+                                                    console.error('❌ Failed to save price per share:', err);
+                                                });
+                                        }
+                                        
                                         return `Price/Share: ${formatCurrency(computedPricePerShare, startupCurrency)}`;
                                     }
                                     return 'Price/Share: —';
@@ -2484,15 +2624,51 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         </div>
                     </div>
                      
-                     {/* Shares Allocation Summary */}
+                     {/* Shares Allocation Summary - Recreated */}
                      {(() => {
+                         // Calculate all share components
                          const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
                          const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-                         const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
                          const totalRecognitionShares = recognitionRecords
                              .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
                              .reduce((sum, rec) => sum + (rec.shares || 0), 0);
+                         
+                         // Get ESOP reserved shares from the correct source
+                         // Use startup object as fallback since esopData state is not updating properly
+                         const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
+                         
+                         // CRITICAL DEBUG: Check what we're actually using
+                         console.log('🚨 CRITICAL - ESOP calculation values:', {
+                             esopData,
+                             esopDataEsopReservedShares: esopData?.esopReservedShares,
+                             startupEsopReservedShares: startup.esopReservedShares,
+                             esopReservedShares,
+                             esopReservedSharesType: typeof esopReservedShares
+                         });
+                         
+                         // Calculate total shares
                          const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares;
+                         
+                         // CRITICAL DEBUG: Check if esopData is null
+                         console.log('🚨 CRITICAL DEBUG - esopData Status:', {
+                             esopDataIsNull: esopData === null,
+                             esopDataIsUndefined: esopData === undefined,
+                             esopDataType: typeof esopData,
+                             esopDataValue: esopData,
+                             esopDataEsopReservedShares: esopData?.esopReservedShares,
+                             esopDataEsopReservedSharesType: typeof esopData?.esopReservedShares
+                         });
+                         
+                         // Debug logging
+                         console.log('🔍 RECREATED Total Shares Calculation:', {
+                             totalFounderShares,
+                             totalInvestorShares,
+                             esopReservedShares,
+                             totalRecognitionShares,
+                             calculatedTotalShares,
+                             esopData: esopData,
+                             esopDataEsopReservedShares: esopData?.esopReservedShares
+                         });
                          
                          if (calculatedTotalShares > 0) {
                              return (
@@ -2501,9 +2677,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                      <div className="space-y-1 text-xs">
                                          <div className="flex justify-between">
                                              <span className="text-slate-500">Founders:</span>
-                                             <span className="text-slate-700">
-                                                 {totalFounderShares.toLocaleString()}
-                                             </span>
+                                             <span className="text-slate-700">{totalFounderShares.toLocaleString()}</span>
                                          </div>
                                          <div className="flex justify-between">
                                              <span className="text-slate-500">Investors:</span>
@@ -2511,17 +2685,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                          </div>
                                          <div className="flex justify-between">
                                              <span className="text-slate-500">ESOP Reserved:</span>
-                                             <span className="text-slate-700">
-                                                 {(() => {
-                                                     const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
-                                                     console.log('🔍 ESOP Reserved Display:', {
-                                                         esopReservedShares,
-                                                         esopDataEsopReservedShares: esopData?.esopReservedShares,
-                                                         startupEsopReservedShares: startup.esopReservedShares
-                                                     });
-                                                     return esopReservedShares.toLocaleString();
-                                                 })()}
-                                             </span>
+                                             <span className="text-slate-700">{esopReservedShares.toLocaleString()}</span>
                                          </div>
                                          {totalRecognitionShares > 0 && (
                                              <div className="flex justify-between">
@@ -2531,9 +2695,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                          )}
                                          <div className="flex justify-between font-medium pt-1 border-t border-slate-100">
                                              <span className="text-slate-600">Total:</span>
-                                             <span className="text-slate-900 font-bold">
-                                                 {calculatedTotalShares.toLocaleString()}
-                                             </span>
+                                             <span className="text-slate-900 font-bold">{calculatedTotalShares.toLocaleString()}</span>
                                          </div>
                                      </div>
                                  </div>
@@ -2717,14 +2879,47 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                          })()}
                          
                          {equityData.length > 0 ? (
-                             <div style={{ width: '100%', height: 300 }}>
+                             <div style={{ width: '100%', height: 350 }}>
                                  <ResponsiveContainer width="100%" height="100%">
                                      <PieChart>
-                                         <Pie data={equityData} cx="50%" cy="50%" labelLine={false} outerRadius={110} fill="#8884d8" dataKey="value" nameKey="name" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                                         <Pie 
+                                             data={equityData} 
+                                             cx="50%" 
+                                             cy="50%" 
+                                             labelLine={false} 
+                                             outerRadius={100} 
+                                             fill="#8884d8" 
+                                             dataKey="value" 
+                                             nameKey="name"
+                                             label={({ name, percent }) => {
+                                                 // Only show labels for segments > 5%
+                                                 if (percent < 0.05) return '';
+                                                 // Shorten long names
+                                                 const shortName = name.length > 15 ? name.substring(0, 15) + '...' : name;
+                                                 return `${shortName} ${(percent * 100).toFixed(0)}%`;
+                                             }}
+                                         >
                                              {equityData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                                          </Pie>
-                                         <Tooltip formatter={(value: number) => `${value}%`} />
-                                         <Legend />
+                                         <Tooltip 
+                                             formatter={(value: number) => `${value.toFixed(1)}%`}
+                                             labelFormatter={(label) => label}
+                                             contentStyle={{
+                                                 backgroundColor: 'white',
+                                                 border: '1px solid #e2e8f0',
+                                                 borderRadius: '8px',
+                                                 boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                                             }}
+                                         />
+                                         <Legend 
+                                             verticalAlign="bottom" 
+                                             height={36}
+                                             iconType="circle"
+                                             wrapperStyle={{
+                                                 fontSize: '12px',
+                                                 paddingTop: '10px'
+                                             }}
+                                         />
                                      </PieChart>
                                  </ResponsiveContainer>
                              </div>
@@ -2966,7 +3161,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             {/* Offers Received - moved below graphs and fundraising */}
             <Card>
                 <h3 className="text-lg font-semibold mb-4 text-slate-700">Offers Received</h3>
-                {isViewOnly && (
+                {(
                     <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                         <p className="text-sm text-blue-800">
                             <strong>Debug Info:</strong> Loading offers for startup ID: {startup.id} | 
@@ -2974,6 +3169,39 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                             User role: {userRole} | 
                             View only: {isViewOnly ? 'Yes' : 'No'}
                         </p>
+                        <div className="mt-2 flex gap-2">
+                            <button
+                                onClick={async () => {
+                                    console.log('🔍 Testing investment offers...');
+                                    const result = await testInvestmentOffers.checkAllInvestmentOffers();
+                                    console.log('🔍 All offers result:', result);
+                                    alert(`Found ${result.data?.count || 0} total investment offers in database`);
+                                }}
+                                className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                            >
+                                Test All Offers
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    console.log('🔍 Testing offers for this startup...');
+                                    const result = await testInvestmentOffers.checkOffersForStartup(startup.id);
+                                    console.log('🔍 Startup offers result:', result);
+                                    alert(`Found ${result.data?.count || 0} offers for startup ${startup.id}`);
+                                }}
+                                className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                            >
+                                Test Startup Offers
+                            </button>
+                            <button
+                                onClick={() => {
+                                    console.log('🔍 Reloading offers...');
+                                    loadOffersReceived();
+                                }}
+                                className="px-3 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700"
+                            >
+                                Reload Offers
+                            </button>
+                        </div>
                     </div>
                 )}
                 <div className="overflow-x-auto">
@@ -3582,65 +3810,6 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 </div>
             </Card>
 
-            {/* Incubation & Acceleration Programs */}
-            <Card>
-                <h3 className="text-lg font-semibold mb-4 text-slate-700">Incubation & Acceleration Programs</h3>
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200 text-sm">
-                        <thead className="bg-slate-50">
-                            <tr>
-                                <th className="px-4 py-2 text-left font-medium text-slate-500">Program Name</th>
-                                <th className="px-4 py-2 text-left font-medium text-slate-500">Program Type</th>
-                                <th className="px-4 py-2 text-left font-medium text-slate-500">Start Date</th>
-                                <th className="px-4 py-2 text-left font-medium text-slate-500">End Date</th>
-                                <th className="px-4 py-2 text-left font-medium text-slate-500">Status</th>
-                                <th className="px-4 py-2 text-right font-medium text-slate-500">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-slate-200">
-                            {incubationPrograms.map(program => (
-                                <tr key={program.id}>
-                                    <td className="px-4 py-2 font-medium text-slate-900">{program.programName}</td>
-                                    <td className="px-4 py-2 text-slate-500">{program.programType}</td>
-                                    <td className="px-4 py-2 text-slate-500">{program.startDate}</td>
-                                    <td className="px-4 py-2 text-slate-500">{program.endDate}</td>
-                                        <td className="px-4 py-2 text-slate-500">
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                            program.status === 'Active' ? 'bg-green-100 text-green-800' :
-                                            program.status === 'Completed' ? 'bg-blue-100 text-blue-800' :
-                                            'bg-red-100 text-red-800'
-                                        }`}>
-                                            {program.status}
-                                        </span>
-                                        </td>
-                                        <td className="px-4 py-2 text-right">
-                                        <Button 
-                                            size="sm" 
-                                            variant="outline" 
-                                            disabled={!canEdit}
-                                            onClick={() => handleEditIncubationProgram(program)}
-                                        >
-                                            <Edit3 className="h-4 w-4" />
-                                        </Button>
-                                        </td>
-                                    </tr>
-                            ))}
-                            {incubationPrograms.length === 0 && (
-                                <tr><td colSpan={6} className="px-6 py-6 text-center text-slate-500">
-                                    {isViewOnly ? (
-                                        <div className="space-y-2">
-                                            <p className="text-sm">No incubation programs enrolled yet.</p>
-                                            <p className="text-xs text-slate-400">This startup hasn't joined any incubation or acceleration programs.</p>
-                                        </div>
-                                    ) : (
-                                        "No incubation programs added yet."
-                                    )}
-                                </td></tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </Card>
 
             {/* Add Entry Form (Unified) */}
             <Card>

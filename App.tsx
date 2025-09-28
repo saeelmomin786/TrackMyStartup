@@ -15,6 +15,7 @@ import CAView from './components/CAView';
 import CSView from './components/CSView';
 import FacilitatorView from './components/FacilitatorView';
 import InvestmentAdvisorView from './components/InvestmentAdvisorView';
+import RazorpaySubscriptionModal from './components/RazorpaySubscriptionModal';
 import LoginPage from './components/LoginPage';
 import { TwoStepRegistration } from './components/TwoStepRegistration';
 import { CompleteRegistrationPage } from './components/CompleteRegistrationPage';
@@ -175,6 +176,11 @@ const App: React.FC = () => {
   const [verificationRequests, setVerificationRequests] = useState<VerificationRequest[]>([]);
   const [investmentOffers, setInvestmentOffers] = useState<InvestmentOffer[]>([]);
   const [validationRequests, setValidationRequests] = useState<ValidationRequest[]>([]);
+  const [pendingRelationships, setPendingRelationships] = useState<any[]>([]);
+
+  // Subscription modal state
+  const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
+  const [pendingStartupRequest, setPendingStartupRequest] = useState<StartupAdditionRequest | null>(null);
 
   // Refs for state variables to avoid dependency issues
   const startupsRef = useRef<Startup[]>([]);
@@ -759,6 +765,21 @@ const App: React.FC = () => {
        setInvestmentOffers(offersData.status === 'fulfilled' ? offersData.value : []);
        setValidationRequests(validationData.status === 'fulfilled' ? validationData.value : []);
 
+       // Fetch pending relationships for Investment Advisors
+       if (currentUser?.role === 'Investment Advisor' && currentUser?.id) {
+         try {
+           console.log('🔍 Fetching pending relationships for Investment Advisor:', currentUser.id);
+           const pendingRelationshipsData = await investmentService.getPendingInvestmentAdvisorRelationships(currentUser.id);
+           setPendingRelationships(pendingRelationshipsData);
+           console.log('🔍 Pending relationships loaded:', pendingRelationshipsData.length);
+         } catch (error) {
+           console.error('❌ Error fetching pending relationships:', error);
+           setPendingRelationships([]);
+         }
+       } else {
+         setPendingRelationships([]);
+       }
+
       console.log('Data fetched successfully!');
       console.log('Startups loaded:', startupsData.status === 'fulfilled' ? startupsData.value.length : 0);
       console.log('Users loaded:', usersData.status === 'fulfilled' ? usersData.value.length : 0);
@@ -1104,17 +1125,46 @@ const App: React.FC = () => {
 
   const handleAcceptStartupRequest = useCallback(async (requestId: number) => {
     try {
-      const newStartup = await startupAdditionService.acceptStartupRequest(requestId);
+      // Find the startup request
+      const startupRequest = startupAdditionRequests.find(req => req.id === requestId);
+      if (!startupRequest) {
+        alert('Startup request not found.');
+        return;
+      }
+
+      // Show subscription modal first
+      setPendingStartupRequest(startupRequest);
+      setIsSubscriptionModalOpen(true);
+    } catch (error) {
+      console.error('Error preparing startup request:', error);
+      alert('Failed to prepare startup request. Please try again.');
+    }
+  }, [startupAdditionRequests]);
+
+  const handleSubscriptionSuccess = useCallback(async () => {
+    if (!pendingStartupRequest) return;
+
+    try {
+      const newStartup = await startupAdditionService.acceptStartupRequest(pendingStartupRequest.id);
       
       // Update local state
       setStartups(prev => [...prev, newStartup]);
-      setStartupAdditionRequests(prev => prev.filter(req => req.id !== requestId));
+      setStartupAdditionRequests(prev => prev.filter(req => req.id !== pendingStartupRequest.id));
       
       alert(`${newStartup.name} has been added to your portfolio.`);
+      
+      // Reset modal state
+      setPendingStartupRequest(null);
+      setIsSubscriptionModalOpen(false);
     } catch (error) {
       console.error('Error accepting startup request:', error);
       alert('Failed to accept startup request. Please try again.');
     }
+  }, [pendingStartupRequest]);
+
+  const handleSubscriptionModalClose = useCallback(() => {
+    setIsSubscriptionModalOpen(false);
+    setPendingStartupRequest(null);
   }, []);
   
   const handleActivateFundraising = useCallback((details: FundraisingDetails, startup: Startup) => {
@@ -1683,6 +1733,7 @@ const App: React.FC = () => {
           investments={newInvestments}
           offers={investmentOffers}
           interests={[]} // TODO: Add investment interests data
+          pendingRelationships={pendingRelationships}
         />
       );
     }
@@ -1887,6 +1938,14 @@ const App: React.FC = () => {
         <main className="container mx-auto p-4 sm:p-6 lg:p-8 flex-1">
           <MainContent key={`${viewKey}-${forceRender}`} />
         </main>
+      
+        {/* Razorpay Subscription Modal */}
+        <RazorpaySubscriptionModal
+          isOpen={isSubscriptionModalOpen}
+          onClose={handleSubscriptionModalClose}
+          onSubscriptionSuccess={handleSubscriptionSuccess}
+          startupName={pendingStartupRequest?.name || ''}
+        />
       
       {/* Footer removed - only shows on landing page */}
       </div>

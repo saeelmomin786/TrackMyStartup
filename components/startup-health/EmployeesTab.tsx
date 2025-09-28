@@ -19,6 +19,7 @@ interface EmployeesTabProps {
   startup: Startup;
   userRole?: string;
   isViewOnly?: boolean;
+  onEsopUpdated?: () => void;
 }
 
 // Remove local formatCurrency function - using utility function instead
@@ -80,7 +81,7 @@ const generateMockEmployees = async (startup: Startup): Promise<Employee[]> => {
 
 const COLORS = ['#1e40af', '#1d4ed8', '#3b82f6'];
 
-const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOnly = false }) => {
+const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOnly = false, onEsopUpdated }) => {
     const startupCurrency = useStartupCurrency(startup);
     const [isEditing, setIsEditing] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -101,10 +102,10 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     
     const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
 
-    // Load data on component mount
+    // Load data on component mount and when startup changes
     useEffect(() => {
         loadData();
-    }, [startup.id]);
+    }, [startup.id, startup.pricePerShare]);
 
     const loadData = async () => {
         try {
@@ -122,24 +123,53 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 capTableService.getEsopReservedShares(startup.id)
             ]);
             
-            // Calculate price per share dynamically (same logic as CapTableTab)
+            // Get fresh price per share from Cap Table service (same as CapTableTab)
             let calculatedPricePerShare = 0;
-            if (shares > 0) {
-                let latestValuation = startup.currentValuation || 0;
-                // Try to get latest valuation from investment records
-                try {
-                    const investmentRecords = await capTableService.getInvestmentRecords(startup.id);
-                    if (investmentRecords && investmentRecords.length > 0) {
-                        const latest = [...investmentRecords]
-                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
-                        if (latest?.postMoneyValuation && latest.postMoneyValuation > 0) {
-                            latestValuation = latest.postMoneyValuation;
+            try {
+                console.log('🔄 Loading fresh price per share from Cap Table...');
+                const sharesData = await capTableService.getStartupSharesData(startup.id);
+                if (sharesData && sharesData.pricePerShare > 0) {
+                    calculatedPricePerShare = sharesData.pricePerShare;
+                    console.log('✅ Fresh price per share from Cap Table:', calculatedPricePerShare);
+                } else {
+                    console.log('⚠️ No price per share from Cap Table, calculating fresh price...');
+                    // Calculate fresh price per share using current valuation and total shares
+                    if (shares > 0) {
+                        let latestValuation = startup.currentValuation || 0;
+                        // Try to get latest valuation from investment records
+                        try {
+                            const investmentRecords = await capTableService.getInvestmentRecords(startup.id);
+                            if (investmentRecords && investmentRecords.length > 0) {
+                                const latest = [...investmentRecords]
+                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
+                                if (latest?.postMoneyValuation && latest.postMoneyValuation > 0) {
+                                    latestValuation = latest.postMoneyValuation;
+                                    console.log('✅ Using latest valuation from investment records:', latestValuation);
+                                }
+                            }
+                        } catch (err) {
+                            console.log('Could not load investment records for price calculation:', err);
+                        }
+                        calculatedPricePerShare = latestValuation / shares;
+                        console.log('✅ Calculated fresh price per share:', calculatedPricePerShare, '(Valuation:', latestValuation, '/ Shares:', shares, ')');
+                        
+                        // Save the calculated price per share to database
+                        try {
+                            await capTableService.upsertPricePerShare(startup.id, calculatedPricePerShare);
+                            console.log('✅ Saved calculated price per share to database:', calculatedPricePerShare);
+                        } catch (saveErr) {
+                            console.error('❌ Failed to save calculated price per share:', saveErr);
                         }
                     }
-                } catch (err) {
-                    console.log('Could not load investment records for price calculation:', err);
                 }
-                calculatedPricePerShare = latestValuation / shares;
+            } catch (err) {
+                console.error('❌ Failed to load fresh price per share from Cap Table:', err);
+                // Fallback to manual calculation
+                if (shares > 0) {
+                    let latestValuation = startup.currentValuation || 0;
+                    calculatedPricePerShare = latestValuation / shares;
+                    console.log('⚠️ Fallback price per share calculation:', calculatedPricePerShare);
+                }
             }
             
             // Debug: Log the loaded values
@@ -148,7 +178,19 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 calculatedPricePerShare,
                 totalShares: shares,
                 esopReservedShares: esopShares,
-                summaryData: summaryData
+                summaryData: summaryData,
+                esopValueCalculation: `${esopShares} × ${calculatedPricePerShare} = ${(esopShares || 0) * calculatedPricePerShare}`
+            });
+            
+            // DETAILED DEBUG: Track all price per share sources
+            console.log('🔍 DETAILED DEBUG - Price Per Share Sources:', {
+                'startup.currentValuation': startup.currentValuation,
+                'startup.pricePerShare': startup.pricePerShare,
+                'calculatedPricePerShare': calculatedPricePerShare,
+                'totalShares': shares,
+                'esopReservedShares': esopShares,
+                'calculation': `Valuation: ${startup.currentValuation} / Shares: ${shares} = ${startup.currentValuation / shares}`,
+                'esopValue': `${esopShares} × ${calculatedPricePerShare} = ${(esopShares || 0) * calculatedPricePerShare}`
             });
             
             // Check if startup_shares record exists, if not, create it with default ESOP
@@ -341,7 +383,31 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     };
 
     // ESOP Reserved: USD = shares * latest price/share
-    const reservedEsopValue = (esopReservedShares || 0) * (pricePerShare || 0);
+    // Prioritize local pricePerShare (updated after ESOP save) over startup object
+    const updatedPricePerShare = pricePerShare || startup.pricePerShare || 0;
+    const reservedEsopValue = (esopReservedShares || 0) * updatedPricePerShare;
+    
+    console.log('🔍 ESOP Value Calculation:', {
+        esopReservedShares,
+        localPricePerShare: pricePerShare,
+        startupPricePerShare: startup.pricePerShare,
+        finalPricePerShare: updatedPricePerShare,
+        reservedEsopValue,
+        calculation: `${esopReservedShares} × ${updatedPricePerShare} = ${reservedEsopValue}`
+    });
+    
+    // DETAILED DEBUG: Track the final calculation
+    console.log('🔍 DETAILED DEBUG - Final ESOP Value Calculation:', {
+        'esopReservedShares': esopReservedShares,
+        'pricePerShare (local)': pricePerShare,
+        'startup.pricePerShare': startup.pricePerShare,
+        'startup.currentValuation': startup.currentValuation,
+        'finalPricePerShare': updatedPricePerShare,
+        'reservedEsopValue': reservedEsopValue,
+        'calculation': `${esopReservedShares} × ${updatedPricePerShare} = ${reservedEsopValue}`,
+        'expectedCalculation': `If using Cap Table price (₹975.35): ${esopReservedShares} × 975.35 = ${(esopReservedShares || 0) * 975.35}`,
+        'priceSource': pricePerShare > 0 ? 'local' : (startup.pricePerShare > 0 ? 'startup' : 'none')
+    });
     const allocatedEsopValue = summary?.total_esop_allocated || mockEmployees.reduce((acc, emp) => acc + emp.esopAllocation, 0);
     
     // Calculate ESOP percentage with improved logic
@@ -456,39 +522,12 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     <p className="text-2xl font-bold">{summary?.total_employees || mockEmployees.length}</p>
                 </Card>
                 <Card>
-                    <p className="text-sm font-medium text-slate-500">Total Equity Reserved for ESOPs</p>
-                    <div className="flex items-center gap-3">
-                        <Input 
-                            id="esop-reserved-shares"
-                            name="esop-reserved-shares"
-                            type="number"
-                            value={esopReservedDraft}
-                            onChange={(e) => setEsopReservedDraft(e.target.value)}
-                            onBlur={async () => {
-                                const parsed = Number(esopReservedDraft);
-                                if (!Number.isFinite(parsed) || parsed < 0) {
-                                    setEsopReservedDraft(String(esopReservedShares || 0));
-                                    return;
-                                }
-                                // Validation: shares must not exceed total shares
-                                if (totalShares && parsed > totalShares) {
-                                    setError('ESOP reserved shares cannot exceed total company shares');
-                                    setEsopReservedDraft(String(esopReservedShares || 0));
-                                    return;
-                                }
-                                try {
-                                    const saved = await capTableService.upsertEsopReservedShares(startup.id, parsed);
-                                    setEsopReservedShares(saved);
-                                } catch (err) {
-                                    console.error('Failed to save ESOP reserved shares', err);
-                                    setEsopReservedDraft(String(esopReservedShares || 0));
-                                }
-                            }}
-                        />
-                        <span className="text-slate-500">(shares)</span>
+                    <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-slate-500">Total Equity Reserved for ESOPs</p>
                         <Button size="sm" variant="outline" onClick={() => setIsEsopModalOpen(true)}>Edit</Button>
                     </div>
-                    <p className="text-2xl font-bold mt-1">{formatCurrencyUtil(reservedEsopValue, startupCurrency)}</p>
+                    <p className="text-2xl font-bold">{formatCurrencyUtil(reservedEsopValue, startupCurrency)}</p>
+                    <p className="text-sm text-slate-500 mt-1">{esopReservedShares.toLocaleString()} (shares)</p>
                     {pricePerShare === 0 && (
                         <div className="text-xs text-amber-600 mt-1">
                             <p className="font-medium">⚠️ Price per share not set</p>
@@ -531,6 +570,28 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                     const saved = await capTableService.upsertEsopReservedShares(startup.id, parsed);
                                     setEsopReservedShares(saved);
                                     setIsEsopModalOpen(false);
+                                    
+                                    // Force refresh of Cap Table data to get updated price per share
+                                    console.log('🔄 Refreshing Cap Table data after ESOP update...');
+                                    try {
+                                        // Get updated shares data from Cap Table
+                                        const updatedSharesData = await capTableService.getStartupSharesData(startup.id);
+                                        console.log('🔄 Updated shares data:', updatedSharesData);
+                                        
+                                        // Update the price per share with the fresh calculation
+                                        if (updatedSharesData && updatedSharesData.pricePerShare > 0) {
+                                            setPricePerShare(updatedSharesData.pricePerShare);
+                                            console.log('✅ Updated price per share:', updatedSharesData.pricePerShare);
+                                        }
+                                    } catch (refreshErr) {
+                                        console.error('❌ Failed to refresh Cap Table data:', refreshErr);
+                                    }
+                                    
+                                    // Also trigger the callback for any other components that need to refresh
+                                    if (onEsopUpdated) {
+                                        console.log('🔄 Triggering additional refresh callbacks');
+                                        onEsopUpdated();
+                                    }
                                 } catch (err) {
                                     console.error('Failed to save ESOP reserved shares', err);
                                 }

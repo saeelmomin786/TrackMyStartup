@@ -15,6 +15,7 @@ import { facilitatorStartupService, StartupDashboardData } from '../lib/facilita
 import { facilitatorCodeService } from '../lib/facilitatorCodeService';
 import { FacilitatorCodeDisplay } from './FacilitatorCodeDisplay';
 import ProfilePage from './ProfilePage';
+import { capTableService } from '../lib/capTableService';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -115,8 +116,79 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [portfolioStartups, setPortfolioStartups] = useState<StartupDashboardData[]>([]);
   const [isLoadingPortfolio, setIsLoadingPortfolio] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPrices, setCurrentPrices] = useState<Record<number, number>>({});
 
   const formatCurrency = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact' }).format(value);
+
+  // Load current prices directly from startup_shares table
+  const loadCurrentPrices = async () => {
+    const prices: Record<number, number> = {};
+    
+    // Get unique startup IDs from recognition records
+    const uniqueStartupIds = [...new Set(recognitionRecords
+      .filter(record => record.equityAllocated && record.equityAllocated > 0)
+      .map(record => record.startupId))];
+
+    console.log('🔄 Loading current prices for startups:', uniqueStartupIds);
+
+    // Query startup_shares table directly for price_per_share
+    try {
+      const { data, error } = await supabase
+        .from('startup_shares')
+        .select('startup_id, price_per_share')
+        .in('startup_id', uniqueStartupIds);
+
+      console.log('🔍 Direct startup_shares query result:', { data, error });
+
+      if (error) {
+        console.error('❌ Error querying startup_shares table:', error);
+        console.log('🔍 Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        return;
+      }
+
+      // Map the results
+      if (data && data.length > 0) {
+        data.forEach(record => {
+          if (record.price_per_share && record.price_per_share > 0) {
+            prices[record.startup_id] = record.price_per_share;
+            console.log(`✅ Found price for startup ${record.startup_id}:`, record.price_per_share);
+          }
+        });
+      } else {
+        console.log('⚠️ No data returned from startup_shares query');
+      }
+
+      // For any missing prices, set to 0
+      uniqueStartupIds.forEach(startupId => {
+        if (!prices[startupId]) {
+          console.log(`⚠️ No price found for startup ${startupId}`);
+          prices[startupId] = 0;
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Failed to load prices from startup_shares table:', error);
+      // Set all prices to 0 on error
+      uniqueStartupIds.forEach(startupId => {
+        prices[startupId] = 0;
+      });
+    }
+    
+    console.log('✅ Final current prices:', prices);
+    setCurrentPrices(prices);
+  };
+
+  // Load current prices when recognition records or portfolio data changes
+  useEffect(() => {
+    if (recognitionRecords.length > 0) {
+      loadCurrentPrices();
+    }
+  }, [recognitionRecords, portfolioStartups]);
 
   const handleShare = async (startup: ActiveFundraisingStartup) => {
     console.log('Share button clicked for startup:', startup.name);
@@ -234,7 +306,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             sector, 
             total_funding,
             total_revenue,
-            registration_date
+            registration_date,
+            currency,
+            startup_shares (
+              price_per_share
+            )
           )
         `)
         .eq('facilitator_code', facilitatorCode)
@@ -257,7 +333,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               sector, 
               total_funding,
               total_revenue,
-              registration_date
+              registration_date,
+              currency,
+              startup_shares (
+                price_per_share
+              )
             )
           `)
           .eq('facilitator_code', facilitatorCode)
@@ -281,12 +361,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           incubationType: record.incubation_type,
           feeType: record.fee_type,
           feeAmount: record.fee_amount,
+          shares: record.shares,
+          pricePerShare: record.price_per_share,
+          investmentAmount: record.investment_amount,
           equityAllocated: record.equity_allocated,
           preMoneyValuation: record.pre_money_valuation,
+          postMoneyValuation: record.post_money_valuation,
           signedAgreementUrl: record.signed_agreement_url,
           status: record.status || 'pending',
           dateAdded: record.date_added,
-          startup: record.startups // Include startup data
+          startup: {
+            ...record.startups,
+            currentPricePerShare: record.startups?.startup_shares?.[0]?.price_per_share || 0
+          } // Include startup data with current price
         }));
         
         console.log('✅ Loaded recognition requests (fallback):', mappedRecords);
@@ -309,13 +396,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         incubationType: record.incubation_type,
         feeType: record.fee_type,
         feeAmount: record.fee_amount,
+        shares: record.shares,
+        pricePerShare: record.price_per_share,
+        investmentAmount: record.investment_amount,
         equityAllocated: record.equity_allocated,
         preMoneyValuation: record.pre_money_valuation,
+        postMoneyValuation: record.post_money_valuation,
         signedAgreementUrl: record.signed_agreement_url,
         status: record.status || 'pending',
         dateAdded: record.date_added,
-        // Include startup data for display
-        startup: record.startups
+        // Include startup data for display with current price
+        startup: {
+          ...record.startups,
+          currentPricePerShare: record.startups?.startup_shares?.[0]?.price_per_share || 0
+        }
       }));
       
       console.log('✅ Loaded recognition requests:', mappedRecords);
@@ -1849,7 +1943,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             </div>
 
             <div className="space-y-8">
-                {/* Recognition and Incubation Section */}
+                {/* Recognition & Incubation Requests (Free/Fee) */}
                 <Card>
                   <h3 className="text-lg font-semibold mb-4 text-slate-700">Recognition & Incubation Requests</h3>
                   <div className="overflow-x-auto">
@@ -1858,7 +1952,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
                         <p className="text-slate-500">Loading recognition requests...</p>
                       </div>
-                    ) : recognitionRecords.length === 0 ? (
+                    ) : (() => {
+                      const freeOrFeeRecords = recognitionRecords.filter(record => 
+                        record.feeType === 'Free' || record.feeType === 'Fee'
+                      );
+                      
+                      return freeOrFeeRecords.length === 0 ? (
                       <div className="text-center py-8 text-slate-500">
                         <p>No recognition requests received yet.</p>
                         <p className="text-sm mt-1">Startups will appear here when they submit recognition forms.</p>
@@ -1869,20 +1968,28 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Program</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Type</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee Type</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Documents</th>
                             <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200">
-                          {recognitionRecords.map((record) => (
+                            {freeOrFeeRecords.map((record) => (
                             <tr key={record.id}>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="text-sm font-medium text-slate-900">{record.startup?.name || 'Unknown Startup'}</div>
                                 <div className="text-xs text-slate-500">{record.startup?.sector || 'N/A'}</div>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">{record.programName}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{record.incubationType}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    record.feeType === 'Free' 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : 'bg-blue-100 text-blue-800'
+                                  }`}>
+                                    {record.feeType}
+                                  </span>
+                                </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                                 {record.signedAgreementUrl ? (
                                   <a 
@@ -1906,7 +2013,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                         disabled={processingRecognitionId === record.id}
                                     >
                                         <Check className="mr-2 h-4 w-4" />
-                                        {processingRecognitionId === record.id ? 'Processing...' : 'Accept'}
+                                        {processingRecognitionId === record.id ? 'Processing...' : 'Pay and Accept'}
                                     </Button>
                                 )}
                                 {record.status === 'approved' && (
@@ -1946,7 +2053,131 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           ))}
                         </tbody>
                       </table>
-                    )}
+                      );
+                    })()}
+                  </div>
+                </Card>
+
+                {/* Investment Requests (Equity/Hybrid) */}
+                <Card>
+                  <h3 className="text-lg font-semibold mb-4 text-slate-700">Investment Requests</h3>
+                  <div className="overflow-x-auto">
+                    {isLoadingRecognition ? (
+                      <div className="text-center py-8">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                        <p className="text-slate-500">Loading investment requests...</p>
+                      </div>
+                    ) : (() => {
+                      const equityOrHybridRecords = recognitionRecords.filter(record => 
+                        record.feeType === 'Equity' || record.feeType === 'Hybrid'
+                      );
+                      
+                      return equityOrHybridRecords.length === 0 ? (
+                        <div className="text-center py-8 text-slate-500">
+                          <p>No investment requests received yet.</p>
+                          <p className="text-sm mt-1">Startups seeking equity investment will appear here.</p>
+                        </div>
+                      ) : (
+                        <table className="min-w-full divide-y divide-slate-200">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Program</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee Type</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Equity/Investment</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Documents</th>
+                              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-slate-200">
+                            {equityOrHybridRecords.map((record) => (
+                              <tr key={record.id}>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <div className="text-sm font-medium text-slate-900">{record.startup?.name || 'Unknown Startup'}</div>
+                                  <div className="text-xs text-slate-500">{record.startup?.sector || 'N/A'}</div>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">{record.programName}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    record.feeType === 'Equity' 
+                                      ? 'bg-purple-100 text-purple-800' 
+                                      : 'bg-orange-100 text-orange-800'
+                                  }`}>
+                                    {record.feeType}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                  {record.equityAllocated ? (
+                                    <span className="font-medium text-slate-900">{record.equityAllocated}%</span>
+                                  ) : (
+                                    <span className="text-slate-400">—</span>
+                                  )}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                  {record.signedAgreementUrl ? (
+                                    <a 
+                                      href={record.signedAgreementUrl} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:text-blue-800 underline"
+                                    >
+                                      View Agreement
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-400">No document</span>
+                                  )}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                  <div className="flex items-center gap-2 justify-end">
+                                    {record.status === 'pending' && (
+                                      <Button 
+                                        size="sm" 
+                                        onClick={() => handleApproveRecognition(record.id)}
+                                        disabled={processingRecognitionId === record.id}
+                                      >
+                                        <Check className="mr-2 h-4 w-4" />
+                                        {processingRecognitionId === record.id ? 'Processing...' : 'Pay and Accept'}
+                                      </Button>
+                                    )}
+                                    {record.status === 'approved' && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline" 
+                                        disabled
+                                        className="bg-green-50 text-green-700 border-green-200"
+                                      >
+                                        <Check className="mr-2 h-4 w-4" />
+                                        Approved
+                                      </Button>
+                                    )}
+                                    {processingRecognitionId === record.id && record.status !== 'approved' && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline" 
+                                        disabled
+                                        className="bg-blue-50 text-blue-700 border-blue-200"
+                                      >
+                                        <Check className="mr-2 h-4 w-4" />
+                                        Processing...
+                                      </Button>
+                                    )}
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => handleDeleteRecognitionRecord(record.id)}
+                                      className="text-red-600 border-red-600 hover:bg-red-50"
+                                      title="Delete recognition record"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      );
+                    })()}
                   </div>
                 </Card>
 
@@ -2117,7 +2348,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </div>
                   <div className="ml-4">
                     <p className="text-sm font-medium text-slate-500">Total Investments</p>
-                    <p className="text-2xl font-bold text-slate-900">{portfolioStartups.length}</p>
+                    <p className="text-2xl font-bold text-slate-900">
+                      {recognitionRecords.filter(record => record.equityAllocated && record.equityAllocated > 0).length}
+                    </p>
                   </div>
                 </div>
               </Card>
@@ -2127,8 +2360,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     <Users className="h-6 w-6 text-blue-600" />
                   </div>
                   <div className="ml-4">
-                    <p className="text-sm font-medium text-slate-500">Active Startups</p>
-                    <p className="text-2xl font-bold text-slate-900">{portfolioStartups.filter(s => s.complianceStatus === 'compliant').length}</p>
+                    <p className="text-sm font-medium text-slate-500">Compliant Startups</p>
+                    <p className="text-2xl font-bold text-slate-900">
+                      {recognitionRecords.filter(record => 
+                        record.equityAllocated && 
+                        record.equityAllocated > 0 && 
+                        record.status === 'approved' &&
+                        record.startup?.compliance_status === 'Compliant'
+                      ).length}
+                    </p>
                   </div>
                 </div>
               </Card>
@@ -2139,7 +2379,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </div>
                   <div className="ml-4">
                     <p className="text-sm font-medium text-slate-500">Total Equity</p>
-                    <p className="text-2xl font-bold text-slate-900">15.5%</p>
+                    <p className="text-2xl font-bold text-slate-900">
+                      {recognitionRecords
+                        .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                        .reduce((sum, record) => sum + (record.equityAllocated || 0), 0)
+                        .toFixed(1)}%
+                    </p>
                   </div>
                 </div>
               </Card>
@@ -2150,22 +2395,49 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               <Card>
                 <h4 className="text-lg font-semibold text-slate-700 mb-4">Investment Distribution by Sector</h4>
                 <div className="space-y-3">
-                  {['Technology', 'Healthcare', 'Finance', 'Education', 'Other'].map((sector, index) => (
+                  {(() => {
+                    // Calculate sector distribution from actual data
+                    const sectorData = recognitionRecords
+                      .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                      .reduce((acc, record) => {
+                        const sector = record.startup?.sector || 'Other';
+                        if (!acc[sector]) {
+                          acc[sector] = { count: 0, equity: 0 };
+                        }
+                        acc[sector].count += 1;
+                        acc[sector].equity += record.equityAllocated || 0;
+                        return acc;
+                      }, {} as Record<string, { count: number; equity: number }>);
+
+                    const totalEquity = Object.values(sectorData).reduce((sum, data) => sum + data.equity, 0);
+                    const sectors = Object.entries(sectorData).sort((a, b) => b[1].equity - a[1].equity);
+
+                    return sectors.length === 0 ? (
+                      <div className="text-center py-4 text-slate-500">
+                        No sector data available
+                      </div>
+                    ) : (
+                      sectors.map(([sector, data]) => {
+                        const percentage = totalEquity > 0 ? (data.equity / totalEquity) * 100 : 0;
+                        return (
                     <div key={sector} className="flex items-center justify-between">
                       <span className="text-sm text-slate-600">{sector}</span>
                       <div className="flex items-center gap-2">
                         <div className="w-20 bg-slate-200 rounded-full h-2">
                           <div 
                             className="bg-brand-primary h-2 rounded-full" 
-                            style={{ width: `${Math.random() * 100}%` }}
+                                  style={{ width: `${Math.min(percentage, 100)}%` }}
                           ></div>
                         </div>
                         <span className="text-sm font-medium text-slate-900">
-                          {Math.floor(Math.random() * 30) + 10}%
+                                {percentage.toFixed(1)}%
                         </span>
                       </div>
                     </div>
-                  ))}
+                        );
+                      })
+                    );
+                  })()}
                 </div>
               </Card>
 
@@ -2174,19 +2446,74 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-slate-600">Total Portfolio Value</span>
-                    <span className="text-lg font-bold text-slate-900">$2.4M</span>
+                  <span className="text-lg font-bold text-slate-900">
+                    {(() => {
+                      const totalValue = recognitionRecords
+                        .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                        .reduce((sum, record) => {
+                          const currentPrice = currentPrices[record.startupId];
+                          const shares = record.shares;
+                          if (currentPrice && shares) {
+                            return sum + (currentPrice * shares);
+                          }
+                          return sum + (record.preMoneyValuation || 0);
+                        }, 0);
+                      const currency = recognitionRecords[0]?.startup?.currency || 'USD';
+                      const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+                      return `${symbol}${totalValue.toLocaleString()}`;
+                    })()}
+                  </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-slate-600">Average ROI</span>
-                    <span className="text-lg font-bold text-green-600">+24.5%</span>
+                  <span className="text-sm text-slate-600">Total Equity Holdings</span>
+                  <span className="text-lg font-bold text-green-600">
+                    {recognitionRecords
+                      .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                      .reduce((sum, record) => sum + (record.equityAllocated || 0), 0)
+                      .toFixed(1)}%
+                  </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-slate-600">Best Performer</span>
-                    <span className="text-sm font-medium text-slate-900">TechCorp (+156%)</span>
+                  <span className="text-sm text-slate-600">Average Investment Size</span>
+                  <span className="text-sm font-medium text-slate-900">
+                    {(() => {
+                      const investments = recognitionRecords.filter(record => record.equityAllocated && record.equityAllocated > 0);
+                      if (investments.length === 0) return '0';
+                      
+                      const totalInvestment = investments.reduce((sum, record) => {
+                        const currentPrice = currentPrices[record.startupId];
+                        const shares = record.shares;
+                        if (currentPrice && shares) {
+                          return sum + (currentPrice * shares);
+                        }
+                        return sum + (record.investmentAmount || 0);
+                      }, 0);
+                      
+                      const currency = investments[0]?.startup?.currency || 'USD';
+                      const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+                      return `${symbol}${(totalInvestment / investments.length).toLocaleString()}`;
+                    })()}
+                  </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-slate-600">Active Investments</span>
-                    <span className="text-sm font-medium text-slate-900">{portfolioStartups.length} startups</span>
+                  <span className="text-sm text-slate-600">Compliant Investments</span>
+                  <span className="text-sm font-medium text-slate-900">
+                    {recognitionRecords.filter(record => 
+                      record.equityAllocated && 
+                      record.equityAllocated > 0 && 
+                      record.status === 'approved' &&
+                      record.startup?.compliance_status === 'Compliant'
+                    ).length} startups
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-slate-600">Total Shares Owned</span>
+                  <span className="text-sm font-medium text-slate-900">
+                    {recognitionRecords
+                      .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                      .reduce((sum, record) => sum + (record.shares || 0), 0)
+                      .toLocaleString()} shares
+                  </span>
                   </div>
                 </div>
               </Card>
@@ -2226,7 +2553,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Investment Date</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Equity %</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Valuation</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Shares</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Purchase Price</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Current Price</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Current Valuation</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
                         <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                       </tr>
@@ -2261,7 +2591,49 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             {record.equityAllocated || 0}%
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                            {record.preMoneyValuation ? `$${record.preMoneyValuation.toLocaleString()}` : '—'}
+                            {record.shares ? record.shares.toLocaleString() : '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                            {(() => {
+                              if (record.pricePerShare) {
+                                const currency = record.startup?.currency || 'USD';
+                                const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+                                return `${symbol}${record.pricePerShare.toFixed(2)}`;
+                              }
+                              return '—';
+                            })()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                            {(() => {
+                              const currentPrice = currentPrices[record.startupId];
+                              console.log(`🔍 Current price for startup ${record.startupId}:`, currentPrice);
+                              
+                              if (currentPrice && currentPrice > 0) {
+                                const currency = record.startup?.currency || 'USD';
+                                const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+                                return `${symbol}${currentPrice.toFixed(2)}`;
+                              }
+                              return '—';
+                            })()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                            {(() => {
+                              const currentPrice = currentPrices[record.startupId];
+                              const shares = record.shares;
+                              console.log(`🔍 Current valuation calculation for startup ${record.startupId}:`, {
+                                currentPrice,
+                                shares,
+                                calculation: currentPrice && shares ? `${currentPrice} × ${shares} = ${currentPrice * shares}` : 'N/A'
+                              });
+                              
+                              if (currentPrice && shares) {
+                                const currentValuation = currentPrice * shares;
+                                const currency = record.startup?.currency || 'USD';
+                                const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+                                return `${symbol}${currentValuation.toLocaleString()}`;
+                              }
+                              return '—';
+                            })()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${

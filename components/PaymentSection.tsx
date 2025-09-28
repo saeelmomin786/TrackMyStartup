@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { paymentService, SubscriptionPlan, UserSubscription, DiscountCoupon } from '../lib/paymentService';
 import Button from './ui/Button';
 import Card from './ui/Card';
+import StartupSubscriptionModal from './StartupSubscriptionModal';
 import { CreditCard, CheckCircle, AlertCircle, Percent, Calendar, RefreshCw, Settings, Download, Clock, DollarSign, Users, Building2 } from 'lucide-react';
 import { getCurrencyForCountry } from '../lib/utils';
 import { formatCurrencyFromEUR } from '../lib/currencyUtils';
@@ -22,6 +23,7 @@ export default function PaymentSection({ userId, userType, country, startupCount
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
 
   // Get currency based on user's country
   const userCurrency = getCurrencyForCountry(country);
@@ -249,6 +251,14 @@ export default function PaymentSection({ userId, userType, country, startupCount
             <p className="text-sm text-yellow-700 mb-3">
               Subscribe to access premium features for your {startupCount} startup{startupCount !== 1 ? 's' : ''}.
             </p>
+            <Button
+              onClick={() => setShowSubscriptionModal(true)}
+              className="w-full"
+              size="sm"
+            >
+              <CreditCard className="h-4 w-4 mr-2" />
+              Subscribe Now
+            </Button>
             <div className="bg-white rounded-lg p-3 border border-yellow-100">
               <div className="flex items-center justify-between">
                 <div>
@@ -256,16 +266,18 @@ export default function PaymentSection({ userId, userType, country, startupCount
                   <p className="text-xs text-slate-600">{startupCount} startup{startupCount !== 1 ? 's' : ''} requiring subscription</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-semibold text-slate-900">{formatCurrency(startupCount * 15)}/month</p>
-                  <p className="text-xs text-slate-600">or {formatCurrency(startupCount * 120)}/year</p>
+                  <p className="text-sm font-semibold text-slate-900">₹{startupCount * 354}/month</p>
+                  <p className="text-xs text-slate-600">or ₹{startupCount * 3540}/year</p>
+                  <p className="text-xs text-green-600 font-medium">80% OFF First Year</p>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Subscription Plans */}
-        {!currentSubscription && (
+
+        {/* Subscription Plans - Hidden for Startups */}
+        {!currentSubscription && userType !== 'Startup' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h4 className="font-medium text-slate-900">Choose Your Plan</h4>
@@ -364,8 +376,8 @@ export default function PaymentSection({ userId, userType, country, startupCount
           </div>
         )}
 
-        {/* Discount Coupon */}
-        {!currentSubscription && selectedPlan && (
+        {/* Discount Coupon - Hidden for Startups */}
+        {!currentSubscription && selectedPlan && userType !== 'Startup' && (
           <div className="bg-white border border-slate-200 rounded-lg p-4">
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -434,8 +446,8 @@ export default function PaymentSection({ userId, userType, country, startupCount
           </div>
         )}
 
-        {/* Payment Summary and Subscribe Button */}
-        {!currentSubscription && selectedPlan && (
+        {/* Payment Summary and Subscribe Button - Hidden for Startups */}
+        {!currentSubscription && selectedPlan && userType !== 'Startup' && (
           <div className="bg-white border border-slate-200 rounded-lg p-4">
             <h4 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
               <CreditCard className="h-4 w-4" />
@@ -533,17 +545,18 @@ export default function PaymentSection({ userId, userType, country, startupCount
           </div>
         )}
 
-        {/* Enhanced Pricing Information */}
-        <div className="bg-slate-50 rounded-lg p-4">
-          <h5 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
-            <DollarSign className="h-4 w-4" />
-            Pricing Information
-          </h5>
+        {/* Enhanced Pricing Information - Hidden for Startups */}
+        {userType !== 'Startup' && (
+          <div className="bg-slate-50 rounded-lg p-4">
+            <h5 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
+              <DollarSign className="h-4 w-4" />
+              Pricing Information
+            </h5>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <h6 className="text-sm font-medium text-slate-800">Subscription Details</h6>
               <div className="text-sm text-slate-600 space-y-1">
-                <p>• {formatCurrency(15)}/month or {formatCurrency(120)}/year per invested startup</p>
+                <p>• ₹354/month or ₹3,540/year per startup (80% OFF first year)</p>
                 <p>• Billing based on active startup investments</p>
                 <p>• Update subscription anytime</p>
                 <p>• Cancel anytime with no fees</p>
@@ -594,7 +607,22 @@ export default function PaymentSection({ userId, userType, country, startupCount
             </div>
           </div>
         </div>
+        )}
       </div>
+      
+      {/* Startup Subscription Modal */}
+      {userType === 'Startup' && (
+        <StartupSubscriptionModal
+          isOpen={showSubscriptionModal}
+          onClose={() => setShowSubscriptionModal(false)}
+          onSubscriptionSuccess={() => {
+            setShowSubscriptionModal(false);
+            loadSubscriptionData(); // Refresh subscription data
+            setSuccess('Subscription activated successfully!');
+          }}
+          startupName={`Startup ${userId}`} // You can pass the actual startup name here
+        />
+      )}
     </Card>
   );
 }

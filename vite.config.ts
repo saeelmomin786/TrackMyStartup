@@ -32,7 +32,16 @@ export default defineConfig(({ mode }) => {
           output: {
             manualChunks: undefined,
           },
+          external: [],
         },
+        // Add build optimizations for Vercel
+        minify: 'terser',
+        sourcemap: false,
+        // Ensure compatibility with Vercel's build environment
+        target: 'esnext',
+        modulePreload: {
+          polyfill: false
+        }
       },
     };
 });

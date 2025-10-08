@@ -23,7 +23,8 @@ export default defineConfig(({ mode }) => {
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
-        }
+        },
+        dedupe: ['react', 'react-dom']
       },
       build: {
         outDir: 'dist',
@@ -32,7 +33,6 @@ export default defineConfig(({ mode }) => {
           output: {
             manualChunks: undefined,
           },
-          external: [],
         },
         // Add build optimizations for Vercel
         minify: 'terser',

@@ -5,11 +5,20 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       base: '/', // Change this to '/your-repo-name/' if deploying to GitHub Pages subdirectory
+      server: {
+        proxy: {
+          '/api': 'http://localhost:3001'
+        }
+      },
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL),
-        'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY)
+        'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY),
+        // Explicitly expose Razorpay envs to ensure availability at build time
+        'import.meta.env.VITE_RAZORPAY_KEY_ID': JSON.stringify(env.VITE_RAZORPAY_KEY_ID),
+        'import.meta.env.VITE_RAZORPAY_KEY_SECRET': JSON.stringify(env.VITE_RAZORPAY_KEY_SECRET),
+        'import.meta.env.VITE_RAZORPAY_ENVIRONMENT': JSON.stringify(env.VITE_RAZORPAY_ENVIRONMENT)
       },
       resolve: {
         alias: {

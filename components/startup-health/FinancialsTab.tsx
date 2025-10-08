@@ -43,6 +43,23 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
   const [error, setError] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; type: 'expense' | 'revenue'; description: string } | null>(null);
+  const [investmentRecordsState, setInvestmentRecordsState] = useState<any[]>([]);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editRecord, setEditRecord] = useState<{
+    id: string;
+    type: 'expense' | 'revenue';
+    date: string;
+    entity: string;
+    description?: string;
+    vertical: string;
+    amount: number;
+    fundingSource?: string;
+    cogs?: number;
+  } | null>(null);
+
+  // Keep Financials in sync with Equity Allocation: derive total funding from investment records
+  const totalFundingFromRecords = (investmentRecordsState || []).reduce((sum: number, rec: any) => sum + (rec?.amount || 0), 0);
 
   // Form states
   const [formState, setFormState] = useState({
@@ -56,6 +73,8 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
     attachment: null as File | null
   });
   const [formType, setFormType] = useState<'revenue' | 'expense'>('expense');
+  const [otherExpenseLabel, setOtherExpenseLabel] = useState<string>('');
+  const [otherIncomeLabel, setOtherIncomeLabel] = useState<string>('');
 
   // CA should have view-only financials
   const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
@@ -75,7 +94,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       console.log('🏢 Startup object:', startup);
 
       const [
-        monthly,
+        allRecords,
         revenueVertical,
         expenseVertical,
         expensesData,
@@ -86,7 +105,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         yearsData,
         investmentRecords
       ] = await Promise.all([
-        financialsService.getMonthlyFinancialData(startup.id, year),
+        financialsService.getFinancialRecords(startup.id, { year }),
         financialsService.getRevenueByVertical(startup.id, year),
         financialsService.getExpensesByVertical(startup.id, year),
         financialsService.getExpenses(startup.id, filters),
@@ -100,7 +119,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
 
       console.log('📊 Financial data loaded:', {
         startupId: startup.id,
-        monthlyDataCount: monthly.length,
+        allRecordsCount: allRecords.length,
         expensesCount: expensesData.length,
         revenuesCount: revenuesData.length,
         summary: summaryData,
@@ -136,15 +155,39 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       });
 
       console.log('📊 Chart data received:', {
-        monthlyData: monthly,
+        allRecords: allRecords,
         revenueByVertical: revenueVertical,
         expensesByVertical: expenseVertical,
         expensesCount: expensesData.length,
         revenuesCount: revenuesData.length
       });
 
-      // Ensure we have chart data, use what we received
-      const finalMonthlyData = monthly || [];
+      // Generate comprehensive monthly data for all 12 months
+      const monthlyData: { [key: string]: { revenue: number; expenses: number } } = {};
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      // Initialize all months
+      months.forEach(month => {
+        monthlyData[month] = { revenue: 0, expenses: 0 };
+      });
+      
+      // Aggregate data by month
+      allRecords.forEach(record => {
+        const monthIndex = new Date(record.date).getMonth();
+        const monthName = months[monthIndex];
+        
+        if (record.record_type === 'revenue') {
+          monthlyData[monthName].revenue += record.amount;
+        } else {
+          monthlyData[monthName].expenses += record.amount;
+        }
+      });
+      
+      const finalMonthlyData = months.map(month => ({
+        month_name: month,
+        revenue: monthlyData[month].revenue,
+        expenses: monthlyData[month].expenses
+      }));
       const finalRevenueByVertical = revenueVertical || [];
       const finalExpensesByVertical = expenseVertical || [];
 
@@ -162,6 +205,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       setSummary(summaryData);
       setEntities(entitiesData);
       setVerticals(verticalsData);
+      
       // Generate years from account creation to current year
       const accountCreationYear = new Date(startup.registrationDate).getFullYear();
       const currentYear = new Date().getFullYear();
@@ -186,6 +230,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         sources.push(investment.investorName);
       });
       setFundingSources(sources);
+      setInvestmentRecordsState(investmentRecords || []);
       
       console.log('💰 Funding Sources Created:', {
         totalInvestors: investmentRecords.length,
@@ -199,6 +244,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       setIsLoading(false);
     }
   };
+
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -250,7 +296,11 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         date: formState.date,
         entity: formState.entity,
         description: formState.description,
-        vertical: formState.vertical,
+        vertical: (
+          formType === 'expense' && formState.vertical === 'Other Expenses' && otherExpenseLabel
+        ) ? otherExpenseLabel : (
+          formType === 'revenue' && formState.vertical === 'Other Income' && otherIncomeLabel
+        ) ? otherIncomeLabel : formState.vertical,
         amount: parseFloat(formState.amount.toString()),
         funding_source: formState.fundingSource,
         cogs: formType === 'revenue' ? parseFloat(formState.cogs.toString()) || 0 : 0,
@@ -273,6 +323,8 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         fundingSource: 'Revenue',
         attachment: null
       });
+      setOtherExpenseLabel('');
+      setOtherIncomeLabel('');
 
       console.log('🔄 Reloading financial data...');
       // Force reload data with a small delay to ensure database is updated
@@ -341,6 +393,73 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
     }
   };
 
+  const openEditModalForExpense = (expense: Expense) => {
+    setEditRecord({
+      id: expense.id,
+      type: 'expense',
+      date: expense.date,
+      entity: expense.entity,
+      description: expense.description,
+      vertical: expense.vertical,
+      amount: expense.amount,
+      fundingSource: expense.fundingSource
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const openEditModalForRevenue = (revenue: Revenue) => {
+    setEditRecord({
+      id: revenue.id,
+      type: 'revenue',
+      date: revenue.date,
+      entity: revenue.entity,
+      description: undefined,
+      vertical: revenue.vertical,
+      amount: revenue.earnings,
+      cogs: revenue.cogs
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    if (!editRecord) return;
+    const { name, value } = e.target;
+    const parsed = name === 'amount' || name === 'cogs' ? (parseFloat(value) || 0) : value;
+    setEditRecord({ ...editRecord, [name]: parsed } as any);
+  };
+
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editRecord) return;
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      const updates: any = {
+        date: editRecord.date,
+        entity: editRecord.entity,
+        vertical: editRecord.vertical,
+        amount: editRecord.amount
+      };
+      if (editRecord.description !== undefined) updates.description = editRecord.description;
+      if (editRecord.type === 'expense') {
+        updates.funding_source = editRecord.fundingSource || null;
+      }
+      if (editRecord.type === 'revenue') {
+        updates.cogs = editRecord.cogs ?? null;
+      }
+      await financialsService.updateFinancialRecord(editRecord.id, updates);
+      setIsEditModalOpen(false);
+      setEditRecord(null);
+      await loadFinancialData();
+      await calculateChartDataManually();
+    } catch (err: any) {
+      console.error('Error saving edit:', err);
+      setError(err?.message || 'Failed to save changes.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Manual chart data calculation to ensure charts update
   const calculateChartDataManually = async () => {
     try {
@@ -364,10 +483,11 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       
       allRecords.forEach(record => {
         const monthName = new Date(record.date).toLocaleDateString('en-US', { month: 'short' });
+        const amt = typeof record.amount === 'string' ? parseFloat(record.amount) || 0 : record.amount || 0;
         if (record.record_type === 'revenue') {
-          monthlyData[monthName].revenue += record.amount;
+          monthlyData[monthName].revenue += amt;
         } else {
-          monthlyData[monthName].expenses += record.amount;
+          monthlyData[monthName].expenses += amt;
         }
       });
       
@@ -470,7 +590,11 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card>
           <p className="text-sm font-medium text-slate-500">Total Funding Received</p>
-          <p className="text-2xl font-bold">{formatCurrency(startup.totalFunding, startupCurrency)}</p>
+          <p className="text-2xl font-bold">{(() => {
+            const fallback = startup.totalFunding || 0;
+            const value = totalFundingFromRecords > 0 ? totalFundingFromRecords : fallback;
+            return formatCurrency(value, startupCurrency);
+          })()}</p>
         </Card>
         <Card>
           <p className="text-sm font-medium text-slate-500">Total Revenue Till Date</p>
@@ -482,8 +606,12 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         </Card>
         <Card>
             <p className="text-sm font-medium text-slate-500">Total Available Fund</p>
-          <p className="text-2xl font-bold">{formatCurrency((summary?.total_revenue || 0) - (summary?.total_expenses || 0), startupCurrency)}</p>
-            <p className="text-xs text-slate-400">Total Revenue - Total Expenditure</p>
+          <p className="text-2xl font-bold">{(() => {
+            const fallback = startup.totalFunding || 0;
+            const tf = totalFundingFromRecords > 0 ? totalFundingFromRecords : fallback;
+            return formatCurrency(tf - (summary?.total_expenses || 0), startupCurrency);
+          })()}</p>
+            <p className="text-xs text-slate-400">Total Funding - Total Expenditure</p>
         </Card>
       </div>
 
@@ -556,45 +684,29 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
             </ResponsiveContainer>
             </div>
         </Card>
-                  <Card>
-             <h3 className="text-lg font-semibold mb-0 text-slate-700">Revenue by Vertical</h3>
-              <div style={{ width: '100%', height: 300 }}>
-             <ResponsiveContainer>
-               <PieChart>
-                 <Pie data={revenueByVertical} dataKey="value" nameKey="name" cx="65%" cy="50%" outerRadius={65} label>
-                   {revenueByVertical.map((entry, index) => (
-                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                   ))}
-                 </Pie>
-                 <Tooltip formatter={(val: number) => formatCurrency(val, startupCurrency)} />
-                 <Legend layout="vertical" align="left" verticalAlign="middle" />
-               </PieChart>
-             </ResponsiveContainer>
-             </div>
-         </Card>
-                 <Card>
-             <h3 className="text-lg font-semibold mb-0 text-slate-700">Expenses by Vertical</h3>
-             <div style={{ width: '100%', height: 300 }}>
-             <ResponsiveContainer>
-               <PieChart>
-                 <Pie data={expensesByVertical} dataKey="value" nameKey="name" cx="65%" cy="50%" outerRadius={65} label>
-                   {expensesByVertical.map((entry, index) => (
-                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                   ))}
-                 </Pie>
-                 <Tooltip formatter={(val: number) => formatCurrency(val, startupCurrency)} />
-                 <Legend layout="vertical" align="left" verticalAlign="middle" />
-               </PieChart>
-             </ResponsiveContainer>
-             </div>
-         </Card>
       </div>
 
-      {/* Add Financial Record Section - Below Charts */}
+      {/* Add Financial Record Button + Modal */}
       {canEdit && (
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <h3 className="text-xl font-semibold text-slate-700 mb-6">Add Financial Record</h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="max-w-3xl mx-auto">
+          <div className="bg-gradient-to-r from-slate-50 to-white border border-slate-200 rounded-xl shadow-sm p-10 flex flex-col items-center text-center">
+            <h3 className="text-2xl font-bold text-slate-800">Add Financial Record</h3>
+            <p className="text-slate-500 mt-2">Quickly log a new expense or revenue entry</p>
+            <Button onClick={() => setIsAddModalOpen(true)} className="mt-6 bg-blue-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-blue-700 flex items-center gap-2 text-base">
+              <Plus className="h-5 w-5" /> Add Record
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isAddModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-3xl w-full mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-slate-900">Add Financial Record</h3>
+              <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>Close</Button>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
             {/* Toggle Buttons */}
             <div className="flex gap-4 mb-4">
               <button 
@@ -688,6 +800,28 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                   </>
                 )}
               </Select>
+              {formType === 'expense' && formState.vertical === 'Other Expenses' && (
+                <Input 
+                  label="Specify Other Expense" 
+                  id="otherExpenseLabel" 
+                  name="otherExpenseLabel"
+                  type="text"
+                  value={otherExpenseLabel}
+                  onChange={(e) => setOtherExpenseLabel(e.target.value)}
+                  required
+                />
+              )}
+              {formType === 'revenue' && formState.vertical === 'Other Income' && (
+                <Input 
+                  label="Specify Other Income" 
+                  id="otherIncomeLabel" 
+                  name="otherIncomeLabel"
+                  type="text"
+                  value={otherIncomeLabel}
+                  onChange={(e) => setOtherIncomeLabel(e.target.value)}
+                  required
+                />
+              )}
               <Input 
                 label="Amount" 
                 id="amount" 
@@ -770,35 +904,58 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
               </Button>
             </div>
           </form>
+          </div>
         </div>
       )}
       
       {/* Tables Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6">
+        <div className="px-2 sm:px-6">
         <Card>
           <h3 className="text-lg font-semibold mb-4 text-slate-700">Expenditure List</h3>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-80 overflow-y-auto">
             {expenses.length === 0 ? (
               <p className="text-slate-500 text-center py-4">No expenses found for the selected filters.</p>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="py-2 text-left font-semibold">Vertical</th>
-                    <th className="py-2 text-left font-semibold">Amount</th>
-                    <th className="py-2 text-left font-semibold">Actions</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Date</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Vertical</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Amount</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Funding Source</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {expenses.map(expense => (
                     <tr key={expense.id} className="border-b">
-                      <td className="py-2">{expense.vertical}</td>
-                      <td className="py-2">{formatCurrency(expense.amount, startupCurrency)}</td>
-                      <td className="py-2">
+                      <td className="py-1.5 px-3">{new Date(expense.date).toLocaleDateString()}</td>
+                      <td className="py-1.5 px-3">{expense.vertical}</td>
+                      <td className="py-1.5 px-3">{formatCurrency(expense.amount, startupCurrency)}</td>
+                      <td className="py-1.5 px-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          expense.fundingSource 
+                            ? 'bg-blue-100 text-blue-800' 
+                            : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {expense.fundingSource || 'Not specified'}
+                        </span>
+                      </td>
+                       <td className="py-1.5 px-3">
                         <div className="flex gap-2">
                           {expense.attachmentUrl && (
                             <Button size="sm" variant="outline" onClick={() => handleDownloadAttachment(expense.attachmentUrl)}>
                               <Download className="h-4 w-4"/>
+                            </Button>
+                          )}
+                          {canEdit && (
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              onClick={() => openEditModalForExpense(expense)}
+                            >
+                              <Edit className="h-4 w-4"/>
                             </Button>
                           )}
                           {canEdit && (
@@ -819,30 +976,43 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
             )}
           </div>
         </Card>
+        </div>
+        <div className="px-2 sm:px-6">
         <Card>
           <h3 className="text-lg font-semibold mb-4 text-slate-700">Revenue & Profitability</h3>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-80 overflow-y-auto">
             {revenues.length === 0 ? (
               <p className="text-slate-500 text-center py-4">No revenue found for the selected filters.</p>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="py-2 text-left font-semibold">Vertical</th>
-                    <th className="py-2 text-left font-semibold">Earnings</th>
-                    <th className="py-2 text-left font-semibold">Actions</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Date</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Vertical</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Earnings</th>
+                    <th className="py-1.5 px-3 text-left font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {revenues.map(revenue => (
                     <tr key={revenue.id} className="border-b">
-                      <td className="py-2">{revenue.vertical}</td>
-                      <td className="py-2">{formatCurrency(revenue.earnings, startupCurrency)}</td>
-                      <td className="py-2">
+                      <td className="py-1.5 px-3">{new Date(revenue.date).toLocaleDateString()}</td>
+                      <td className="py-1.5 px-3">{revenue.vertical}</td>
+                      <td className="py-1.5 px-3">{formatCurrency(revenue.earnings, startupCurrency)}</td>
+                      <td className="py-1.5 px-3">
                         <div className="flex gap-2">
                           {revenue.attachmentUrl && (
                             <Button size="sm" variant="outline" onClick={() => handleDownloadAttachment(revenue.attachmentUrl)}>
                               <Download className="h-4 w-4"/>
+                            </Button>
+                          )}
+                          {canEdit && (
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              onClick={() => openEditModalForRevenue(revenue)}
+                            >
+                              <Edit className="h-4 w-4"/>
                             </Button>
                           )}
                           {canEdit && (
@@ -863,6 +1033,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
             )}
           </div>
         </Card>
+        </div>
       </div>
 
       {/* Delete Confirmation Modal */}
@@ -894,6 +1065,153 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                 Delete
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Record Modal */}
+      {isEditModalOpen && editRecord && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
+            <div className="flex items-center mb-4">
+              <Edit className="h-6 w-6 text-blue-600 mr-3" />
+              <h3 className="text-lg font-semibold text-gray-900">Edit {editRecord.type === 'expense' ? 'Expense' : 'Revenue'}</h3>
+            </div>
+            <form onSubmit={saveEdit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <DateInput 
+                  label="Transaction Date" 
+                  id="edit-date" 
+                  name="date"
+                  value={editRecord.date}
+                  onChange={handleEditChange}
+                  required
+                  fieldName="Transaction date"
+                  maxYearsPast={10}
+                />
+                <Select 
+                  label="Entity" 
+                  id="edit-entity"
+                  name="entity"
+                  value={editRecord.entity}
+                  onChange={handleEditChange}
+                  required
+                >
+                  {entities.length > 0 ? entities.map(entity => (
+                    <option key={entity} value={entity}>{entity}</option>
+                  )) : (
+                    <option value="Parent Company">Parent Company</option>
+                  )}
+                </Select>
+                <div className="md:col-span-2">
+                  <label htmlFor="edit-description" className="block text-sm font-medium text-slate-700 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    id="edit-description"
+                    name="description"
+                    value={editRecord.description || ''}
+                    onChange={handleEditChange}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    placeholder="Enter description..."
+                  />
+                </div>
+                <Select 
+                  label="Vertical" 
+                  id="edit-vertical"
+                  name="vertical"
+                  value={editRecord.vertical}
+                  onChange={handleEditChange}
+                  required
+                >
+                  <option value="">Select Vertical</option>
+                  {editRecord.type === 'expense' ? (
+                    <>
+                      <option value="SaaS">SaaS</option>
+                      <option value="Enterprise">Enterprise</option>
+                      <option value="B2C Hardware">B2C Hardware</option>
+                      <option value="B2B Services">B2B Services</option>
+                      <option value="R&D">R&D</option>
+                      <option value="Marketing">Marketing</option>
+                      <option value="Salaries">Salaries</option>
+                      <option value="Ops">Ops</option>
+                      <option value="COGS">COGS</option>
+                      <option value="Other Expenses">Other Expenses</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="Product Sales">Product Sales</option>
+                      <option value="Service Revenue">Service Revenue</option>
+                      <option value="Subscription Revenue">Subscription Revenue</option>
+                      <option value="Commission/Transaction Fees">Commission/Transaction Fees</option>
+                      <option value="Advertising Revenue">Advertising Revenue</option>
+                      <option value="Licensing & Royalties">Licensing & Royalties</option>
+                      <option value="Other Income">Other Income</option>
+                    </>
+                  )}
+                </Select>
+                <Input 
+                  label="Amount" 
+                  id="edit-amount" 
+                  name="amount"
+                  type="number" 
+                  step="0.01"
+                  min="0"
+                  value={editRecord.amount}
+                  onChange={handleEditChange}
+                  required
+                />
+                {editRecord.type === 'revenue' && (
+                  <Input 
+                    label="COGS" 
+                    id="edit-cogs" 
+                    name="cogs"
+                    type="number" 
+                    step="0.01"
+                    min="0"
+                    value={editRecord.cogs ?? 0}
+                    onChange={handleEditChange}
+                  />
+                )}
+                {editRecord.type === 'expense' && (
+                  <Select 
+                    label="Funding Source" 
+                    id="edit-fundingSource" 
+                    name="fundingSource"
+                    value={editRecord.fundingSource || ''}
+                    onChange={handleEditChange}
+                    required
+                  >
+                    <option value="">Select funding source</option>
+                    {fundingSources.length > 0 ? (
+                      fundingSources.map(source => (
+                        <option key={source} value={source}>{source}</option>
+                      ))
+                    ) : (
+                      <option value="Revenue">Revenue</option>
+                    )}
+                  </Select>
+                )}
+              </div>
+              <div className="flex justify-end space-x-3">
+                <Button 
+                  variant="outline" 
+                  onClick={() => { setIsEditModalOpen(false); setEditRecord(null); }}
+                  className="px-4 py-2"
+                  type="button"
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  className="px-4 py-2"
+                  type="submit"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

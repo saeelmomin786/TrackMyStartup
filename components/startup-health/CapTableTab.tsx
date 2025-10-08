@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Startup, InvestmentRecord, InvestorType, InvestmentRoundType, Founder, FundraisingDetails, UserRole, InvestmentType, IncubationProgram, AddIncubationProgramData, RecognitionRecord, IncubationType, FeeType } from '../../types';
+import { Startup, InvestmentRecord, InvestorType, InvestmentRoundType, Founder, FundraisingDetails, UserRole, InvestmentType, IncubationProgram, AddIncubationProgramData, RecognitionRecord, IncubationType, FeeType, StartupDomain, StartupStage } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -248,16 +248,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     };
     // Removed isSharesModalOpen - no longer needed since total shares are calculated automatically
 
-    // Offers Received states
-    const [offersReceived, setOffersReceived] = useState<OfferReceived[]>([]);
-    const [isAcceptingOffer, setIsAcceptingOffer] = useState(false);
 
     // Load data on component mount
     useEffect(() => {
         console.log('🔄 useEffect triggered - loading data for startup:', startup?.id);
         if (startup?.id) {
             loadCapTableData();
-            loadOffersReceived();
             setupRealTimeSubscriptions();
         }
     }, [startup?.id]); // Only depend on startup.id, not the entire startup object
@@ -529,7 +525,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 event: '*', 
                 schema: 'public', 
                 table: 'opportunity_applications',
-                filter: `startup_id=eq.${startup.id}`
+                filter: 'startup_id=eq.' + startup.id
             }, async (payload) => {
                 console.log('🔄 Offers received change detected:', payload);
                 console.log('📝 Change details:', {
@@ -538,7 +534,6 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     record: payload.new,
                     old: payload.old
                 });
-                await loadOffersReceived();
             })
             .subscribe((status) => {
                 console.log('📡 Real-time subscription status:', status);
@@ -562,7 +557,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         event: '*', 
                         schema: 'public', 
                         table: 'recognition_records',
-                        filter: `startup_id=eq.${startup.id}`
+                        filter: 'startup_id=eq.' + startup.id
                     }, async (payload) => {
                         console.log('🔄 Recognition records change detected:', payload);
                         console.log('📝 Change details:', {
@@ -866,12 +861,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             // Log any errors for debugging
             [records, foundersData, fundraisingData, valuationData, equityData, summaryData, incubationProgramsData, popularProgramsData, financialRecordsData, recognitionData].forEach((result, index) => {
                 if (result.status === 'rejected') {
-                    console.warn(`Failed to load data ${index}:`, result.reason);
+                    console.warn('Failed to load data ' + index + ':', result.reason);
                 }
             });
 
             // Debug loaded data
-            console.log('📊 Cap Table Data Loaded:', {
+            console.log('📊 Equity Allocation Data Loaded:', {
                 investmentRecords: records.status === 'fulfilled' ? records.value.length : 'failed',
                 founders: foundersData.status === 'fulfilled' ? foundersData.value.length : 'failed',
                 fundraisingDetails: fundraisingData.status === 'fulfilled' ? fundraisingData.value.length : 'failed',
@@ -963,8 +958,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 console.error('❌ Financial Records Failed:', financialRecordsData.reason);
             }
         } catch (err) {
-            console.error('Error loading cap table data:', err);
-            setError('Failed to load cap table data');
+            console.error('Error loading equity allocation data:', err);
+            setError('Failed to load equity allocation data');
         } finally {
             setIsLoading(false);
         }
@@ -1137,10 +1132,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     console.log('✅ Validation request processed:', validationRequest);
                     
                     // Show success message with validation info
-                    alert(`${startup.name} fundraising is now active! A Startup Nation validation request has been submitted and is pending admin approval.`);
+                    alert(startup.name + ' fundraising is now active! A Startup Nation validation request has been submitted and is pending admin approval.');
                 } catch (validationError) {
                     console.error('❌ Error processing validation request:', validationError);
-                    alert(`${startup.name} fundraising is now active! However, there was an issue submitting the validation request. Please contact support.`);
+                    alert(startup.name + ' fundraising is now active! However, there was an issue submitting the validation request. Please contact support.');
                 }
             } else {
                 // If validation was unchecked, remove any existing validation request
@@ -1155,7 +1150,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 
                 // Call parent callback for non-validation fundraising
                 onActivateFundraising(savedFundraising, startup);
-                alert(`${startup.name} fundraising is now active!`);
+                alert(startup.name + ' fundraising is now active!');
             }
             
             // Exit edit mode
@@ -1183,7 +1178,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 } else if (err.message.includes('not null')) {
                     errorMessage = 'Please fill in all required fields.';
                 } else {
-                    errorMessage = `Database error: ${err.message}`;
+                    errorMessage = 'Database error: ' + err.message;
                 }
             }
             
@@ -1209,7 +1204,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             console.log('🔍 Investment Form Debug:');
             console.log('Form data entries:');
             for (const [key, value] of formData.entries()) {
-                console.log(`${key}: ${value}`);
+                console.log(key + ': ' + value);
             }
             
             // Debug current state
@@ -1479,7 +1474,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             let signedAgreementUrl = '';
             if (agreementFile && agreementFile.size > 0) {
                 try {
-                    const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', `agreements/${startup.id}/signed_agreement_${Date.now()}_${agreementFile.name}`);
+                    const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/signed_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
                         signedAgreementUrl = uploadResult.url;
                     } else {
@@ -1588,7 +1583,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             let signedAgreementUrl = editingRecognition.signedAgreementUrl;
             if (agreementFile && agreementFile.size > 0) {
                 try {
-                    const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', `agreements/${startup.id}/signed_agreement_${Date.now()}_${agreementFile.name}`);
+                    const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/signed_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
                         signedAgreementUrl = uploadResult.url;
                     } else {
@@ -1726,7 +1721,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             const downloadUrl = await capTableService.getAttachmentDownloadUrl(proofUrl);
             const link = document.createElement('a');
             link.href = downloadUrl;
-            link.download = `investment-proof-${investorName}.pdf`;
+            link.download = 'investment-proof-' + investorName + '.pdf';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -1769,7 +1764,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 return {
                     investorName: inv.investorName,
                     investmentAmount: inv.amount.toLocaleString(),
-                    equityAllocated: `${inv.equityAllocated}%`,
+                    equityAllocated: inv.equityAllocated + '%',
                     utilized: utilization.utilized.toLocaleString(),
                     remainingFunds: (inv.amount - utilization.utilized).toLocaleString(),
                     investmentDate: new Date(inv.date).toLocaleDateString()
@@ -1789,7 +1784,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             const pdfBlob = await generateInvestorListPDF(reportData, options);
             
             // Download PDF
-            const filename = `fund-utilization-report-${startup.name.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
+            const filename = 'fund-utilization-report-' + startup.name.replace(/[^a-zA-Z0-9]/g, '-') + '-' + new Date().toISOString().split('T')[0] + '.pdf';
             downloadBlob(pdfBlob, filename);
 
             console.log('✅ Fund utilization report downloaded successfully as PDF');
@@ -1832,27 +1827,26 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 description: expense.description || 'N/A',
                 amount: (expense.amount || 0).toLocaleString(),
                 fundingSource: expense.funding_source || 'N/A',
-                remainingFunds: (investment.amount - utilization.utilized).toLocaleString()
+                invoiceLink: expense.attachment_url || 'No invoice attached'
             }));
 
             // PDF options (using plain numbers without currency formatting)
             const options: PDFReportOptions = {
                 title: 'Individual Fund Utilization Report',
-                subtitle: `Detailed expense breakdown for ${investment.investorName} (${utilization.percentage.toFixed(2)}% utilized)`,
+                subtitle: 'Detailed expense breakdown for ' + investment.investorName + ' (' + utilization.percentage.toFixed(2) + '% utilized)',
                 companyName: startup.name,
                 generatedDate: new Date().toLocaleDateString(),
                 currency: startupCurrency,
                 investmentAmount: investment.amount.toLocaleString(),
-                equityAllocated: `${investment.equityAllocated}%`,
-                utilizedAmount: utilization.utilized.toLocaleString(),
-                remainingAmount: (investment.amount - utilization.utilized).toLocaleString()
+                equityAllocated: investment.equityAllocated + '%',
+                utilizedAmount: utilization.utilized.toLocaleString()
             };
 
             // Generate PDF
             const pdfBlob = await generateIndividualInvestorPDF(investment.investorName, reportData, options);
             
             // Download PDF
-            const filename = `fund-utilization-${investment.investorName.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
+            const filename = 'fund-utilization-' + investment.investorName.replace(/[^a-zA-Z0-9]/g, '-') + '-' + new Date().toISOString().split('T')[0] + '.pdf';
             downloadBlob(pdfBlob, filename);
 
             console.log('✅ Individual fund utilization report downloaded successfully as PDF');
@@ -1917,7 +1911,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 <div className="w-full bg-slate-200 rounded-full h-2">
                     <div 
                         className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${displayPercentage}%` }}
+                        style={{ width: displayPercentage + '%' }}
                     />
                 </div>
                 <div className="text-xs text-slate-600">
@@ -1954,7 +1948,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                  
                  if (founderPercentage > 0) {
                      distribution.push({
-                         name: `Founder (${founder.name})`,
+                         name: 'Founder (' + founder.name + ')',
                          value: founderPercentage
                      });
                  }
@@ -2002,8 +1996,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
          investorGroups.forEach((group, key) => {
              if (group.totalEquity > 0) {
                  const displayName = group.totalShares > 0 
-                     ? `Investor (${group.name})` 
-                     : `Investor (${group.name})`;
+                     ? 'Investor (' + group.name + ')' 
+                     : 'Investor (' + group.name + ')';
                  
                  distribution.push({
                      name: displayName,
@@ -2070,456 +2064,16 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     // All debug logs commented out for production
     // Charts are ready to render based on data availability
 
-    // =====================================================
-    // OFFERS RECEIVED HANDLERS
-    // =====================================================
 
-    const loadOffersReceived = async () => {
-        console.log('🚀 loadOffersReceived function called!');
-        if (!startup?.id) return;
-        
-        try {
-            console.log('🔍 Loading offers for startup ID:', startup.id);
-            console.log('🔍 Startup object:', startup);
-            console.log('🔍 User role:', userRole);
-            console.log('🔍 Is view only:', isViewOnly);
-            
-            // Fetch investment offers for this startup
-            console.log('💰 Fetching investment offers...');
-            console.log('💰 Startup ID:', startup.id);
-            console.log('💰 Startup object:', startup);
-            const investmentOffers = await investmentService.getOffersForStartup(startup.id);
-            console.log('💰 Investment offers fetched:', investmentOffers);
-            console.log('💰 Investment offers count:', investmentOffers?.length || 0);
-            
-            // Debug: Check if any offers exist in the database
-            const { data: debugOffers, error: debugOffersError } = await supabase
-                .from('investment_offers')
-                .select('*')
-                .eq('startup_id', startup.id);
-            console.log('💰 Direct database query result:', { debugOffers, debugOffersError });
-            console.log('💰 Direct database offers count:', debugOffers?.length || 0);
-            
-            // Debug: Check all offers to see their startup_ids
-            const { data: allDebugOffers, error: allDebugError } = await supabase
-                .from('investment_offers')
-                .select('id, startup_id, investor_email, offer_amount, status');
-            console.log('💰 All offers in database:', allDebugOffers);
-            console.log('💰 Current startup ID:', startup.id);
-            console.log('💰 Offers with matching startup_id:', allDebugOffers?.filter(offer => offer.startup_id === startup.id));
-            console.log('💰 All startup_ids in offers:', allDebugOffers?.map(offer => ({ id: offer.id, startup_id: offer.startup_id, investor: offer.investor_email })));
-            
-            // Fetch applications for this startup with all necessary data
-            const { data: applications, error } = await supabase
-                .from('opportunity_applications')
-                .select(`
-                    id,
-                    startup_id,
-                    opportunity_id,
-                    status,
-                    diligence_status,
-                    agreement_url,
-                    created_at,
-                    incubation_opportunities(
-                        id,
-                        program_name,
-                        facilitator_id,
-                        facilitator_code
-                    )
-                `)
-                .eq('startup_id', startup.id)
-                .order('created_at', { ascending: false });
+    // Offers functionality moved to dashboard tab
 
-            if (error) {
-                console.error('Error fetching applications:', error);
-                throw error;
-            }
-
-            console.log('📋 Raw applications data:', applications);
-            console.log('📋 Applications count:', applications?.length || 0);
-            console.log('📋 Startup ID being queried:', startup.id);
-            
-            // Debug: Check the relationship data
-            if (applications && applications.length > 0) {
-                applications.forEach((app, index) => {
-                    console.log(`🔍 App ${index}:`, {
-                        id: app.id,
-                        startup_id: app.startup_id,
-                        opportunity_id: app.opportunity_id,
-                        status: app.status,
-                        diligence_status: app.diligence_status,
-                        incubation_opportunities: app.incubation_opportunities
-                    });
-                });
-            }
-
-            // Get facilitator names for the opportunities
-            const facilitatorIds = [...new Set(applications?.map(app => {
-                const opportunities = app.incubation_opportunities as any;
-                if (Array.isArray(opportunities) && opportunities.length > 0) {
-                    return opportunities[0]?.facilitator_id;
-                }
-                // Handle case where opportunities might be a single object
-                return opportunities?.facilitator_id;
-            }).filter(Boolean) || [])];
-            
-            let facilitatorNames: { [key: string]: string } = {};
-            if (facilitatorIds.length > 0) {
-                const { data: facilitators, error: facilitatorError } = await supabase
-                    .from('users')
-                    .select('id, name')
-                    .in('id', facilitatorIds);
-                
-                if (facilitatorError) {
-                    console.error('Error fetching facilitators:', facilitatorError);
-                } else {
-                    facilitatorNames = (facilitators || []).reduce((acc, fac) => {
-                        acc[fac.id] = fac.name;
-                        return acc;
-                    }, {} as { [key: string]: string });
-                }
-            }
-
-            console.log('👥 Facilitator names:', facilitatorNames);
-
-            // Debug: Check the filtering logic
-            console.log('🔍 Applications before filtering:', applications);
-            console.log('🔍 Applications with status "accepted":', applications?.filter(app => app.status === 'accepted'));
-            console.log('🔍 Applications with diligence_status "requested":', applications?.filter(app => app.diligence_status === 'requested'));
-            console.log('🔍 Applications that will pass filter:', applications?.filter(app => app.status === 'accepted' || app.diligence_status === 'requested'));
-
-            // Transform investment offers into OfferReceived format
-            console.log('💰 Formatting investment offers...');
-            console.log('💰 Raw investment offers to format:', investmentOffers);
-            const investmentOffersFormatted: OfferReceived[] = investmentOffers.map((offer: any) => {
-                console.log('💰 Formatting individual offer:', offer);
-                const formatted = {
-                    id: `investment_${offer.id}`,
-                    from: offer.investorName || offer.investorEmail || 'Unknown Investor', // Use organization name if available, fallback to email, then unknown
-                    type: 'Investment' as const,
-                    offerDetails: `${formatCurrency(offer.offerAmount, startupCurrency)} for ${offer.equityPercentage}% equity`,
-                    status: offer.status as 'pending' | 'accepted' | 'rejected',
-                    code: offer.id.toString(),
-                    createdAt: offer.createdAt,
-                    isInvestmentOffer: true,
-                    investmentOfferId: offer.id,
-                    startupScoutingFee: offer.startup_scouting_fee_paid || 0,
-                    investorScoutingFee: offer.investor_scouting_fee_paid || 0,
-                    contactDetailsRevealed: offer.contact_details_revealed || false
-                };
-                console.log('💰 Formatted offer:', formatted);
-                return formatted;
-            });
-            console.log('💰 All formatted investment offers:', investmentOffersFormatted);
-
-            // Transform applications into offers - Show both accepted applications and pending diligence requests
-            const incubationOffers: OfferReceived[] = (applications || [])
-                .filter((app: any) => {
-                    const passesFilter = app.status === 'accepted' || app.diligence_status === 'requested';
-                    console.log(`🔍 App ${app.id}: status=${app.status}, diligence_status=${app.diligence_status}, passesFilter=${passesFilter}`);
-                    return passesFilter;
-                })
-                .map((app: any) => {
-                    console.log(`📝 Processing app ${app.id}:`, app);
-                    const isAccepted = app.status === 'accepted';
-                    const hasDiligenceRequest = app.diligence_status === 'requested';
-                    const hasDiligenceApproved = app.diligence_status === 'approved';
-                    const facilitatorName = (() => {
-                        const opportunities = app.incubation_opportunities as any;
-                        if (Array.isArray(opportunities) && opportunities.length > 0) {
-                            return facilitatorNames[opportunities[0]?.facilitator_id] || 'Program Facilitator';
-                        }
-                        return facilitatorNames[opportunities?.facilitator_id] || 'Program Facilitator';
-                    })();
-                    
-                    let type: 'Incubation' | 'Due Diligence';
-                    let offerDetails: string;
-                    let status: 'pending' | 'accepted' | 'rejected';
-                    
-                    if (hasDiligenceRequest && !hasDiligenceApproved) {
-                        // Pending diligence request - startup can accept
-                        type = 'Due Diligence';
-                        offerDetails = `Request for Compliance access until ${new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}`;
-                        status = 'pending';
-                    } else if (hasDiligenceApproved) {
-                        // Diligence approved - show as accepted with download option
-                        type = 'Due Diligence';
-                        offerDetails = 'Compliance access granted';
-                        status = 'accepted';
-                    } else if (isAccepted && !hasDiligenceRequest) {
-                        // Regular incubation acceptance (no diligence requested)
-                        type = 'Incubation';
-                        offerDetails = 'Accepted into Program';
-                        status = 'accepted';
-                    } else if (isAccepted && hasDiligenceRequest) {
-                        // Incubation accepted but diligence not yet requested
-                        type = 'Incubation';
-                        offerDetails = 'Accepted into Program - Diligence may be requested later';
-                        status = 'accepted';
-                    } else {
-                        // Fallback
-                        type = 'Incubation';
-                        offerDetails = 'Application Submitted';
-                        status = 'pending';
-                    }
-
-                    const offer: OfferReceived = {
-                        id: app.id,
-                        from: facilitatorName,
-                        type,
-                        offerDetails,
-                        status,
-                        code: (() => {
-                            const opportunities = app.incubation_opportunities as any;
-                            if (Array.isArray(opportunities) && opportunities.length > 0) {
-                                return opportunities[0]?.facilitator_code || 'FAC-XXXXXX';
-                            }
-                            return opportunities?.facilitator_code || 'FAC-XXXXXX';
-                        })(),
-                        agreementUrl: app.agreement_url,
-                        applicationId: app.id,
-                        createdAt: app.created_at
-                    };
-
-                    console.log('📝 Created offer:', offer);
-                    return offer;
-                });
-
-            // Combine investment offers and incubation offers
-            const allOffers: OfferReceived[] = [...investmentOffersFormatted, ...incubationOffers]
-                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-            console.log('🎯 Investment offers:', investmentOffersFormatted);
-            console.log('🎯 Incubation offers:', incubationOffers);
-            console.log('🎯 Combined offers array:', allOffers);
-            console.log('🎯 Final offers count:', allOffers.length);
-            console.log('🎯 Setting offersReceived state to:', allOffers);
-            setOffersReceived(allOffers);
-            console.log('🎯 State set complete');
-        } catch (err) {
-            console.error('Error loading offers received:', err);
-            setOffersReceived([]);
-        }
-    };
-
-    const handleAcceptDiligenceRequest = async (offer: OfferReceived) => {
-        if (!startup?.id) return;
-        
-        // Prevent multiple acceptances - check both local state and database
-        if (offer.status === 'accepted' || isAcceptingOffer) {
-            console.log('⚠️ Offer already accepted or processing, preventing duplicate acceptance');
-            return;
-        }
-        
-        setIsAcceptingOffer(true);
-        try {
-            console.log('🔄 Accepting diligence request for offer:', offer.id);
-            console.log('📋 Offer details:', {
-                id: offer.id,
-                applicationId: offer.applicationId,
-                type: offer.type,
-                status: offer.status,
-                from: offer.from
-            });
-            
-            // First, check the current status in the database to prevent race conditions
-            const { data: currentApp, error: checkError } = await supabase
-                .from('opportunity_applications')
-                .select('diligence_status')
-                .eq('id', offer.applicationId)
-                .single();
-            
-            if (checkError) {
-                console.error('Error checking current status:', checkError);
-                throw checkError;
-            }
-            
-            // If already approved, don't proceed
-            if (currentApp.diligence_status === 'approved') {
-                console.log('⚠️ Diligence already approved in database');
-                await loadOffersReceived(); // Refresh to get latest state
-                return;
-            }
-            
-            // Show confirmation dialog
-            const confirmed = window.confirm(
-                'By accepting this due diligence request, you are granting the facilitator view-only access to your compliance tab. Do you want to continue?'
-            );
-            
-            if (!confirmed) {
-                setIsAcceptingOffer(false);
-                return;
-            }
-
-            // Use RPC to approve diligence as per previous working logic
-            let updateResult = null;
-            try {
-                const { data, error: rpcError } = await supabase.rpc('safe_update_diligence_status', {
-                    p_application_id: offer.applicationId,
-                    p_new_status: 'approved',
-                    p_old_status: 'requested'
-                });
-                if (rpcError) {
-                    console.error('RPC function error:', rpcError);
-                    throw rpcError;
-                }
-                updateResult = data;
-            } catch (rpcError) {
-                console.error('RPC function failed:', rpcError);
-                throw rpcError;
-            }
-
-            if (!updateResult) {
-                console.log('⚠️ Diligence was already approved or status changed');
-                await loadOffersReceived();
-                return;
-            }
-
-            // Fetch latest agreement url from application
-            const { data: appAfter, error: appFetchError } = await supabase
-                .from('opportunity_applications')
-                .select('agreement_url')
-                .eq('id', offer.applicationId)
-                .single();
-            if (appFetchError) {
-                console.warn('Could not fetch updated agreement URL:', appFetchError);
-            }
-
-            console.log('✅ Diligence request approved in database');
-            console.log('🔄 Updating local state for offer:', offer.id);
-
-            // Update local state immediately to prevent multiple clicks
-            setOffersReceived(prev => {
-                const updated = prev.map(o => 
-                    o.id === offer.id 
-                        ? { 
-                            ...o, 
-                            status: 'accepted' as const,
-                            type: 'Due Diligence' as const,
-                            offerDetails: 'Compliance access granted',
-                            agreementUrl: appAfter?.agreement_url || o.agreementUrl
-                          }
-                        : o
-                );
-                console.log('🔄 Local state updated:', updated);
-                return updated;
-            });
-
-            // Reload offers to ensure persistence and get updated data
-            await loadOffersReceived();
-
-            // Show success message
-            const successMessage = document.createElement('div');
-            successMessage.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
-            successMessage.innerHTML = `
-                <div class="bg-white rounded-lg p-6 max-w-sm mx-4 text-center">
-                    <div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                        </svg>
-                    </div>
-                    <h3 class="text-lg font-semibold text-gray-900 mb-2">Due Diligence Accepted!</h3>
-                    <p class="text-gray-600 mb-4">The facilitator now has view-only access to your compliance tab.</p>
-                    <button onclick="this.parentElement.parentElement.remove()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors">
-                        Continue
-                    </button>
-                </div>
-            `;
-            document.body.appendChild(successMessage);
-        } catch (err) {
-            console.error('Error accepting diligence request:', err);
-            
-            // More detailed error message
-            let errorMessage = 'Failed to accept diligence request. Please try again.';
-            if (err && typeof err === 'object' && 'message' in err) {
-                errorMessage = `Error: ${err.message}`;
-            }
-            
-            alert(errorMessage);
-        } finally {
-            setIsAcceptingOffer(false);
-        }
-    };
-
-    const handleDownloadAgreement = async (agreementUrl: string) => {
-        try {
-            console.log('📥 Downloading agreement from:', agreementUrl);
-            
-            // Create a temporary link element
-            const link = document.createElement('a');
-            link.href = agreementUrl;
-            link.download = `facilitation-agreement-${Date.now()}.pdf`;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            
-            // Add to DOM, click, and remove
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            console.log('✅ Agreement download initiated');
-        } catch (err) {
-            console.error('Error downloading agreement:', err);
-            alert('Failed to download agreement. Please try again.');
-        }
-    };
-
-    const handleAcceptInvestmentOffer = async (offer: OfferReceived) => {
-        if (!offer.investmentOfferId) return;
-        
-        try {
-            console.log('💰 Accepting investment offer:', offer.investmentOfferId);
-            
-            // Try the simple accept function first (without scouting fee)
-            try {
-                await investmentService.acceptOfferSimple(offer.investmentOfferId);
-                console.log('✅ Investment offer accepted successfully (simple)');
-                alert('Investment offer accepted! Contact details have been revealed to both parties.');
-            } catch (simpleError) {
-                console.log('⚠️ Simple accept failed, trying with fee:', simpleError);
-                // Fallback to the fee-based function
-                await investmentService.acceptOfferWithFee(
-                    offer.investmentOfferId, 
-                    'United States', // TODO: Get actual country from startup profile
-                    startup.totalFunding || 0
-                );
-                console.log('✅ Investment offer accepted successfully with investor scouting fee');
-                alert('Investment offer accepted! Investor scouting fee has been paid. Contact details will be revealed based on investment advisor assignment.');
-            }
-            
-            // Reload offers to reflect the change
-            await loadOffersReceived();
-            
-        } catch (err) {
-            console.error('Error accepting investment offer:', err);
-            alert('Failed to accept investment offer. Please try again.');
-        }
-    };
-
-    const handleRejectInvestmentOffer = async (offer: OfferReceived) => {
-        if (!offer.investmentOfferId) return;
-        
-        try {
-            console.log('💰 Rejecting investment offer:', offer.investmentOfferId);
-            await investmentService.rejectOffer(offer.investmentOfferId);
-            
-            // Reload offers to reflect the change
-            await loadOffersReceived();
-            
-            console.log('✅ Investment offer rejected successfully');
-            alert('Investment offer rejected successfully.');
-        } catch (err) {
-            console.error('Error rejecting investment offer:', err);
-            alert('Failed to reject investment offer. Please try again.');
-        }
-    };
 
     if (isLoading) {
         return (
             <div className="flex items-center justify-center h-64">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-slate-600">Loading cap table data...</p>
+                    <p className="text-slate-600">Loading equity allocation data...</p>
                 </div>
             </div>
         );
@@ -2595,14 +2149,14 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                         }
                                         const computedPricePerShare = latestValuation / calculatedTotalShares;
                                         
-                                        // DETAILED DEBUG: Track Cap Table price calculation
-                                        console.log('🔍 DETAILED DEBUG - Cap Table Price Per Share Calculation:', {
+                                        // DETAILED DEBUG: Track Equity Allocation price calculation
+                                        console.log('🔍 DETAILED DEBUG - Equity Allocation Price Per Share Calculation:', {
                                             'startup.currentValuation': startup.currentValuation,
                                             'latestValuation': latestValuation,
                                             'calculatedTotalShares': calculatedTotalShares,
                                             'computedPricePerShare': computedPricePerShare,
                                             'formattedPrice': formatCurrency(computedPricePerShare, startupCurrency),
-                                            'calculation': `${latestValuation} / ${calculatedTotalShares} = ${computedPricePerShare}`
+                                            'calculation': latestValuation + ' / ' + calculatedTotalShares + ' = ' + computedPricePerShare
                                         });
                                         
                                         // Save the calculated price per share to database
@@ -2616,7 +2170,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                                 });
                                         }
                                         
-                                        return `Price/Share: ${formatCurrency(computedPricePerShare, startupCurrency)}`;
+                                        return 'Price/Share: ' + formatCurrency(computedPricePerShare, startupCurrency);
                                     }
                                     return 'Price/Share: —';
                                 })()}
@@ -2688,9 +2242,14 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                              <span className="text-slate-700">{esopReservedShares.toLocaleString()}</span>
                                          </div>
                                          {totalRecognitionShares > 0 && (
-                                             <div className="flex justify-between">
-                                                 <span className="text-slate-500">Incubation Center:</span>
-                                                 <span className="text-slate-700">{totalRecognitionShares.toLocaleString()}</span>
+                                             <div className="flex justify-between items-center">
+                                                 <div className="flex items-center space-x-2">
+                                                     <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                                     <span className="text-slate-500 font-medium">Incubation Center</span>
+                                                 </div>
+                                                 <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-sm font-medium">
+                                                     {totalRecognitionShares.toLocaleString()} shares
+                                                 </div>
                                              </div>
                                          )}
                                          <div className="flex justify-between font-medium pt-1 border-t border-slate-100">
@@ -2736,62 +2295,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             </div>
 
 
-            {/* Startup Profile Information from Second Stage Registration */}
-            {startupProfileData && (
-                <Card>
-                    <div className="flex items-center gap-2 mb-4">
-                        <Users className="w-5 h-5 text-blue-600" />
-                        <h3 className="text-lg font-semibold text-slate-700">Company Information</h3>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {startupProfileData.country_of_registration && (
-                            <div className="p-3 bg-slate-50 rounded-lg">
-                                <h4 className="font-medium text-slate-900">Country of Registration</h4>
-                                <p className="text-sm text-slate-600">{startupProfileData.country_of_registration}</p>
-                            </div>
-                        )}
-                        
-                        {startupProfileData.company_type && (
-                            <div className="p-3 bg-slate-50 rounded-lg">
-                                <h4 className="font-medium text-slate-900">Company Type</h4>
-                                <p className="text-sm text-slate-600">{startupProfileData.company_type}</p>
-                            </div>
-                        )}
-                        
-                        {startupProfileData.registration_date && (
-                            <div className="p-3 bg-slate-50 rounded-lg">
-                                <h4 className="font-medium text-slate-900">Registration Date</h4>
-                                <p className="text-sm text-slate-600">
-                                    {new Date(startupProfileData.registration_date).toLocaleDateString()}
-                                </p>
-                            </div>
-                        )}
-                        
-                        {startupProfileData.currency && (
-                            <div className="p-3 bg-slate-50 rounded-lg">
-                                <h4 className="font-medium text-slate-900">Currency</h4>
-                                <p className="text-sm text-slate-600">{startupProfileData.currency}</p>
-                            </div>
-                        )}
-                        
-                        {startupProfileData.total_shares && (
-                            <div className="p-3 bg-slate-50 rounded-lg">
-                                <h4 className="font-medium text-slate-900">Total Shares (Profile)</h4>
-                                <p className="text-sm text-slate-600">{startupProfileData.total_shares.toLocaleString()}</p>
-                            </div>
-                        )}
-                        
-                        {startupProfileData.price_per_share && (
-                            <div className="p-3 bg-slate-50 rounded-lg">
-                                <h4 className="font-medium text-slate-900">Price Per Share (Profile)</h4>
-                                <p className="text-sm text-slate-600">
-                                    {formatCurrency(startupProfileData.price_per_share, startupProfileData.currency || startupCurrency)}
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                </Card>
-            )}
+            {/* Company Information card removed as requested */}
 
             {/* Charts & Founder Info */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2896,13 +2400,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                                  if (percent < 0.05) return '';
                                                  // Shorten long names
                                                  const shortName = name.length > 15 ? name.substring(0, 15) + '...' : name;
-                                                 return `${shortName} ${(percent * 100).toFixed(0)}%`;
+                                                 return shortName + ' ' + (percent * 100).toFixed(0) + '%';
                                              }}
                                          >
-                                             {equityData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                                             {equityData.map((entry, index) => <Cell key={'cell-' + index} fill={COLORS[index % COLORS.length]} />)}
                                          </Pie>
                                          <Tooltip 
-                                             formatter={(value: number) => `${value.toFixed(1)}%`}
+                                             formatter={(value: number) => value.toFixed(1) + '%'}
                                              labelFormatter={(label) => label}
                                              contentStyle={{
                                                  backgroundColor: 'white',
@@ -2942,7 +2446,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 <Edit3 className="h-4 w-4 mr-2" />Edit
                             </Button>
                         </div>
-                        <div className="space-y-4">
+                                <div className="space-y-4">
                             {founders && founders.length > 0 ? (
                                 founders.map((founder, index) => (
                                     <div key={index} className="border-b border-slate-200 pb-3 last:border-b-0">
@@ -3131,8 +2635,16 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                                          <Select label="Type" id="fr-type" value={fundraising.type} onChange={e => setFundraising({...fundraising, type: e.target.value as InvestmentType})}>
                         {Object.values(InvestmentType).map(t => <option key={t} value={t}>{t}</option>)}
                     </Select>
-                                     <Input label="Value" id="fr-value" type="number" value={fundraising.value} onChange={e => setFundraising({...fundraising, value: Number(e.target.value)})} />
-                                     <Input label="Equity" id="fr-equity" type="number" value={fundraising.equity} onChange={e => setFundraising({...fundraising, equity: Number(e.target.value)})} />
+                                    <Input label="Value" id="fr-value" type="number" value={fundraising.value} onChange={e => setFundraising({...fundraising, value: Number(e.target.value)})} />
+                                    <Input label="Equity" id="fr-equity" type="number" value={fundraising.equity} onChange={e => setFundraising({...fundraising, equity: Number(e.target.value)})} />
+                                    {/* New dropdowns for Domain and Stage */}
+                                    <Select label="Domain" id="fr-domain" value={(fundraising as any).domain || ''} onChange={e => setFundraising({ ...fundraising, domain: e.target.value as any })}>
+                                        <option value="">Select your startup sector</option>
+                                        {Object.values(StartupDomain).map(d => <option key={d} value={d}>{d}</option>)}
+                                    </Select>
+                                    <Select label="Stage" id="fr-stage" value={(fundraising as any).stage || ''} onChange={e => setFundraising({ ...fundraising, stage: e.target.value as any })}>
+                                        {Object.values(StartupStage).map(s => <option key={s} value={s}>{s}</option>)}
+                                    </Select>
                                      <Input label="Pitch Deck" id="fr-deck" type="file" />
                                      <Input 
                                          label="Pitch Video (YouTube Link)" 
@@ -3142,15 +2654,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                          value={fundraising.pitchVideoUrl || ''}
                                          onChange={e => setFundraising({...fundraising, pitchVideoUrl: e.target.value})}
                                      />
-                                     <div className="flex items-center">
-                                         <input type="checkbox" id="fr-validation" className="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary" checked={fundraising.validationRequested} onChange={e => setFundraising({...fundraising, validationRequested: e.target.checked})} />
-                                         <label htmlFor="fr-validation" className="ml-2 block text-sm text-gray-900">Startup Nation Validation Requested</label>
-                                     </div>
-                                     {fundraising.validationRequested && (
-                                         <div className="p-3 bg-blue-50 border-l-4 border-brand-accent text-sm text-slate-600">
-                                             Startup Nation will charge 3% of fund raised or 4% to total equity raised as fees for validation, documentation and connection.
-                                         </div>
-                                     )}
+                                    {/* Startup Nation Validation disabled */}
+                                    <div className="flex items-center opacity-60">
+                                        <input type="checkbox" id="fr-validation" className="h-4 w-4 rounded border-gray-300" checked={false} disabled />
+                                        <label htmlFor="fr-validation" className="ml-2 block text-sm text-gray-900">Startup Nation Validation (disabled)</label>
+                                    </div>
                                  </div>
                              </fieldset>
                          )}
@@ -3158,203 +2666,30 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 </div>
             </div>
             
-            {/* Offers Received - moved below graphs and fundraising */}
-            <Card>
-                <h3 className="text-lg font-semibold mb-4 text-slate-700">Offers Received</h3>
-                {(
-                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <p className="text-sm text-blue-800">
-                            <strong>Debug Info:</strong> Loading offers for startup ID: {startup.id} | 
-                            Offers loaded: {offersReceived.length} | 
-                            User role: {userRole} | 
-                            View only: {isViewOnly ? 'Yes' : 'No'}
-                        </p>
-                        <div className="mt-2 flex gap-2">
-                            <button
-                                onClick={async () => {
-                                    console.log('🔍 Testing investment offers...');
-                                    const result = await testInvestmentOffers.checkAllInvestmentOffers();
-                                    console.log('🔍 All offers result:', result);
-                                    alert(`Found ${result.data?.count || 0} total investment offers in database`);
-                                }}
-                                className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-                            >
-                                Test All Offers
-                            </button>
-                            <button
-                                onClick={async () => {
-                                    console.log('🔍 Testing offers for this startup...');
-                                    const result = await testInvestmentOffers.checkOffersForStartup(startup.id);
-                                    console.log('🔍 Startup offers result:', result);
-                                    alert(`Found ${result.data?.count || 0} offers for startup ${startup.id}`);
-                                }}
-                                className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                            >
-                                Test Startup Offers
-                            </button>
-                            <button
-                                onClick={() => {
-                                    console.log('🔍 Reloading offers...');
-                                    loadOffersReceived();
-                                }}
-                                className="px-3 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700"
-                            >
-                                Reload Offers
-                            </button>
-                        </div>
-                    </div>
-                )}
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200">
-                        <thead className="bg-slate-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Type</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Offer Details</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Scouting Fees</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions / Status</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Code</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-slate-200">
-                            {offersReceived.map(offer => (
-                                <tr key={offer.id}>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                                        {offer.from}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                        {offer.type}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                        {offer.offerDetails}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                        {offer.type === 'Investment' ? (
-                                            <div className="text-xs">
-                                                <div>Startup: {formatCurrency(offer.startupScoutingFee || 0)}</div>
-                                                <div>Investor: {formatCurrency(offer.investorScoutingFee || 0)}</div>
-                                            </div>
-                                        ) : (
-                                            <span className="text-slate-400">N/A</span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        {offer.type === 'Incubation' && offer.status === 'accepted' && offer.agreementUrl && (
-                                            <button
-                                                onClick={() => handleDownloadAgreement(offer.agreementUrl!)}
-                                                className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                                            >
-                                                <Download className="h-4 w-4" />
-                                                Download Agreement
-                                            </button>
-                                        )}
-                                        {offer.type === 'Due Diligence' && offer.status === 'pending' && (
-                                            <Button
-                                                size="sm"
-                                                onClick={() => handleAcceptDiligenceRequest(offer)}
-                                                disabled={isAcceptingOffer || offer.status !== 'pending'}
-                                                className="flex items-center gap-1"
-                                            >
-                                                <Check className="h-4 w-4" />
-                                                {isAcceptingOffer ? 'Accepting...' : 'Accept Request'}
-                                            </Button>
-                                        )}
-                                        {offer.type === 'Due Diligence' && offer.status === 'accepted' && offer.agreementUrl && (
-                                            <button
-                                                onClick={() => handleDownloadAgreement(offer.agreementUrl!)}
-                                                className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                                            >
-                                                <Download className="h-4 w-4" />
-                                                Download Agreement
-                                            </button>
-                                        )}
-                                        {offer.type === 'Due Diligence' && offer.status === 'accepted' && !offer.agreementUrl && (
-                                            <span className="text-green-600 flex items-center gap-1">
-                                                <Check className="h-4 w-4" />
-                                                Accepted
-                                            </span>
-                                        )}
-                                        {offer.type === 'Investment' && (offer.status === 'pending' || offer.status === 'startup_advisor_approved') && (
-                                            <div className="flex gap-2">
-                                                <Button
-                                                    size="sm"
-                                                    onClick={() => handleAcceptInvestmentOffer(offer)}
-                                                    className="bg-green-600 hover:bg-green-700 text-white"
-                                                >
-                                                    <Check className="h-4 w-4 mr-1" />
-                                                    Accept
-                                                </Button>
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    onClick={() => handleRejectInvestmentOffer(offer)}
-                                                    className="border-red-300 text-red-600 hover:bg-red-50"
-                                                >
-                                                    <X className="h-4 w-4 mr-1" />
-                                                    Reject
-                                                </Button>
-                                            </div>
-                                        )}
-                                        {offer.type === 'Investment' && offer.status === 'accepted' && (
-                                            <span className="text-green-600 flex items-center gap-1">
-                                                <Check className="h-4 w-4" />
-                                                Accepted
-                                            </span>
-                                        )}
-                                        {offer.type === 'Investment' && offer.status === 'rejected' && (
-                                            <span className="text-red-600 flex items-center gap-1">
-                                                <X className="h-4 w-4" />
-                                                Rejected
-                                            </span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                        {offer.code}
-                                    </td>
-                                </tr>
-                            ))}
-                            {offersReceived.length === 0 && (
-                                <tr>
-                                    <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
-                                        {isViewOnly ? (
-                                            <div className="space-y-2">
-                                                <p className="text-sm">No offers or opportunities received yet.</p>
-                                                <p className="text-xs text-slate-400">This startup hasn't applied to any incubation programs or received investment offers.</p>
-                                            </div>
-                                        ) : (
-                                            "No offers received yet."
-                                        )}
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </Card>
             
             <Modal isOpen={isFounderModalOpen} onClose={() => setIsFounderModalOpen(false)} title="Edit Founder Information">
                 <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                     {editingFounders.map((founder, index) => (
                         <div key={founder.id} className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 relative border p-4 rounded-lg bg-slate-50/50">
                             <Input 
-                                label={`Founder ${index + 1} Name`}
-                                id={`founder-name-${founder.id}`}
+                                label={'Founder ' + (index + 1) + ' Name'}
+                                id={'founder-name-' + founder.id}
                                 type="text"
                                 value={founder.name}
                                 onChange={e => handleFounderChange(founder.id, 'name', e.target.value)}
                                 required
                             />
                             <Input 
-                                label={`Founder ${index + 1} Email`}
-                                id={`founder-email-${founder.id}`}
+                                label={'Founder ' + (index + 1) + ' Email'}
+                                id={'founder-email-' + founder.id}
                                 type="email"
                                 value={founder.email}
                                 onChange={e => handleFounderChange(founder.id, 'email', e.target.value)}
                                 required
                             />
                             <Input 
-                                label={`Equity Percentage (%)`}
-                                id={`founder-equity-${founder.id}`}
+                                label={'Equity Percentage (%)'}
+                                id={'founder-equity-' + founder.id}
                                 type="number"
                                 step="0.1"
                                 min="0"
@@ -3364,8 +2699,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 placeholder="e.g., 25.5"
                             />
                             <Input 
-                                label={`Shares`}
-                                id={`founder-shares-${founder.id}`}
+                                label={'Shares'}
+                                id={'founder-shares-' + founder.id}
                                 type="number"
                                 min="0"
                                 value={founder.shares || ''}
@@ -3524,7 +2859,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 placeholder="e.g., 10000"
                             />
                             <Input 
-                                label={`Price per Share (${startupCurrency})`} 
+                                label={'Price per Share (' + startupCurrency + ')'} 
                                 name="rec-price-per-share" 
                                 id="rec-price-per-share" 
                                 type="number"
@@ -3635,18 +2970,18 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     <td className="px-4 py-2 font-medium text-slate-900">{rec.programName}</td>
                                     <td className="px-4 py-2 text-slate-500">{rec.facilitatorName}</td>
                                     <td className="px-4 py-2 text-slate-500">
-                                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                        <span className={'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ' + (
                                             rec.feeType === 'Equity' ? 'bg-green-100 text-green-800' :
                                             rec.feeType === 'Hybrid' ? 'bg-blue-100 text-blue-800' :
                                             rec.feeType === 'Fees' ? 'bg-yellow-100 text-yellow-800' :
                                             'bg-gray-100 text-gray-800'
-                                        }`}>
+                                        )}>
                                             {rec.feeType}
                                         </span>
                                     </td>
                                     <td className="px-4 py-2 text-slate-500">
                                         {rec.feeAmount ? 
-                                            `${startupCurrency} ${rec.feeAmount.toLocaleString()}` : '—'
+                                            startupCurrency + ' ' + rec.feeAmount.toLocaleString() : '—'
                                         }
                                     </td>
                                     <td className="px-4 py-2 text-slate-500">
@@ -3656,17 +2991,17 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     </td>
                                     <td className="px-4 py-2 text-slate-500">
                                         {(rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.pricePerShare ? 
-                                            `${startupCurrency} ${rec.pricePerShare.toFixed(2)}` : '—'
+                                            startupCurrency + ' ' + rec.pricePerShare.toFixed(2) : '—'
                                         }
                                     </td>
                                     <td className="px-4 py-2 text-slate-500">
                                         {(rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.investmentAmount ? 
-                                            `${startupCurrency} ${rec.investmentAmount.toLocaleString()}` : '—'
+                                            startupCurrency + ' ' + rec.investmentAmount.toLocaleString() : '—'
                                         }
                                     </td>
                                     <td className="px-4 py-2 text-slate-500">
                                         {(rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.equityAllocated ? 
-                                            `${rec.equityAllocated.toFixed(2)}%` : '—'
+                                            rec.equityAllocated.toFixed(2) + '%' : '—'
                                         }
                                     </td>
                                     <td className="px-4 py-2 text-slate-500">{rec.dateAdded}</td>
@@ -3813,7 +3148,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
 
             {/* Add Entry Form (Unified) */}
             <Card>
-                <h3 className="text-lg font-semibold mb-4 text-slate-700">Add New Entry to Cap Table</h3>
+                <h3 className="text-lg font-semibold mb-4 text-slate-700">Add New Equity Allocation Entry</h3>
                 {error && (
                     <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded">
                         <div className="flex items-center">
@@ -3834,7 +3169,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     type="button"
                                     variant={entryType === 'investment' ? 'default' : 'outline'}
                                     onClick={() => setEntryType('investment')}
-                                    className={`flex-1 border-2 ${entryType === 'investment' ? 'border-blue-600' : 'border-slate-300'}`}
+                                    className={'flex-1 border-2 ' + (entryType === 'investment' ? 'border-blue-600' : 'border-slate-300')}
                                 >
                                     Investment
                                 </Button>
@@ -3842,7 +3177,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     type="button"
                                     variant={entryType === 'recognition' ? 'default' : 'outline'}
                                     onClick={() => setEntryType('recognition')}
-                                    className={`flex-1 border-2 ${entryType === 'recognition' ? 'border-blue-600' : 'border-slate-300'}`}
+                                    className={'flex-1 border-2 ' + (entryType === 'recognition' ? 'border-blue-600' : 'border-slate-300')}
                                 >
                                     Recognition / Incubation
                                 </Button>
@@ -3914,7 +3249,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     placeholder="e.g., 10000"
                                 />
                                 <Input 
-                                    label={`Price per Share (${startupCurrency})`} 
+                                    label={'Price per Share (' + startupCurrency + ')'} 
                                     name="inv-price-per-share" 
                                     id="inv-price-per-share" 
                                     type="number" 
@@ -3959,7 +3294,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             placeholder="e.g., 10000"
                                         />
                                         <Input 
-                                            label={`Price per Share (${startupCurrency})`} 
+                                            label={'Price per Share (' + startupCurrency + ')'} 
                                             name="rec-price-per-share" 
                                             id="rec-price-per-share" 
                                             type="number" 
@@ -4283,7 +3618,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         console.error('CapTableTab render error:', error);
         return (
             <div className="text-center py-8">
-                <p className="text-red-600 mb-4">An error occurred while loading the cap table.</p>
+                <p className="text-red-600 mb-4">An error occurred while loading the equity allocation data.</p>
                 <Button onClick={() => window.location.reload()}>Reload Page</Button>
             </div>
         );

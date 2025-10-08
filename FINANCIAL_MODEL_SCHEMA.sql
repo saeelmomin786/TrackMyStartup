@@ -27,6 +27,12 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
     startup_count INTEGER DEFAULT 0,
     amount DECIMAL(10,2) NOT NULL DEFAULT 0,
     interval VARCHAR(20) NOT NULL CHECK (interval IN ('monthly', 'yearly')),
+    -- trial support
+    is_in_trial BOOLEAN DEFAULT false,
+    trial_start TIMESTAMP WITH TIME ZONE,
+    trial_end TIMESTAMP WITH TIME ZONE,
+    -- payment gateway linkage
+    razorpay_subscription_id TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(user_id, plan_id)

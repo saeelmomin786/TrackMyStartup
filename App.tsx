@@ -8,6 +8,9 @@ import { dataMigrationService } from './lib/dataMigration';
 import { storageService } from './lib/storage';
 import { validationService, ValidationRequest } from './lib/validationService';
 import { supabase } from './lib/supabase';
+import { paymentService } from './lib/paymentService';
+import { TrialService } from './lib/trialService';
+import TrialAlert from './components/TrialAlert';
 import InvestorView from './components/InvestorView';
 import StartupHealthView from './components/StartupHealthView';
 import AdminView from './components/AdminView';
@@ -15,7 +18,7 @@ import CAView from './components/CAView';
 import CSView from './components/CSView';
 import FacilitatorView from './components/FacilitatorView';
 import InvestmentAdvisorView from './components/InvestmentAdvisorView';
-import RazorpaySubscriptionModal from './components/RazorpaySubscriptionModal';
+import TrialStatusBanner from './components/TrialStatusBanner';
 import LoginPage from './components/LoginPage';
 import { TwoStepRegistration } from './components/TwoStepRegistration';
 import { CompleteRegistrationPage } from './components/CompleteRegistrationPage';
@@ -23,6 +26,7 @@ import ResetPasswordPage from './components/ResetPasswordPage';
 import LandingPage from './components/LandingPage';
 import Footer from './components/Footer';
 import PageRouter from './components/PageRouter';
+import StartupSubscriptionStep from './components/StartupSubscriptionStep';
 
 import { Briefcase, BarChart3, LogOut } from 'lucide-react';
 import LogoTMS from './components/public/logoTMS.svg';
@@ -178,14 +182,31 @@ const App: React.FC = () => {
   const [validationRequests, setValidationRequests] = useState<ValidationRequest[]>([]);
   const [pendingRelationships, setPendingRelationships] = useState<any[]>([]);
 
-  // Subscription modal state
-  const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
+  // Subscription modal removed
   const [pendingStartupRequest, setPendingStartupRequest] = useState<StartupAdditionRequest | null>(null);
+  
+  // Trial subscription modal state
+  const [isTrialModalOpen, setIsTrialModalOpen] = useState(false);
+  const [showTrialBanner, setShowTrialBanner] = useState(false);
+  
+  // Subscription access control
+  const [userHasAccess, setUserHasAccess] = useState<boolean | null>(null);
+  const [isCheckingSubscription, setIsCheckingSubscription] = useState(false);
+  
+  // 5-minute trial system
+  const [trialStatus, setTrialStatus] = useState<any>(null);
+  const [showSubscriptionPage, setShowSubscriptionPage] = useState(false); // will be forced off below
+  const [trialEnded, setTrialEnded] = useState(false);
 
   // Refs for state variables to avoid dependency issues
   const startupsRef = useRef<Startup[]>([]);
   const investmentOffersRef = useRef<InvestmentOffer[]>([]);
   const validationRequestsRef = useRef<ValidationRequest[]>([]);
+
+  // Trial control refs (one-shot guard and timers)
+  const hasHandledTrialEndRef = useRef(false);
+  const trialEndTimeoutRef = useRef<number | null>(null);
+  const trialCountdownIntervalRef = useRef<number | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -215,6 +236,129 @@ const App: React.FC = () => {
   useEffect(() => {
     hasInitialDataLoadedRef.current = hasInitialDataLoaded;
   }, [hasInitialDataLoaded]);
+
+  // Disable any accidental full page reloads in development to prevent refresh loops
+  useEffect(() => {
+    try {
+      if (import.meta && (import.meta as any).env && (import.meta as any).env.DEV) {
+        const originalReload = window.location.reload;
+        (window as any).__originalReload = originalReload;
+        // No-op reload in dev
+        (window.location as any).reload = () => {
+          console.log('⚠️ Reload blocked in DEV to avoid loops');
+        };
+      }
+    } catch {}
+  }, []);
+
+  // Enforced: Check user access against backend subscription status
+  const checkUserAccess = useCallback(async (userId: string) => {
+    try {
+      console.log('🔍 Checking user access for:', userId);
+      const resp = await fetch(`/api/billing/subscription-status?user_id=${encodeURIComponent(userId)}`);
+      if (!resp.ok) throw new Error(`status ${resp.status}`);
+      const status = await resp.json();
+      const isTrial = Boolean(status?.is_in_trial === true);
+      const isActive = Boolean(status?.status === 'active');
+
+      // Local hard lock flags: if set, force subscription unless backend says trial
+      let forceLock = false;
+      try {
+        const required = localStorage.getItem('startupPaymentRequired') === '1';
+        const inProgress = localStorage.getItem('startupPaymentInProgress') === '1';
+        forceLock = (required || inProgress) && !isTrial; // allow trial through
+      } catch {}
+
+      const allowAccess = (isActive || isTrial) && !forceLock;
+
+      setUserHasAccess(allowAccess);
+      setShowSubscriptionPage(!allowAccess);
+
+      return { hasAccess: allowAccess, isTrial, subscription: status };
+    } catch (error) {
+      console.error('Error checking user access:', error);
+      // Lock by default on error to be safe
+      setUserHasAccess(false);
+      setShowSubscriptionPage(true);
+      return { hasAccess: false, isTrial: false, subscription: null };
+    }
+  }, []);
+
+  // Check user access when authenticated
+  useEffect(() => {
+    const checkAccess = async () => {
+      if (currentUser && currentUser.role === 'Startup' && !isCheckingSubscription) {
+        if ((window as any).__rzpAccessCheckInFlight) return; // throttle
+        (window as any).__rzpAccessCheckInFlight = true;
+        setIsCheckingSubscription(true);
+        console.log('🔍 Checking access for startup user:', currentUser.email);
+        
+        try {
+          const accessResult = await checkUserAccess(currentUser.id);
+          setUserHasAccess(accessResult.hasAccess);
+          
+          if (accessResult.isTrial) {
+            setShowTrialBanner(true);
+          }
+          
+          console.log('🔍 Access check result:', accessResult);
+        } catch (error) {
+          console.error('❌ Access check failed:', error);
+          setShowSubscriptionPage(true);
+        } finally {
+          setIsCheckingSubscription(false);
+          setTimeout(() => { (window as any).__rzpAccessCheckInFlight = false; }, 1000);
+        }
+      }
+    };
+
+    checkAccess();
+  }, [currentUser, checkUserAccess, isCheckingSubscription]);
+
+  // Disable trial logic entirely
+  useEffect(() => {}, [currentUser]);
+
+  // Handle trial end (one-shot)
+  const handleTrialEnd = useCallback(() => {
+    if (hasHandledTrialEndRef.current) return;
+    hasHandledTrialEndRef.current = true;
+
+    console.log('🔍 Trial ended - redirecting to subscription page');
+    // No gating: do not lock or redirect to subscription page
+    setTrialEnded(true);
+    setShowSubscriptionPage(false);
+    setUserHasAccess(true);
+
+    // Cleanup timers
+    if (trialEndTimeoutRef.current) {
+      clearTimeout(trialEndTimeoutRef.current);
+      trialEndTimeoutRef.current = null;
+    }
+    if (trialCountdownIntervalRef.current) {
+      clearInterval(trialCountdownIntervalRef.current);
+      trialCountdownIntervalRef.current = null;
+    }
+  }, []);
+
+  // Update trial countdown every second (UI only; end handled by single timeout)
+  useEffect(() => {
+    if (trialStatus && trialStatus.hasActiveTrial) {
+      if (trialCountdownIntervalRef.current) clearInterval(trialCountdownIntervalRef.current);
+      trialCountdownIntervalRef.current = window.setInterval(() => {
+        const now = Date.now();
+        const end = new Date(trialStatus.trialEndTime).getTime();
+        const minutesRemaining = Math.max(0, Math.ceil((end - now) / 60000));
+        setTrialStatus(prev => (prev ? { ...prev, minutesRemaining } : prev));
+      }, 1000);
+
+      return () => {
+        if (trialCountdownIntervalRef.current) {
+          clearInterval(trialCountdownIntervalRef.current);
+          trialCountdownIntervalRef.current = null;
+        }
+      };
+    }
+  }, [trialStatus]);
 
 
   // Utility function to emit tab change events (can be used by dashboard components)
@@ -1043,13 +1187,20 @@ const App: React.FC = () => {
       const shares = sharesData.data;
       const founders = foundersData.data || [];
       
-      // Map founders data to include shares
-      const mappedFounders = founders.map((founder: any) => ({
-        name: founder.name,
-        email: founder.email,
-        shares: founder.shares || 0,
-        equityPercentage: founder.equity_percentage || 0
-      }));
+      // Map founders data to include shares; if shares are missing, derive from equity percentage
+      const totalSharesForDerivation = (sharesData && (sharesData as any).data && (sharesData as any).data.total_shares) || 0;
+      const mappedFounders = founders.map((founder: any) => {
+        const equityPct = Number(founder.equity_percentage) || 0;
+        const sharesFromEquity = totalSharesForDerivation > 0 && equityPct > 0
+          ? Math.round((equityPct / 100) * totalSharesForDerivation)
+          : 0;
+        return {
+          name: founder.name,
+          email: founder.email,
+          shares: Number(founder.shares) || sharesFromEquity,
+          equityPercentage: equityPct
+        };
+      });
       
       // Convert database format to Startup interface
       const startupObj: Startup = {
@@ -1132,9 +1283,8 @@ const App: React.FC = () => {
         return;
       }
 
-      // Show subscription modal first
+      // Directly proceed without subscription modal
       setPendingStartupRequest(startupRequest);
-      setIsSubscriptionModalOpen(true);
     } catch (error) {
       console.error('Error preparing startup request:', error);
       alert('Failed to prepare startup request. Please try again.');
@@ -1142,6 +1292,19 @@ const App: React.FC = () => {
   }, [startupAdditionRequests]);
 
   const handleSubscriptionSuccess = useCallback(async () => {
+    // Handle trial subscription success
+    if (showSubscriptionPage) {
+      console.log('🔍 Trial subscription successful - granting access');
+      try { localStorage.removeItem('subscription_required'); } catch {}
+      setShowSubscriptionPage(false);
+      setUserHasAccess(true);
+      setTrialEnded(false);
+      // Refresh data
+      fetchData();
+      return;
+    }
+
+    // Handle regular subscription success (for startup requests)
     if (!pendingStartupRequest) return;
 
     try {
@@ -1153,19 +1316,60 @@ const App: React.FC = () => {
       
       alert(`${newStartup.name} has been added to your portfolio.`);
       
-      // Reset modal state
+      // Reset pending request
       setPendingStartupRequest(null);
-      setIsSubscriptionModalOpen(false);
     } catch (error) {
       console.error('Error accepting startup request:', error);
       alert('Failed to accept startup request. Please try again.');
     }
-  }, [pendingStartupRequest]);
+  }, [pendingStartupRequest, showSubscriptionPage, fetchData]);
 
   const handleSubscriptionModalClose = useCallback(() => {
-    setIsSubscriptionModalOpen(false);
     setPendingStartupRequest(null);
   }, []);
+
+  // Trial subscription modal handlers
+  const handleTrialModalClose = useCallback(() => {
+    console.log('🔍 Trial modal close handler called');
+    setIsTrialModalOpen(false);
+  }, []);
+
+  const handleTrialSuccess = useCallback(() => {
+    console.log('🔍 Trial success handler called');
+    setIsTrialModalOpen(false);
+    setShowTrialBanner(true);
+    setUserHasAccess(true); // Grant access after successful trial start
+    try { localStorage.removeItem('subscription_required'); } catch {} // Clear subscription lock
+    
+    // Set trial status for 5 minutes
+    const trialStart = new Date();
+    const trialEnd = new Date(Date.now() + 5 * 60 * 1000);
+    setTrialStatus({
+      hasActiveTrial: true,
+      trialStartTime: trialStart.toISOString(),
+      trialEndTime: trialEnd.toISOString(),
+      minutesRemaining: 5,
+      hasUsedTrial: false
+    });
+    
+    // Set timer to end trial after 5 minutes
+    setTimeout(() => {
+      handleTrialEnd();
+    }, 5 * 60 * 1000);
+    
+    // Refresh data to show trial status
+    fetchData();
+  }, [fetchData, handleTrialEnd]);
+
+  // Client-side trial redirect disabled
+  useEffect(() => {}, []);
+
+  // Remove subscription-related URL toggles
+  useEffect(() => {}, []);
+
+  // Remove subscription localStorage lock behavior
+  useEffect(() => {}, []);
+
   
   const handleActivateFundraising = useCallback((details: FundraisingDetails, startup: Startup) => {
     const newOpportunity: NewInvestment = {
@@ -1499,7 +1703,7 @@ const App: React.FC = () => {
 
 
 
-  if (isLoading) {
+  if (isLoading && currentPage !== 'login' && currentPage !== 'register') {
       console.log('Rendering loading screen...', { isAuthenticated, currentUser: !!currentUser });
       return (
           <div className="flex items-center justify-center min-h-screen bg-slate-50 text-brand-primary">
@@ -1518,6 +1722,8 @@ const App: React.FC = () => {
           </div>
       )
   }
+
+  // Subscription page removed (always allow dashboard)
 
 
 
@@ -1768,27 +1974,132 @@ const App: React.FC = () => {
         userStartup = startups[0];
       }
       
-      console.log('🚨🚨🚨 APP COMPONENT DEBUGGING - STARTUP DATA 🚨🚨🚨');
-      console.log('🔍 Found user startup:', userStartup);
-      console.log('🔍 User startup founders:', userStartup?.founders);
-      console.log('🔍 User startup ESOP reserved shares:', userStartup?.esopReservedShares);
-      console.log('🚨🚨🚨 END APP COMPONENT DEBUGGING 🚨🚨🚨');
+      // Check if startup user needs to start trial subscription
+      // This will be handled by the trial modal logic
+      if (userStartup && !showTrialBanner) {
+        console.log('🔍 DEBUG: Checking trial status for user:', currentUser?.email, 'startup:', userStartup.name);
+        // Check if user has active trial or subscription
+        // For now, we'll show the trial modal for new startup users
+        // You can add more sophisticated logic here to check existing subscriptions
+      }
+      
+      // User startup data processed
+      
+      // Show subscription page if user needs to subscribe
+      if (showSubscriptionPage) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <StartupSubscriptionStep
+                userEmail={currentUser?.email || ''}
+                razorpayCustomerId={undefined}
+                subscriptionButtonId={(typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RAZORPAY_SUBSCRIPTION_BUTTON_ID) || 'pl_RMvYPEir7kvx3E'}
+                onSuccess={handleSubscriptionSuccess}
+                onBack={() => {
+                  setShowSubscriptionPage(false);
+                  setCurrentPage('landing');
+                }}
+              />
+            </div>
+          </div>
+        );
+      }
+
+      // SIMPLIFIED: Skip loading check for faster access
+      // TODO: Re-enable once database is working properly
+      /*
+      if (userHasAccess === null || isCheckingSubscription) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Checking access...</p>
+              <p className="text-sm text-gray-500 mt-2">Setting up your 5-minute free trial</p>
+            </div>
+          </div>
+        );
+      }
+      */
+
+      // Show access denied if user doesn't have access
+      if (userHasAccess === false) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
+              <div className="mb-6">
+                <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Restricted</h2>
+                <p className="text-gray-600 mb-6">
+                  You need an active subscription to access the dashboard.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSubscriptionPage(true)}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                Subscribe Now
+              </button>
+            </div>
+          </div>
+        );
+      }
       
       // If user's startup is found, show the health view
       if (userStartup) {
         console.log('✅ Rendering StartupHealthView for startup:', userStartup.name);
+        
         return (
+          <div>
+            {/* Trial Alert - Shows when trial is active */}
+            {trialStatus && trialStatus.hasActiveTrial && (
+              <TrialAlert
+                userId={currentUser?.id || ''}
+                onTrialEnd={handleTrialEnd}
+              />
+            )}
+            
+            {/* Trial Status Banner */}
+            {trialStatus && trialStatus.hasActiveTrial && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-green-900">🎉 Free Trial Active</h3>
+                    <p className="text-green-700">
+                      You have {Math.ceil(trialStatus.minutesRemaining)} minutes remaining in your free trial
+                    </p>
+                    <p className="text-xs text-green-600 mt-1">
+                      Trial ends at: {trialStatus.trialEndTime ? new Date(trialStatus.trialEndTime).toLocaleTimeString() : 'N/A'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-green-600">
+                      {Math.ceil(trialStatus.minutesRemaining)}m
+                    </div>
+                    <div className="text-xs text-green-600">remaining</div>
+                  </div>
+                </div>
+              </div>
+            )}
           <StartupHealthView 
             startup={userStartup}
             userRole={currentUser?.role}
             user={currentUser}
             onBack={() => {}} // No back button needed for startup users
+              onTrialButtonClick={() => {
+                console.log('🔍 Trial button clicked in App.tsx - setting modal to open');
+                setIsTrialModalOpen(true);
+              }} // Connect trial button to modal
             onActivateFundraising={handleActivateFundraising}
             onInvestorAdded={handleInvestorAdded}
             onUpdateFounders={handleUpdateFounders}
             investmentOffers={investmentOffers}
             onProcessOffer={handleProcessOffer}
           />
+          </div>
         );
       }
       
@@ -1936,16 +2247,22 @@ const App: React.FC = () => {
         )}
         
         <main className="container mx-auto p-4 sm:p-6 lg:p-8 flex-1">
+          {/* Trial Status Banner */}
+          {currentUser && showTrialBanner && (
+            <TrialStatusBanner
+              userId={currentUser.id}
+              onTrialEnd={() => {
+                setShowTrialBanner(false);
+                fetchData();
+              }}
+            />
+          )}
           <MainContent key={`${viewKey}-${forceRender}`} />
         </main>
       
-        {/* Razorpay Subscription Modal */}
-        <RazorpaySubscriptionModal
-          isOpen={isSubscriptionModalOpen}
-          onClose={handleSubscriptionModalClose}
-          onSubscriptionSuccess={handleSubscriptionSuccess}
-          startupName={pendingStartupRequest?.name || ''}
-        />
+        {/* Razorpay Subscription Modal removed */}
+
+        {/* Trial Subscription Modal removed */}
       
       {/* Footer removed - only shows on landing page */}
       </div>

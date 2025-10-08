@@ -58,13 +58,13 @@ const StartupSubscriptionModal: React.FC<StartupSubscriptionModalProps> = ({
     
     try {
       // Create payment order
-      const response = await fetch('/api/payment/create-order', {
+      const response = await fetch('/api/razorpay/create-order', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          amount: currentPricing.final * 100, // Convert to paise
+          amount: currentPricing.final, // Amount in rupees (not paise)
           currency: 'INR',
           plan: selectedPlan,
           startupName: startupName
@@ -72,14 +72,22 @@ const StartupSubscriptionModal: React.FC<StartupSubscriptionModalProps> = ({
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create payment order');
+        const errorText = await response.text();
+        console.error('Payment order creation failed:', response.status, errorText);
+        throw new Error(`Failed to create payment order: ${response.status} ${errorText}`);
       }
 
       const order = await response.json();
 
       // Initialize Razorpay
+      console.log('🔍 Environment check:', {
+        keyId: import.meta.env.VITE_RAZORPAY_KEY_ID,
+        keySecret: import.meta.env.VITE_RAZORPAY_KEY_SECRET,
+        environment: import.meta.env.VITE_RAZORPAY_ENVIRONMENT
+      });
+      
       const options = {
-        key: process.env.REACT_APP_RAZORPAY_KEY_ID || 'rzp_test_1234567890', // Replace with your Razorpay key
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_live_RMzc3DoDdGLh9u', // Using your real key as fallback
         amount: order.amount,
         currency: order.currency,
         name: 'Track My Startup',
@@ -107,7 +115,14 @@ const StartupSubscriptionModal: React.FC<StartupSubscriptionModalProps> = ({
       rzp.open();
     } catch (error) {
       console.error('Payment error:', error);
-      alert('Payment failed. Please try again.');
+      
+      // Check if it's a server connection error
+      if (error.message.includes('Failed to fetch') || error.message.includes('404')) {
+        alert('Payment server is not running. Please start the server with: npm run server');
+      } else {
+        alert(`Payment failed: ${error.message}`);
+      }
+      
       setIsProcessing(false);
     }
   };

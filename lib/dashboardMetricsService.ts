@@ -38,8 +38,8 @@ export class DashboardMetricsService {
         .filter(record => record.record_type === 'expense')
         .reduce((sum, record) => sum + record.amount, 0);
 
-      // Calculate Burn Rate
-      const burnRate = monthlyExpenses - monthlyRevenue;
+      // Calculate Burn Rate (Gross Burn: total monthly expenses)
+      const burnRate = monthlyExpenses;
 
       // Calculate CAC (Customer Acquisition Cost)
       // Use marketing expenses from financial records

@@ -3,6 +3,9 @@ import { paymentService, SubscriptionPlan, UserSubscription, DiscountCoupon } fr
 import Button from './ui/Button';
 import Card from './ui/Card';
 import StartupSubscriptionModal from './StartupSubscriptionModal';
+import PlanSelectionModal from './PlanSelectionModal';
+import BillingSettingsModal from './BillingSettingsModal';
+import CancelSubscriptionModal from './CancelSubscriptionModal';
 import { CreditCard, CheckCircle, AlertCircle, Percent, Calendar, RefreshCw, Settings, Download, Clock, DollarSign, Users, Building2 } from 'lucide-react';
 import { getCurrencyForCountry } from '../lib/utils';
 import { formatCurrencyFromEUR } from '../lib/currencyUtils';
@@ -24,6 +27,9 @@ export default function PaymentSection({ userId, userType, country, startupCount
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [showPlanSelectionModal, setShowPlanSelectionModal] = useState(false);
+  const [showBillingSettingsModal, setShowBillingSettingsModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
 
   // Get currency based on user's country
   const userCurrency = getCurrencyForCountry(country);
@@ -124,6 +130,80 @@ export default function PaymentSection({ userId, userType, country, startupCount
     }
   };
 
+  // Handle Update Plan button
+  const handleUpdatePlan = () => {
+    setShowPlanSelectionModal(true);
+  };
+
+  // Handle plan selection from modal
+  const handlePlanSelected = async (newPlanId: string) => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const updatedSubscription = await paymentService.updateSubscriptionPlan(userId, newPlanId);
+      setCurrentSubscription(updatedSubscription);
+      setSuccess('Subscription plan updated successfully!');
+    } catch (error) {
+      console.error('Error updating plan:', error);
+      setError('Failed to update subscription plan. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Download Invoice button
+  const handleDownloadInvoice = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const { downloadUrl } = await paymentService.generateInvoice(userId);
+      
+      // Create a temporary link to download the invoice
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `invoice-${Date.now()}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      setSuccess('Invoice downloaded successfully!');
+    } catch (error) {
+      console.error('Error downloading invoice:', error);
+      setError('Failed to download invoice. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Billing Settings button
+  const handleBillingSettings = () => {
+    setShowBillingSettingsModal(true);
+  };
+
+  // Handle Cancel Subscription button
+  const handleCancelSubscription = () => {
+    setShowCancelModal(true);
+  };
+
+  // Handle subscription cancellation
+  const handleSubscriptionCancelled = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      await paymentService.cancelSubscription(userId);
+      setCurrentSubscription(null);
+      setSuccess('Subscription cancelled successfully. You can resubscribe anytime.');
+    } catch (error) {
+      console.error('Error cancelling subscription:', error);
+      setError('Failed to cancel subscription. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (isLoading && !currentSubscription) {
     return (
       <Card>
@@ -217,63 +297,56 @@ export default function PaymentSection({ userId, userType, country, startupCount
               </div>
             </div>
 
-            {/* Subscription Management Actions */}
-            <div className="bg-white border border-slate-200 rounded-lg p-4">
+            {/* Subscription Management Actions - Hidden as requested */}
+            {/* <div className="bg-white border border-slate-200 rounded-lg p-4">
               <h4 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
                 <Settings className="h-4 w-4" />
                 Subscription Management
               </h4>
               <div className="flex flex-wrap gap-3">
-                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex items-center gap-2"
+                  onClick={handleUpdatePlan}
+                  disabled={isLoading}
+                >
                   <RefreshCw className="h-4 w-4" />
                   Update Plan
                 </Button>
-                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex items-center gap-2"
+                  onClick={handleDownloadInvoice}
+                  disabled={isLoading}
+                >
                   <Download className="h-4 w-4" />
                   Download Invoice
                 </Button>
-                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex items-center gap-2"
+                  onClick={handleBillingSettings}
+                  disabled={isLoading}
+                >
                   <Settings className="h-4 w-4" />
                   Billing Settings
                 </Button>
-                <Button variant="outline" size="sm" className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:border-red-300">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:border-red-300"
+                  onClick={handleCancelSubscription}
+                  disabled={isLoading}
+                >
                   Cancel Subscription
                 </Button>
               </div>
-            </div>
+            </div> */}
           </div>
-        ) : (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertCircle className="h-5 w-5 text-yellow-600" />
-              <span className="font-medium text-yellow-800">No Active Subscription</span>
-            </div>
-            <p className="text-sm text-yellow-700 mb-3">
-              Subscribe to access premium features for your {startupCount} startup{startupCount !== 1 ? 's' : ''}.
-            </p>
-            <Button
-              onClick={() => setShowSubscriptionModal(true)}
-              className="w-full"
-              size="sm"
-            >
-              <CreditCard className="h-4 w-4 mr-2" />
-              Subscribe Now
-            </Button>
-            <div className="bg-white rounded-lg p-3 border border-yellow-100">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">Current Usage</p>
-                  <p className="text-xs text-slate-600">{startupCount} startup{startupCount !== 1 ? 's' : ''} requiring subscription</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-slate-900">₹{startupCount * 354}/month</p>
-                  <p className="text-xs text-slate-600">or ₹{startupCount * 3540}/year</p>
-                  <p className="text-xs text-green-600 font-medium">80% OFF First Year</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        ) : null}
 
 
         {/* Subscription Plans - Hidden for Startups */}
@@ -623,6 +696,33 @@ export default function PaymentSection({ userId, userType, country, startupCount
           startupName={`Startup ${userId}`} // You can pass the actual startup name here
         />
       )}
+
+      {/* Plan Selection Modal */}
+      <PlanSelectionModal
+        isOpen={showPlanSelectionModal}
+        onClose={() => setShowPlanSelectionModal(false)}
+        onPlanSelected={handlePlanSelected}
+        currentPlanId={currentSubscription?.plan_id}
+        userType={userType}
+        country={country}
+      />
+
+      {/* Billing Settings Modal */}
+      <BillingSettingsModal
+        isOpen={showBillingSettingsModal}
+        onClose={() => setShowBillingSettingsModal(false)}
+        userId={userId}
+      />
+
+      {/* Cancel Subscription Modal */}
+      <CancelSubscriptionModal
+        isOpen={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        onCancelled={handleSubscriptionCancelled}
+        userId={userId}
+        planName={currentSubscription?.plan_id}
+        nextBillingDate={currentSubscription?.current_period_end}
+      />
     </Card>
   );
 }

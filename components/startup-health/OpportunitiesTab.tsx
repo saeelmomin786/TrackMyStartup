@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
-import { Zap, Check, Video } from 'lucide-react';
+import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import Modal from '../ui/Modal';
 
@@ -34,7 +34,7 @@ interface OpportunitiesTabProps {
     startup: StartupRef;
 }
 
-const SECTOR_OPTIONS = [
+ const SECTOR_OPTIONS = [
     'Agriculture',
     'AI',
     'Climate',
@@ -59,6 +59,14 @@ const SECTOR_OPTIONS = [
     'Waste Management',
     'Web 3.0'
 ];
+ 
+ const STAGE_OPTIONS = [
+     'Ideation',
+     'Proof of Concept',
+     'Minimum viable product',
+     'Product market fit',
+     'Scaling'
+ ];
 
 const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
@@ -70,11 +78,13 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     const [applyPitchVideoUrl, setApplyPitchVideoUrl] = useState('');
     const [applyPitchDeckFile, setApplyPitchDeckFile] = useState<File | null>(null);
     const [applySector, setApplySector] = useState('');
-    const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
+     const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
+     const [applyStage, setApplyStage] = useState('');
     // Image modal state
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
     const [selectedImageUrl, setSelectedImageUrl] = useState<string>('');
     const [selectedImageAlt, setSelectedImageAlt] = useState<string>('');
+    
 
     useEffect(() => {
         let mounted = true;
@@ -121,6 +131,10 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
 
     const appliedIds = useMemo(() => new Set(applications.map(a => a.opportunityId)), [applications]);
 
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isPast = (dateStr: string) => new Date(dateStr) < new Date(todayStr);
+    const isToday = (dateStr: string) => dateStr === todayStr;
+
     const getYoutubeEmbedUrl = (url?: string): string | null => {
         if (!url) return null;
         try {
@@ -144,8 +158,15 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
         setApplyingOppId(opportunityId);
         setApplyPitchDeckFile(null);
         setApplyPitchVideoUrl('');
-        setApplySector('');
+         setApplySector('');
+         setApplyStage('');
         setIsApplyModalOpen(true);
+    };
+
+
+    const handlePaymentSuccess = () => {
+        // Refresh applications to show updated payment status
+        window.location.reload();
     };
 
     const openImageModal = (imageUrl: string, altText: string) => {
@@ -175,8 +196,12 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             alert('Please provide either a pitch deck file or a pitch video URL.');
             return;
         }
-        if (!applySector.trim()) {
-            alert('Please select a sector for your startup.');
+         if (!applySector.trim()) {
+             alert('Please select a domain for your startup.');
+             return;
+         }
+         if (!applyStage.trim()) {
+             alert('Please select your startup stage.');
             return;
         }
 
@@ -205,8 +230,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     opportunity_id: applyingOppId,
                     status: 'pending',
                     pitch_deck_url: pitchDeckUrl,
-                    pitch_video_url: pitchVideo,
-                    sector: applySector.trim()
+                     pitch_video_url: pitchVideo,
+                    domain: applySector.trim(),
+                    stage: applyStage.trim()
                 })
                 .select()
                 .single();
@@ -251,8 +277,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
 
     return (
         <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-slate-800">Growth Opportunities</h2>
-            <p className="text-slate-600">Explore accelerator programs and other opportunities posted by our network of facilitation centers.</p>
+            <h2 className="text-2xl font-bold text-slate-800">Programs</h2>
+            <p className="text-slate-600">Explore accelerator programs and other programs posted by our network of facilitation centers.</p>
+            
 
             {/* One-time Pitch Materials Section removed - per-application modal handles uploads */}
 
@@ -287,25 +314,34 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                 <div className="space-y-4">
                                     <Card className="bg-slate-50/70 !shadow-none border">
                                         <h3 className="text-lg font-semibold text-slate-700 mb-3">About {selectedOpportunity.facilitatorName || 'Program Facilitator'}</h3>
-                                        <p className="text-sm text-slate-600 mb-4">Opportunities from our facilitator network.</p>
+                                        <p className="text-sm text-slate-600 mb-4">Programs from our facilitator network.</p>
                                     </Card>
                                     <div className="border-t pt-4">
                                         <p className="text-sm text-slate-500">Application Deadline: <span className="font-semibold text-slate-700">{selectedOpportunity.deadline}</span></p>
+                                        {isToday(selectedOpportunity.deadline) && (
+                                            <div className="mt-2 inline-block px-2 py-1 rounded bg-yellow-100 text-yellow-800 text-xs font-medium">
+                                                Applications closing today
+                                            </div>
+                                        )}
                                         {!appliedIds.has(selectedOpportunity.id) ? (
-                                            <Button 
-                                                type="button" 
-                                                className="w-full mt-3" 
-                                                onClick={() => openApplyModal(selectedOpportunity.id)}
-                                                disabled={false}
-                                            >
-                                                <Zap className="h-4 w-4 mr-2" /> Apply for Program
-                                            </Button>
+                                            !isPast(selectedOpportunity.deadline) ? (
+                                                <Button 
+                                                    type="button" 
+                                                    className="w-full mt-3" 
+                                                    onClick={() => openApplyModal(selectedOpportunity.id)}
+                                                >
+                                                    <Zap className="h-4 w-4 mr-2" /> Apply for Program
+                                                </Button>
+                                            ) : (
+                                                <Button type="button" className="w-full mt-3" variant="secondary" disabled>
+                                                    Application closed
+                                                </Button>
+                                            )
                                         ) : (
                                             <Button type="button" className="w-full mt-3" variant="secondary" disabled>
                                                 <Check className="h-4 w-4 mr-2" /> You have applied for this program
                                             </Button>
                                         )}
-                                        
                                     </div>
                                 </div>
                             </div>
@@ -317,7 +353,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     {opportunities.map(opp => {
                         const embedUrl = getYoutubeEmbedUrl(opp.videoUrl);
                         const hasApplied = appliedIds.has(opp.id);
-                        const canApply = true;
+                        const canApply = !isPast(opp.deadline);
                         return (
                             <Card key={opp.id} className="flex flex-col !p-0 overflow-hidden">
                                 {embedUrl ? (
@@ -345,16 +381,26 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                         <p className="text-sm text-slate-500 mt-2 mb-4">{opp.description.substring(0, 100)}...</p>
                                     </div>
                                     <div className="border-t pt-4 mt-4">
-                                        <p className="text-xs text-slate-500">Deadline: <span className="font-semibold">{opp.deadline}</span></p>
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-xs text-slate-500">Deadline: <span className="font-semibold">{opp.deadline}</span></p>
+                                            {isToday(opp.deadline) && (
+                                                <span className="ml-2 inline-block px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-[10px] font-medium whitespace-nowrap">Applications closing today</span>
+                                            )}
+                                        </div>
                                         {!hasApplied ? (
-                                            <Button 
-                                                type="button" 
-                                                className="w-full mt-3" 
-                                                onClick={() => openApplyModal(opp.id)}
-                                                disabled={!canApply}
-                                            >
-                                                <Zap className="h-4 w-4 mr-2" /> Apply for Program
-                                            </Button>
+                                            canApply ? (
+                                                <Button 
+                                                    type="button" 
+                                                    className="w-full mt-3" 
+                                                    onClick={() => openApplyModal(opp.id)}
+                                                >
+                                                    <Zap className="h-4 w-4 mr-2" /> Apply for Program
+                                                </Button>
+                                            ) : (
+                                                <Button type="button" className="w-full mt-3" variant="secondary" disabled>
+                                                    Application closed
+                                                </Button>
+                                            )
                                         ) : (
                                             <Button type="button" className="w-full mt-3" variant="secondary" disabled>
                                                 <Check className="h-4 w-4 mr-2" /> You have applied for this program
@@ -373,24 +419,41 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     <p className="text-slate-500 mt-2">Please check back later for new programs and offerings.</p>
                 </Card>
             )}
+            
+            
             {/* Apply Modal */}
             <Modal isOpen={isApplyModalOpen} onClose={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null);} }} title="Submit Application">
                 <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Startup Sector *</label>
+                     <div>
+                         <label className="block text-sm font-medium text-slate-700 mb-2">Startup Domain *</label>
                         <select
                             value={applySector}
                             onChange={(e) => setApplySector(e.target.value)}
                             className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
                             required
                         >
-                            <option value="">Select your startup sector</option>
+                            <option value="">Select your startup domain</option>
                             {SECTOR_OPTIONS.map(sector => (
                                 <option key={sector} value={sector}>{sector}</option>
                             ))}
                         </select>
                         <p className="text-xs text-slate-500 mt-1">Required field</p>
                     </div>
+                     <div>
+                         <label className="block text-sm font-medium text-slate-700 mb-2">Startup Stage *</label>
+                         <select
+                             value={applyStage}
+                             onChange={(e) => setApplyStage(e.target.value)}
+                             className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
+                             required
+                         >
+                             <option value="">Select your startup stage</option>
+                             {STAGE_OPTIONS.map(stage => (
+                                 <option key={stage} value={stage}>{stage}</option>
+                             ))}
+                         </select>
+                         <p className="text-xs text-slate-500 mt-1">Required field</p>
+                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
                         <input
@@ -414,7 +477,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     </div>
                     <div className="flex justify-end gap-3 pt-2">
                         <Button variant="secondary" type="button" onClick={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null);} }} disabled={isSubmittingApplication}>Cancel</Button>
-                        <Button type="button" onClick={submitApplication} disabled={isSubmittingApplication || (!applyPitchDeckFile && !applyPitchVideoUrl.trim()) || !applySector.trim()}>
+                         <Button type="button" onClick={submitApplication} disabled={isSubmittingApplication || (!applyPitchDeckFile && !applyPitchVideoUrl.trim()) || !applySector.trim() || !applyStage.trim()}>
                             {isSubmittingApplication ? 'Submitting...' : 'Submit Application'}
                         </Button>
                     </div>
@@ -430,10 +493,16 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     />
                 </div>
             </Modal>
+            
         </div>
     );
 };
 
 export default OpportunitiesTab;
+
+
+
+
+
 
 

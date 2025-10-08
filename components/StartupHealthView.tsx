@@ -3,11 +3,13 @@ import { Startup, FundraisingDetails, InvestmentRecord, UserRole, Founder, Compl
 import { AuthUser } from '../lib/auth';
 import Button from './ui/Button';
 import Card from './ui/Card';
-import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu } from 'lucide-react';
+import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell } from 'lucide-react';
 import { investmentService } from '../lib/database';
 
 import StartupDashboardTab from './startup-health/StartupDashboardTab';
 import OpportunitiesTab from './startup-health/OpportunitiesTab';
+import NotificationBadge from './startup-health/NotificationBadge';
+import NotificationsView from './startup-health/NotificationsView';
 import ProfileTab from './startup-health/ProfileTab';
 import ComplianceTab from './startup-health/ComplianceTab';
 import FinancialsTab from './startup-health/FinancialsTab';
@@ -27,11 +29,12 @@ interface StartupHealthViewProps {
   isViewOnly?: boolean; // New prop for view-only mode (for CA viewing)
   investmentOffers?: InvestmentOffer[];
   onProcessOffer?: (offerId: number, status: 'approved' | 'rejected' | 'accepted' | 'completed') => void;
+  onTrialButtonClick?: () => void; // Add trial button click handler
 }
 
 type TabId = 'dashboard' | 'opportunities' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable';
 
-const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole, user, onBack, onActivateFundraising, onInvestorAdded, onUpdateFounders, isViewOnly = false, investmentOffers = [], onProcessOffer }) => {
+const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole, user, onBack, onActivateFundraising, onInvestorAdded, onUpdateFounders, isViewOnly = false, investmentOffers = [], onProcessOffer, onTrialButtonClick }) => {
     // Check if this is a facilitator accessing the startup
     const isFacilitatorAccess = isViewOnly && userRole === 'Startup Facilitation Center';
     
@@ -59,6 +62,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [localOffers, setLocalOffers] = useState<InvestmentOffer[]>(investmentOffers || []);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [showAccountPage, setShowAccountPage] = useState(false);
+    const [showNotifications, setShowNotifications] = useState(false);
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
     
     // Update currentStartup when startup prop changes (important for facilitator access)
@@ -151,23 +155,23 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
             { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
-            { id: 'capTable', name: 'Cap Table', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
           ]
         : [
             // Regular startup users see all tabs; offers are now inside dashboard
             { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-            { id: 'opportunities', name: 'Opportunities', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'opportunities', name: 'Programs', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
             { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
             { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
-            { id: 'capTable', name: 'Cap Table', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
           ];
 
     const renderTabContent = () => {
         switch (activeTab) {
             case 'dashboard':
-                return <StartupDashboardTab startup={currentStartup} isViewOnly={isViewOnly} offers={offersForStartup} onProcessOffer={onProcessOffer} currentUser={user} />;
+                return <StartupDashboardTab startup={currentStartup} isViewOnly={isViewOnly} offers={offersForStartup} onProcessOffer={onProcessOffer} currentUser={user} onTrialButtonClick={onTrialButtonClick} />;
             case 'opportunities':
                 return <OpportunitiesTab startup={{ id: currentStartup.id, name: currentStartup.name }} />;
             case 'profile':
@@ -215,6 +219,41 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     );
   }
 
+  // If notifications are shown, render the notifications view instead of the main dashboard
+  if (showNotifications) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="bg-white shadow-sm border-b">
+          <div className="w-full px-3 sm:px-4 lg:px-8">
+            <div className="flex flex-col sm:flex-row justify-start sm:justify-between items-start sm:items-center py-3 sm:py-4 gap-3 sm:gap-0">
+              <div className="flex items-start sm:items-center space-x-2 sm:space-x-3 w-full sm:w-auto">
+                <div className="bg-blue-100 p-1.5 sm:p-2 rounded-lg flex-shrink-0">
+                  <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-lg sm:text-xl font-semibold text-slate-900 truncate">
+                    {currentStartup.name} - Notifications
+                  </h1>
+                  <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                    Stay updated with your program applications and messages
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <Card className="!p-0 sm:!p-0">
+          <div className="p-3 sm:p-4 lg:p-6">
+            <NotificationsView 
+              startupId={currentStartup.id} 
+              onClose={() => setShowNotifications(false)} 
+            />
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
         <div className="bg-white shadow-sm border-b">
@@ -252,6 +291,22 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         </div>
                     </div>
                     <div className="flex items-center space-x-2 sm:space-x-4 w-full sm:w-auto">
+                        {/* Notification Button - Only show for startup users */}
+                        {userRole === 'Startup' && !isViewOnly && (
+                            <div className="relative inline-block">
+                                <Button 
+                                    onClick={() => setShowNotifications(true)} 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="w-full sm:w-auto pr-10"
+                                >
+                                    <Bell className="mr-2 h-4 w-4" />
+                                    <span className="hidden sm:inline">Notifications</span>
+                                    <span className="sm:hidden">Notifications</span>
+                                </Button>
+                                <NotificationBadge startupId={currentStartup.id} badgeOnly className="absolute -top-2 -right-2" />
+                            </div>
+                        )}
                         {/* Account Button - Only show for startup users */}
                         {userRole === 'Startup' && !isViewOnly && (
                             <Button 
@@ -313,12 +368,12 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
 
         {/* Desktop Tab Navigation */}
         <div className="hidden sm:block border-b border-slate-200">
-            <nav className="-mb-px flex space-x-1 sm:space-x-4 px-4 overflow-x-auto" aria-label="Tabs">
+            <nav className="-mb-px flex justify-center space-x-2 sm:space-x-4 px-2 sm:px-4 overflow-x-auto" aria-label="Tabs">
                 {tabs.map(tab => (
                     <button 
                         key={tab.id}
                         onClick={() => handleTabChange(tab.id)} 
-                        className={`${activeTab === tab.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center whitespace-nowrap py-4 px-1 sm:px-2 border-b-2 font-medium text-sm transition-colors`}
+                        className={`${activeTab === tab.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center whitespace-nowrap py-3 px-2 sm:px-3 border-b-2 font-medium text-base transition-colors`}
                     >
                        {tab.icon}
                        <span className="ml-2">{tab.name}</span>

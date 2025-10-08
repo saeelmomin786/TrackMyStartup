@@ -82,14 +82,13 @@ const RazorpaySubscriptionModal: React.FC<RazorpaySubscriptionModalProps> = ({
               </div>
               
               <div className="mb-6">
-                <form>
-                  <script 
-                    src="https://cdn.razorpay.com/static/widget/subscription-button.js" 
-                    data-subscription_button_id="pl_RMJifehxdZakiX" 
-                    data-button_theme="brand-color" 
-                    async
-                  />
-                </form>
+                <div className="text-center py-4">
+                  <p className="text-sm text-gray-500">
+                    This modal is for approving startup requests. 
+                    <br />
+                    Please use the "Start Your Free Trial" button for trial subscriptions.
+                  </p>
+                </div>
               </div>
               
               <div className="flex justify-end space-x-3">

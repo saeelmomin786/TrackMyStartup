@@ -202,7 +202,7 @@ export function formatCurrency(
  * @returns Formatted compact currency string
  */
 export function formatCurrencyCompact(value: number, currency: string = 'USD'): string {
-  return formatCurrency(value, currency, { notation: 'compact' });
+  return formatCurrency(value, currency, { notation: 'standard' });
 }
 
 /**

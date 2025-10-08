@@ -15,6 +15,41 @@ export enum InvestmentType {
     Bridge = 'Bridge',
 }
 
+// Startup domains for fundraising filtering/labeling
+export enum StartupDomain {
+    Agriculture = 'Agriculture',
+    AI = 'AI',
+    Climate = 'Climate',
+    ConsumerGoods = 'Consumer Goods',
+    Defence = 'Defence',
+    Ecommerce = 'E-commerce',
+    Education = 'Education',
+    EV = 'EV',
+    Finance = 'Finance',
+    FoodAndBeverage = 'Food & Beverage',
+    Healthcare = 'Healthcare',
+    Manufacturing = 'Manufacturing',
+    MediaAndEntertainment = 'Media & Entertainment',
+    Others = 'Others',
+    PaaS = 'PaaS',
+    RenewableEnergy = 'Renewable Energy',
+    Retail = 'Retail',
+    SaaS = 'SaaS',
+    SocialImpact = 'Social Impact',
+    Space = 'Space',
+    TransportationAndLogistics = 'Transportation and Logistics',
+    WasteManagement = 'Waste Management',
+    Web3 = 'Web 3.0'
+}
+
+export enum StartupStage {
+    Ideation = 'Ideation',
+    ProofOfConcept = 'Proof of Concept',
+    MVP = 'Minimum viable product',
+    PMF = 'Product market fit',
+    Scaling = 'Scaling'
+}
+
 export enum IncubationType {
     IncubationCenter = 'Incubation Center',
     Accelerator = 'Accelerator',
@@ -191,6 +226,7 @@ export interface Employee {
     allocationType: 'one-time' | 'annually' | 'quarterly' | 'monthly';
     esopPerAllocation: number;
     contractUrl?: string;
+    terminationDate?: string;
 }
 
 export enum InvestorType {
@@ -260,6 +296,9 @@ export interface FundraisingDetails {
     type: InvestmentType;
     value: number;
     equity: number;
+    // newly added classification fields
+    domain?: StartupDomain;
+    stage?: StartupStage;
     validationRequested: boolean;
     pitchDeckUrl?: string;
     pitchVideoUrl?: string;
@@ -336,6 +375,19 @@ export interface ComplianceCheck {
     caStatus: ComplianceStatus;
     csStatus: ComplianceStatus;
     documentUrl?: string;
+}
+
+// Extend application item shape used in startup components if referenced
+export interface ApplicationItem {
+    id: string;
+    startupId: number;
+    opportunityId: string;
+    status: 'pending' | 'accepted' | 'rejected' | 'withdrawn' | string;
+    pitchDeckUrl?: string;
+    pitchVideoUrl?: string;
+    created_at?: string;
+    diligence_status?: 'requested' | 'approved' | 'rejected' | null | string;
+    diligence_urls?: string[]; // array of uploaded diligence document URLs
 }
 
 export enum FinancialVertical {

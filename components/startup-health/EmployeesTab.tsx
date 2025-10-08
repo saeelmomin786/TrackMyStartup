@@ -25,10 +25,10 @@ interface EmployeesTabProps {
 // Remove local formatCurrency function - using utility function instead
 
 // Dynamic data generation based on startup - now using real data
-const generateMonthlyExpenseData = async (startup: Startup) => {
+const generateMonthlyExpenseData = async (startup: Startup, year: number) => {
   try {
     console.log('🔍 Loading monthly data for startup:', startup.id);
-    const monthlyData = await employeesService.getMonthlySalaryData(startup.id, new Date().getFullYear());
+    const monthlyData = await employeesService.getMonthlySalaryData(startup.id, year);
     console.log('✅ Monthly data loaded:', monthlyData);
     
     if (monthlyData.length === 0) {
@@ -36,11 +36,18 @@ const generateMonthlyExpenseData = async (startup: Startup) => {
       return [];
     }
     
-    return monthlyData.map(item => ({
-      name: item.month_name,
-      salary: item.total_salary,
-      esop: item.total_esop
-    }));
+    // Convert ESOP from cumulative to monthly so graphs reflect allocation type per month
+    const adjusted = monthlyData.map((item: any, index: number) => {
+      const prevTotal = index > 0 ? (monthlyData[index - 1]?.total_esop || 0) : 0;
+      const monthlyEsop = Math.max(0, (item.total_esop || 0) - prevTotal);
+      return {
+        name: item.month_name,
+        salary: item.total_salary,
+        esop: monthlyEsop
+      };
+    });
+
+    return adjusted;
   } catch (error) {
     console.error('❌ Error loading monthly data:', error);
     return [];
@@ -84,12 +91,20 @@ const COLORS = ['#1e40af', '#1d4ed8', '#3b82f6'];
 const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOnly = false, onEsopUpdated }) => {
     const startupCurrency = useStartupCurrency(startup);
     const [isEditing, setIsEditing] = useState(false);
+    const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+    const [editFormData, setEditFormData] = useState<{ name: string; joiningDate: string; entity: string; department: string; salary: number; esopAllocation: number; allocationType: 'one-time' | 'annually' | 'quarterly' | 'monthly'; esopPerAllocation: number }>({ name: '', joiningDate: '', entity: 'Parent Company', department: '', salary: 0, esopAllocation: 0, allocationType: 'one-time', esopPerAllocation: 0 });
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [monthlyExpenseData, setMonthlyExpenseData] = useState<any[]>([]);
+    const [availableYears, setAvailableYears] = useState<number[]>([]);
+    const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+    const [startMonth, setStartMonth] = useState<number>(1); // 1-12
+    const [endMonth, setEndMonth] = useState<number>(12); // 1-12
     const [departmentData, setDepartmentData] = useState<any[]>([]);
     const [mockEmployees, setMockEmployees] = useState<Employee[]>([]);
+    const [currentValuesMap, setCurrentValuesMap] = useState<Record<string, { salary: number; esopAllocation: number; allocationType: 'one-time' | 'annually' | 'quarterly' | 'monthly'; esopPerAllocation: number }>>({});
     const [summary, setSummary] = useState<any>(null);
+  const [monthlySalaryExpense, setMonthlySalaryExpense] = useState<number>(0);
     const [entities, setEntities] = useState<string[]>(['Parent Company']);
     const [esopReservedShares, setEsopReservedShares] = useState<number>(0);
     const [esopReservedDraft, setEsopReservedDraft] = useState<string>('0');
@@ -99,13 +114,51 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     const [allocationTypeDraft, setAllocationTypeDraft] = useState<'one-time' | 'annually' | 'quarterly' | 'monthly'>('one-time');
     const [esopPerAllocationDraft, setEsopPerAllocationDraft] = useState<string>('0');
     const [isEsopModalOpen, setIsEsopModalOpen] = useState(false);
+    const [isTerminateModalOpen, setIsTerminateModalOpen] = useState<null | Employee>(null);
+    const [terminationDateDraft, setTerminationDateDraft] = useState<string>('');
+    const [isIncrementModalOpen, setIsIncrementModalOpen] = useState<null | Employee>(null);
+    const [incrementDateDraft, setIncrementDateDraft] = useState<string>('');
+    const [incrementSalaryDraft, setIncrementSalaryDraft] = useState<string>('');
+    const [incrementEsopAllocationDraft, setIncrementEsopAllocationDraft] = useState<string>('');
+    const [incrementAllocationTypeDraft, setIncrementAllocationTypeDraft] = useState<'one-time' | 'annually' | 'quarterly' | 'monthly'>('one-time');
+    const [incrementEsopPerAllocationDraft, setIncrementEsopPerAllocationDraft] = useState<string>('0');
+    const [historyEmployee, setHistoryEmployee] = useState<null | Employee>(null);
+    const [historyItems, setHistoryItems] = useState<any[]>([]);
+    const [isHistoryLoading, setIsHistoryLoading] = useState<boolean>(false);
     
-    const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
+    // Allow editing for Startup/Admin; also allow when role is not yet loaded
+    const canEdit = ((userRole === 'Startup' || userRole === 'Admin' || !userRole) && !isViewOnly);
 
     // Load data on component mount and when startup changes
     useEffect(() => {
         loadData();
-    }, [startup.id, startup.pricePerShare]);
+    }, [startup.id, startup.pricePerShare, selectedYear]);
+
+  // Recompute monthly salary expense whenever employees change
+  useEffect(() => {
+      const computeMonthly = (employees: Employee[]) => {
+          return employees.reduce((sum, emp) => {
+              const monthlySalary = (emp.salary || 0) / 12;
+              let esopMonthly = 0;
+              switch (emp.allocationType) {
+                  case 'monthly':
+                      esopMonthly = emp.esopPerAllocation || 0; // already monthly
+                      break;
+                  case 'quarterly':
+                      esopMonthly = (emp.esopPerAllocation || 0) / 3; // spread across months in a quarter
+                      break;
+                  case 'annually':
+                      esopMonthly = (emp.esopPerAllocation || 0) / 12; // spread across months in a year
+                      break;
+                  default:
+                      esopMonthly = 0; // one-time not counted as recurring monthly
+              }
+              return sum + monthlySalary + esopMonthly;
+          }, 0);
+      };
+
+      setMonthlySalaryExpense(computeMonthly(mockEmployees));
+  }, [mockEmployees]);
 
     const loadData = async () => {
         try {
@@ -113,8 +166,9 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             setError(null);
             
             // Load all data in parallel
-            const [monthlyData, deptData, employeesData, summaryData, profileData, shares, esopShares] = await Promise.all([
-                generateMonthlyExpenseData(startup),
+            const [years, monthlyData, deptData, employeesData, summaryData, profileData, shares, esopShares] = await Promise.all([
+                employeesService.getAvailableYears(startup.id),
+                generateMonthlyExpenseData(startup, selectedYear),
                 generateDepartmentData(startup),
                 generateMockEmployees(startup),
                 employeesService.getEmployeeSummary(startup.id),
@@ -213,9 +267,38 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 setEsopReservedDraft(String(esopShares || 0));
             }
             
+            setAvailableYears(years);
             setMonthlyExpenseData(monthlyData);
             setDepartmentData(deptData);
             setMockEmployees(employeesData);
+
+            // Build current values (apply latest increment if any)
+            try {
+                const increments = await employeesService.getIncrementsForEmployees(employeesData.map(e => e.id));
+                const map: Record<string, any> = {};
+                employeesData.forEach(emp => {
+                    const incs = increments.filter(i => i.employee_id === emp.id);
+                    if (incs.length === 0) {
+                        map[emp.id] = {
+                            salary: emp.salary,
+                            esopAllocation: emp.esopAllocation,
+                            allocationType: emp.allocationType,
+                            esopPerAllocation: emp.esopPerAllocation,
+                        };
+                    } else {
+                        const latest = incs[incs.length - 1];
+                        map[emp.id] = {
+                            salary: latest.salary || 0,
+                            esopAllocation: latest.esop_allocation || 0,
+                            allocationType: latest.allocation_type,
+                            esopPerAllocation: latest.esop_per_allocation || 0,
+                        };
+                    }
+                });
+                setCurrentValuesMap(map);
+            } catch {
+                setCurrentValuesMap({});
+            }
             setSummary(summaryData);
             setPricePerShare(calculatedPricePerShare);
             setTotalShares(shares || 0);
@@ -370,15 +453,151 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
         }
     };
 
-    const handleDeleteEmployee = async (employeeId: string) => {
-        if (!confirm('Are you sure you want to delete this employee?')) return;
-        
+    const handleTerminateEmployee = async () => {
+        if (!isTerminateModalOpen) return;
         try {
-            await employeesService.deleteEmployee(employeeId);
-            await loadData(); // Reload data
+            if (!terminationDateDraft) {
+                setError('Please select a termination date');
+                return;
+            }
+            await employeesService.terminateEmployee(isTerminateModalOpen.id, terminationDateDraft);
+            setIsTerminateModalOpen(null);
+            setTerminationDateDraft('');
+            await loadData();
         } catch (err) {
-            console.error('Error deleting employee:', err);
-            setError('Failed to delete employee');
+            console.error('Error terminating employee:', err);
+            setError('Failed to terminate employee');
+        }
+    };
+
+    const handleAddIncrement = async () => {
+        if (!isIncrementModalOpen) return;
+        try {
+            const newSalary = Number(incrementSalaryDraft);
+            const newEsopAllocation = Number(incrementEsopAllocationDraft) || 0;
+            const newEsopPerAllocation = Number(incrementEsopPerAllocationDraft) || 0;
+            if (!incrementDateDraft || !Number.isFinite(newSalary) || newSalary < 0) {
+                setError('Please enter valid effective date and non-negative salary');
+                return;
+            }
+            await employeesService.addSalaryIncrement(
+              isIncrementModalOpen.id,
+              newSalary,
+              incrementDateDraft,
+              newEsopAllocation,
+              incrementAllocationTypeDraft,
+              newEsopPerAllocation
+            );
+            setIsIncrementModalOpen(null);
+            setIncrementDateDraft('');
+            setIncrementSalaryDraft('');
+            setIncrementEsopAllocationDraft('');
+            setIncrementEsopPerAllocationDraft('0');
+            setIncrementAllocationTypeDraft('one-time');
+            await loadData();
+        } catch (err) {
+            console.error('Error adding increment:', err);
+            setError('Failed to add increment');
+        }
+    };
+
+    const openEditEmployee = async (emp: Employee) => {
+        // Open modal immediately with currently displayed values
+        setEditingEmployee(emp);
+        const current = currentValuesMap[emp.id];
+        setEditFormData({
+            name: emp.name,
+            joiningDate: emp.joiningDate,
+            entity: emp.entity,
+            department: emp.department,
+            salary: current?.salary ?? emp.salary,
+            esopAllocation: current?.esopAllocation ?? emp.esopAllocation,
+            allocationType: current?.allocationType ?? emp.allocationType,
+            esopPerAllocation: current?.esopPerAllocation ?? emp.esopPerAllocation,
+        });
+
+        // Then try to refine from latest increment if table exists
+        try {
+            const increments = await employeesService.getIncrementsForEmployee(emp.id);
+            const latest = increments.length > 0 ? increments[increments.length - 1] : null;
+            if (latest) {
+                setEditFormData(prev => ({
+                    ...prev,
+                    salary: latest.salary,
+                    esopAllocation: latest.esop_allocation,
+                    allocationType: latest.allocation_type,
+                    esopPerAllocation: latest.esop_per_allocation,
+                }));
+            }
+        } catch {}
+    };
+
+    const openHistory = async (emp: Employee) => {
+        try {
+            setIsHistoryLoading(true);
+            setHistoryEmployee(emp);
+            // Fetch increments
+            const increments = await employeesService.getIncrementsForEmployee(emp.id);
+            // Build history array: base + increments
+            const items = [
+                {
+                    type: 'base',
+                    effective_date: emp.joiningDate,
+                    salary: emp.salary,
+                    esop_allocation: emp.esopAllocation,
+                    allocation_type: emp.allocationType,
+                    esop_per_allocation: emp.esopPerAllocation,
+                },
+                ...increments
+            ].sort((a: any, b: any) => new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime());
+            setHistoryItems(items);
+        } catch (e) {
+            setHistoryItems([]);
+        } finally {
+            setIsHistoryLoading(false);
+        }
+    };
+
+    const saveEditEmployee = async () => {
+        if (!editingEmployee) return;
+        try {
+            // Update latest increment if exists, otherwise base employee
+            const increments = await employeesService.getIncrementsForEmployee(editingEmployee.id);
+            if (increments.length > 0) {
+                const latest = increments[increments.length - 1];
+                await employeesService.updateIncrement(latest.id, {
+                    salary: editFormData.salary,
+                    esop_allocation: editFormData.esopAllocation,
+                    allocation_type: editFormData.allocationType,
+                    esop_per_allocation: editFormData.esopPerAllocation,
+                } as any);
+            } else {
+                await employeesService.updateEmployee(editingEmployee.id, {
+                    name: editFormData.name,
+                    joiningDate: editFormData.joiningDate,
+                    entity: editFormData.entity,
+                    department: editFormData.department,
+                    salary: editFormData.salary,
+                    esopAllocation: editFormData.esopAllocation,
+                    allocationType: editFormData.allocationType,
+                    esopPerAllocation: editFormData.esopPerAllocation
+                } as any);
+            }
+
+            // Optional: handle contract upload if a new file is provided
+            const contractInput = document.getElementById('edit-employee-contract') as HTMLInputElement | null;
+            const file = contractInput?.files && contractInput.files[0] ? contractInput.files[0] : null;
+            if (file) {
+                const upload = await storageService.uploadEmployeeContract(file, String(startup.id), String(editingEmployee.id));
+                if (upload.success && upload.url) {
+                    await employeesService.updateEmployee(editingEmployee.id, { contractUrl: upload.url } as any);
+                }
+            }
+            setEditingEmployee(null);
+            await loadData();
+        } catch (err) {
+            console.error('Error updating employee:', err);
+            setError('Failed to update employee');
         }
     };
 
@@ -516,7 +735,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             )}
 
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <Card>
                     <p className="text-sm font-medium text-slate-500">Number of Employees</p>
                     <p className="text-2xl font-bold">{summary?.total_employees || mockEmployees.length}</p>
@@ -531,7 +750,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     {pricePerShare === 0 && (
                         <div className="text-xs text-amber-600 mt-1">
                             <p className="font-medium">⚠️ Price per share not set</p>
-                            <p className="mt-1">Go to Cap Table tab → Company Settings to set the price per share</p>
+                            <p className="mt-1">Go to Equity Allocation tab → Company Settings to set the price per share</p>
                         </div>
                     )}
                 </Card>
@@ -543,6 +762,10 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             ⚠️ No ESOP shares reserved but allocations exist
                         </p>
                     )}
+                </Card>
+                <Card>
+                    <p className="text-sm font-medium text-slate-500">Monthly Salary Expenditure</p>
+                    <p className="text-2xl font-bold">{formatCurrencyUtil(monthlySalaryExpense, startupCurrency)}</p>
                 </Card>
             </div>
 
@@ -616,11 +839,43 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
 
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Filters */}
+                <div className="lg:col-span-2">
+                    <div className="flex flex-wrap gap-3 items-end">
+                        <div>
+                            <label className="block text-xs text-slate-500 mb-1">Year</label>
+                            <select className="border border-slate-300 rounded px-2 py-1" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
+                                {(availableYears.length > 0 ? availableYears : [new Date().getFullYear()]).map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs text-slate-500 mb-1">Start Month</label>
+                            <select className="border border-slate-300 rounded px-2 py-1" value={startMonth} onChange={(e) => setStartMonth(Number(e.target.value))}>
+                                {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => (
+                                    <option key={m} value={m}>{new Date(2000, m-1, 1).toLocaleString('default', { month: 'short' })}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs text-slate-500 mb-1">End Month</label>
+                            <select className="border border-slate-300 rounded px-2 py-1" value={endMonth} onChange={(e) => setEndMonth(Number(e.target.value))}>
+                                {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => (
+                                    <option key={m} value={m}>{new Date(2000, m-1, 1).toLocaleString('default', { month: 'short' })}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </div>
                 <Card>
                     <h3 className="text-lg font-semibold mb-4 text-slate-700">Salary Expense</h3>
                     <div style={{ width: '100%', height: 250 }}>
                         <ResponsiveContainer>
-                            <LineChart data={monthlyExpenseData}>
+                            <LineChart data={monthlyExpenseData.filter(d => {
+                                const monthIndex = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(d.name) + 1;
+                                return monthIndex >= startMonth && monthIndex <= endMonth;
+                            })}>
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis dataKey="name" fontSize={12}/>
                                 <YAxis fontSize={12}/>
@@ -635,7 +890,10 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     <h3 className="text-lg font-semibold mb-4 text-slate-700">ESOP Expenses</h3>
                     <div style={{ width: '100%', height: 250 }}>
                         <ResponsiveContainer>
-                            <LineChart data={monthlyExpenseData}>
+                            <LineChart data={monthlyExpenseData.filter(d => {
+                                const monthIndex = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(d.name) + 1;
+                                return monthIndex >= startMonth && monthIndex <= endMonth;
+                            })}>
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis dataKey="name" fontSize={12}/>
                                 <YAxis fontSize={12}/>
@@ -696,12 +954,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 </Card>
             </div>
             
-            {/* Add Employee Form */}
-            <Card>
-                <h3 className="text-lg font-semibold mb-4 text-slate-700">Add New Employee</h3>
-                {console.log('🔍 Form canEdit status:', canEdit, 'userRole:', userRole, 'isViewOnly:', isViewOnly)}
-                <fieldset disabled={false}>
-                    <form onSubmit={handleAddEmployee} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Add Employee button moved to Employee List header */}
+
+            {/* Add Employee Modal */}
+            <SimpleModal isOpen={isEditing} onClose={() => setIsEditing(false)} title="Add Employee" width="800px">
+                <form onSubmit={handleAddEmployee} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Input label="Employee Name" name="name" required />
                         <Input 
                             label="Date of Joining" 
@@ -718,7 +975,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                         <Input label="Department" name="department" required />
                         <Input label="Salary (Annual)" name="salary" type="number" min="0" required />
                         <Input 
-                            label="ESOP Allocation (USD)" 
+                            label={`ESOP Allocation (${startupCurrency})`} 
                             name="esopAllocation" 
                             type="number" 
                             min="0" 
@@ -757,16 +1014,18 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             readOnly
                         />
                         <Input id="employee-contract" label="Employee Contract" name="contract" type="file" accept=".pdf,.doc,.docx" />
-                        <div className="flex items-end pt-5">
-                            <Button type="submit">Add Employee</Button>
+                        <div className="flex items-end pt-5 col-span-1 md:col-span-2 justify-end">
+                            <Button type="submit" className="bg-blue-600 text-white">Save</Button>
                         </div>
-                    </form>
-                </fieldset>
-            </Card>
+                </form>
+            </SimpleModal>
 
             {/* Employee List */}
             <Card>
-                <h3 className="text-lg font-semibold mb-4 text-slate-700">Employee List</h3>
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-slate-700">Employee List</h3>
+                    <Button onClick={() => setIsEditing(true)} disabled={!canEdit} className="bg-blue-600 text-white">Add Employee</Button>
+                </div>
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-slate-200 text-sm">
                         <thead className="bg-slate-50">
@@ -784,8 +1043,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                 <tr key={emp.id}>
                                     <td className="px-4 py-2 font-medium text-slate-900">{emp.name}</td>
                                     <td className="px-4 py-2 text-slate-500">{emp.department}</td>
-                                    <td className="px-4 py-2 text-slate-500">{formatCurrencyUtil(emp.salary, startupCurrency)}</td>
-                                    <td className="px-4 py-2 text-slate-500">{formatCurrencyUtil(emp.esopAllocation, startupCurrency)}</td>
+                                    <td className="px-4 py-2 text-slate-500">{formatCurrencyUtil((currentValuesMap[emp.id]?.salary ?? emp.salary), startupCurrency)}</td>
+                                    <td className="px-4 py-2 text-slate-500">{formatCurrencyUtil((currentValuesMap[emp.id]?.esopAllocation ?? emp.esopAllocation), startupCurrency)}</td>
                                     <td className="px-4 py-2 text-slate-500">
                                         {emp.contractUrl ? (
                                             <a href={emp.contractUrl} className="flex items-center text-brand-primary hover:underline">
@@ -794,14 +1053,28 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                         ) : 'N/A'}
                                     </td>
                                     <td className="px-4 py-2 text-right">
-                                        <Button 
-                                            size="sm" 
-                                            variant="outline" 
-                                            disabled={!canEdit}
-                                            onClick={() => handleDeleteEmployee(emp.id)}
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
+                                        <div className="inline-flex gap-2">
+                                            <Button type="button" size="sm" variant="outline" onClick={() => openHistory(emp)}>History</Button>
+                                            <Button type="button" size="sm" variant="outline" disabled={!canEdit || !!emp.terminationDate} onClick={() => openEditEmployee(emp)}>Edit</Button>
+                                            <Button 
+                                                type="button"
+                                                size="sm" 
+                                                variant="outline" 
+                                                disabled={!canEdit || !!emp.terminationDate}
+                                                onClick={() => setIsTerminateModalOpen(emp)}
+                                            >
+                                                Terminate
+                                            </Button>
+                                            <Button 
+                                                type="button"
+                                                size="sm" 
+                                                variant="outline" 
+                                                disabled={!canEdit || !!emp.terminationDate}
+                                                onClick={() => setIsIncrementModalOpen(emp)}
+                                            >
+                                                Increment
+                                            </Button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -809,6 +1082,166 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     </table>
                 </div>
             </Card>
+            {/* History Modal */}
+            <SimpleModal 
+                isOpen={!!historyEmployee}
+                onClose={() => { setHistoryEmployee(null); setHistoryItems([]); }}
+                title={historyEmployee ? `History - ${historyEmployee.name}` : 'History'}
+                width="700px"
+            >
+                <div className="space-y-3">
+                    {historyEmployee?.terminationDate && (
+                        <div className="text-sm text-red-600">Terminated on {new Date(historyEmployee.terminationDate).toLocaleDateString()}</div>
+                    )}
+                    {isHistoryLoading ? (
+                        <div className="text-sm text-slate-500">Loading history...</div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-slate-200 text-sm">
+                                <thead className="bg-slate-50">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Type</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Effective Date</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Salary</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">ESOP Allocation</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Allocation Type</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">ESOP per Allocation</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-slate-200">
+                                    {historyItems.map((it: any, idx: number) => (
+                                        <tr key={idx}>
+                                            <td className="px-4 py-2 text-slate-600">{it.type === 'base' ? 'Base' : 'Increment'}</td>
+                                            <td className="px-4 py-2 text-slate-600">{new Date(it.effective_date).toLocaleDateString()}</td>
+                                            <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(it.salary) || 0, startupCurrency)}</td>
+                                            <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(it.esop_allocation) || 0, startupCurrency)}</td>
+                                            <td className="px-4 py-2 text-slate-600">{it.allocation_type}</td>
+                                            <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(it.esop_per_allocation) || 0, startupCurrency)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            </SimpleModal>
+            {/* Terminate Modal */}
+            <SimpleModal 
+                isOpen={!!isTerminateModalOpen}
+                onClose={() => { setIsTerminateModalOpen(null); setTerminationDateDraft(''); }}
+                title={isTerminateModalOpen ? `Terminate Employee - ${isTerminateModalOpen.name}` : 'Terminate Employee'}
+                width="500px"
+            >
+                <div className="space-y-3">
+                    <p className="text-sm text-slate-600">Set the termination date. Data will be counted up to this date only.</p>
+                    <Input label="Termination Date" type="date" value={terminationDateDraft} max={new Date().toISOString().split('T')[0]} onChange={(e) => setTerminationDateDraft(e.target.value)} />
+                    <div className="flex justify-end gap-2 pt-2">
+                        <Button variant="outline" onClick={() => { setIsTerminateModalOpen(null); setTerminationDateDraft(''); }}>Cancel</Button>
+                        <Button onClick={handleTerminateEmployee} className="bg-red-600 text-white">Terminate</Button>
+                    </div>
+                </div>
+            </SimpleModal>
+
+            {/* Increment Modal */}
+            <SimpleModal 
+                isOpen={!!isIncrementModalOpen}
+                onClose={() => { setIsIncrementModalOpen(null); setIncrementDateDraft(''); setIncrementSalaryDraft(''); setIncrementEsopAllocationDraft(''); setIncrementEsopPerAllocationDraft('0'); setIncrementAllocationTypeDraft('one-time'); }}
+                title={isIncrementModalOpen ? `Add Increment - ${isIncrementModalOpen.name}` : 'Add Increment'}
+                width="500px"
+            >
+                <div className="space-y-3">
+                    <p className="text-sm text-slate-600">Set the effective date and new values. Previous data remains unchanged before the date.</p>
+                    <Input label="Effective Date" type="date" value={incrementDateDraft} onChange={(e) => setIncrementDateDraft(e.target.value)} />
+                    <Input label="New Salary (Annual)" type="number" min="0" value={incrementSalaryDraft} onChange={(e) => setIncrementSalaryDraft(e.target.value)} />
+                    <Input 
+                        label={`ESOP Allocation (${startupCurrency})`} 
+                        type="number" 
+                        min="0" 
+                        value={incrementEsopAllocationDraft}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            setIncrementEsopAllocationDraft(val);
+                            const amount = parseFloat(val) || 0;
+                            const periods = incrementAllocationTypeDraft === 'monthly' ? 12 : incrementAllocationTypeDraft === 'quarterly' ? 4 : 1;
+                            setIncrementEsopPerAllocationDraft(String(amount / periods));
+                        }}
+                    />
+                    <Select 
+                        label="Allocation Type" 
+                        value={incrementAllocationTypeDraft}
+                        onChange={(e) => {
+                            const type = e.target.value as 'one-time' | 'annually' | 'quarterly' | 'monthly';
+                            setIncrementAllocationTypeDraft(type);
+                            const amount = parseFloat(incrementEsopAllocationDraft) || 0;
+                            const periods = type === 'monthly' ? 12 : type === 'quarterly' ? 4 : 1;
+                            setIncrementEsopPerAllocationDraft(String(amount / periods));
+                        }}
+                    >
+                        <option value="one-time">One-time</option>
+                        <option value="annually">Annually</option>
+                        <option value="quarterly">Quarterly</option>
+                        <option value="monthly">Monthly</option>
+                    </Select>
+                    <Input 
+                        label="ESOP per Allocation" 
+                        type="number" 
+                        min="0"
+                        value={incrementEsopPerAllocationDraft}
+                        readOnly
+                    />
+                    <div className="flex justify-end gap-2 pt-2">
+                        <Button variant="outline" onClick={() => { setIsIncrementModalOpen(null); setIncrementDateDraft(''); setIncrementSalaryDraft(''); setIncrementEsopAllocationDraft(''); setIncrementEsopPerAllocationDraft('0'); setIncrementAllocationTypeDraft('one-time'); }}>Cancel</Button>
+                        <Button onClick={handleAddIncrement}>Save</Button>
+                    </div>
+                </div>
+            </SimpleModal>
+            {editingEmployee && (
+                <SimpleModal
+                    isOpen={!!editingEmployee}
+                    onClose={() => setEditingEmployee(null)}
+                    title={`Edit Employee - ${editingEmployee.name}`}
+                    width="800px"
+                >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Input label="Name" value={editFormData.name} onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })} />
+                        <Input 
+                            label="Date of Joining" 
+                            type="date" 
+                            value={editFormData.joiningDate?.slice(0,10) || ''}
+                            max={new Date().toISOString().split('T')[0]}
+                            onChange={(e) => setEditFormData({ ...editFormData, joiningDate: e.target.value })} 
+                        />
+                        <Select label="Entity" value={editFormData.entity} onChange={(e) => setEditFormData({ ...editFormData, entity: e.target.value })}>
+                            {entities.map((entity, index) => (
+                                <option key={index} value={entity}>{entity}</option>
+                            ))}
+                        </Select>
+                        <Input label="Department" value={editFormData.department} onChange={(e) => setEditFormData({ ...editFormData, department: e.target.value })} />
+                        <Input label="Salary" type="number" value={editFormData.salary} onChange={(e) => setEditFormData({ ...editFormData, salary: Number(e.target.value) || 0 })} />
+                        <Input label={`ESOP Allocation (${startupCurrency})`} type="number" value={editFormData.esopAllocation} onChange={(e) => {
+                            const val = Number(e.target.value) || 0;
+                            setEditFormData({ ...editFormData, esopAllocation: val, esopPerAllocation: editFormData.allocationType === 'monthly' ? val/12 : editFormData.allocationType === 'quarterly' ? val/4 : val });
+                        }} />
+                        <Select label="Allocation Type" value={editFormData.allocationType} onChange={(e) => {
+                            const type = e.target.value as 'one-time' | 'annually' | 'quarterly' | 'monthly';
+                            const amount = editFormData.esopAllocation || 0;
+                            const periods = type === 'monthly' ? 12 : type === 'quarterly' ? 4 : 1;
+                            setEditFormData({ ...editFormData, allocationType: type, esopPerAllocation: amount / periods });
+                        }}>
+                            <option value="one-time">One-time</option>
+                            <option value="annually">Annually</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="monthly">Monthly</option>
+                        </Select>
+                        <Input label="ESOP per Allocation" type="number" value={editFormData.esopPerAllocation} readOnly />
+                        <Input id="edit-employee-contract" label="Employee Contract" name="contract" type="file" accept=".pdf,.doc,.docx" />
+                        <div className="flex justify-end gap-2 pt-2 md:col-span-2">
+                            <Button variant="outline" onClick={() => setEditingEmployee(null)}>Cancel</Button>
+                            <Button onClick={saveEditEmployee}>Save</Button>
+                        </div>
+                    </div>
+                </SimpleModal>
+            )}
         </div>
     );
 };

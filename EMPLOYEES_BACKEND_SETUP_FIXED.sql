@@ -22,9 +22,24 @@ CREATE TABLE IF NOT EXISTS employees (
     allocation_type VARCHAR(20) DEFAULT 'one-time' CHECK (allocation_type IN ('one-time', 'annually', 'quarterly', 'monthly')),
     esop_per_allocation DECIMAL(15,2) DEFAULT 0,
     contract_url TEXT,
+    termination_date DATE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- History of increments (salary and ESOP changes) per employee
+CREATE TABLE IF NOT EXISTS employees_increments (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    effective_date DATE NOT NULL,
+    salary DECIMAL(15,2) NOT NULL,
+    esop_allocation DECIMAL(15,2) DEFAULT 0,
+    allocation_type VARCHAR(20) DEFAULT 'one-time' CHECK (allocation_type IN ('one-time', 'annually', 'quarterly', 'monthly')),
+    esop_per_allocation DECIMAL(15,2) DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_emp_increments_employee_date ON employees_increments(employee_id, effective_date);
 
 -- Create indexes for better performance (IF NOT EXISTS)
 CREATE INDEX IF NOT EXISTS idx_employees_startup_id ON employees(startup_id);

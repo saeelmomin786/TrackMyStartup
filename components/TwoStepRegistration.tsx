@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { BasicRegistrationStep } from './BasicRegistrationStep';
 import { DocumentUploadStep } from './DocumentUploadStep';
 import { UserRole } from '../types';
+import StartupPaymentStep from './StartupPaymentStep';
+import StartupSubscriptionStep from './StartupSubscriptionStep';
 import { authService, AuthUser } from '../lib/auth';
 import { storageService } from '../lib/storage';
 
@@ -42,7 +44,10 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
   onNavigateToLogin,
   onNavigateToLanding
 }) => {
-  const [currentStep, setCurrentStep] = useState<'basic' | 'documents'>('basic');
+  const [currentStep, setCurrentStep] = useState<'basic' | 'documents' | 'payment'>('basic');
+  const [pendingDocuments, setPendingDocuments] = useState<any | null>(null);
+  const [pendingFounders, setPendingFounders] = useState<any[] | null>(null);
+  const [pendingCountry, setPendingCountry] = useState<string | undefined>(undefined);
   const [userData, setUserData] = useState<{
     name: string;
     email: string;
@@ -89,30 +94,24 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     founders: any[],
     country?: string
   ) => {
-    // Add timeout wrapper for the entire registration process
-    const registrationTimeout = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Registration timed out after 60 seconds. Please try again.')), 60000);
-    });
-
-    try {
-      // Clear saved data after successful completion
-      localStorage.removeItem('registrationData');
-      
-      console.log('🚀 Starting optimized registration process...');
-      
-      // Wrap the entire registration process with timeout
-      await Promise.race([
-        performRegistration(userData, documents, founders, country),
-        registrationTimeout
-      ]);
-      
-    } catch (error: any) {
-      console.error('Registration error:', error);
-      throw error;
+    // For Startup role, go to payment step first (₹1 verification)
+    if (userData?.role === 'Startup') {
+      // Cache payload to finalize after payment success
+      setPendingDocuments(documents);
+      setPendingFounders(founders);
+      setPendingCountry(country);
+      try {
+        localStorage.setItem('startupPaymentRequired', '1');
+      } catch {}
+      setCurrentStep('payment');
+      return;
     }
+
+    // Non-startup roles proceed to finalize directly
+    await finalizeRegistration(userData, documents, founders, country);
   };
 
-  const performRegistration = async (
+  const finalizeRegistration = async (
     userData: any, 
     documents: any, 
     founders: any[],
@@ -384,6 +383,72 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
         userData={userData}
         onComplete={handleComplete}
         onBack={handleBackToBasic}
+      />
+    );
+  }
+
+  if (currentStep === 'payment' && userData) {
+    // Attempt to fetch saved razorpay_customer_id from profile for cleanup (best-effort)
+    const [razorpayCustomerId, setRazorpayCustomerId] = useState<string | undefined>(undefined);
+    useState(() => {
+      (async () => {
+        try {
+          const { data: { user } } = await authService.supabase.auth.getUser();
+          if (user?.id) {
+            const { data: profile } = await authService.supabase
+              .from('users')
+              .select('razorpay_customer_id')
+              .eq('id', user.id)
+              .single();
+            if (profile?.razorpay_customer_id) setRazorpayCustomerId(profile.razorpay_customer_id);
+          }
+        } catch {}
+      })();
+      return undefined;
+    });
+    // Render the Razorpay Subscription Button step for Startup role
+    if (userData.role === 'Startup') {
+      return (
+        <StartupSubscriptionStep
+          userEmail={userData.email}
+          razorpayCustomerId={razorpayCustomerId}
+          subscriptionButtonId={process.env.RAZORPAY_SUBSCRIPTION_BUTTON_ID || 'pl_RMvYPEir7kvx3E'}
+          onSuccess={async () => {
+            try {
+              await finalizeRegistration(
+                userData,
+                pendingDocuments || {},
+                pendingFounders || [],
+                pendingCountry || userData.country
+              );
+            } catch (e) {
+              console.error(e);
+            }
+          }}
+          onBack={() => setCurrentStep('documents')}
+        />
+      );
+    }
+
+    // Fallback for non-startup (shouldn't happen as we gate earlier)
+    return (
+      <StartupPaymentStep
+        userName={userData.name}
+        userEmail={userData.email}
+        applicationId={userData.email}
+        onSuccess={async () => {
+          try {
+            await finalizeRegistration(
+              userData,
+              pendingDocuments || {},
+              pendingFounders || [],
+              pendingCountry || userData.country
+            );
+          } catch (e) {
+            console.error(e);
+          }
+        }}
+        onBack={() => setCurrentStep('documents')}
       />
     );
   }

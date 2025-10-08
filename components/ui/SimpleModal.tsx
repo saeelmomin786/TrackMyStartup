@@ -6,6 +6,7 @@ interface SimpleModalProps {
     onClose: () => void;
     children: React.ReactNode;
     footer?: React.ReactNode;
+    width?: string;
 }
 
 const overlayStyle: React.CSSProperties = {
@@ -18,7 +19,7 @@ const overlayStyle: React.CSSProperties = {
     zIndex: 1000
 };
 
-const modalStyle: React.CSSProperties = {
+const baseModalStyle: React.CSSProperties = {
     backgroundColor: '#ffffff',
     borderRadius: 8,
     width: '90%',
@@ -45,12 +46,16 @@ const footerStyle: React.CSSProperties = {
     gap: 8
 };
 
-export const SimpleModal: React.FC<SimpleModalProps> = ({ isOpen, title, onClose, children, footer }) => {
+export const SimpleModal: React.FC<SimpleModalProps> = ({ isOpen, title, onClose, children, footer, width }) => {
     if (!isOpen) return null;
+    const modalStyle: React.CSSProperties = { ...baseModalStyle, maxWidth: width ? undefined : baseModalStyle.maxWidth, width: width || baseModalStyle.width };
     return (
         <div style={overlayStyle} onClick={onClose}>
             <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-                <div style={headerStyle}>{title}</div>
+                <div style={{...headerStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                    {title}
+                    <button onClick={onClose} style={{border: '1px solid #e5e7eb', background: 'white', borderRadius: 6, padding: '4px 8px', cursor: 'pointer'}}>Close</button>
+                </div>
                 <div style={bodyStyle}>{children}</div>
                 <div style={footerStyle}>
                     {footer}

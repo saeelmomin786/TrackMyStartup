@@ -242,8 +242,6 @@ export const authService = {
         is_profile_complete: isComplete
       };
       
-      console.log('🔍 Returning user data:', userData);
-      console.log('🔍 User role in return data:', userData.role);
       return userData;
     } catch (error) {
       console.error('Error getting current user:', error)
@@ -545,8 +543,6 @@ export const authService = {
   // Update user profile (comprehensive version)
   async updateProfile(userId: string, updates: any): Promise<{ user: AuthUser | null; error: string | null }> {
     try {
-      console.log('🔍 Updating user profile:', { userId, updates });
-      
       const { data, error } = await supabase
         .from('users')
         .update(updates)
@@ -558,8 +554,6 @@ export const authService = {
         console.error('❌ Profile update error:', error);
         return { user: null, error: error.message }
       }
-
-      console.log('✅ Profile updated successfully:', data);
 
       return {
         user: {

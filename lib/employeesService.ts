@@ -29,7 +29,72 @@ export interface MonthlySalaryData {
   total_esop: number;
 }
 
+export interface EmployeeIncrementRecord {
+  id: string;
+  employee_id: string;
+  effective_date: string;
+  salary: number;
+  esop_allocation: number;
+  allocation_type: 'one-time' | 'annually' | 'quarterly' | 'monthly';
+  esop_per_allocation: number;
+}
+
 class EmployeesService {
+  async getIncrementsForEmployee(employeeId: string): Promise<EmployeeIncrementRecord[]> {
+    const { data, error } = await supabase
+      .from('employees_increments')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('effective_date', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(r => ({
+      id: r.id,
+      employee_id: r.employee_id,
+      effective_date: r.effective_date,
+      salary: Number(r.salary) || 0,
+      esop_allocation: Number(r.esop_allocation) || 0,
+      allocation_type: r.allocation_type,
+      esop_per_allocation: Number(r.esop_per_allocation) || 0,
+    }));
+  }
+
+  async getIncrementsForEmployees(employeeIds: string[]): Promise<EmployeeIncrementRecord[]> {
+    if (!employeeIds || employeeIds.length === 0) return [];
+    try {
+      const { data, error } = await supabase
+        .from('employees_increments')
+        .select('*')
+        .in('employee_id', employeeIds)
+        .order('effective_date', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(r => ({
+        id: r.id,
+        employee_id: r.employee_id,
+        effective_date: r.effective_date,
+        salary: Number(r.salary) || 0,
+        esop_allocation: Number(r.esop_allocation) || 0,
+        allocation_type: r.allocation_type,
+        esop_per_allocation: Number(r.esop_per_allocation) || 0,
+      }));
+    } catch (err: any) {
+      if (err?.status === 404) return [];
+      throw err;
+    }
+  }
+
+  async updateIncrement(incrementId: string, fields: Partial<{
+    effective_date: string;
+    salary: number;
+    esop_allocation: number;
+    allocation_type: 'one-time' | 'annually' | 'quarterly' | 'monthly';
+    esop_per_allocation: number;
+  }>): Promise<void> {
+    const { error } = await supabase
+      .from('employees_increments')
+      .update(fields as any)
+      .eq('id', incrementId);
+    if (error) throw error;
+  }
   // =====================================================
   // CRUD OPERATIONS
   // =====================================================
@@ -66,7 +131,8 @@ class EmployeesService {
       esopAllocation: record.esop_allocation,
       allocationType: record.allocation_type,
       esopPerAllocation: record.esop_per_allocation,
-      contractUrl: record.contract_url
+      contractUrl: record.contract_url,
+      terminationDate: record.termination_date
     }));
   }
 
@@ -107,7 +173,8 @@ class EmployeesService {
         esop_allocation: employeeData.esopAllocation,
         allocation_type: employeeData.allocationType,
         esop_per_allocation: employeeData.esopPerAllocation,
-        contract_url: employeeData.contractUrl
+        contract_url: employeeData.contractUrl,
+        termination_date: employeeData.terminationDate || null
       })
       .select()
       .single();
@@ -124,7 +191,8 @@ class EmployeesService {
       esopAllocation: data.esop_allocation,
       allocationType: data.allocation_type,
       esopPerAllocation: data.esop_per_allocation,
-      contractUrl: data.contract_url
+      contractUrl: data.contract_url,
+      terminationDate: data.termination_date
     };
   }
 
@@ -176,6 +244,7 @@ class EmployeesService {
     if (employeeData.allocationType !== undefined) updateData.allocation_type = employeeData.allocationType;
     if (employeeData.esopPerAllocation !== undefined) updateData.esop_per_allocation = employeeData.esopPerAllocation;
     if (employeeData.contractUrl !== undefined) updateData.contract_url = employeeData.contractUrl;
+    if (employeeData.terminationDate !== undefined) updateData.termination_date = employeeData.terminationDate;
 
     const { data, error } = await supabase
       .from('employees')
@@ -196,8 +265,42 @@ class EmployeesService {
       esopAllocation: data.esop_allocation,
       allocationType: data.allocation_type,
       esopPerAllocation: data.esop_per_allocation,
-      contractUrl: data.contract_url
+      contractUrl: data.contract_url,
+      terminationDate: data.termination_date
     };
+  }
+
+  // Soft terminate employee: set termination_date
+  async terminateEmployee(id: string, terminationDate: string): Promise<void> {
+    const { error } = await supabase
+      .from('employees')
+      .update({ termination_date: terminationDate })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
+  // Record salary increment change effective from a date by updating base salary and storing history
+  async addSalaryIncrement(
+    id: string,
+    newSalary: number,
+    effectiveDate: string,
+    esopAllocation?: number,
+    allocationType?: 'one-time' | 'annually' | 'quarterly' | 'monthly',
+    esopPerAllocation?: number
+  ): Promise<void> {
+    // Write to history table; do not change base employee row (so past months stay intact)
+    const payload: any = {
+      employee_id: id,
+      effective_date: effectiveDate,
+      salary: newSalary,
+      esop_allocation: esopAllocation ?? 0,
+      allocation_type: allocationType ?? 'one-time',
+      esop_per_allocation: esopPerAllocation ?? 0,
+    };
+    const { error } = await supabase
+      .from('employees_increments')
+      .insert(payload);
+    if (error) throw error;
   }
 
   async deleteEmployee(id: string): Promise<void> {
@@ -393,26 +496,110 @@ class EmployeesService {
 
   private async calculateMonthlySalaryDataManually(startupId: number, year: number): Promise<MonthlySalaryData[]> {
     const employees = await this.getEmployees(startupId);
-    
+
+    // Initialize all 12 months with zeroed totals
+    const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyMap = new Map<string, { salary: number; esop: number }>();
-    
-    employees.forEach(emp => {
-      const joinYear = new Date(emp.joiningDate).getFullYear();
-      if (joinYear === year) {
-        const month = new Date(emp.joiningDate).toLocaleString('default', { month: 'short' });
-        const existing = monthlyMap.get(month) || { salary: 0, esop: 0 };
-        monthlyMap.set(month, {
-          salary: existing.salary + emp.salary,
-          esop: existing.esop + emp.esopAllocation
-        });
-      }
+    monthOrder.forEach(m => monthlyMap.set(m, { salary: 0, esop: 0 }));
+
+    // Prefetch increment histories for all employees in parallel
+    const incrementsMap = new Map<string, EmployeeIncrementRecord[]>();
+    const incrementsArrays = await Promise.all(
+      employees.map(emp => this.getIncrementsForEmployee(emp.id))
+    );
+    employees.forEach((emp, idx) => {
+      incrementsMap.set(emp.id, incrementsArrays[idx] || []);
     });
-    
-    return Array.from(monthlyMap.entries()).map(([month_name, data]) => ({
-      month_name,
-      total_salary: data.salary,
-      total_esop: data.esop
-    }));
+
+    employees.forEach(emp => {
+      const joiningDate = new Date(emp.joiningDate);
+      const terminationDate = emp.terminationDate ? new Date(emp.terminationDate) : null;
+      // Determine effective compensation for each month using increment history
+      const increments = incrementsMap.get(emp.id) || [];
+
+      // For each month in the requested year, include employee if active in that month
+      monthOrder.forEach((label, idx) => {
+        const monthStart = new Date(year, idx, 1);
+        const monthEnd = new Date(year, idx + 1, 0); // last day of month
+
+        // Active if joined on/before the end of the month and not terminated before the start of the month
+        const activeThisMonth = (joiningDate <= monthEnd && joiningDate.getFullYear() <= year) && (!terminationDate || terminationDate >= monthStart);
+        if (activeThisMonth) {
+          const existing = monthlyMap.get(label) || { salary: 0, esop: 0 };
+          // pick best applicable record (base vs latest increment whose effective_date <= monthEnd)
+          const { applicable, applicableEffectiveDate } = (() => {
+            const applicableIncs = increments.filter(inc => new Date(inc.effective_date) <= monthEnd);
+            if (applicableIncs.length === 0) {
+              return {
+                applicable: {
+                  salary: emp.salary || 0,
+                  esop_allocation: emp.esopAllocation || 0,
+                  allocation_type: emp.allocationType,
+                  esop_per_allocation: emp.esopPerAllocation || 0,
+                },
+                applicableEffectiveDate: joiningDate,
+              };
+            }
+            const latest = applicableIncs[applicableIncs.length - 1];
+            return {
+              applicable: {
+                salary: latest.salary || 0,
+                esop_allocation: latest.esop_allocation || 0,
+                allocation_type: latest.allocation_type,
+                esop_per_allocation: latest.esop_per_allocation || 0,
+              },
+              applicableEffectiveDate: new Date(latest.effective_date),
+            };
+          })();
+
+          const monthlySalaryPortion = (applicable.salary || 0) / 12;
+          const esopAllocationTotal = applicable.esop_allocation || 0;
+          const esopPerAllocation = applicable.esop_per_allocation || 0;
+
+          // Compute ESOP monthly allocation based on allocation type
+          let esopMonthlyPortion = 0;
+          switch (applicable.allocation_type) {
+            case 'monthly':
+              esopMonthlyPortion = esopPerAllocation; // already monthly
+              break;
+            case 'quarterly':
+              esopMonthlyPortion = esopPerAllocation / 3; // spread across months in a quarter
+              break;
+            case 'annually':
+              esopMonthlyPortion = esopPerAllocation / 12; // spread across months in a year
+              break;
+            case 'one-time':
+            default:
+              // One-time applies in the effective month (joining month for base, increment's effective month for increments)
+              const effectiveYear = applicableEffectiveDate.getFullYear();
+              const effectiveMonthIdx = effectiveYear === year ? applicableEffectiveDate.getMonth() : -1;
+              if (effectiveMonthIdx === idx) {
+                esopMonthlyPortion = esopAllocationTotal;
+              } else {
+                esopMonthlyPortion = 0;
+              }
+              break;
+          }
+
+          monthlyMap.set(label, {
+            salary: existing.salary + monthlySalaryPortion,
+            esop: existing.esop + esopMonthlyPortion,
+          });
+        }
+      });
+    });
+
+    // Convert ESOP monthly values to cumulative allocation over the year
+    let cumulativeEsop = 0;
+    return monthOrder.map(label => {
+      const data = monthlyMap.get(label) || { salary: 0, esop: 0 };
+      cumulativeEsop += data.esop;
+      return {
+        month_name: label,
+        total_salary: data.salary,
+        total_esop: cumulativeEsop,
+      };
+    });
   }
 }
 

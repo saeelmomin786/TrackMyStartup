@@ -127,6 +127,30 @@ class ComplianceRulesIntegrationService {
     try {
       console.log('🔍 getComplianceTasksForStartup called for startup:', startupId);
       
+      // Load startup context up-front to get registration year for correct year assignment
+      const { data: startup, error: startupError } = await supabase
+        .from('startups')
+        .select('country_of_registration, company_type, registration_date')
+        .eq('id', startupId)
+        .single();
+
+      if (startupError || !startup) {
+        console.error('Error fetching startup data:', startupError);
+        return [];
+      }
+
+      const countryName = startup.country_of_registration;
+      const companyType = startup.company_type;
+      const registrationDate = startup.registration_date;
+      
+      if (!countryName || !companyType) {
+        console.log('Startup missing country or company type, cannot load compliance rules');
+        return [];
+      }
+
+      const registrationYear = registrationDate ? new Date(registrationDate).getFullYear() : new Date().getFullYear();
+      const currentYear = new Date().getFullYear();
+
       // First, try to get compliance tasks from the database function that handles subsidiaries
     try {
       console.log('🔍 Calling database function generate_compliance_tasks_for_startup for startup:', startupId);
@@ -153,27 +177,40 @@ class ComplianceRulesIntegrationService {
           console.log('🔍 Found compliance tasks from database function:', dbTasks);
           
           // Transform database tasks to IntegratedComplianceTask format
-          const integratedTasks: IntegratedComplianceTask[] = dbTasks.map((task: any) => ({
-            taskId: task.task_id,
-            entityIdentifier: task.entity_identifier,
-            entityDisplayName: task.entity_display_name,
-            year: task.year,
-            task: task.task_name,
-            caRequired: task.ca_required,
-            csRequired: task.cs_required,
-            caStatus: 'Pending' as any,
-            csStatus: 'Pending' as any,
-            uploads: [],
-            complianceRule: {
-              id: task.task_id,
-              name: task.task_name,
-              description: '',
-              frequency: task.task_type === 'firstYear' ? 'first-year' : 'annual',
-              verification_required: task.ca_required || task.cs_required,
-              ca_type: task.ca_required ? 'CA' : undefined,
-              cs_type: task.cs_required ? 'CS' : undefined
-            }
-          }));
+          const integratedTasks: IntegratedComplianceTask[] = dbTasks.map((task: any) => {
+            // Normalize frequency coming from DB
+            const rawType = (task.task_type || '').toString();
+            const normalizedFrequency: 'first-year' | 'annual' | 'monthly' | 'quarterly' =
+              rawType === 'firstYear'
+                ? 'first-year'
+                : (['first-year', 'annual', 'monthly', 'quarterly'] as const).includes(rawType as any)
+                ? (rawType as any)
+                : 'annual';
+
+            return {
+              taskId: task.task_id,
+              entityIdentifier: task.entity_identifier,
+              entityDisplayName: task.entity_display_name,
+              year: normalizedFrequency === 'first-year' ? registrationYear : task.year,
+              task: task.task_name,
+              caRequired: !!task.ca_required,
+              csRequired: !!task.cs_required,
+              caStatus: 'Pending' as any,
+              csStatus: 'Pending' as any,
+              uploads: [],
+              complianceRule: {
+                id: task.task_id,
+                name: task.task_name,
+                description: task.description || '',
+                frequency: normalizedFrequency,
+                verification_required: task.verification_required ?? (task.ca_required ? 'CA' : task.cs_required ? 'CS' : undefined),
+                ca_type: task.ca_type || (task.ca_required ? 'CA' : undefined),
+                cs_type: task.cs_type || (task.cs_required ? 'CS' : undefined)
+              },
+              frequency: normalizedFrequency,
+              complianceDescription: task.description || ''
+            } as IntegratedComplianceTask;
+          });
 
           console.log('🔍 Transformed integrated tasks:', integratedTasks);
           return integratedTasks;
@@ -187,25 +224,6 @@ class ComplianceRulesIntegrationService {
       }
 
       // Fallback to the original comprehensive rules approach for parent company only
-      const { data: startup, error: startupError } = await supabase
-        .from('startups')
-        .select('country_of_registration, company_type, registration_date')
-        .eq('id', startupId)
-        .single();
-
-      if (startupError || !startup) {
-        console.error('Error fetching startup data:', startupError);
-        return [];
-      }
-
-      const countryName = startup.country_of_registration;
-      const companyType = startup.company_type;
-      const registrationDate = startup.registration_date;
-
-      if (!countryName || !companyType) {
-        console.log('Startup missing country or company type, cannot load compliance rules');
-        return [];
-      }
 
       // Convert country name to country code
       const countryCodeMap: { [key: string]: string } = {
@@ -268,9 +286,7 @@ class ComplianceRulesIntegrationService {
       const countryCode = countryCodeMap[countryName] || countryName; // Fallback to original value if not found
       console.log(`🔍 Converting country name "${countryName}" to country code "${countryCode}"`);
 
-      // Calculate the registration year for first-year compliance tasks
-      const registrationYear = registrationDate ? new Date(registrationDate).getFullYear() : new Date().getFullYear();
-      const currentYear = new Date().getFullYear();
+      // registrationYear/currentYear already computed above
 
       console.log(`🔍 Looking for compliance rules for country: ${countryCode}, company type: ${companyType}`);
 

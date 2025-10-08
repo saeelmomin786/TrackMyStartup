@@ -68,9 +68,8 @@ export default function SubscriptionSummaryCards({ userId, userType, userCountry
   }
 
   const formatCurrency = (eurAmount: number) => {
-    // Get currency based on user's country
-    const userCurrency = userCountry ? getCurrencyForCountry(userCountry) : 'EUR';
-    return formatCurrencyFromEUR(eurAmount, userCurrency);
+    // Force display in INR (Indian Rupees) as requested
+    return formatCurrencyFromEUR(eurAmount, 'INR');
   };
 
   const formatDate = (dateString: string) => {
@@ -96,15 +95,7 @@ export default function SubscriptionSummaryCards({ userId, userType, userCountry
             </p>
           </div>
           <div className="h-12 w-12 bg-red-100 rounded-full flex items-center justify-center">
-            {userCountry && getCurrencyForCountry(userCountry) === 'INR' ? (
-              <IndianRupee className="h-6 w-6 text-red-600" />
-            ) : userCountry && getCurrencyForCountry(userCountry) === 'USD' ? (
-              <DollarSign className="h-6 w-6 text-red-600" />
-            ) : userCountry && getCurrencyForCountry(userCountry) === 'GBP' ? (
-              <PoundSterling className="h-6 w-6 text-red-600" />
-            ) : (
-              <Euro className="h-6 w-6 text-red-600" />
-            )}
+            <IndianRupee className="h-6 w-6 text-red-600" />
           </div>
         </div>
         {summary.totalDue > 0 && (

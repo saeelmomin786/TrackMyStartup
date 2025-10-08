@@ -24,6 +24,8 @@ DECLARE
   s_company_type text;
   s_reg_date date;
   current_year integer := EXTRACT(YEAR FROM CURRENT_DATE);
+  current_month integer := EXTRACT(MONTH FROM CURRENT_DATE);
+  current_quarter integer := CEIL(current_month::numeric / 3);
   reg_year integer;
   rule_rec record;
   sub_rec record;
@@ -74,10 +76,10 @@ BEGIN
           cs_req := true;
       END CASE;
 
-      -- Generate tasks for each year from registration to current
-      FOR y IN reg_year..current_year LOOP
-        year := y;
-        task_id := 'parent-' || y || '-' || rule_rec.frequency || '-' || rule_rec.compliance_name;
+      -- Assign tasks by frequency: first-year only in registration year; annual each year; quarterly/monthly per period
+      IF rule_rec.frequency = 'first-year' THEN
+        year := reg_year;
+        task_id := 'parent-' || reg_year || '-' || rule_rec.frequency || '-' || rule_rec.compliance_name;
         entity_identifier := 'parent';
         entity_display_name := 'Parent Company (' || s_country || ')';
         task_name := rule_rec.compliance_name;
@@ -85,7 +87,53 @@ BEGIN
         cs_required := cs_req;
         task_type := rule_rec.frequency;
         RETURN NEXT;
-      END LOOP;
+      ELSIF rule_rec.frequency = 'quarterly' THEN
+        FOR y IN reg_year..current_year LOOP
+          FOR q IN 1..4 LOOP
+            -- Only show quarterly tasks for quarters that have ended
+            IF y < current_year OR (y = current_year AND q < current_quarter) THEN
+              year := y;
+              task_id := 'parent-' || y || '-' || rule_rec.frequency || '-Q' || q || '-' || rule_rec.compliance_name;
+              entity_identifier := 'parent';
+              entity_display_name := 'Parent Company (' || s_country || ')';
+              task_name := rule_rec.compliance_name || ' (Q' || q || ' ' || y || ')';
+              ca_required := ca_req;
+              cs_required := cs_req;
+              task_type := rule_rec.frequency;
+              RETURN NEXT;
+            END IF;
+          END LOOP;
+        END LOOP;
+      ELSIF rule_rec.frequency = 'monthly' THEN
+        FOR y IN reg_year..current_year LOOP
+          FOR m IN 1..12 LOOP
+            -- Only show monthly tasks for months that have ended
+            IF y < current_year OR (y = current_year AND m < current_month) THEN
+              year := y;
+              task_id := 'parent-' || y || '-' || rule_rec.frequency || '-M' || LPAD(m::text, 2, '0') || '-' || rule_rec.compliance_name;
+              entity_identifier := 'parent';
+              entity_display_name := 'Parent Company (' || s_country || ')';
+              task_name := rule_rec.compliance_name || ' (M' || LPAD(m::text, 2, '0') || ' ' || y || ')';
+              ca_required := ca_req;
+              cs_required := cs_req;
+              task_type := rule_rec.frequency;
+              RETURN NEXT;
+            END IF;
+          END LOOP;
+        END LOOP;
+      ELSE
+        FOR y IN reg_year..current_year LOOP
+          year := y;
+          task_id := 'parent-' || y || '-' || rule_rec.frequency || '-' || rule_rec.compliance_name;
+          entity_identifier := 'parent';
+          entity_display_name := 'Parent Company (' || s_country || ')';
+          task_name := rule_rec.compliance_name;
+          ca_required := ca_req;
+          cs_required := cs_req;
+          task_type := rule_rec.frequency;
+          RETURN NEXT;
+        END LOOP;
+      END IF;
     END LOOP;
   END IF;
 
@@ -135,10 +183,10 @@ BEGIN
           cs_req := true;
       END CASE;
 
-      -- Generate tasks for each year from registration to current
-      FOR y IN reg_year..current_year LOOP
-        year := y;
-        task_id := 'sub-' || (sub_index - 1) || '-' || y || '-' || rule_rec.frequency || '-' || rule_rec.compliance_name;
+      -- Assign tasks by frequency for subsidiaries
+      IF rule_rec.frequency = 'first-year' THEN
+        year := reg_year;
+        task_id := 'sub-' || (sub_index - 1) || '-' || reg_year || '-' || rule_rec.frequency || '-' || rule_rec.compliance_name;
         entity_identifier := 'sub-' || (sub_index - 1);
         entity_display_name := 'Subsidiary ' || sub_index || ' (' || sub_rec.country || ')';
         task_name := rule_rec.compliance_name;
@@ -146,7 +194,53 @@ BEGIN
         cs_required := cs_req;
         task_type := rule_rec.frequency;
         RETURN NEXT;
-      END LOOP;
+      ELSIF rule_rec.frequency = 'quarterly' THEN
+        FOR y IN reg_year..current_year LOOP
+          FOR q IN 1..4 LOOP
+            -- Only show quarterly tasks for quarters that have ended
+            IF y < current_year OR (y = current_year AND q < current_quarter) THEN
+              year := y;
+              task_id := 'sub-' || (sub_index - 1) || '-' || y || '-' || rule_rec.frequency || '-Q' || q || '-' || rule_rec.compliance_name;
+              entity_identifier := 'sub-' || (sub_index - 1);
+              entity_display_name := 'Subsidiary ' || sub_index || ' (' || sub_rec.country || ')';
+              task_name := rule_rec.compliance_name || ' (Q' || q || ' ' || y || ')';
+              ca_required := ca_req;
+              cs_required := cs_req;
+              task_type := rule_rec.frequency;
+              RETURN NEXT;
+            END IF;
+          END LOOP;
+        END LOOP;
+      ELSIF rule_rec.frequency = 'monthly' THEN
+        FOR y IN reg_year..current_year LOOP
+          FOR m IN 1..12 LOOP
+            -- Only show monthly tasks for months that have ended
+            IF y < current_year OR (y = current_year AND m < current_month) THEN
+              year := y;
+              task_id := 'sub-' || (sub_index - 1) || '-' || y || '-' || rule_rec.frequency || '-M' || LPAD(m::text, 2, '0') || '-' || rule_rec.compliance_name;
+              entity_identifier := 'sub-' || (sub_index - 1);
+              entity_display_name := 'Subsidiary ' || sub_index || ' (' || sub_rec.country || ')';
+              task_name := rule_rec.compliance_name || ' (M' || LPAD(m::text, 2, '0') || ' ' || y || ')';
+              ca_required := ca_req;
+              cs_required := cs_req;
+              task_type := rule_rec.frequency;
+              RETURN NEXT;
+            END IF;
+          END LOOP;
+        END LOOP;
+      ELSE
+        FOR y IN reg_year..current_year LOOP
+          year := y;
+          task_id := 'sub-' || (sub_index - 1) || '-' || y || '-' || rule_rec.frequency || '-' || rule_rec.compliance_name;
+          entity_identifier := 'sub-' || (sub_index - 1);
+          entity_display_name := 'Subsidiary ' || sub_index || ' (' || sub_rec.country || ')';
+          task_name := rule_rec.compliance_name;
+          ca_required := ca_req;
+          cs_required := cs_req;
+          task_type := rule_rec.frequency;
+          RETURN NEXT;
+        END LOOP;
+      END IF;
     END LOOP;
   END LOOP;
 

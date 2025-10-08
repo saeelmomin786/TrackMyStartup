@@ -40,12 +40,12 @@ class FacilitatorStartupService {
     try {
       const { data, error } = await supabase
         .from('facilitator_startups')
-        .insert({
+        .upsert({
           facilitator_id: facilitatorId,
           startup_id: startupId,
           recognition_record_id: recognitionRecordId,
           status: 'active'
-        })
+        }, { onConflict: 'facilitator_id,startup_id' })
         .select()
         .single();
 
@@ -125,6 +125,32 @@ class FacilitatorStartupService {
       if (startupError) {
         console.error('Error fetching startup data:', startupError);
         throw startupError;
+      }
+
+      // Fetch domain information from opportunity applications for these startups
+      const { data: applicationData, error: applicationError } = await supabase
+        .from('opportunity_applications')
+        .select(`
+          startup_id,
+          domain,
+          stage
+        `)
+        .in('startup_id', startupIds)
+        .eq('status', 'accepted'); // Only get accepted applications
+
+      if (applicationError) {
+        console.error('Error fetching application data:', applicationError);
+        // Continue without domain data if there's an error
+      }
+
+      // Create a map of startup_id to domain for quick lookup
+      const domainMap: { [key: number]: string } = {};
+      if (applicationData) {
+        applicationData.forEach(app => {
+          if (app.domain && !domainMap[app.startup_id]) {
+            domainMap[app.startup_id] = app.domain;
+          }
+        });
       }
 
       // Fetch investment records for current valuation (using existing table)
@@ -222,7 +248,7 @@ class FacilitatorStartupService {
         return {
           id: startup.id,
           name: startup.name,
-          sector: startup.sector || 'N/A',
+          sector: domainMap[startup.id] || startup.sector || 'N/A', // Use domain from applications, fallback to startup sector
           currentValuation,
           complianceStatus,
           totalFunding: startup.total_funding || 0,

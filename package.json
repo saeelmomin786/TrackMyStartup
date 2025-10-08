@@ -6,12 +6,21 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/copy-404.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server": "node server.js",
+    "start-payment-server": "node start-payment-server.js",
+    "check-razorpay": "node check-razorpay-setup.js",
+    "fix-env": "node fix-env-file.js",
+    "restart-app": "node restart-app.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.53.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
     "jspdf": "^3.0.3",
     "lucide-react": "^0.535.0",
+    "node-fetch": "^2.7.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-router-dom": "^7.9.1",
@@ -25,7 +34,7 @@
     "autoprefixer": "^10.4.21",
     "cpx2": "^8.0.0",
     "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.12",
+    "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
     "vite": "^6.3.6",
     "vite-plugin-copy": "^0.1.6"

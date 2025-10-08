@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { InvestmentRecord, InvestorType, InvestmentRoundType, Founder, FundraisingDetails, InvestmentType } from '../types';
+import { InvestmentRecord, InvestorType, InvestmentRoundType, Founder, FundraisingDetails, InvestmentType, StartupDomain, StartupStage } from '../types';
 import { validateInvestmentDate, validateValuationDate } from './dateValidation';
 
 export interface InvestmentSummary {
@@ -732,6 +732,8 @@ class CapTableService {
       type: item.type as InvestmentType,
       value: item.value,
       equity: item.equity,
+      domain: item.domain as StartupDomain | undefined,
+      stage: item.stage as StartupStage | undefined,
       validationRequested: item.validation_requested,
       pitchDeckUrl: item.pitch_deck_url,
       pitchVideoUrl: item.pitch_video_url
@@ -787,6 +789,8 @@ class CapTableService {
         type: fundraisingData.type,
         value: fundraisingData.value,
         equity: fundraisingData.equity,
+        domain: fundraisingData.domain || null,
+        stage: fundraisingData.stage || null,
         validation_requested: fundraisingData.validationRequested,
         pitch_deck_url: fundraisingData.pitchDeckUrl || null,
         pitch_video_url: fundraisingData.pitchVideoUrl || null
@@ -811,6 +815,8 @@ class CapTableService {
         type: data.type as InvestmentType,
         value: data.value,
         equity: data.equity,
+        domain: data.domain as StartupDomain | undefined,
+        stage: data.stage as StartupStage | undefined,
         validationRequested: data.validation_requested,
         pitchDeckUrl: data.pitch_deck_url,
         pitchVideoUrl: data.pitch_video_url

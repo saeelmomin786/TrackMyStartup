@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2 } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle } from 'lucide-react';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
@@ -16,6 +16,11 @@ import { facilitatorCodeService } from '../lib/facilitatorCodeService';
 import { FacilitatorCodeDisplay } from './FacilitatorCodeDisplay';
 import ProfilePage from './ProfilePage';
 import { capTableService } from '../lib/capTableService';
+import IncubationMessagingModal from './IncubationMessagingModal';
+import ContractManagementModal from './ContractManagementModal';
+import { incubationPaymentService } from '../lib/incubationPaymentService';
+import { profileService } from '../lib/profileService';
+import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, getCurrencyForCountry, getCurrencyForCountryCode } from '../lib/utils';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -53,7 +58,9 @@ type ReceivedApplication = {
   diligenceStatus: 'none' | 'requested' | 'approved';
   agreementUrl?: string;
   sector?: string;
+  stage?: string;
   createdAt?: string;
+  diligenceUrls?: string[]; // Array of uploaded diligence document URLs
 };
 
 const initialNewOppState = {
@@ -90,6 +97,81 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   onProfileUpdate,
   onLogout
 }) => {
+  const resolveCurrency = (countryOrCode?: string): string => {
+    if (!countryOrCode) return 'USD';
+    // Heuristic: 2-letter codes or all-caps assumed as country codes
+    const isLikelyCode = countryOrCode.length <= 3 && countryOrCode.toUpperCase() === countryOrCode;
+    return isLikelyCode ? getCurrencyForCountryCode(countryOrCode) : getCurrencyForCountry(countryOrCode);
+  };
+
+  const buildStartupForView = async (
+    base: Partial<Startup> & { id: number | string; name: string; sector: string }
+  ): Promise<Startup> => {
+    const numericId = typeof base.id === 'string' ? parseInt(base.id, 10) : base.id;
+    let profile: any = null;
+    try {
+      // Validate deadline: must be today or later
+      if (newOpportunity.deadline) {
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const sel = new Date(newOpportunity.deadline);
+        sel.setHours(0,0,0,0);
+        if (sel < today) {
+          alert('Deadline cannot be in the past. Please choose today or a future date.');
+          return;
+        }
+      }
+      if (!isNaN(Number(numericId))) {
+        profile = await profileService.getStartupProfile(Number(numericId));
+      }
+    } catch (e) {
+      // ignore profile fetch failures; we'll fall back safely
+    }
+
+    const derivedCurrency = (() => {
+      if (base.currency) return base.currency as string;
+      if (profile?.currency) return profile.currency as string;
+      if (profile?.country) return resolveCurrency(profile.country as string);
+      if ((base as any).profile?.currency) return (base as any).profile.currency as string;
+      if ((base as any).profile?.country) return resolveCurrency((base as any).profile.country as string);
+      if (currentUser?.country) return resolveCurrency(currentUser.country);
+      return 'USD';
+    })();
+
+    return {
+      id: (numericId as unknown) as any,
+      name: base.name,
+      sector: base.sector,
+      investmentType: (base as any).investmentType || ('equity' as any),
+      investmentValue: (base as any).investmentValue || 0,
+      equityAllocation: (base as any).equityAllocation || 0,
+      currentValuation: (base as any).currentValuation || 0,
+      totalFunding: (base as any).totalFunding || 0,
+      totalRevenue: (base as any).totalRevenue || 0,
+      registrationDate: (base as any).registrationDate || new Date().toISOString().split('T')[0],
+      currency: derivedCurrency,
+      complianceStatus: (base as any).complianceStatus || ComplianceStatus.Pending,
+      founders: (base as any).founders || [],
+      profile: profile || (base as any).profile || undefined,
+    } as Startup;
+  };
+
+  // Resolve a reliable numeric startup ID for DB RPCs
+  const resolveStartupNumericId = async (id: number | string, name?: string): Promise<number | null> => {
+    const n = typeof id === 'string' ? parseInt(id as string, 10) : id as number;
+    if (!isNaN(n) && n > 0) return n;
+    if (name) {
+      try {
+        const { data } = await supabase
+          .from('startups')
+          .select('id')
+          .eq('name', name)
+          .maybeSingle();
+        if (data?.id) return Number(data.id);
+      } catch {}
+    }
+    return null;
+  };
   const [activeTab, setActiveTab] = useState<FacilitatorTab>('dashboard');
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
   const [showProfilePage, setShowProfilePage] = useState(false);
@@ -117,8 +199,192 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isLoadingPortfolio, setIsLoadingPortfolio] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPrices, setCurrentPrices] = useState<Record<number, number>>({});
+  
+  // New state for messaging and payment functionality
+  const [isMessagingModalOpen, setIsMessagingModalOpen] = useState(false);
+  const [isContractModalOpen, setIsContractModalOpen] = useState(false);
+  const [selectedApplicationForMessaging, setSelectedApplicationForMessaging] = useState<ReceivedApplication | null>(null);
+  const [selectedApplicationForContract, setSelectedApplicationForContract] = useState<ReceivedApplication | null>(null);
+  const [selectedApplicationForDiligence, setSelectedApplicationForDiligence] = useState<ReceivedApplication | null>(null);
+  const formatCurrency = (value: number, currency: string = 'USD') => 
+    formatCurrencyUtil(value, currency, { notation: 'compact' });
 
-  const formatCurrency = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact' }).format(value);
+  // Handle messaging modal
+  const handleOpenMessaging = (application: ReceivedApplication) => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(application.id)) {
+      alert('Messaging is only available for valid program applications. Open from Applications where an application exists.');
+      return;
+    }
+    setSelectedApplicationForMessaging(application);
+    setIsMessagingModalOpen(true);
+  };
+
+  const handleCloseMessaging = () => {
+    setIsMessagingModalOpen(false);
+    setSelectedApplicationForMessaging(null);
+  };
+
+
+
+  // Function to refresh data after payment
+  const refreshData = async () => {
+    try {
+      // Trigger a page refresh to reload all data
+      window.location.reload();
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    }
+  };
+
+
+  // Handle contract management modal
+  const handleOpenContract = (application: ReceivedApplication) => {
+    setSelectedApplicationForContract(application);
+    setIsContractModalOpen(true);
+  };
+
+  const handleCloseContract = () => {
+    setIsContractModalOpen(false);
+    setSelectedApplicationForContract(null);
+  };
+
+  const handleOpenDiligenceDocuments = async (app: ReceivedApplication) => {
+    console.log('🔍 FACILITATOR VIEW: Opening diligence documents for app:', app.id);
+    
+    // Fetch fresh data from database to ensure we have the latest diligence_urls
+    try {
+      const { data: freshData, error } = await supabase
+        .from('opportunity_applications')
+        .select('diligence_urls, diligence_status')
+        .eq('id', app.id)
+        .single();
+      
+      console.log('🔍 FACILITATOR VIEW: Fresh database data:', freshData);
+      console.log('🔍 FACILITATOR VIEW: Database error:', error);
+      
+      if (freshData) {
+        // Update the app with fresh data
+        const updatedApp = {
+          ...app,
+          diligenceUrls: freshData.diligence_urls || [],
+          diligenceStatus: freshData.diligence_status
+        };
+        console.log('🔍 FACILITATOR VIEW: Updated app with fresh data:', updatedApp);
+        setSelectedApplicationForDiligence(updatedApp);
+      } else {
+        setSelectedApplicationForDiligence(app);
+      }
+    } catch (err) {
+      console.error('🔍 FACILITATOR VIEW: Error fetching fresh data:', err);
+      setSelectedApplicationForDiligence(app);
+    }
+    
+    setIsDiligenceModalOpen(true);
+  };
+
+  const handleCloseDiligenceDocuments = () => {
+    setIsDiligenceModalOpen(false);
+    setSelectedApplicationForDiligence(null);
+  };
+
+  const handleApproveDiligence = async (app: ReceivedApplication) => {
+    if (!app.id) return;
+    
+    setIsProcessingAction(true);
+    try {
+      console.log('🔄 Approving diligence for application:', app.id);
+      
+      // Use RPC to approve diligence
+      const { data, error: rpcError } = await supabase.rpc('safe_update_diligence_status', {
+        p_application_id: app.id,
+        p_new_status: 'approved',
+        p_old_status: 'requested'
+      });
+      
+      if (rpcError) {
+        console.error('RPC function error:', rpcError);
+        throw rpcError;
+      }
+
+      if (!data || data.length === 0) {
+        console.log('⚠️ Diligence was already approved or status changed');
+        await loadFacilitatorData(); // Reload data
+        return;
+      }
+
+      // Update local state
+      setMyReceivedApplications(prev => prev.map(application => 
+        application.id === app.id 
+          ? { ...application, diligenceStatus: 'approved' }
+          : application
+      ));
+
+      // Close modal
+      setIsDiligenceModalOpen(false);
+      setSelectedApplicationForDiligence(null);
+      
+      alert('Diligence request approved! The startup has been notified.');
+      
+    } catch (err) {
+      console.error('Error approving diligence:', err);
+      alert('Failed to approve diligence request. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleRejectDiligence = async (app: ReceivedApplication) => {
+    if (!app.id) return;
+    
+    const confirmed = window.confirm(
+      'Are you sure you want to reject this diligence request? The startup will be notified and can re-upload documents if needed.'
+    );
+    
+    if (!confirmed) return;
+    
+    setIsProcessingAction(true);
+    try {
+      console.log('🔄 Rejecting diligence for application:', app.id);
+      
+      // Use RPC to reject diligence
+      const { data, error: rpcError } = await supabase.rpc('safe_update_diligence_status', {
+        p_application_id: app.id,
+        p_new_status: 'rejected',
+        p_old_status: 'requested'
+      });
+      
+      if (rpcError) {
+        console.error('RPC function error:', rpcError);
+        throw rpcError;
+      }
+
+      if (!data || data.length === 0) {
+        console.log('⚠️ Diligence status was already changed');
+        await loadFacilitatorData(); // Reload data
+        return;
+      }
+
+      // Update local state
+      setMyReceivedApplications(prev => prev.map(application => 
+        application.id === app.id 
+          ? { ...application, diligenceStatus: 'none' } // Reset to none so they can request again
+          : application
+      ));
+
+      // Close modal
+      setIsDiligenceModalOpen(false);
+      setSelectedApplicationForDiligence(null);
+      
+      alert('Diligence request rejected. The startup can upload new documents and request again.');
+      
+    } catch (err) {
+      console.error('Error rejecting diligence:', err);
+      alert('Failed to reject diligence request. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
 
   // Load current prices directly from startup_shares table
   const loadCurrentPrices = async () => {
@@ -129,8 +395,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       .filter(record => record.equityAllocated && record.equityAllocated > 0)
       .map(record => record.startupId))];
 
-    console.log('🔄 Loading current prices for startups:', uniqueStartupIds);
-
     // Query startup_shares table directly for price_per_share
     try {
       const { data, error } = await supabase
@@ -138,16 +402,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         .select('startup_id, price_per_share')
         .in('startup_id', uniqueStartupIds);
 
-      console.log('🔍 Direct startup_shares query result:', { data, error });
-
       if (error) {
         console.error('❌ Error querying startup_shares table:', error);
-        console.log('🔍 Error details:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
         return;
       }
 
@@ -156,8 +412,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         data.forEach(record => {
           if (record.price_per_share && record.price_per_share > 0) {
             prices[record.startup_id] = record.price_per_share;
-            console.log(`✅ Found price for startup ${record.startup_id}:`, record.price_per_share);
-          }
+            }
         });
       } else {
         console.log('⚠️ No data returned from startup_shares query');
@@ -179,7 +434,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       });
     }
     
-    console.log('✅ Final current prices:', prices);
     setCurrentPrices(prices);
   };
 
@@ -196,7 +450,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     const videoUrl = startup.pitchVideoUrl || 'Video not available';
     // Calculate valuation from investment value and equity allocation
     const valuation = startup.equityAllocation > 0 ? (startup.investmentValue / (startup.equityAllocation / 100)) : 0;
-    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: $${valuation.toLocaleString()}\n\nPitch Video: ${videoUrl}`;
+    const inferredCurrency =
+      startup.currency ||
+      (startup as any).profile?.currency ||
+      ((startup as any).profile?.country ? resolveCurrency((startup as any).profile?.country) : undefined) ||
+      (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
+    const symbol = getCurrencySymbol(inferredCurrency);
+    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: ${symbol}${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: ${symbol}${valuation.toLocaleString()}\n\nPitch Video: ${videoUrl}`;
     console.log('Share details:', details);
         try {
             if (navigator.share) {
@@ -250,8 +510,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     try {
       setIsLoadingRecognition(true);
       
-      console.log('🔍 Loading recognition requests for facilitator ID:', facilitatorId);
-      
       // Get facilitator code first, create one if it doesn't exist
       const { data: facilitatorData, error: facilitatorError } = await supabase
         .from('users')
@@ -276,24 +534,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         }
       }
 
-      console.log('📋 Facilitator code:', facilitatorCode);
-      
       if (!facilitatorCode) {
         console.error('❌ No facilitator code available, cannot load recognition records');
         setRecognitionRecords([]);
         return;
       }
       
-      console.log('🔍 Querying recognition_records with facilitator code:', facilitatorCode);
-      
       // First, let's check if there are any recognition records at all
       const { data: allRecords, error: allRecordsError } = await supabase
         .from('recognition_records')
         .select('*')
         .limit(5);
-      
-      console.log('🔍 All recognition records in database:', allRecords);
-      console.log('🔍 All records error:', allRecordsError);
       
       // Query the original recognition_records table with proper startup data
       const { data, error } = await supabase
@@ -316,12 +567,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         .eq('facilitator_code', facilitatorCode)
         .order('date_added', { ascending: false });
       
-      console.log('📊 Raw query result:', { data, error });
-      
       if (error) {
         console.error('❌ Error loading recognition requests:', error);
-        console.log('🔄 Trying fallback query without foreign key join...');
-        
         // Fallback: Query without foreign key join but with startup data
         const { data: fallbackData, error: fallbackError } = await supabase
           .from('recognition_records')
@@ -349,8 +596,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           return;
         }
         
-        console.log('✅ Fallback query successful:', fallbackData);
-        
         // Map the fallback data
         const mappedRecords = (fallbackData || []).map(record => ({
           id: record.id.toString(),
@@ -376,12 +621,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           } // Include startup data with current price
         }));
         
-        console.log('✅ Loaded recognition requests (fallback):', mappedRecords);
-        console.log('🔍 Startup data in fallback records:', mappedRecords.map(r => ({ 
-          id: r.id, 
-          startupName: r.startup?.name, 
-          startupData: r.startup 
-        })));
+        // console.log('Mapped recognition records:', mappedRecords);
         setRecognitionRecords(mappedRecords);
         return;
       }
@@ -412,12 +652,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         }
       }));
       
-      console.log('✅ Loaded recognition requests:', mappedRecords);
-      console.log('🔍 Startup data in records:', mappedRecords.map(r => ({ 
-        id: r.id, 
-        startupName: r.startup?.name, 
-        startupData: r.startup 
-      })));
       setRecognitionRecords(mappedRecords);
     } catch (err) {
       console.error('Error loading recognition requests:', err);
@@ -439,8 +673,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         if (!mounted || !user?.id) return;
         
         setFacilitatorId(user.id);
-        console.log('🔍 Facilitator ID set:', user.id);
-        
         // Set loading timeout to prevent infinite loading
         loadingTimeout = setTimeout(() => {
           if (mounted) {
@@ -485,23 +717,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             // Load applications for opportunities
           if (mapped.length > 0) {
             const oppIds = mapped.map(o => o.id);
-            console.log('🔍 Loading applications for opportunities:', oppIds);
-              
-              try {
+            try {
             const { data: apps, error: appsError } = await supabase
               .from('opportunity_applications')
-              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, created_at, startups!inner(id,name)')
+              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, startups!inner(id,name)')
               .in('opportunity_id', oppIds)
               .order('created_at', { ascending: false });
             
             if (appsError) {
                   console.error('❌ Error loading opportunity applications:', appsError);
-                  console.log('🔄 Trying fallback query without inner join...');
-                  
                   // Try without the inner join
                   const { data: fallbackApps, error: fallbackAppsError } = await supabase
                     .from('opportunity_applications')
-                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, sector, created_at')
+                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls')
                     .in('opportunity_id', oppIds)
                     .order('created_at', { ascending: false });
                   
@@ -509,7 +737,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     console.error('❌ Fallback query also failed:', fallbackAppsError);
                     setMyReceivedApplications([]);
                   } else {
-                    console.log('✅ Fallback applications query successful');
                     // Map without startup data
                     const fallbackAppsMapped: ReceivedApplication[] = (fallbackApps || []).map((a: any) => ({
                       id: a.id,
@@ -521,13 +748,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       agreementUrl: a.agreement_url,
                       pitchDeckUrl: a.pitch_deck_url,
                       pitchVideoUrl: a.pitch_video_url,
-                      sector: a.sector,
-                      createdAt: a.created_at
+                      sector: a.domain,
+                      stage: a.stage,
+                      createdAt: a.created_at,
+                      diligenceUrls: a.diligence_urls || []
                     }));
                     setMyReceivedApplications(fallbackAppsMapped);
                   }
             } else {
-              console.log('📋 Raw applications data:', apps);
               const appsMapped: ReceivedApplication[] = (apps || []).map((a: any) => ({
                 id: a.id,
                 startupId: a.startup_id,
@@ -538,10 +766,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 pitchVideoUrl: a.pitch_video_url || undefined,
                 diligenceStatus: a.diligence_status || 'none',
                 agreementUrl: a.agreement_url || undefined,
-                sector: a.sector,
-                createdAt: a.created_at
+                sector: a.domain,
+                stage: a.stage,
+                createdAt: a.created_at,
+                diligenceUrls: a.diligence_urls || []
               }));
-              console.log('🎯 Mapped applications:', appsMapped);
               if (mounted) setMyReceivedApplications(appsMapped);
                 }
               } catch (appsErr) {
@@ -646,13 +875,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               pitchVideoUrl: row.pitch_video_url || undefined,
               diligenceStatus: row.diligence_status || 'none',
               agreementUrl: row.agreement_url || undefined,
+              stage: row.stage,
               createdAt: row.created_at
             },
             ...prev
           ]);
           
           // Show notification to facilitator
-          console.log(`✅ New application received from ${startup?.name || 'Startup'} for opportunity ${row.opportunity_id}`);
           console.log('📝 Application details:', row);
         } catch (e) {
             console.error('Error processing new application:', e);
@@ -677,8 +906,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
-            console.log('✅ Subscribed to opportunity applications changes');
-          } else if (status === 'CHANNEL_ERROR') {
+            } else if (status === 'CHANNEL_ERROR') {
             console.error('❌ Error subscribing to opportunity applications changes');
           }
         });
@@ -688,7 +916,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     
     return () => { 
       if (channel) {
-        console.log('🔌 Unsubscribing from opportunity applications changes');
         channel.unsubscribe();
       }
     };
@@ -721,8 +948,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
-            console.log('✅ Subscribed to recognition records changes');
-          } else if (status === 'CHANNEL_ERROR') {
+            } else if (status === 'CHANNEL_ERROR') {
             console.error('❌ Error subscribing to recognition records changes');
           }
         });
@@ -732,7 +958,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     
     return () => { 
       if (channel) {
-        console.log('🔌 Unsubscribing from recognition records changes');
         channel.unsubscribe();
       }
     };
@@ -766,8 +991,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
-            console.log('✅ Subscribed to facilitator startups changes');
-          } else if (status === 'CHANNEL_ERROR') {
+            } else if (status === 'CHANNEL_ERROR') {
             console.error('❌ Error subscribing to facilitator startups changes');
           }
         });
@@ -777,7 +1001,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     
     return () => { 
       if (channel) {
-        console.log('🔌 Unsubscribing from facilitator startups changes');
         channel.unsubscribe();
       }
     };
@@ -826,8 +1049,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 return;
               }
               
-            console.log(`✅ Due diligence approved by ${startup?.name || 'Startup'} for opportunity ${row.opportunity_id}`);
-            
             // Show success popup
             const successMessage = document.createElement('div');
             successMessage.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
@@ -853,8 +1074,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
-            console.log('✅ Subscribed to diligence status changes');
-          } else if (status === 'CHANNEL_ERROR') {
+            } else if (status === 'CHANNEL_ERROR') {
             console.error('❌ Error subscribing to diligence status changes');
           }
         });
@@ -864,7 +1084,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     
     return () => { 
       if (channel) {
-        console.log('🔌 Unsubscribing from diligence status changes');
         channel.unsubscribe();
       }
     };
@@ -1015,8 +1234,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         return;
       }
 
-      console.log('✅ Successfully deleted application:', data);
-
       // Update local state
       setMyReceivedApplications(prev => prev.filter(app => app.id !== application.id));
 
@@ -1071,8 +1288,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         return;
       }
 
-      console.log('✅ Successfully deleted startup from portfolio:', data);
-
       // Update local state
       setPortfolioStartups(prev => prev.filter(startup => startup.id !== startupId));
 
@@ -1124,8 +1339,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         alert('Recognition record was not found or was already deleted.');
         return;
       }
-
-      console.log('✅ Successfully deleted recognition record:', data);
 
       // Update local state
       setRecognitionRecords(prev => prev.filter(record => record.id !== recordId));
@@ -1292,10 +1505,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           return;
         }
         
-                console.log('🔍 Record found:', record);
-        console.log('🔍 Startup ID type:', typeof record.startupId, 'Value:', record.startupId);
-        
-        // Validate data types
+                // Validate data types
         if (typeof record.startupId !== 'number') {
           console.error('❌ Invalid startup ID type:', typeof record.startupId, record.startupId);
           alert('Invalid startup data. Please try again.');
@@ -1361,9 +1571,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             return;
           }
           
-      console.log('✅ All validation checks passed');
-        
-        // Update the recognition request status in the database
+      // Update the recognition request status in the database
         const { error: updateError } = await supabase
           .from('recognition_records')
           .update({ 
@@ -1378,12 +1586,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         }
         
         // Add startup to facilitator's portfolio
-        console.log('🔍 Adding startup to portfolio:', {
-          facilitatorId: facilitatorId,
-          startupId: record.startupId,
-        recognitionRecordId: dbId
-        });
-        
         const portfolioEntry = await facilitatorStartupService.addStartupToPortfolio(
         facilitatorId,
           record.startupId,
@@ -1398,7 +1600,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 ? { ...r, status: 'approved' }
                 : r
             );
-            console.log('🔄 Updated recognition records:', updated);
             return updated;
           });
           
@@ -1605,7 +1806,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       <thead className="bg-slate-50 sticky top-0">
                         <tr>
                                                               <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Startup</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Sector</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Domain</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Stage</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Opportunity</th>
                                     <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Pitch Materials</th>
                           <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Actions</th>
@@ -1616,6 +1818,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <tr key={app.id}>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{app.startupName}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{app.sector || '—'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{app.stage || '—'}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{myPostedOpportunities.find(o => o.id === app.opportunityId)?.programName || '—'}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-center">
                               <div className="flex justify-center items-center gap-3">
@@ -1692,10 +1895,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               {(app.diligenceStatus === 'none' || app.diligenceStatus == null) && app.status === 'pending' && (
                                 <Button
                                   size="sm"
-                                    variant="outline"
+                                  variant="outline"
                                   onClick={() => handleRequestDiligence(app)}
                                   disabled={isProcessingAction}
-                                    className="w-full"
+                                  className="w-full"
                                 >
                                   Request Diligence
                                 </Button>
@@ -1705,80 +1908,59 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   size="sm"
                                   variant="outline"
                                   disabled
-                                  title="Disabled after application approval"
-                                    className="w-full"
+                                  title="Diligence can only be requested for pending applications"
+                                  className="w-full"
                                 >
                                   Unavailable after approval
                                 </Button>
                               )}
                               {app.diligenceStatus === 'requested' && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled
-                                    className="w-full"
-                                >
-                                    Diligence Requested
-                                </Button>
+                                <span className="inline-flex items-center justify-center w-full px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  Request Pending
+                                </span>
                               )}
                               {app.diligenceStatus === 'approved' && (
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                    onClick={() => {
-                                      // Create a startup object from application data for onViewStartup
-                                      const startupObj: Startup = {
+                                    onClick={async () => {
+                                      const startupObj = await buildStartupForView({
                                         id: app.startupId,
                                         name: app.startupName,
-                                        sector: 'Unknown', // Not available in application data
-                                        investmentType: 'equity' as any, // Default value
+                                        sector: 'Unknown',
+                                        investmentType: 'equity' as any,
                                         investmentValue: 0,
                                         equityAllocation: 0,
                                         currentValuation: 0,
                                         totalFunding: 0,
                                         totalRevenue: 0,
                                         registrationDate: new Date().toISOString().split('T')[0],
-                                        currency: 'USD',
                                         complianceStatus: ComplianceStatus.Pending,
-                                        founders: [] // Not available in application data
-                                      };
+                                        founders: []
+                                      });
                                       onViewStartup(startupObj);
                                     }}
                                     className="w-full"
                                 >
-                                  View Diligence
+                                  View Startup
                                 </Button>
                               )}
+                              {/* Diligence documents removed; only show View Startup after approval */}
                             
-                            {/* Contact Details Button - always available */}
+                            {/* Message Button - always available */}
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => {
-                                // Create a startup object from application data for onViewStartup
-                                const startupObj: Startup = {
-                                  id: app.startupId,
-                                  name: app.startupName,
-                                  sector: 'Unknown', // Not available in application data
-                                  investmentType: 'equity' as any, // Default value
-                                  investmentValue: 0,
-                                  equityAllocation: 0,
-                                  currentValuation: 0,
-                                  totalFunding: 0,
-                                  totalRevenue: 0,
-                                  registrationDate: new Date().toISOString().split('T')[0],
-                                  currency: 'USD',
-                                  complianceStatus: ComplianceStatus.Pending,
-                                  founders: [] // Not available in application data
-                                };
-                                onViewStartup(startupObj);
-                              }}
+                              onClick={() => handleOpenMessaging(app)}
                               className="w-full"
-                              title="View startup contact details and information"
+                              title="Send message to startup"
                             >
-                              <Users className="mr-2 h-4 w-4" />
-                              View Contact Details
+                              <MessageCircle className="mr-2 h-4 w-4" />
+                              Message Startup
                             </Button>
+
+
+                            {/* Contract Management Button removed per requirements */}
                             
                             {/* Delete Application Button - always available */}
                             <Button
@@ -1853,23 +2035,21 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 <Button 
                                   size="sm" 
                                   variant="outline" 
-                                  onClick={() => {
-                                    // Convert portfolio startup data to Startup object for onViewStartup
-                                    const startupObj: Startup = {
+                                  onClick={async () => {
+                                    const startupObj = await buildStartupForView({
                                       id: startup.id,
                                       name: startup.name,
                                       sector: startup.sector,
-                                      investmentType: 'equity' as any, // Default value
+                                      investmentType: 'equity' as any,
                                       investmentValue: startup.totalFunding || 0,
-                                      equityAllocation: 0, // Not available in portfolio data
+                                      equityAllocation: 0,
                                       currentValuation: startup.totalFunding || 0,
                                       totalFunding: startup.totalFunding || 0,
                                       totalRevenue: startup.totalRevenue || 0,
                                       registrationDate: startup.registrationDate || new Date().toISOString().split('T')[0],
-                                      currency: startup.currency || 'USD',
                                       complianceStatus: startup.complianceStatus || ComplianceStatus.Pending,
-                                      founders: [] // Not available in portfolio data
-                                    };
+                                      founders: []
+                                    });
                                     onViewStartup(startupObj);
                                   }}
                                   title="View complete startup dashboard for tracking"
@@ -1880,29 +2060,34 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 <Button 
                                   size="sm" 
                                   variant="outline"
-                                  onClick={() => {
-                                    // Convert portfolio startup data to Startup object for onViewStartup
-                                    const startupObj: Startup = {
-                                      id: startup.id,
-                                      name: startup.name,
-                                      sector: startup.sector,
-                                      investmentType: 'equity' as any, // Default value
-                                      investmentValue: startup.totalFunding || 0,
-                                      equityAllocation: 0, // Not available in portfolio data
-                                      currentValuation: startup.totalFunding || 0,
-                                      totalFunding: startup.totalFunding || 0,
-                                      totalRevenue: startup.totalRevenue || 0,
-                                      registrationDate: startup.registrationDate || new Date().toISOString().split('T')[0],
-                                      currency: startup.currency || 'USD',
-                                      complianceStatus: startup.complianceStatus || ComplianceStatus.Pending,
-                                      founders: [] // Not available in portfolio data
-                                    };
-                                    onViewStartup(startupObj);
+                                  onClick={async () => {
+                                    try {
+                                      const numericId = await resolveStartupNumericId(startup.id, startup.name);
+                                      if (!numericId) throw new Error('Startup ID not found.');
+                                      const appId = await incubationPaymentService.ensureApplicationForConversation(numericId, facilitatorId || '');
+                                      const realApplication: ReceivedApplication = {
+                                        id: appId,
+                                        startupId: numericId,
+                                        startupName: startup.name,
+                                        opportunityId: '',
+                                        status: 'pending',
+                                        pitchDeckUrl: '',
+                                        pitchVideoUrl: '',
+                                        diligenceStatus: 'none',
+                                        agreementUrl: '',
+                                        sector: startup.sector,
+                                        stage: startup.stage,
+                                        createdAt: new Date().toISOString()
+                                      };
+                                      handleOpenMessaging(realApplication);
+                                    } catch (e: any) {
+                                      alert(e?.message || 'Unable to start conversation.');
+                                    }
                                   }}
-                                  title="View startup contact details and information"
+                                  title="Send message to startup"
                                 >
-                                  <Users className="mr-2 h-4 w-4" />
-                                  View Contact Details
+                                  <MessageCircle className="mr-2 h-4 w-4" />
+                                  Message Startup
                                 </Button>
                                 <Button 
                                   size="sm" 
@@ -1953,8 +2138,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         <p className="text-slate-500">Loading recognition requests...</p>
                       </div>
                     ) : (() => {
+                      // Filter records for Recognition & Incubation Requests (Free/Fees)
                       const freeOrFeeRecords = recognitionRecords.filter(record => 
-                        record.feeType === 'Free' || record.feeType === 'Fee'
+                        record.feeType === 'Free' || record.feeType === 'Fees'
                       );
                       
                       return freeOrFeeRecords.length === 0 ? (
@@ -2011,9 +2197,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                         size="sm" 
                                         onClick={() => handleApproveRecognition(record.id)}
                                         disabled={processingRecognitionId === record.id}
+                                        className="bg-green-600 hover:bg-green-700 text-white"
                                     >
                                         <Check className="mr-2 h-4 w-4" />
-                                        {processingRecognitionId === record.id ? 'Processing...' : 'Pay and Accept'}
+                                        {processingRecognitionId === record.id ? 'Processing...' : 'Accept'}
                                     </Button>
                                 )}
                                 {record.status === 'approved' && (
@@ -2068,6 +2255,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         <p className="text-slate-500">Loading investment requests...</p>
                       </div>
                     ) : (() => {
+                      // Filter records for Investment Requests (Equity/Hybrid)
                       const equityOrHybridRecords = recognitionRecords.filter(record => 
                         record.feeType === 'Equity' || record.feeType === 'Hybrid'
                       );
@@ -2134,9 +2322,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                         size="sm" 
                                         onClick={() => handleApproveRecognition(record.id)}
                                         disabled={processingRecognitionId === record.id}
+                                        className="bg-green-600 hover:bg-green-700 text-white"
                                       >
                                         <Check className="mr-2 h-4 w-4" />
-                                        {processingRecognitionId === record.id ? 'Processing...' : 'Pay and Accept'}
+                                        {processingRecognitionId === record.id ? 'Processing...' : 'Accept'}
                                       </Button>
                                     )}
                                     {record.status === 'approved' && (
@@ -2181,10 +2370,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </div>
                 </Card>
 
-                {/* My Opportunities Section - moved from Intake Management */}
+                {/* My Programs Section - moved from Intake Management */}
                 <Card>
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-slate-700">My Opportunities</h3>
+                    <h3 className="text-lg font-semibold text-slate-700">My Programs</h3>
                     <Button size="sm" onClick={handleOpenPostModal}><PlusCircle className="h-4 w-4 mr-1" /> Post</Button>
                   </div>
                   <div className="overflow-x-auto max-h-96">
@@ -2319,7 +2508,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         </div>
                         <p className="text-sm text-slate-500 font-medium">{inv.sector}</p>
                         <div className="mt-3 text-sm">
-                          Ask: ${inv.investmentValue.toLocaleString()} for <span className="font-semibold text-blue-600">{inv.equityAllocation}%</span> equity
+                          {(() => {
+                            const ccy = (inv as any).currency || (inv as any).startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
+                            const sym = getCurrencySymbol(ccy);
+                            return `${'Ask: '}${sym}${inv.investmentValue.toLocaleString()} ${'for '}`;
+                          })()}
+                          <span className="font-semibold text-blue-600">{inv.equityAllocation}%</span> equity
                         </div>
                         <div className="mt-3 text-sm text-slate-500">
                           {inv.pitchDeckUrl ? (
@@ -2337,6 +2531,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           </div>
         );
       case 'ourInvestments':
+        // Use approved Equity/Hybrid recognitions as "our investments"
+        // This ensures startups appear once incubation is accepted, even if equityAllocated is not set yet
+        const investedRecords = recognitionRecords.filter(record => 
+          record.status === 'approved' && (record.feeType === 'Equity' || record.feeType === 'Hybrid')
+        );
+        
         return (
           <div className="space-y-8 animate-fade-in">
             {/* Investment Summary Cards */}
@@ -2349,7 +2549,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   <div className="ml-4">
                     <p className="text-sm font-medium text-slate-500">Total Investments</p>
                     <p className="text-2xl font-bold text-slate-900">
-                      {recognitionRecords.filter(record => record.equityAllocated && record.equityAllocated > 0).length}
+                      {investedRecords.length}
                     </p>
                   </div>
                 </div>
@@ -2362,12 +2562,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   <div className="ml-4">
                     <p className="text-sm font-medium text-slate-500">Compliant Startups</p>
                     <p className="text-2xl font-bold text-slate-900">
-                      {recognitionRecords.filter(record => 
-                        record.equityAllocated && 
-                        record.equityAllocated > 0 && 
-                        record.status === 'approved' &&
-                        record.startup?.compliance_status === 'Compliant'
-                      ).length}
+                      {investedRecords.filter(record => record.startup?.compliance_status === 'Compliant').length}
                     </p>
                   </div>
                 </div>
@@ -2380,8 +2575,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   <div className="ml-4">
                     <p className="text-sm font-medium text-slate-500">Total Equity</p>
                     <p className="text-2xl font-bold text-slate-900">
-                      {recognitionRecords
-                        .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                      {investedRecords
                         .reduce((sum, record) => sum + (record.equityAllocated || 0), 0)
                         .toFixed(1)}%
                     </p>
@@ -2397,8 +2591,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 <div className="space-y-3">
                   {(() => {
                     // Calculate sector distribution from actual data
-                    const sectorData = recognitionRecords
-                      .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                    const sectorData = investedRecords
                       .reduce((acc, record) => {
                         const sector = record.startup?.sector || 'Other';
                         if (!acc[sector]) {
@@ -2448,8 +2641,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     <span className="text-sm text-slate-600">Total Portfolio Value</span>
                   <span className="text-lg font-bold text-slate-900">
                     {(() => {
-                      const totalValue = recognitionRecords
-                        .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                      const totalValue = investedRecords
                         .reduce((sum, record) => {
                           const currentPrice = currentPrices[record.startupId];
                           const shares = record.shares;
@@ -2458,8 +2650,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           }
                           return sum + (record.preMoneyValuation || 0);
                         }, 0);
-                      const currency = recognitionRecords[0]?.startup?.currency || 'USD';
-                      const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+                      const currency = investedRecords[0]?.startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
+                      const symbol = getCurrencySymbol(currency);
                       return `${symbol}${totalValue.toLocaleString()}`;
                     })()}
                   </span>
@@ -2467,8 +2659,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   <div className="flex justify-between items-center">
                   <span className="text-sm text-slate-600">Total Equity Holdings</span>
                   <span className="text-lg font-bold text-green-600">
-                    {recognitionRecords
-                      .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                    {investedRecords
                       .reduce((sum, record) => sum + (record.equityAllocated || 0), 0)
                       .toFixed(1)}%
                   </span>
@@ -2477,7 +2668,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   <span className="text-sm text-slate-600">Average Investment Size</span>
                   <span className="text-sm font-medium text-slate-900">
                     {(() => {
-                      const investments = recognitionRecords.filter(record => record.equityAllocated && record.equityAllocated > 0);
+                      const investments = investedRecords;
                       if (investments.length === 0) return '0';
                       
                       const totalInvestment = investments.reduce((sum, record) => {
@@ -2489,8 +2680,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         return sum + (record.investmentAmount || 0);
                       }, 0);
                       
-                      const currency = investments[0]?.startup?.currency || 'USD';
-                      const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+                      const currency = investments[0]?.startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
+                      const symbol = getCurrencySymbol(currency);
                       return `${symbol}${(totalInvestment / investments.length).toLocaleString()}`;
                     })()}
                   </span>
@@ -2498,19 +2689,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   <div className="flex justify-between items-center">
                   <span className="text-sm text-slate-600">Compliant Investments</span>
                   <span className="text-sm font-medium text-slate-900">
-                    {recognitionRecords.filter(record => 
-                      record.equityAllocated && 
-                      record.equityAllocated > 0 && 
-                      record.status === 'approved' &&
-                      record.startup?.compliance_status === 'Compliant'
-                    ).length} startups
+                    {investedRecords.filter(record => record.startup?.compliance_status === 'Compliant').length} startups
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-slate-600">Total Shares Owned</span>
                   <span className="text-sm font-medium text-slate-900">
-                    {recognitionRecords
-                      .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                    {investedRecords
                       .reduce((sum, record) => sum + (record.shares || 0), 0)
                       .toLocaleString()} shares
                   </span>
@@ -2535,7 +2720,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 </div>
               </div>
               
-              {recognitionRecords.filter(record => record.equityAllocated && record.equityAllocated > 0).length === 0 ? (
+              {investedRecords.length === 0 ? (
                 <div className="text-center py-12">
                   <Gift className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-slate-700 mb-2">No Investments Yet</h3>
@@ -2551,6 +2736,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Stage</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Investment Date</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Equity %</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Shares</th>
@@ -2562,8 +2748,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-slate-200">
-                      {recognitionRecords
-                        .filter(record => record.equityAllocated && record.equityAllocated > 0)
+                      {investedRecords
                         .map((record) => (
                         <tr key={record.id} className="hover:bg-slate-50">
                           <td className="px-6 py-4 whitespace-nowrap">
@@ -2583,6 +2768,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                             {record.startup?.sector || '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                            {record.stage || '—'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                             {record.dateAdded ? new Date(record.dateAdded).toLocaleDateString() : '—'}
@@ -2606,8 +2794,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                             {(() => {
                               const currentPrice = currentPrices[record.startupId];
-                              console.log(`🔍 Current price for startup ${record.startupId}:`, currentPrice);
-                              
                               if (currentPrice && currentPrice > 0) {
                                 const currency = record.startup?.currency || 'USD';
                                 const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
@@ -2620,12 +2806,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             {(() => {
                               const currentPrice = currentPrices[record.startupId];
                               const shares = record.shares;
-                              console.log(`🔍 Current valuation calculation for startup ${record.startupId}:`, {
-                                currentPrice,
-                                shares,
-                                calculation: currentPrice && shares ? `${currentPrice} × ${shares} = ${currentPrice * shares}` : 'N/A'
-                              });
-                              
                               if (currentPrice && shares) {
                                 const currentValuation = currentPrice * shares;
                                 const currency = record.startup?.currency || 'USD';
@@ -2652,18 +2832,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => {
-                                  const startupObj: Startup = {
+                                onClick={async () => {
+                                  const startupObj = await buildStartupForView({
                                     id: record.startupId.toString(),
                                     name: record.startup?.name || 'Unknown Startup',
                                     sector: record.startup?.sector || '',
                                     totalFunding: record.startup?.total_funding || 0,
                                     totalRevenue: record.startup?.total_revenue || 0,
                                     registrationDate: record.startup?.registration_date || new Date().toISOString().split('T')[0],
-                                    currency: 'USD',
-                                    complianceStatus: 'compliant',
+                                    complianceStatus: 'compliant' as any,
                                     founders: []
-                                  };
+                                  });
                                   onViewStartup(startupObj);
                                 }}
                                 title="View startup details"
@@ -2757,7 +2936,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               <label htmlFor="description" className="block text-sm font-medium text-slate-700 mb-1">Program Description</label>
               <textarea id="description" name="description" value={newOpportunity.description} onChange={handleInputChange} required rows={3} className="block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm" />
                     </div>
-            <Input label="Application Deadline" id="deadline" name="deadline" type="date" value={newOpportunity.deadline} onChange={handleInputChange} required />
+            <Input label="Application Deadline" id="deadline" name="deadline" type="date" value={newOpportunity.deadline} onChange={handleInputChange} required min={new Date().toISOString().split('T')[0]} />
             <div className="border-t pt-4 mt-2 space-y-4">
               <Input label="Poster/Banner Image" id="posterUrl" name="posterUrl" type="file" accept="image/*" onChange={handlePosterChange} />
               {posterPreview && <img src={posterPreview} alt="Poster preview" className="mt-2 rounded-lg max-h-40 w-auto" />}
@@ -2862,6 +3041,123 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           </div>
         </div>
       </Modal>
+
+
+      {/* Messaging Modal */}
+      {selectedApplicationForMessaging && (
+        <IncubationMessagingModal
+          isOpen={isMessagingModalOpen}
+          onClose={handleCloseMessaging}
+          applicationId={selectedApplicationForMessaging.id}
+          startupName={selectedApplicationForMessaging.startupName}
+          facilitatorName={currentUser?.name || 'Facilitator'}
+        />
+      )}
+
+      {/* Contract Management Modal */}
+      {selectedApplicationForContract && (
+        <ContractManagementModal
+          isOpen={isContractModalOpen}
+          onClose={handleCloseContract}
+          applicationId={selectedApplicationForContract.id}
+          startupName={selectedApplicationForContract.startupName}
+          facilitatorName={currentUser?.name || 'Facilitator'}
+        />
+      )}
+
+      {/* Diligence Documents Modal */}
+      {selectedApplicationForDiligence && (
+        <Modal
+          isOpen={isDiligenceModalOpen}
+          onClose={handleCloseDiligenceDocuments}
+          title={`Diligence Documents - ${selectedApplicationForDiligence.startupName}`}
+        >
+          <div className="space-y-4">
+            {console.log('🔍 FACILITATOR VIEW: Selected application:', selectedApplicationForDiligence)}
+            {console.log('🔍 FACILITATOR VIEW: Diligence URLs:', selectedApplicationForDiligence.diligenceUrls)}
+            {console.log('🔍 FACILITATOR VIEW: Application ID:', selectedApplicationForDiligence.id)}
+            {console.log('🔍 FACILITATOR VIEW: Startup ID:', selectedApplicationForDiligence.startupId)}
+            {console.log('🔍 FACILITATOR VIEW: Status:', selectedApplicationForDiligence.status)}
+            {console.log('🔍 FACILITATOR VIEW: Diligence Status:', selectedApplicationForDiligence.diligenceStatus)}
+            {selectedApplicationForDiligence.diligenceUrls && selectedApplicationForDiligence.diligenceUrls.length > 0 ? (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600">
+                  The startup has uploaded {selectedApplicationForDiligence.diligenceUrls.length} document(s) for due diligence review:
+                </p>
+                <div className="space-y-2">
+                  {selectedApplicationForDiligence.diligenceUrls.map((url, index) => (
+                    <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                      <div className="flex items-center space-x-3">
+                        <FileText className="h-5 w-5 text-slate-500" />
+                        <span className="text-sm font-medium text-slate-700">
+                          Document {index + 1}
+                        </span>
+                      </div>
+                      <div className="flex space-x-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => window.open(url, '_blank')}
+                          className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                        >
+                          View
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = `diligence-document-${index + 1}.pdf`;
+                            link.target = '_blank';
+                            link.click();
+                          }}
+                          className="text-green-600 border-green-300 hover:bg-green-50"
+                        >
+                          Download
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Action buttons for facilitator */}
+                {selectedApplicationForDiligence.diligenceStatus === 'requested' && (
+                  <div className="border-t pt-4">
+                    <p className="text-sm font-medium text-slate-700 mb-3">Review and Decision:</p>
+                    <div className="flex space-x-3">
+                      <Button
+                        onClick={() => handleApproveDiligence(selectedApplicationForDiligence)}
+                        disabled={isProcessingAction}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {isProcessingAction ? 'Approving...' : 'Approve Diligence'}
+                      </Button>
+                      <Button
+                        onClick={() => handleRejectDiligence(selectedApplicationForDiligence)}
+                        disabled={isProcessingAction}
+                        variant="outline"
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                      >
+                        {isProcessingAction ? 'Rejecting...' : 'Reject Diligence'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <FileText className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-500 mb-2">No diligence documents uploaded yet</p>
+                <p className="text-sm text-slate-400">
+                  The startup hasn't uploaded any documents for due diligence review.
+                </p>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
 
       <style>{`
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }

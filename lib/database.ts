@@ -257,12 +257,7 @@ export const startupService = {
         return [];
       }
       
-      console.log('🚨🚨🚨 DATABASE DEBUGGING - STARTUP DATA 🚨🚨🚨');
-      console.log('Startups fetched successfully:', data?.length || 0);
-      console.log('🔍 Raw startup data with shares:', data);
-      console.log('🔍 First startup founders:', data?.[0]?.founders);
-      console.log('🔍 First startup startup_shares:', data?.[0]?.startup_shares);
-      console.log('🚨🚨🚨 END DATABASE DEBUGGING 🚨🚨🚨');
+      // Startups fetched successfully
       
       // Map database fields to frontend expected format
       const mappedData = (data || []).map(startup => ({

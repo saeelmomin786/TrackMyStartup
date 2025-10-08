@@ -27,7 +27,7 @@ export interface IndividualInvestorReportData {
   description: string;
   amount: string;
   fundingSource: string;
-  remainingFunds: string;
+  invoiceLink: string;
 }
 
 export interface PDFReportOptions {
@@ -39,7 +39,6 @@ export interface PDFReportOptions {
   investmentAmount?: string;
   equityAllocated?: string;
   utilizedAmount?: string;
-  remainingAmount?: string;
 }
 
 /**
@@ -184,15 +183,14 @@ export async function generateIndividualInvestorPDF(
   
   // Add investment summary if provided
   let tableTop: number;
-  if (options.investmentAmount || options.equityAllocated || options.utilizedAmount || options.remainingAmount) {
+  if (options.investmentAmount || options.equityAllocated || options.utilizedAmount) {
     doc.text(`Investment Amount: ${options.investmentAmount || 'N/A'} ${options.currency}`, margin, 95);
     doc.text(`Equity Allocated: ${options.equityAllocated || 'N/A'}`, margin, 105);
     doc.text(`Utilized Amount: ${options.utilizedAmount || 'N/A'} ${options.currency}`, margin, 115);
-    doc.text(`Remaining Amount: ${options.remainingAmount || 'N/A'} ${options.currency}`, margin, 125);
     
     // Add line separator
     doc.setLineWidth(0.5);
-    doc.line(margin, 135, pageWidth - margin, 135);
+    doc.line(margin, 125, pageWidth - margin, 125);
     
     tableTop = 145;
   } else {
@@ -204,8 +202,8 @@ export async function generateIndividualInvestorPDF(
   }
   
   // Add table headers
-  const colWidths = [25, 50, 25, 30, 30]; // Adjusted for A4
-  const headers = ['Date', 'Description', `Amount (${options.currency})`, 'Source', `Remaining (${options.currency})`];
+  const colWidths = [25, 50, 25, 30, 40]; // Adjusted for A4
+  const headers = ['Date', 'Description', `Amount (${options.currency})`, 'Source', 'Invoice Link'];
   
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
@@ -243,14 +241,27 @@ export async function generateIndividualInvestorPDF(
       row.description,
       row.amount,
       row.fundingSource,
-      row.remainingFunds
+      row.invoiceLink
     ];
     
     rowData.forEach((cell, cellIndex) => {
-      // Truncate long text to fit column
-      const maxLength = Math.floor(colWidths[cellIndex] / 2);
-      const displayText = cell.length > maxLength ? cell.substring(0, maxLength - 3) + '...' : cell;
-      doc.text(displayText, xPos, yPos);
+      // Special handling for invoice link column (last column)
+      if (cellIndex === 4 && cell !== 'No invoice attached' && cell.startsWith('http')) {
+        // Create clickable link for invoice
+        const linkText = 'View Invoice';
+        const maxLength = Math.floor(colWidths[cellIndex] / 2);
+        const displayText = linkText.length > maxLength ? linkText.substring(0, maxLength - 3) + '...' : linkText;
+        
+        // Add clickable link
+        doc.setTextColor(0, 0, 255); // Blue color for links
+        doc.textWithLink(displayText, xPos, yPos, { url: cell });
+        doc.setTextColor(0, 0, 0); // Reset to black
+      } else {
+        // Regular text handling
+        const maxLength = Math.floor(colWidths[cellIndex] / 2);
+        const displayText = cell.length > maxLength ? cell.substring(0, maxLength - 3) + '...' : cell;
+        doc.text(displayText, xPos, yPos);
+      }
       xPos += colWidths[cellIndex];
     });
     

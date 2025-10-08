@@ -33,7 +33,13 @@ export default defineConfig(({ mode }) => {
         assetsDir: 'assets',
         rollupOptions: {
           output: {
-            manualChunks: undefined,
+            manualChunks: {
+              vendor: ['react', 'react-dom'],
+              charts: ['recharts'],
+              ui: ['lucide-react'],
+              supabase: ['@supabase/supabase-js'],
+              analytics: ['@vercel/analytics']
+            },
           },
         },
         // Add build optimizations for Vercel

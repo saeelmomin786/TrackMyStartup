@@ -1,36 +1,46 @@
-// Webhook requires raw body for signature verification; use Node runtime and disable body parsing
-export const config = { api: { bodyParser: false } } as const;
+export const config = { runtime: 'edge' };
 
-import type { NextApiRequest, NextApiResponse } from 'next';
-import crypto from 'crypto';
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+export default async function handler(req: Request): Promise<Response> {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
+  }
 
   try {
-    const chunks: Buffer[] = [];
-    await new Promise<void>((resolve, reject) => {
-      req.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
-      req.on('end', () => resolve());
-      req.on('error', reject);
-    });
-    const raw = Buffer.concat(chunks);
-
-    const signature = req.headers['x-razorpay-signature'] as string | undefined;
+    const body = await req.text();
+    const signature = req.headers.get('x-razorpay-signature');
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    if (!webhookSecret) return res.status(500).json({ error: 'Webhook secret not configured' });
+    
+    if (!webhookSecret) {
+      return new Response(JSON.stringify({ error: 'Webhook secret not configured' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
 
-    const expected = crypto.createHmac('sha256', webhookSecret).update(raw).digest('hex');
-    if (!signature || expected !== signature) return res.status(401).json({ error: 'Invalid signature' });
+    // Create HMAC signature
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(webhookSecret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    
+    const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(body));
+    const expectedSignature = Array.from(new Uint8Array(signatureBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
 
-    const event = JSON.parse(raw.toString('utf8'));
+    if (!signature || expectedSignature !== signature) {
+      return new Response(JSON.stringify({ error: 'Invalid signature' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    const event = JSON.parse(body);
     console.log('Razorpay webhook event:', event?.event);
 
-    // TODO: replicate server.js side-effects if needed (persist customer id, update subscription status)
+    // TODO: Handle webhook events (payment success, subscription updates, etc.)
     // For now, acknowledge
-    return res.status(200).json({ ok: true });
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (e: any) {
-    return res.status(400).json({ error: 'Invalid payload', details: e?.message || String(e) });
+    return new Response(JSON.stringify({ error: 'Invalid payload', details: e?.message || String(e) }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 }
 

@@ -797,6 +797,15 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             console.log('📝 Found existing startup, updating with profile data');
             startup = existingStartups[0];
           } else {
+            // Calculate current valuation from price per share and total shares
+            const calculatedCurrentValuation = shareData.pricePerShare * shareData.totalShares;
+            
+            // Validate that valuation is not less than 20,000,000 (20 million)
+            const minimumValuation = 20000000;
+            if (calculatedCurrentValuation < minimumValuation) {
+              throw new Error(`Startup valuation (${calculatedCurrentValuation.toLocaleString()}) must be at least ${minimumValuation.toLocaleString()}. Please increase the price per share or total shares.`);
+            }
+
             // Create new startup if none exists
             console.log('🆕 No existing startup found, creating new one');
             const { data: newStartup, error: createError } = await authService.supabase
@@ -806,7 +815,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 investment_type: 'Seed',
                 investment_value: 0,
                 equity_allocation: 0,
-                current_valuation: 0,
+                current_valuation: calculatedCurrentValuation,
                 compliance_status: 'Pending',
                 sector: 'Technology',
                 total_funding: 0,
@@ -848,6 +857,15 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             console.log('✅ Founders saved successfully:', savedFounders);
             }
 
+            // Calculate current valuation from price per share and total shares
+            const calculatedCurrentValuation = shareData.pricePerShare * shareData.totalShares;
+            
+            // Validate that valuation is not less than 20,000,000 (20 million)
+            const minimumValuation = 20000000;
+            if (calculatedCurrentValuation < minimumValuation) {
+              throw new Error(`Startup valuation (${calculatedCurrentValuation.toLocaleString()}) must be at least ${minimumValuation.toLocaleString()}. Please increase the price per share or total shares.`);
+            }
+
             // Update the startup record with comprehensive profile data
             const startupUpdateData = {
               country: profileData.country,
@@ -859,7 +877,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               currency: profileData.currency,
               total_shares: shareData.totalShares,
               price_per_share: shareData.pricePerShare,
-              esop_reserved_shares: shareData.esopReservedShares
+              esop_reserved_shares: shareData.esopReservedShares,
+              current_valuation: calculatedCurrentValuation
             };
 
             console.log('💾 Updating startup with profile data:', startupUpdateData);
@@ -1329,6 +1348,34 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   required
                 />
               </div>
+              
+              {/* Current Valuation Display */}
+              {shareData.totalShares > 0 && shareData.pricePerShare > 0 && (
+                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h4 className="text-sm font-medium text-blue-700 mb-2">Calculated Current Valuation</h4>
+                  <div className="flex items-center justify-between">
+                    <span className="text-blue-600">Total Company Valuation:</span>
+                    <span className="text-lg font-bold text-blue-800">
+                      {(() => {
+                        const calculatedValuation = shareData.pricePerShare * shareData.totalShares;
+                        const currency = profileData.currency;
+                        const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+                        return `${symbol}${calculatedValuation.toLocaleString()}`;
+                      })()}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-xs text-blue-600">
+                    {(() => {
+                      const calculatedValuation = shareData.pricePerShare * shareData.totalShares;
+                      const minimumValuation = 20000000;
+                      if (calculatedValuation < minimumValuation) {
+                        return `⚠️ Valuation must be at least ${minimumValuation.toLocaleString()} to proceed`;
+                      }
+                      return `✅ Valuation meets minimum requirement (${minimumValuation.toLocaleString()})`;
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

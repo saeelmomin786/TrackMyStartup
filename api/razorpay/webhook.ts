@@ -1,47 +1,67 @@
-export const config = { runtime: 'edge' };
+export const config = { runtime: 'nodejs' } as const;
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
-  }
+import crypto from 'crypto';
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const body = await req.text();
-    const signature = req.headers.get('x-razorpay-signature');
+    const payload = req.body.toString();
+    const signature = req.headers['x-razorpay-signature'];
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
     
-    if (!webhookSecret) {
-      return new Response(JSON.stringify({ error: 'Webhook secret not configured' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
+    if (!webhookSecret) return res.status(500).json({ error: 'Webhook secret not configured' });
 
-    // Create HMAC signature
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(webhookSecret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-    
-    const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(body));
-    const expectedSignature = Array.from(new Uint8Array(signatureBuffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
+    const expected = crypto.createHmac('sha256', webhookSecret).update(payload).digest('hex');
+    if (expected !== signature) return res.status(401).json({ error: 'Invalid signature' });
 
-    if (!signature || expectedSignature !== signature) {
-      return new Response(JSON.stringify({ error: 'Invalid signature' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
-    }
-
-    const event = JSON.parse(body);
+    const event = JSON.parse(payload);
     console.log('Razorpay webhook event:', event?.event);
 
-    // TODO: Handle webhook events (payment success, subscription updates, etc.)
-    // For now, acknowledge
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    // Handle subscription events
+    if (event.event === 'subscription.activated') {
+      console.log('Subscription activated:', event.payload.subscription.id);
+      try {
+        const sub = event.payload?.subscription;
+        const customerId = sub?.customer_id;
+        const userId = sub?.notes?.user_id;
+        
+        if (customerId && userId && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+          await fetch(`${process.env.SUPABASE_URL}/rest/v1/users?id=eq.${userId}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({ 
+              razorpay_customer_id: customerId, 
+              updated_at: new Date().toISOString() 
+            })
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to persist razorpay_customer_id on subscription.activated:', e);
+      }
+    }
+
+    if (event.event === 'subscription.charged') {
+      console.log('Subscription charged:', event.payload.subscription.id);
+      // Handle subscription charged event
+    }
+
+    if (event.event === 'subscription.paused') {
+      console.log('Subscription paused:', event.payload.subscription.id);
+    }
+
+    if (event.event === 'subscription.cancelled') {
+      console.log('Subscription cancelled:', event.payload.subscription.id);
+    }
+
+    return res.status(200).json({ ok: true });
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: 'Invalid payload', details: e?.message || String(e) }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    console.error('Webhook error:', e);
+    return res.status(500).json({ error: 'Server error', details: e?.message || String(e) });
   }
 }
-
-

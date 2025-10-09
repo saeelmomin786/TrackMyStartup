@@ -250,13 +250,25 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
         try {
           console.log('🏢 Setting up startup and founders...');
           
+          // Calculate current valuation from price per share and total shares
+          // Default values for initial registration
+          const defaultPricePerShare = 0.01;
+          const defaultTotalShares = 1000000;
+          const calculatedCurrentValuation = defaultPricePerShare * defaultTotalShares;
+          
+          // Validate that valuation is not less than 20,000,000 (20 million)
+          const minimumValuation = 20000000;
+          if (calculatedCurrentValuation < minimumValuation) {
+            throw new Error(`Startup valuation (${calculatedCurrentValuation.toLocaleString()}) must be at least ${minimumValuation.toLocaleString()}. Please increase the price per share or total shares.`);
+          }
+
           // Use upsert to create or update startup in one operation
           const startupData: any = {
             name: userData.startupName || `${userData.name}'s Startup`,
             investment_type: 'Seed',
             investment_value: 0,
             equity_allocation: 0,
-            current_valuation: 0,
+            current_valuation: calculatedCurrentValuation,
             compliance_status: 'Pending',
             sector: 'Technology',
             total_funding: 0,

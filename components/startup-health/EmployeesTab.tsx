@@ -95,6 +95,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     const [editFormData, setEditFormData] = useState<{ name: string; joiningDate: string; entity: string; department: string; salary: number; esopAllocation: number; allocationType: 'one-time' | 'annually' | 'quarterly' | 'monthly'; esopPerAllocation: number }>({ name: '', joiningDate: '', entity: 'Parent Company', department: '', salary: 0, esopAllocation: 0, allocationType: 'one-time', esopPerAllocation: 0 });
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [formError, setFormError] = useState<string | null>(null);
     const [monthlyExpenseData, setMonthlyExpenseData] = useState<any[]>([]);
     const [availableYears, setAvailableYears] = useState<number[]>([]);
     const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
@@ -363,14 +364,14 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             if (pricePerShare > 0 && reservedEsopValue > 0 && prospectiveAllocatedTotal > reservedEsopValue) {
                 const errorMsg = `Total ESOP allocation would exceed the reserved ESOPs value. Current: ${formatCurrencyUtil(currentAllocatedTotal, startupCurrency)}, Adding: ${formatCurrencyUtil(esopAllocationValue || 0, startupCurrency)}, Reserved: ${formatCurrencyUtil(reservedEsopValue, startupCurrency)}. Reduce the allocation or increase reserved ESOPs.`;
                 console.log('❌ ESOP validation failed:', errorMsg);
-                setError(errorMsg);
+                setFormError(errorMsg);
                 return;
             }
             
             // Check if no ESOP shares are reserved but trying to allocate
             if (esopReservedShares === 0 && (esopAllocationValue || 0) > 0) {
                 console.log('❌ ESOP shares validation failed: No reserved shares but trying to allocate');
-                setError('Cannot allocate ESOPs when no shares are reserved for ESOP. Please set ESOP reserved shares first.');
+                setFormError('Cannot allocate ESOPs when no shares are reserved for ESOP. Please set ESOP reserved shares first.');
                 return;
             }
 
@@ -394,7 +395,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 if (joiningDateObj < registrationDateObj) {
                     const errorMsg = `Employee joining date cannot be before the company registration date (${startup.registrationDate}). Please select a date on or after the registration date.`;
                     console.log('❌ Date validation failed:', errorMsg);
-                    setError(errorMsg);
+                    setFormError(errorMsg);
                     return;
                 }
             }
@@ -446,10 +447,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             setEsopAllocationDraft('');
             setEsopPerAllocationDraft('0');
             setAllocationTypeDraft('one-time');
+            setFormError(null);
             
         } catch (err) {
             console.error('❌ Error adding employee:', err);
-            setError('Failed to add employee');
+            setFormError('Failed to add employee');
         }
     };
 
@@ -957,7 +959,18 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             {/* Add Employee button moved to Employee List header */}
 
             {/* Add Employee Modal */}
-            <SimpleModal isOpen={isEditing} onClose={() => setIsEditing(false)} title="Add Employee" width="800px">
+            <SimpleModal isOpen={isEditing} onClose={() => { setIsEditing(false); setFormError(null); }} title="Add Employee" width="800px">
+                {formError && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded">
+                        <div className="flex items-center">
+                            <span className="text-red-500 mr-2">⚠️</span>
+                            <div>
+                                <p className="font-medium">Form Error</p>
+                                <p className="text-sm">{formError}</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 <form onSubmit={handleAddEmployee} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Input label="Employee Name" name="name" required />
                         <Input 
@@ -1024,7 +1037,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             <Card>
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-semibold text-slate-700">Employee List</h3>
-                    <Button onClick={() => setIsEditing(true)} disabled={!canEdit} className="bg-blue-600 text-white">Add Employee</Button>
+                    <Button onClick={() => { setIsEditing(true); setFormError(null); }} disabled={!canEdit} className="bg-blue-600 text-white">Add Employee</Button>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-slate-200 text-sm">

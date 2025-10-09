@@ -8,7 +8,7 @@ import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import ComplianceSubmissionButton from '../ComplianceSubmissionButton';
-import { DollarSign, Zap, TrendingUp, Download, Check, X, FileText, MessageCircle, Calendar, ChevronDown } from 'lucide-react';
+import { DollarSign, Zap, TrendingUp, Download, Check, X, FileText, MessageCircle, Calendar, ChevronDown, CheckCircle, Clock, XCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { investmentService } from '../../lib/investmentService';
 import StartupMessagingModal from './StartupMessagingModal';
@@ -1231,7 +1231,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   return (
     <div className="space-y-4 sm:space-y-6 px-2 sm:px-0">
       {/* Financial Metrics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 max-w-4xl mx-auto">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 max-w-6xl mx-auto">
         <MetricCard
           title="MRR"
           value={isLoading ? "Loading..." : formatCurrencyCompact(metrics?.mrr || 0, startupCurrency)}
@@ -1251,6 +1251,50 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           icon={<TrendingUp className="h-5 w-5 sm:h-6 sm:w-6" />}
           subtitle="Revenue - COGS"
         />
+        
+        {/* Compliance Status Card */}
+        <Card padding="sm">
+          <div className="flex items-center justify-between">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Compliance Status</p>
+              <p className={`text-lg sm:text-xl lg:text-2xl font-bold ${
+                startup.complianceStatus === 'Compliant' 
+                  ? 'text-green-600' 
+                  : startup.complianceStatus === 'Pending' 
+                    ? 'text-yellow-600' 
+                    : 'text-red-600'
+              }`}>
+                {startup.complianceStatus === 'Compliant' 
+                  ? 'Compliant' 
+                  : startup.complianceStatus === 'Pending' 
+                    ? 'Pending' 
+                    : 'Not Compliant'}
+              </p>
+              <p className="text-xs text-slate-400 mt-1 truncate">
+                {startup.complianceStatus === 'Compliant' 
+                  ? 'All requirements met' 
+                  : startup.complianceStatus === 'Pending' 
+                    ? 'Under review' 
+                    : 'Action required'}
+              </p>
+            </div>
+            <div className={`flex-shrink-0 ml-2 ${
+              startup.complianceStatus === 'Compliant' 
+                ? 'text-green-600' 
+                : startup.complianceStatus === 'Pending' 
+                  ? 'text-yellow-600' 
+                  : 'text-red-600'
+            }`}>
+              {startup.complianceStatus === 'Compliant' ? (
+                <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6" />
+              ) : startup.complianceStatus === 'Pending' ? (
+                <Clock className="h-5 w-5 sm:h-6 sm:w-6" />
+              ) : (
+                <XCircle className="h-5 w-5 sm:h-6 sm:w-6" />
+              )}
+            </div>
+          </div>
+        </Card>
       </div>
 
 

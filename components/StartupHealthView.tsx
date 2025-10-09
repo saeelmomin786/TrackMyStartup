@@ -41,7 +41,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     // Get the target tab for facilitator access
     const facilitatorTargetTab = (window as any).facilitatorTargetTab;
     
-    // Initialize activeTab from localStorage or default to 'dashboard'
+    // Initialize activeTab - always start with dashboard for regular users
     // If facilitator is accessing, use the target tab or default to compliance
     const [activeTab, setActiveTab] = useState<TabId>(() => {
         if (isFacilitatorAccess) {
@@ -53,10 +53,8 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             return 'compliance'; // Default fallback
         }
         
-        const savedTab = localStorage.getItem('startupHealthActiveTab') as TabId;
-        return savedTab && ['dashboard', 'opportunities', 'profile', 'compliance', 'financials', 'employees', 'capTable'].includes(savedTab) 
-            ? savedTab 
-            : 'dashboard';
+        // Always start with dashboard for regular users on login
+        return 'dashboard';
     });
     const [currentStartup, setCurrentStartup] = useState<Startup>(startup);
     const [localOffers, setLocalOffers] = useState<InvestmentOffer[]>(investmentOffers || []);
@@ -106,10 +104,13 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         return () => { cancelled = true; };
     }, [currentStartup?.id]);
 
-    // Save activeTab to localStorage whenever it changes
+    // Save activeTab to localStorage whenever it changes (only for facilitator access)
     useEffect(() => {
-        localStorage.setItem('startupHealthActiveTab', activeTab);
-    }, [activeTab]);
+        // Only save tab state for facilitator access, not for regular users
+        if (isFacilitatorAccess) {
+            localStorage.setItem('startupHealthActiveTab', activeTab);
+        }
+    }, [activeTab, isFacilitatorAccess]);
 
     const handleProfileUpdate = (updatedStartup: Startup) => {
         console.log('🔄 StartupHealthView: Profile updated, updating currentStartup and triggering ComplianceTab refresh...', {

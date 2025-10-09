@@ -655,6 +655,11 @@ const App: React.FC = () => {
                             .single();
 
                           if (!existingStartup) {
+                            // Calculate current valuation from default price per share and total shares
+                            const defaultPricePerShare = 0.01;
+                            const defaultTotalShares = 1000000;
+                            const calculatedCurrentValuation = defaultPricePerShare * defaultTotalShares;
+                            
                             await authService.supabase
                               .from('startups')
                               .insert({
@@ -662,7 +667,7 @@ const App: React.FC = () => {
                                 investment_type: 'Seed',
                                 investment_value: 0,
                                 equity_allocation: 0,
-                                current_valuation: 0,
+                                current_valuation: calculatedCurrentValuation,
                                 compliance_status: 'Pending',
                                 sector: 'Technology',
                                 total_funding: 0,

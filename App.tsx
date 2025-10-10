@@ -467,6 +467,10 @@ const App: React.FC = () => {
   useEffect(() => {
     let isMounted = true;
     
+    // Track focus/visibility timing to avoid instant re-inits on quick tab switches
+    const lastHiddenAtRef = { current: 0 } as { current: number };
+    const REFRESH_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+    
     const initializeAuth = async () => {
       try {
         console.log('Starting auth initialization...');
@@ -589,6 +593,32 @@ const App: React.FC = () => {
     };
 
     initializeAuth();
+
+    // Visibility/focus handlers: only refresh if away >= threshold
+    const maybeRefreshAfterAway = () => {
+      const now = Date.now();
+      const awayMs = lastHiddenAtRef.current ? now - lastHiddenAtRef.current : 0;
+      if (awayMs >= REFRESH_THRESHOLD_MS) {
+        console.log(`🔄 Returning after ${Math.round(awayMs/1000)}s away, refreshing data`);
+        setHasInitialDataLoaded(false);
+        hasInitialDataLoadedRef.current = false;
+        fetchData(true).catch(() => {});
+      }
+      lastHiddenAtRef.current = 0;
+    };
+
+    const onHidden = () => { lastHiddenAtRef.current = Date.now(); };
+    const onVisible = () => maybeRefreshAfterAway();
+    const onFocus = () => maybeRefreshAfterAway();
+    const onBlur = () => { lastHiddenAtRef.current = Date.now(); };
+
+    const visibilityHandler = () => {
+      if (document.hidden) onHidden(); else onVisible();
+    };
+
+    document.addEventListener('visibilitychange', visibilityHandler);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
 
     // Set up auth state listener
     const { data: { subscription } } = authService.onAuthStateChange(async (event, session) => {
@@ -872,7 +902,9 @@ const App: React.FC = () => {
     return () => {
       isMounted = false;
       subscription?.unsubscribe();
-      // clearTimeout(timeoutId); // Removed timeout
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
     };
   }, []);
 
@@ -2032,7 +2064,6 @@ const App: React.FC = () => {
                             setCurrentUser(refreshedUser);
                             setIsAuthenticated(true);
                             setCurrentPage('login'); // This will show the main dashboard
-                            
                             // Force refresh startup data after registration
                             console.log('🔄 Forcing startup data refresh after registration...');
                             setTimeout(() => {
@@ -2053,6 +2084,12 @@ const App: React.FC = () => {
             {currentPage === 'landing' && <Footer />}
         </div>
     )
+  }
+
+  // Auth redirect guard: if authenticated and still on 'landing', go to dashboard view ('login')
+  if (isAuthenticated && currentPage === 'landing') {
+    console.log('🔁 Auth redirect guard: redirecting landing -> dashboard');
+    setCurrentPage('login');
   }
 
   const MainContent = () => {
@@ -2303,7 +2340,9 @@ const App: React.FC = () => {
       }
       
       // If no startup found, show appropriate message
-      console.log('❌ No startup found for user:', currentUser.email);
+      if (hasInitialDataLoaded) {
+        console.log('❌ No startup found for user:', currentUser.email);
+      }
       return (
         <div className="text-center py-20">
           <h2 className="text-xl font-semibold">No Startup Found</h2>

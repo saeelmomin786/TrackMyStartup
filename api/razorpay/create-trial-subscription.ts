@@ -15,14 +15,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
     if (!keyId || !keySecret) return res.status(500).json({ error: 'Razorpay keys not configured' });
 
-    // Pick plan id for interval; if you intend dynamic amount plan creation, wire that here
+    // Try static plan id first; if missing, dynamically create based on final_amount
     let plan_id = interval === 'yearly' ? process.env.RAZORPAY_STARTUP_PLAN_ID_YEARLY : process.env.RAZORPAY_STARTUP_PLAN_ID_MONTHLY;
+    const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+
     if (!plan_id) {
-      console.error('[create-trial-subscription] Missing plan ID for interval:', interval);
-      return res.status(400).json({ error: `Plan ID not configured for ${interval} plan. Set RAZORPAY_STARTUP_PLAN_ID_${interval === 'yearly' ? 'YEARLY' : 'MONTHLY'} in Vercel env.` });
+      if (typeof final_amount !== 'number' || isNaN(final_amount) || final_amount <= 0) {
+        console.error('[create-trial-subscription] Missing plan ID and invalid final_amount for dynamic plan creation');
+        return res.status(400).json({ error: `Plan ID not configured for ${interval} plan and final_amount is missing/invalid for dynamic plan creation.` });
+      }
+
+      const period = interval === 'yearly' ? 'yearly' : 'monthly';
+      const amountPaise = Math.round(final_amount * 100);
+      console.log('[create-trial-subscription] Creating dynamic plan', { period, amountPaise, plan_name });
+
+      const planResp = await fetch('https://api.razorpay.com/v1/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({
+          period,
+          interval: 1,
+          item: {
+            name: `${plan_name} (${interval})`,
+            amount: amountPaise,
+            currency: 'INR'
+          }
+        })
+      });
+
+      if (!planResp.ok) {
+        const txt = await planResp.text();
+        console.error('[create-trial-subscription] Dynamic plan creation failed:', txt);
+        return res.status(planResp.status).send(txt);
+      }
+      const planJson = await planResp.json();
+      plan_id = planJson?.id;
+      if (!plan_id) {
+        console.error('[create-trial-subscription] No plan id in Razorpay response');
+        return res.status(500).json({ error: 'Failed to create dynamic plan' });
+      }
     }
 
-    const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
     const trialPeriod = Number(trial_days) * 24 * 60 * 60; // seconds
 
     const r = await fetch('https://api.razorpay.com/v1/subscriptions', {

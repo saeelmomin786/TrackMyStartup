@@ -9,6 +9,7 @@ export interface AuthUser {
   name: string
   role: UserRole
   startup_name?: string
+  center_name?: string
   investor_code?: string
   ca_code?: string
   cs_code?: string
@@ -43,6 +44,7 @@ export interface SignUpData {
   name: string
   role: UserRole
   startupName?: string
+  centerName?: string
   investmentAdvisorCode?: string
 }
 
@@ -218,6 +220,7 @@ export const authService = {
         name: profile.name,
         role: profile.role,
         startup_name: profile.startup_name,
+        center_name: profile.center_name,
         investor_code: profile.investor_code,
         investment_advisor_code: profile.investment_advisor_code,
         investment_advisor_code_entered: profile.investment_advisor_code_entered,
@@ -272,6 +275,7 @@ export const authService = {
             name: data.name,
             role: data.role,
             startupName: data.startupName, // make available after confirmation
+            centerName: data.centerName, // make available after confirmation
             fileUrls: data.fileUrls || {}
           }
         }
@@ -318,6 +322,7 @@ export const authService = {
             name: data.name,
             role: data.role,
             startup_name: data.role === 'Startup' ? data.startupName : null,
+            center_name: data.role === 'Startup Facilitation Center' ? data.centerName : null,
             investor_code: investorCode,
             investment_advisor_code: investmentAdvisorCode,
             // Store the Investment Advisor code entered by user (for Investors and Startups)

@@ -8,7 +8,6 @@ import Modal from './ui/Modal';
 import Input from './ui/Input';
 import { TrendingUp, DollarSign, CheckSquare, Eye, PlusCircle, Activity, FileText, Video, Users, Heart, CheckCircle, LayoutGrid, Film, Edit, X, Clock, CheckCircle2, Shield, Menu, User, Settings, LogOut, Star, Search, Share2 } from 'lucide-react';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
-import { paymentService } from '../lib/paymentService';
 import { investmentService } from '../lib/database';
 import ProfilePage from './ProfilePage';
 import AdvisorAwareLogo from './AdvisorAwareLogo';
@@ -275,34 +274,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         });
     };
 
-    const handleDueDiligenceClick = async (startup: ActiveFundraisingStartup) => {
-        if (!currentUser?.id) {
-            alert('Please log in to conduct due diligence');
-            return;
-        }
-
-        try {
-            // Create due diligence request
-            const request = await paymentService.createDueDiligenceRequest(currentUser.id, startup.id.toString());
-            
-            // Create payment intent
-            const paymentIntent = await paymentService.createPaymentIntent(
-                150, // €150 for due diligence
-                'EUR',
-                currentUser.id,
-                'due-diligence'
-            );
-
-            // Here you would integrate with your payment gateway
-            // For now, we'll simulate a successful payment
-            await paymentService.processDueDiligencePayment(request.id, paymentIntent.id);
-            
-            alert('Due diligence payment successful! You now have access to detailed startup information.');
-        } catch (error) {
-            console.error('Error processing due diligence payment:', error);
-            alert('Failed to process due diligence payment. Please try again.');
-        }
-    };
+    // Due diligence payment flow removed
 
     // Handle editing offers
     const handleEditOffer = (offer: InvestmentOffer) => {
@@ -887,14 +859,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           </a>
                         )}
 
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleDueDiligenceClick(inv)}
-                          className="flex-1 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 transition-all duration-200 border border-slate-200"
-                        >
-                          <Search className="h-4 w-4 mr-2" /> Due Diligence (€150)
-                        </Button>
+                        {/* Due diligence payment removed */}
 
                         {(() => {
                           // Check if user has already submitted an offer for this startup
@@ -1246,17 +1211,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     </select>
                 </div>
                 
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <h4 className="text-sm font-medium text-blue-800 mb-2">Scouting Fee Information</h4>
-                    <p className="text-xs text-blue-700">
-                        When you submit this offer, you will be required to pay a startup scouting fee based on your country and the startup's funding amount. 
-                        The fee will be calculated automatically and displayed before payment confirmation.
-                    </p>
-                </div>
+                {/* Scouting fee information removed */}
                 
                 <div className="flex justify-end gap-3 pt-4">
                     <Button type="button" variant="secondary" onClick={() => setIsOfferModalOpen(false)}>Cancel</Button>
-                    <Button type="submit">Submit Offer & Pay Scouting Fee</Button>
+                    <Button type="submit">Submit Offer</Button>
                 </div>
             </form>
         </Modal>

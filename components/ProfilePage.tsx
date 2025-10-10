@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Bell, HelpCircle, LogOut, Edit3, Shield, RefreshCw } from 'lucide-react';
 import Button from './ui/Button';
 import EditProfileModal from './EditProfileModal';
-import PaymentSection from './PaymentSection';
-import SubscriptionSummaryCards from './SubscriptionSummaryCards';
+// PaymentSection removed
+// SubscriptionSummaryCards removed
 import { authService } from '../lib/auth';
 import { AuthUser } from '../lib/auth';
 
@@ -337,28 +337,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ currentUser, onBack, onProfil
         </div>
       )}
 
-      {/* Subscription Summary Cards - Only for eligible user types */}
-      {refreshedProfile && ['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor'].includes(refreshedProfile.role) && (
-        <div className="mt-4">
-          <SubscriptionSummaryCards
-            userId={refreshedProfile.id}
-            userType={refreshedProfile.role}
-            userCountry={refreshedProfile.country}
-          />
-        </div>
-      )}
+      {/* Subscription Summary Cards removed */}
 
-      {/* Payment Section - Only for eligible user types */}
-      {refreshedProfile && ['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor'].includes(refreshedProfile.role) && (
-        <div className="mt-4">
-          <PaymentSection
-            userId={refreshedProfile.id}
-            userType={refreshedProfile.role as 'Investor' | 'Startup' | 'Startup Facilitation Center' | 'Investment Advisor'}
-            country={refreshedProfile.country || 'Global'}
-            startupCount={refreshedProfile.startup_count || 0}
-          />
-        </div>
-      )}
+      {/* Payment Section removed */}
 
       {/* Settings List */}
       <div className="bg-white mt-4">

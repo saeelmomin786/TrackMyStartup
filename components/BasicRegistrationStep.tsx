@@ -14,6 +14,7 @@ interface BasicRegistrationStepProps {
     password: string;
     role: UserRole;
     startupName?: string;
+    centerName?: string;
     investmentAdvisorCode?: string;
   }) => void;
   onNavigateToLogin: () => void;
@@ -32,6 +33,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
     confirmPassword: '',
     role: 'Investor' as UserRole,
     startupName: '',
+    centerName: '',
     investmentAdvisorCode: ''
   });
 
@@ -145,6 +147,12 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
       return;
     }
 
+    if (formData.role === 'Startup Facilitation Center' && !formData.centerName.trim()) {
+      setError('Center name is required for Startup Facilitation Center role');
+      setIsLoading(false);
+      return;
+    }
+
     // Additional email validation
     if (!formData.email || !formData.email.includes('@')) {
       setError('Please enter a valid email address');
@@ -160,6 +168,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
         name: formData.name,
         role: formData.role,
         startupName: formData.role === 'Startup' ? formData.startupName : undefined,
+        centerName: formData.role === 'Startup Facilitation Center' ? formData.centerName : undefined,
         investmentAdvisorCode: formData.investmentAdvisorCode || undefined,
         founders: [],
         fileUrls: {}
@@ -185,6 +194,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
           password: formData.password,
           role: formData.role,
           startupName: formData.role === 'Startup' ? formData.startupName : undefined,
+          centerName: formData.role === 'Startup Facilitation Center' ? formData.centerName : undefined,
           investmentAdvisorCode: formData.investmentAdvisorCode || undefined
         });
       }
@@ -295,10 +305,24 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Center Name - Only show if role is Startup Facilitation Center */}
+        {formData.role === 'Startup Facilitation Center' && (
+          <Input
+            label="Facilitation Center Name"
+            id="centerName"
+            name="centerName"
+            type="text"
+            required
+            placeholder="Enter your facilitation center name"
+            value={formData.centerName}
+            onChange={(e) => handleInputChange('centerName', e.target.value)}
+          />
+        )}
+
         {/* Basic Information */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Input
-            label="Full Name"
+            label={formData.role === 'Startup Facilitation Center' ? "Your Name" : "Full Name"}
             id="name"
             name="name"
             type="text"
@@ -429,6 +453,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
             onChange={(e) => handleInputChange('startupName', e.target.value)}
           />
         )}
+
 
         {/* Error Display */}
         {error && (

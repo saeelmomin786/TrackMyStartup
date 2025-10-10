@@ -665,20 +665,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     try {
       console.log('💰 Accepting investment offer:', offer.investmentOfferId);
       
-      try {
         await investmentService.acceptOfferSimple(String(offer.investmentOfferId));
-        console.log('✅ Investment offer accepted successfully (simple)');
-        alert('Investment offer accepted! Contact details have been revealed to both parties.');
-      } catch (simpleError) {
-        console.log('⚠️ Simple accept failed, trying with fee:', simpleError);
-        await investmentService.acceptOfferWithFee(
-          String(offer.investmentOfferId), 
-          'United States',
-          startup.totalFunding || 0
-        );
-        console.log('✅ Investment offer accepted successfully with investor scouting fee');
-        alert('Investment offer accepted! Investor scouting fee has been paid. Contact details will be revealed based on investment advisor assignment.');
-      }
+      console.log('✅ Investment offer accepted');
+      alert('Investment offer accepted! Contact details will be revealed based on advisor assignment.');
       
       await loadOffersReceived();
       

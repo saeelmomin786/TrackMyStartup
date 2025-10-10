@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { paymentService, SubscriptionPlan, DiscountCoupon } from '../lib/paymentService';
+import { supabase } from '../lib/supabase';
 import { complianceRulesComprehensiveService } from '../lib/complianceRulesComprehensiveService';
 import Card from './ui/Card';
 import Button from './ui/Button';
@@ -12,6 +12,31 @@ interface FinancialModelAdminProps {
 
 export default function FinancialModelAdmin({ currentUser }: FinancialModelAdminProps) {
   const [activeTab, setActiveTab] = useState<'pricing' | 'coupons' | 'dueDiligence' | 'scoutingFees'>('pricing');
+  type SubscriptionPlan = {
+    id: string;
+    name: string;
+    price: number;
+    currency: string;
+    interval: 'monthly' | 'yearly';
+    description: string;
+    user_type: string;
+    country: string;
+    is_active: boolean;
+    tax_percentage?: number;
+  };
+
+  type DiscountCoupon = {
+    id: string;
+    code: string;
+    discount_type: 'percentage' | 'fixed';
+    discount_value: number;
+    max_uses: number;
+    used_count: number;
+    valid_from: string | null;
+    valid_until: string | null;
+    is_active: boolean;
+  };
+
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [coupons, setCoupons] = useState<DiscountCoupon[]>([]);
   const [countries, setCountries] = useState<string[]>([]);
@@ -24,12 +49,13 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
   const [newPlan, setNewPlan] = useState({
     name: '',
     price: '',
-    currency: 'EUR',
+    currency: 'INR',
     interval: 'monthly' as 'monthly' | 'yearly',
     description: '',
-    user_type: 'Investor',
+    user_type: 'Startup',
     country: 'Global',
-    is_active: true
+    is_active: true,
+    tax_percentage: 0
   });
 
   // Form states for coupons
@@ -45,8 +71,8 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
 
   // Form states for due diligence
   const [dueDiligenceSettings, setDueDiligenceSettings] = useState({
-    base_price: 150,
-    currency: 'EUR',
+    base_price: 15000,
+    currency: 'INR',
     is_active: true,
     selected_countries: [] as string[]
   });
@@ -147,7 +173,29 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
       setCountries(uniqueCountries);
       
       // Load plans and coupons from database
-      // This would be implemented with actual database calls
+      try {
+        const { data: planRows, error: planErr } = await supabase
+          .from('subscription_plans')
+          .select('id,name,price,currency,interval,description,user_type,country,is_active')
+          .order('created_at', { ascending: false });
+        if (planErr) throw planErr;
+        setPlans((planRows as any) || []);
+      } catch (e) {
+        console.warn('Failed to load subscription_plans:', e);
+        setPlans([]);
+      }
+
+      try {
+        const { data: couponRows, error: couponErr } = await supabase
+          .from('coupons')
+          .select('id,code,discount_type,discount_value,max_uses,used_count,valid_from,valid_until,is_active')
+          .order('created_at', { ascending: false });
+        if (couponErr) throw couponErr;
+        setCoupons((couponRows as any) || []);
+      } catch (e) {
+        console.warn('Failed to load coupons:', e);
+        setCoupons([]);
+      }
       
       // Load implemented due diligence fees
       setImplementedDueDiligenceFees([]);
@@ -163,10 +211,6 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
 
       // Load implemented general coupons
       setImplementedGeneralCoupons([]);
-
-      setPlans([]);
-
-      setCoupons([]);
     } catch (error) {
       console.error('Error loading data:', error);
       setError('Failed to load financial model data');
@@ -186,9 +230,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
         return;
       }
 
-      // Create new plan (this would be a database operation)
-      const plan: SubscriptionPlan = {
-        id: Date.now().toString(),
+      const insertPayload = {
         name: newPlan.name,
         price: parseFloat(newPlan.price),
         currency: newPlan.currency,
@@ -197,13 +239,27 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
         user_type: newPlan.user_type,
         country: newPlan.country,
         is_active: newPlan.is_active
-      };
+      } as any;
 
-      setPlans([...plans, plan]);
+      // Add tax_percentage if column exists
+      try {
+        insertPayload.tax_percentage = newPlan.tax_percentage;
+      } catch (error) {
+        console.log('Tax percentage column not available yet');
+      }
+
+      const { data, error: insErr } = await supabase
+        .from('subscription_plans')
+        .insert(insertPayload)
+        .select('id,name,price,currency,interval,description,user_type,country,is_active')
+        .single();
+      if (insErr) throw insErr;
+
+      setPlans([...plans, data as any]);
       setNewPlan({
         name: '',
         price: '',
-        currency: 'EUR',
+        currency: 'INR',
         interval: 'monthly',
         description: '',
         user_type: 'Investor',
@@ -230,22 +286,26 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
         return;
       }
 
-      // Create new coupon (this would be a database operation)
-      const coupon: DiscountCoupon = {
-        id: Date.now().toString(),
+      const insertPayload = {
         code: newCoupon.code.toUpperCase(),
-        discount_type: newCoupon.discount_type,
+        discount_type: newCoupon.discount_type === 'percentage' ? 'percentage' : 'fixed',
         discount_value: parseFloat(newCoupon.discount_value),
         max_uses: parseInt(newCoupon.max_uses),
         used_count: 0,
-        valid_from: newCoupon.valid_from || new Date().toISOString().split('T')[0],
-        valid_until: newCoupon.valid_until,
+        valid_from: newCoupon.valid_from || null,
+        valid_until: newCoupon.valid_until || null,
         is_active: newCoupon.is_active,
-        created_by: currentUser?.id || '',
-        created_at: new Date().toISOString()
-      };
+        created_by: currentUser?.id || null
+      } as any;
 
-      setCoupons([...coupons, coupon]);
+      const { data, error: cErr } = await supabase
+        .from('coupons')
+        .insert(insertPayload)
+        .select('id,code,discount_type,discount_value,max_uses,used_count,valid_from,valid_until,is_active')
+        .single();
+      if (cErr) throw cErr;
+
+      setCoupons([...coupons, data as any]);
       setNewCoupon({
         code: '',
         discount_type: 'percentage',
@@ -268,11 +328,18 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
     if (!confirm('Are you sure you want to delete this pricing plan?')) return;
 
     try {
+      const { error: delErr } = await supabase
+        .from('subscription_plans')
+        .delete()
+        .eq('id', planId);
+      if (delErr) throw delErr;
       setPlans(plans.filter(plan => plan.id !== planId));
       setSuccess('Pricing plan deleted successfully');
     } catch (error) {
       console.error('Error deleting plan:', error);
       setError('Failed to delete pricing plan');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -280,11 +347,18 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
     if (!confirm('Are you sure you want to delete this discount coupon?')) return;
 
     try {
+      const { error: delErr } = await supabase
+        .from('coupons')
+        .delete()
+        .eq('id', couponId);
+      if (delErr) throw delErr;
       setCoupons(coupons.filter(coupon => coupon.id !== couponId));
       setSuccess('Discount coupon deleted successfully');
     } catch (error) {
       console.error('Error deleting coupon:', error);
       setError('Failed to delete discount coupon');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -439,7 +513,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
   // Helper function to get currency for country
   const getCurrencyForCountry = (country: string) => {
     const currencyMap: { [key: string]: string } = {
-      'Global': 'EUR',
+      'Global': 'INR',
       'United States': 'USD',
       'United Kingdom': 'GBP',
       'India': 'INR',
@@ -481,7 +555,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
       'Cyprus': 'EUR',
       'Greece': 'EUR'
     };
-    return currencyMap[country] || 'EUR';
+    return currencyMap[country] || 'INR';
   };
 
   return (
@@ -573,12 +647,24 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Price (€)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Price (₹)</label>
                 <Input
                   type="number"
                   value={newPlan.price}
                   onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })}
-                  placeholder="15"
+                  placeholder="1500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tax Percentage (%)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={newPlan.tax_percentage}
+                  onChange={(e) => setNewPlan({ ...newPlan, tax_percentage: parseFloat(e.target.value) || 0 })}
+                  placeholder="18.00"
                 />
               </div>
               <div>
@@ -674,6 +760,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">User Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Country</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Price</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Tax %</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Interval</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Description</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
@@ -692,7 +779,10 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                         {plan.country}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                        €{plan.price}
+                        ₹{plan.price}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                        {(plan as any).tax_percentage || 0}%
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 capitalize">
                         {plan.interval}
@@ -745,12 +835,12 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                   className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="percentage">Percentage</option>
-                  <option value="fixed">Fixed Amount (€)</option>
+                  <option value="fixed">Fixed Amount (₹)</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Discount Value {newCoupon.discount_type === 'percentage' ? '(%)' : '(€)'}
+                  Discount Value {newCoupon.discount_type === 'percentage' ? '(%)' : '(₹)'}
                 </label>
                 <Input
                   type="number"
@@ -865,7 +955,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                         {coupon.discount_type === 'percentage' 
                           ? `${coupon.discount_value}%` 
-                          : `€${coupon.discount_value}`}
+                          : `₹${coupon.discount_value}`}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                         {coupon.used_count}/{coupon.max_uses}
@@ -928,7 +1018,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                         {coupon.discount_type === 'percentage' 
                           ? `${coupon.discount_value}%` 
-                          : `€${coupon.discount_value}`}
+                          : `₹${coupon.discount_value}`}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -992,12 +1082,12 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
             <h3 className="text-lg font-semibold mb-4 text-slate-700">Due Diligence Settings</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Base Price (€)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Base Price (₹)</label>
                 <Input
                   type="number"
                   value={dueDiligenceSettings.base_price}
                   onChange={(e) => setDueDiligenceSettings({ ...dueDiligenceSettings, base_price: parseFloat(e.target.value) || 0 })}
-                  placeholder="150"
+                  placeholder="15000"
                 />
               </div>
               <div>
@@ -1007,8 +1097,9 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                   onChange={(e) => setDueDiligenceSettings({ ...dueDiligenceSettings, currency: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="EUR">EUR</option>
+                  <option value="INR">INR</option>
                   <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
                   <option value="GBP">GBP</option>
                 </select>
               </div>
@@ -1096,12 +1187,12 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                   className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="percentage">Percentage</option>
-                  <option value="fixed">Fixed Amount (€)</option>
+                  <option value="fixed">Fixed Amount (₹)</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Discount Value {newCoupon.discount_type === 'percentage' ? '(%)' : '(€)'}
+                  Discount Value {newCoupon.discount_type === 'percentage' ? '(%)' : '(₹)'}
                 </label>
                 <Input
                   type="number"
@@ -1263,7 +1354,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                         {coupon.discount_type === 'percentage' 
                           ? `${coupon.discount_value}%` 
-                          : `€${coupon.discount_value}`}
+                          : `₹${coupon.discount_value}`}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                         <div className="flex flex-wrap gap-1">
@@ -1495,7 +1586,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                        ${config.amountMin.toLocaleString()} - {config.amountMax === 0 ? '∞' : `$${config.amountMax.toLocaleString()}`}
+                        ₹{config.amountMin.toLocaleString()} - {config.amountMax === 0 ? '∞' : `₹${config.amountMax.toLocaleString()}`}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -1565,19 +1656,19 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
                   <div>
                     <h5 className="font-medium text-slate-700 mb-2">For Investors (Startup Scouting Fee):</h5>
                     <ul className="space-y-1 text-slate-600">
-                      <li>• $0 - $100K: 2.0%</li>
-                      <li>• $100K - $500K: 1.5%</li>
-                      <li>• $500K - $1M: 1.0%</li>
-                      <li>• $1M+: 0.5%</li>
+                      <li>• ₹0 - ₹10L: 2.0%</li>
+                      <li>• ₹10L - ₹50L: 1.5%</li>
+                      <li>• ₹50L - ₹1Cr: 1.0%</li>
+                      <li>• ₹1Cr+: 0.5%</li>
                     </ul>
                   </div>
                   <div>
                     <h5 className="font-medium text-slate-700 mb-2">For Startups (Investor Scouting Fee):</h5>
                     <ul className="space-y-1 text-slate-600">
-                      <li>• $0 - $100K: 1.0%</li>
-                      <li>• $100K - $500K: 0.8%</li>
-                      <li>• $500K - $1M: 0.5%</li>
-                      <li>• $1M+: 0.3%</li>
+                      <li>• ₹0 - ₹10L: 1.0%</li>
+                      <li>• ₹10L - ₹50L: 0.8%</li>
+                      <li>• ₹50L - ₹1Cr: 0.5%</li>
+                      <li>• ₹1Cr+: 0.3%</li>
                     </ul>
                   </div>
                 </div>
@@ -1586,6 +1677,7 @@ export default function FinancialModelAdmin({ currentUser }: FinancialModelAdmin
           </Card>
         </div>
       )}
+
     </div>
   );
 }

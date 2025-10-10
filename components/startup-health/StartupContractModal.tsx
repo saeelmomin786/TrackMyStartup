@@ -1,6 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { X, Download, Upload, FileText, CheckCircle, AlertCircle, Clock } from 'lucide-react';
-import { incubationPaymentService, IncubationContract } from '../../lib/incubationPaymentService';
+import { supabase } from '../../lib/supabase';
+type IncubationContract = {
+  id: string;
+  application_id: string;
+  contract_name: string;
+  contract_url?: string;
+  uploaded_at: string;
+  is_signed?: boolean;
+  signed_at?: string | null;
+  uploader?: { name?: string } | null;
+};
 import { storageService } from '../../lib/storage';
 
 interface StartupContractModalProps {
@@ -33,8 +43,13 @@ const StartupContractModal: React.FC<StartupContractModalProps> = ({
   const loadContracts = async () => {
     setIsLoading(true);
     try {
-      const contractsData = await incubationPaymentService.getApplicationContracts(applicationId);
-      setContracts(contractsData);
+      const { data, error } = await supabase
+        .from('incubation_contracts')
+        .select('*')
+        .eq('application_id', applicationId)
+        .order('uploaded_at', { ascending: false });
+      if (error) throw error;
+      setContracts((data as any) || []);
     } catch (error) {
       console.error('Error loading contracts:', error);
     } finally {
@@ -65,11 +80,13 @@ const StartupContractModal: React.FC<StartupContractModalProps> = ({
 
       if (uploadResult.success) {
         // Create contract record
-        await incubationPaymentService.uploadContract(
-          applicationId,
-          selectedFile.name,
-          uploadResult.url || ''
-        );
+        const { error } = await supabase.from('incubation_contracts').insert({
+          application_id: applicationId,
+          contract_name: selectedFile.name,
+          contract_url: uploadResult.url || '',
+          is_signed: false
+        });
+        if (error) throw error;
 
         // Reload contracts
         await loadContracts();

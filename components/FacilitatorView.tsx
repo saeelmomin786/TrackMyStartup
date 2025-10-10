@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus } from 'lucide-react';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
@@ -18,9 +18,12 @@ import ProfilePage from './ProfilePage';
 import { capTableService } from '../lib/capTableService';
 import IncubationMessagingModal from './IncubationMessagingModal';
 import ContractManagementModal from './ContractManagementModal';
-import { incubationPaymentService } from '../lib/incubationPaymentService';
+// Removed incubationPaymentService import
 import { profileService } from '../lib/profileService';
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, getCurrencyForCountry, getCurrencyForCountryCode } from '../lib/utils';
+import AddStartupModal, { StartupFormData } from './AddStartupModal';
+import StartupInvitationModal from './StartupInvitationModal';
+import { startupInvitationService, StartupInvitation } from '../lib/startupInvitationService';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -206,6 +209,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [selectedApplicationForMessaging, setSelectedApplicationForMessaging] = useState<ReceivedApplication | null>(null);
   const [selectedApplicationForContract, setSelectedApplicationForContract] = useState<ReceivedApplication | null>(null);
   const [selectedApplicationForDiligence, setSelectedApplicationForDiligence] = useState<ReceivedApplication | null>(null);
+  
+  // New state for startup invitation functionality
+  const [isAddStartupModalOpen, setIsAddStartupModalOpen] = useState(false);
+  const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
+  const [selectedStartupForInvitation, setSelectedStartupForInvitation] = useState<StartupFormData | null>(null);
+  const [startupInvitations, setStartupInvitations] = useState<StartupInvitation[]>([]);
+  const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
+  const [facilitatorCode, setFacilitatorCode] = useState<string>('');
+  
+  // State for showing more items in dashboard cards
+  const [showAllStartups, setShowAllStartups] = useState(false);
+  const [showAllOpportunities, setShowAllOpportunities] = useState(false);
+  const [showAllApplications, setShowAllApplications] = useState(false);
+  
   const formatCurrency = (value: number, currency: string = 'USD') => 
     formatCurrencyUtil(value, currency, { notation: 'compact' });
 
@@ -1089,6 +1106,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     };
   }, [facilitatorId, myPostedOpportunities]);
 
+  // Load facilitator code and startup invitations
+  useEffect(() => {
+    if (!facilitatorId) return;
+
+    const loadFacilitatorCode = async () => {
+      try {
+        const code = await facilitatorCodeService.getFacilitatorCodeByUserId(facilitatorId);
+        setFacilitatorCode(code || '');
+      } catch (error) {
+        console.error('Error loading facilitator code:', error);
+      }
+    };
+
+    loadFacilitatorCode();
+    loadStartupInvitations();
+  }, [facilitatorId]);
+
   const handleOpenPostModal = () => {
     setEditingIndex(null);
     setNewOpportunity(initialNewOppState);
@@ -1297,6 +1331,85 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       alert('Failed to remove startup from portfolio. Please try again.');
     } finally {
       setIsProcessingAction(false);
+    }
+  };
+
+  // New functions for startup invitation functionality
+  const handleAddStartup = async (startupData: StartupFormData) => {
+    if (!facilitatorId || !facilitatorCode) {
+      alert('Facilitator information not available. Please try again.');
+      return;
+    }
+
+    try {
+      setIsLoadingInvitations(true);
+      
+      // Add the startup invitation
+      const invitation = await startupInvitationService.addStartupInvitation(
+        facilitatorId,
+        startupData,
+        facilitatorCode
+      );
+
+      if (invitation) {
+        // Update local state
+        setStartupInvitations(prev => [invitation, ...prev]);
+        
+        // Set the startup data for invitation modal
+        setSelectedStartupForInvitation(startupData);
+        setIsInvitationModalOpen(true);
+      } else {
+        alert('Failed to add startup. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error adding startup:', error);
+      alert('Failed to add startup. Please try again.');
+    } finally {
+      setIsLoadingInvitations(false);
+    }
+  };
+
+  const handleSendInvitation = async () => {
+    if (!selectedStartupForInvitation) return;
+
+    try {
+      // Update invitation status to 'sent'
+      const invitation = startupInvitations.find(inv => 
+        inv.startupName === selectedStartupForInvitation.name &&
+        inv.email === selectedStartupForInvitation.email
+      );
+
+      if (invitation) {
+        await startupInvitationService.updateInvitationStatus(invitation.id, 'sent');
+        
+        // Update local state
+        setStartupInvitations(prev => 
+          prev.map(inv => 
+            inv.id === invitation.id 
+              ? { ...inv, status: 'sent', invitationSentAt: new Date().toISOString() }
+              : inv
+          )
+        );
+      }
+
+      setIsInvitationModalOpen(false);
+      setSelectedStartupForInvitation(null);
+    } catch (error) {
+      console.error('Error updating invitation status:', error);
+    }
+  };
+
+  const loadStartupInvitations = async () => {
+    if (!facilitatorId) return;
+
+    try {
+      setIsLoadingInvitations(true);
+      const invitations = await startupInvitationService.getFacilitatorInvitations(facilitatorId);
+      setStartupInvitations(invitations);
+    } catch (error) {
+      console.error('Error loading startup invitations:', error);
+    } finally {
+      setIsLoadingInvitations(false);
     }
   };
 
@@ -2123,8 +2236,170 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             </div>
 
             <div className="space-y-8">
+              {/* Add New Startup Section */}
+              <Card>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-slate-700">Add New Startup</h3>
+                  <Button
+                    onClick={() => setIsAddStartupModalOpen(true)}
+                    className="bg-brand-primary hover:bg-brand-primary/90"
+                  >
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Add Startup
+                  </Button>
+                </div>
+                <p className="text-sm text-slate-600 mb-4">
+                  Add a new startup to your portfolio and invite them to join TrackMyStartup platform.
+                </p>
+                
+                {/* Facilitator Code Display */}
+                {facilitatorCode && (
+                  <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-medium text-blue-800">Your Facilitator Code:</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-blue-900 text-lg">{facilitatorCode}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigator.clipboard.writeText(facilitatorCode)}
+                        className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                      >
+                        Copy Code
+                      </Button>
+                    </div>
+                    <p className="text-sm text-blue-700 mt-2">
+                      Share this code with startups when inviting them to join the platform.
+                    </p>
+                  </div>
+                )}
+              </Card>
+
               {/* Portfolio Distribution Chart - moved to top */}
               <PortfolioDistributionChart data={myPortfolio} />
+
+              {/* Added Startups List */}
+              <Card>
+                <h3 className="text-lg font-semibold mb-4 text-slate-700">Added Startups</h3>
+                <div className="overflow-x-auto">
+                  {isLoadingInvitations ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                      <p className="text-slate-500">Loading startups...</p>
+                    </div>
+                  ) : startupInvitations.length === 0 ? (
+                    <div className="text-center py-8 text-slate-500">
+                      <p>No startups added yet.</p>
+                      <p className="text-sm mt-1">Add your first startup using the form above.</p>
+                    </div>
+                  ) : (
+                    <table className="min-w-full divide-y divide-slate-200">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Contact Person</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-slate-200">
+                        {(showAllStartups ? startupInvitations : startupInvitations.slice(0, 5)).map((startup) => (
+                          <tr key={startup.id}>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm font-medium text-slate-900">{startup.startupName}</div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-slate-900">{startup.contactPerson}</div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-slate-900">{startup.email}</div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                startup.status === 'pending' 
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : startup.status === 'sent'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : startup.status === 'accepted'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}>
+                                {startup.status.charAt(0).toUpperCase() + startup.status.slice(1)}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                              <div className="flex items-center gap-2 justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedStartupForInvitation({
+                                      name: startup.startupName,
+                                      contactPerson: startup.contactPerson,
+                                      email: startup.email,
+                                      phone: startup.phone
+                                    });
+                                    setIsInvitationModalOpen(true);
+                                  }}
+                                  className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                                >
+                                  <Share2 className="h-4 w-4 mr-1" />
+                                  Share
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    // TODO: Implement edit functionality
+                                    alert('Edit functionality coming soon!');
+                                  }}
+                                  className="text-green-600 border-green-600 hover:bg-green-50"
+                                >
+                                  <Edit className="h-4 w-4 mr-1" />
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    if (confirm('Are you sure you want to delete this startup invitation?')) {
+                                      try {
+                                        await startupInvitationService.deleteInvitation(startup.id);
+                                        setStartupInvitations(prev => prev.filter(inv => inv.id !== startup.id));
+                                      } catch (error) {
+                                        console.error('Error deleting invitation:', error);
+                                        alert('Failed to delete invitation. Please try again.');
+                                      }
+                                    }
+                                  }}
+                                  className="text-red-600 border-red-600 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  
+                  {/* Show More Button */}
+                  {startupInvitations.length > 5 && (
+                    <div className="mt-4 text-center">
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowAllStartups(!showAllStartups)}
+                        className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                      >
+                        {showAllStartups ? 'Show Less' : `Show More (${startupInvitations.length - 5} more)`}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </Card>
             </div>
 
             <div className="space-y-8">
@@ -2160,7 +2435,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200">
-                            {freeOrFeeRecords.map((record) => (
+                            {(showAllApplications ? freeOrFeeRecords : freeOrFeeRecords.slice(0, 5)).map((record) => (
                             <tr key={record.id}>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="text-sm font-medium text-slate-900">{record.startup?.name || 'Unknown Startup'}</div>
@@ -2240,6 +2515,24 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           ))}
                         </tbody>
                       </table>
+                      );
+                    })()}
+                    
+                    {/* Show More Button for Recognition Requests */}
+                    {(() => {
+                      const freeOrFeeRecords = recognitionRecords.filter(record => 
+                        record.feeType === 'Free' || record.feeType === 'Fees'
+                      );
+                      return freeOrFeeRecords.length > 5 && (
+                        <div className="mt-4 text-center">
+                          <Button
+                            variant="outline"
+                            onClick={() => setShowAllApplications(!showAllApplications)}
+                            className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                          >
+                            {showAllApplications ? 'Show Less' : `Show More (${freeOrFeeRecords.length - 5} more)`}
+                          </Button>
+                        </div>
                       );
                     })()}
                   </div>
@@ -2889,8 +3182,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       {/* Header with facilitator code display */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Facilitation Center Dashboard</h1>
-          <p className="text-slate-600">Manage your startup portfolio and opportunities</p>
+          <h1 className="text-2xl font-bold text-slate-900">
+            Welcome {currentUser?.center_name || 'Facilitation Center'}
+          </h1>
+          <h2 className="text-lg font-semibold text-slate-800">Facilitation Center Dashboard</h2>
+
+
         </div>
         <div className="flex items-center gap-4">
           <FacilitatorCodeDisplay currentUser={currentUser} />
@@ -3158,6 +3455,27 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         </Modal>
       )}
 
+      {/* Add Startup Modal */}
+      <AddStartupModal
+        isOpen={isAddStartupModalOpen}
+        onClose={() => setIsAddStartupModalOpen(false)}
+        onAddStartup={handleAddStartup}
+        facilitatorCode={facilitatorCode}
+      />
+
+      {/* Startup Invitation Modal */}
+      {selectedStartupForInvitation && (
+        <StartupInvitationModal
+          isOpen={isInvitationModalOpen}
+          onClose={() => {
+            setIsInvitationModalOpen(false);
+            setSelectedStartupForInvitation(null);
+          }}
+          startupData={selectedStartupForInvitation}
+          facilitatorCode={facilitatorCode}
+          facilitatorName={currentUser?.name || 'Facilitator'}
+        />
+      )}
 
       <style>{`
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }

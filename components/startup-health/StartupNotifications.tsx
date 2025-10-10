@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, MessageCircle, FileText, CreditCard, AlertCircle, CheckCircle } from 'lucide-react';
-import { incubationPaymentService } from '../../lib/incubationPaymentService';
 import { supabase } from '../../lib/supabase';
 
 interface StartupNotificationsProps {
@@ -12,7 +11,7 @@ interface StartupNotificationsProps {
 
 interface NotificationItem {
   id: string;
-  type: 'message' | 'contract' | 'payment' | 'status';
+  type: 'message' | 'contract' | 'status';
   title: string;
   message: string;
   applicationId: string;
@@ -172,19 +171,7 @@ const StartupNotifications: React.FC<StartupNotificationsProps> = ({
           });
         }
 
-        // Check for payment requirements
-        if (app.payment_status === 'pending' && app.status === 'accepted') {
-          notificationsList.push({
-            id: `payment_${app.id}`,
-            type: 'payment',
-            title: 'Payment Required',
-            message: `Payment is required to complete your application`,
-            applicationId: app.id,
-            isRead: false,
-            createdAt: new Date().toISOString(),
-            priority: 'medium'
-          });
-        }
+        // Payment notifications removed
 
         // Check for status updates
         if (app.status === 'accepted') {
@@ -225,9 +212,7 @@ const StartupNotifications: React.FC<StartupNotificationsProps> = ({
       case 'contract':
         onOpenContracts(notification.applicationId);
         break;
-      case 'payment':
-        onOpenPayment(notification.applicationId);
-        break;
+      // Payment case removed
       default:
         break;
     }
@@ -239,8 +224,7 @@ const StartupNotifications: React.FC<StartupNotificationsProps> = ({
         return <MessageCircle className="w-5 h-5 text-blue-500" />;
       case 'contract':
         return <FileText className="w-5 h-5 text-green-500" />;
-      case 'payment':
-        return <CreditCard className="w-5 h-5 text-orange-500" />;
+      // Payment icon removed
       case 'status':
         return <CheckCircle className="w-5 h-5 text-green-500" />;
       default:

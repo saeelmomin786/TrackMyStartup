@@ -8,8 +8,6 @@
     "build": "vite build && node scripts/copy-404.js",
     "preview": "vite preview",
     "server": "node server.js",
-    "start-payment-server": "node start-payment-server.js",
-    "check-razorpay": "node check-razorpay-setup.js",
     "fix-env": "node fix-env-file.js",
     "restart-app": "node restart-app.js"
   },
@@ -26,7 +24,8 @@
     "react-dom": "^19.1.1",
     "react-is": "^19.2.0",
     "react-router-dom": "^7.9.1",
-    "recharts": "^3.1.0"
+    "recharts": "^3.1.0",
+    "razorpay": "^2.9.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.12",

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, Clock, Shield, Zap } from 'lucide-react';
 import { TrialService, SubscriptionStatus } from '../lib/trialService';
-import { paymentService } from '../lib/paymentService';
 
 interface SubscriptionPageProps {
   userId: string;
@@ -60,19 +59,9 @@ const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
     setError(null);
 
     try {
-      console.log('🔍 Starting subscription for plan:', selectedPlan);
-      
-      // Create Razorpay subscription
-      const subscription = await paymentService.createTrialSubscription(
-        userId,
-        selectedPlan.billing_interval as 'monthly' | 'yearly',
-        1
-      );
-
-      console.log('✅ Subscription created:', subscription);
+      console.log('🔍 Simulating subscription success for plan:', selectedPlan);
       onSubscriptionSuccess();
     } catch (error) {
-      console.error('Error creating subscription:', error);
       setError('Failed to create subscription. Please try again.');
     } finally {
       setIsProcessing(false);
@@ -230,9 +219,7 @@ const SubscriptionPage: React.FC<SubscriptionPageProps> = ({
 
         {/* Security Notice */}
         <div className="mt-8 text-center">
-          <p className="text-sm text-gray-500">
-            🔒 Secure payment processing powered by Razorpay
-          </p>
+          <p className="text-sm text-gray-500">Payment disabled</p>
         </div>
       </div>
     </div>

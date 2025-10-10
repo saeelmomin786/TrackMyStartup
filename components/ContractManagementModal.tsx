@@ -1,6 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { X, Upload, Download, FileText, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import { incubationPaymentService, IncubationContract } from '../lib/incubationPaymentService';
+import { supabase } from '../lib/supabase';
+type IncubationContract = {
+  id: string;
+  application_id: string;
+  contract_name: string;
+  contract_url: string;
+  is_signed: boolean;
+  uploaded_at: string;
+  signed_at?: string | null;
+  uploader?: { name?: string } | null;
+  signer?: { name?: string } | null;
+};
 import { storageService } from '../lib/storage';
 
 interface ContractManagementModalProps {
@@ -33,8 +44,13 @@ const ContractManagementModal: React.FC<ContractManagementModalProps> = ({
   const loadContracts = async () => {
     setIsLoading(true);
     try {
-      const contractsData = await incubationPaymentService.getApplicationContracts(applicationId);
-      setContracts(contractsData);
+      const { data, error } = await supabase
+        .from('incubation_contracts')
+        .select('*')
+        .eq('application_id', applicationId)
+        .order('uploaded_at', { ascending: false });
+      if (error) throw error;
+      setContracts((data as any) || []);
     } catch (error) {
       console.error('Error loading contracts:', error);
     } finally {
@@ -67,11 +83,13 @@ const ContractManagementModal: React.FC<ContractManagementModalProps> = ({
 
       if (uploadResult.success) {
         // Save contract record
-        await incubationPaymentService.uploadContract(
-          applicationId,
-          contractName,
-          uploadResult.url
-        );
+        const { error } = await supabase.from('incubation_contracts').insert({
+          application_id: applicationId,
+          contract_name: contractName,
+          contract_url: uploadResult.url,
+          is_signed: false
+        });
+        if (error) throw error;
 
         // Refresh contracts list
         await loadContracts();
@@ -103,8 +121,12 @@ const ContractManagementModal: React.FC<ContractManagementModalProps> = ({
 
   const handleSignContract = async (contractId: string) => {
     try {
-      await incubationPaymentService.signContract(contractId);
-      await loadContracts(); // Refresh contracts
+      const { error } = await supabase
+        .from('incubation_contracts')
+        .update({ is_signed: true, signed_at: new Date().toISOString() })
+        .eq('id', contractId);
+      if (error) throw error;
+      await loadContracts();
       alert('Contract signed successfully!');
     } catch (error) {
       console.error('Error signing contract:', error);

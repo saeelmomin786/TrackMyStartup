@@ -10,8 +10,7 @@ import { storageService } from '../lib/storage';
 import { complianceRulesComprehensiveService } from '../lib/complianceRulesComprehensiveService';
 import { userComplianceService, CountryComplianceInfo } from '../lib/userComplianceService';
 import { getCurrencyForCountry, getCountryProfessionalTitles } from '../lib/utils';
-import StartupPaymentStep from './StartupPaymentStep';
-import StartupSubscriptionStep from './StartupSubscriptionStep';
+import StartupSubscriptionPage from './startup-health/StartupSubscriptionPage';
 
 interface Founder {
   id: string;
@@ -49,6 +48,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   const [userData, setUserData] = useState<any>(null);
   const [countryComplianceInfo, setCountryComplianceInfo] = useState<CountryComplianceInfo[]>([]);
   const [selectedCountryInfo, setSelectedCountryInfo] = useState<CountryComplianceInfo | null>(null);
+  const [showSubscriptionPage, setShowSubscriptionPage] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<{
     govId: File | null;
     roleSpecific: File | null;
@@ -106,9 +106,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   const [isCheckingUser, setIsCheckingUser] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [showStartupPayment, setShowStartupPayment] = useState(false);
-  const [paymentUserName, setPaymentUserName] = useState('');
-  const [paymentUserEmail, setPaymentUserEmail] = useState('');
+  // Payment gating removed
   
   // Admin-managed compliance rules for company types
   const [rulesMap, setRulesMap] = useState<any>({});
@@ -379,39 +377,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       const isComplete = await authService.isProfileComplete(user.id);
       
       if (isComplete) {
-        // If Startup, block redirect until subscription payment is completed
-        const role = profile?.role || user.user_metadata?.role;
-        if (role === 'Startup') {
-          // Honor local flags to persist modal across refresh
-          try {
-            const required = localStorage.getItem('startupPaymentRequired');
-            const inProgress = localStorage.getItem('startupPaymentInProgress');
-            if (required === '1' || inProgress === '1') {
-              setPaymentUserEmail(profile?.email || user.email || '');
-              setShowStartupPayment(true);
-              return;
-            }
-          } catch {}
-          try {
-            // Ensure modal has user email populated
-            setPaymentUserEmail(profile?.email || user.email || '');
-            // Check subscription status; only redirect if active (not just trial)
-            const res = await fetch(`/api/billing/subscription-status?user_id=${encodeURIComponent(user.id)}`);
-            if (res.ok) {
-              const status = await res.json();
-              if (status?.status === 'active' && !status?.is_in_trial) {
-                onNavigateToDashboard();
-                return;
-              }
-            }
-          } catch (e) {
-            console.warn('Subscription status check failed, showing payment modal as fallback', e);
-          }
-          // Show payment modal and block redirect
-          setShowStartupPayment(true);
-          return;
-        }
-        // Non-startup: proceed to dashboard
         onNavigateToDashboard();
         return;
       }
@@ -982,25 +947,16 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         }
       }
 
-      // Registration complete! For Startup users, require ₹1 payment before dashboard
-      try {
-        const current = await authService.getCurrentUser();
-        if (current && current.role === 'Startup') {
-          setPaymentUserName(current.name || '');
-          setPaymentUserEmail(current.email || '');
-          try {
-            localStorage.setItem('startupPaymentRequired', '1');
-            localStorage.removeItem('startupPaymentInProgress');
-          } catch {}
-          setShowStartupPayment(true);
-          return; // Wait for payment success
-        }
-      } catch (err) {
-        console.error('Error checking current user for payment gate:', err);
-      }
+      // Registration complete, proceed to dashboard
 
-      console.log('🎉 Registration complete! Redirecting to dashboard...');
-      onNavigateToDashboard();
+      console.log('🎉 Registration complete!');
+      
+      // Show subscription page for startup users
+      if (userData?.role === 'Startup') {
+        setShowSubscriptionPage(true);
+      } else {
+        onNavigateToDashboard();
+      }
       
     } catch (error: any) {
       setError(error.message || 'An error occurred');
@@ -1026,23 +982,18 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     return null;
   }
 
+  // Show subscription page if user is startup and registration is complete
+  if (showSubscriptionPage && userData?.role === 'Startup') {
+    return (
+      <StartupSubscriptionPage 
+        currentUser={userData}
+        onPaymentSuccess={() => onNavigateToDashboard()}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 py-12">
-      {showStartupPayment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <StartupSubscriptionStep
-            userEmail={paymentUserEmail}
-            razorpayCustomerId={undefined} // Will be fetched if available
-            subscriptionButtonId={(typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RAZORPAY_SUBSCRIPTION_BUTTON_ID) || 'pl_RMvYPEir7kvx3E'}
-            onSuccess={() => {
-              try { localStorage.removeItem('startupPaymentRequired'); } catch {}
-              setShowStartupPayment(false);
-              onNavigateToDashboard();
-            }}
-            onBack={() => setShowStartupPayment(false)}
-          />
-        </div>
-      )}
       <Card className="w-full max-w-2xl">
         {/* Header with logout button */}
         <div className="relative">

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { paymentService, SubscriptionPlan } from '../lib/paymentService';
+// Payment service removed
+type SubscriptionPlan = { id: string; name: string; description: string; billing_interval: 'monthly'|'yearly'; price: number };
 
 interface TrialSubscriptionModalProps {
   isOpen: boolean;
@@ -35,8 +36,7 @@ const TrialSubscriptionModal: React.FC<TrialSubscriptionModalProps> = ({
       setIsLoading(true);
       setError(null);
       
-      const plansData = await paymentService.getSubscriptionPlans('Startup', 'India');
-      setPlans(plansData || []);
+      setPlans([]);
       
       if (plansData && plansData.length > 0) {
         setSelectedPlan(plansData[0]); // Select first plan by default
@@ -58,45 +58,8 @@ const TrialSubscriptionModal: React.FC<TrialSubscriptionModalProps> = ({
     setIsProcessing(true);
     setError(null);
 
-    try {
-      // Create Razorpay trial subscription
-      const subscription = await paymentService.createTrialSubscription(
-        userId,
-        selectedPlan.billing_interval as 'monthly' | 'yearly',
-        1 // startup count
-      );
-
-      // Initialize Razorpay
-      const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_live_RMzc3DoDdGLh9u',
-        subscription_id: subscription.id,
-        name: 'Track My Startup',
-        description: `5-Minute Trial - ${selectedPlan.name}`,
-        prefill: {
-          name: startupName,
-          email: '', // You can get this from user context
-        },
-        theme: {
-          color: '#3B82F6'
-        },
-        handler: function (response: any) {
-          console.log('Trial subscription successful:', response);
-          handleTrialSuccess();
-        },
-        modal: {
-          ondismiss: function() {
-            setIsProcessing(false);
-          }
-        }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.open();
-    } catch (error) {
-      console.error('Trial subscription error:', error);
-      setError('Failed to start trial. Please try again.');
-      setIsProcessing(false);
-    }
+    // Payment flow removed; directly mark trial success
+    handleTrialSuccess();
   };
 
   const handleTrialSuccess = () => {

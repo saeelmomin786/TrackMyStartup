@@ -1,5 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { paymentService, SubscriptionSummary } from '../lib/paymentService';
+// Payment service removed
+type SubscriptionSummary = {
+  totalDue: number;
+  totalSubscriptions: number;
+  upcomingPayments: { plan: { name: string }; amount: number }[];
+  activeSubscriptions: { startup_count: number; current_period_end: string }[];
+};
 import Card from './ui/Card';
 import { Euro, CreditCard, Calendar, TrendingUp, DollarSign, IndianRupee, PoundSterling } from 'lucide-react';
 import { getCurrencyForCountry } from '../lib/utils';
@@ -24,8 +30,7 @@ export default function SubscriptionSummaryCards({ userId, userType, userCountry
     try {
       setIsLoading(true);
       setError(null);
-      const summaryData = await paymentService.getSubscriptionSummary(userId);
-      setSummary(summaryData);
+      setSummary(null);
     } catch (error) {
       console.error('Error loading subscription summary:', error);
       setError('Failed to load subscription summary. Please try again or contact support.');

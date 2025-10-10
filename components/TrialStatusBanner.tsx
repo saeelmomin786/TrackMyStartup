@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { paymentService, UserSubscription } from '../lib/paymentService';
+// Payment service removed
+type UserSubscription = { trial_start?: string; trial_end?: string; subscription_plans?: { name?: string } };
 
 interface TrialStatusBannerProps {
   userId: string;
@@ -37,8 +38,7 @@ const TrialStatusBanner: React.FC<TrialStatusBannerProps> = ({
   const loadTrialStatus = async () => {
     try {
       setIsLoading(true);
-      const subscription = await paymentService.getTrialSubscription(userId);
-      setTrialSubscription(subscription);
+      setTrialSubscription(null);
       
       if (subscription) {
         updateTimeRemaining();

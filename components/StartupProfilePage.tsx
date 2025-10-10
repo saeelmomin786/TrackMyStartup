@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Bell, HelpCircle, LogOut, Edit3, Shield, RefreshCw, Building2 } from 'lucide-react';
 import Button from './ui/Button';
 import EditProfileModal from './EditProfileModal';
-import PaymentSection from './PaymentSection';
-import SubscriptionSummaryCards from './SubscriptionSummaryCards';
+// PaymentSection removed
+// SubscriptionSummaryCards removed
 import { authService } from '../lib/auth';
 import { AuthUser } from '../lib/auth';
 import { Startup } from '../types';
@@ -268,28 +268,7 @@ const StartupProfilePage: React.FC<StartupProfilePageProps> = ({
         </div>
       )}
 
-      {/* Subscription Summary Cards - For Startups */}
-      {refreshedProfile && (
-        <div className="mt-4">
-          <SubscriptionSummaryCards
-            userId={refreshedProfile.id}
-            userType="Startup"
-            userCountry={refreshedProfile.country}
-          />
-        </div>
-      )}
-
-      {/* Payment Section - For Startups */}
-      {refreshedProfile && (
-        <div className="mt-4">
-          <PaymentSection
-            userId={refreshedProfile.id}
-            userType="Startup"
-            country={refreshedProfile.country || 'Global'}
-            startupCount={startup?.id ? 1 : 0} // If we have startup data, count as 1
-          />
-        </div>
-      )}
+      {/* Payment and Subscription components removed */}
 
       {/* Settings List */}
       <div className="bg-white mt-4">

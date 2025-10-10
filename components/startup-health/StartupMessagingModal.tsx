@@ -1,6 +1,17 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { X, Send, Paperclip, FileText, Download, CheckCircle, MessageCircle } from 'lucide-react';
-import { incubationPaymentService, IncubationMessage } from '../../lib/incubationPaymentService';
+// Payment service removed; define local message type and use Supabase
+type IncubationMessage = {
+  id: string;
+  application_id: string;
+  sender_id: string;
+  receiver_id: string;
+  message: string;
+  message_type: 'text' | 'file';
+  attachment_url?: string;
+  is_read: boolean;
+  created_at: string;
+};
 import { storageService } from '../../lib/storage';
 import { supabase } from '../../lib/supabase';
 
@@ -36,9 +47,10 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
       loadCurrentUserId();
       
       // Subscribe to real-time messages
-      const subscription = incubationPaymentService.subscribeToMessages(
-        applicationId,
-        (message) => {
+      const channel = supabase
+        .channel(`incubation_messages_startup_${applicationId}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'incubation_messages', filter: `application_id=eq.${applicationId}` }, (payload) => {
+          const message = payload.new as any as IncubationMessage;
           console.log('Startup received real-time message:', message);
           console.log('Current startup user ID:', currentUserId);
           console.log('Message sender ID:', message.sender_id);
@@ -59,12 +71,12 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
             return [...prev, message];
           });
           scrollToBottom();
-        }
-      );
+        })
+        .subscribe();
 
       return () => {
         console.log('Startup modal closed, unsubscribing from real-time updates');
-        subscription.unsubscribe();
+        supabase.removeChannel(channel);
       };
     }
   }, [isOpen, applicationId, currentUserId]);
@@ -78,16 +90,21 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
     setIsLoading(true);
     try {
       console.log('Startup loading messages for application:', applicationId);
-      const messagesData = await incubationPaymentService.getApplicationMessages(applicationId);
+      const { data: messagesData, error } = await supabase
+        .from('incubation_messages')
+        .select('*')
+        .eq('application_id', applicationId)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
       console.log('Startup loaded messages:', messagesData);
-      setMessages(messagesData);
+      setMessages((messagesData as any) || []);
       
       // Mark all unread messages as read when the modal is opened
-      const unreadMessages = messagesData.filter(msg => !msg.is_read);
+      const unreadMessages = ((messagesData as any) || []).filter((msg: any) => !msg.is_read);
       console.log('Startup marking unread messages as read:', unreadMessages);
       for (const message of unreadMessages) {
         try {
-          await incubationPaymentService.markMessageAsRead(message.id);
+          await supabase.from('incubation_messages').update({ is_read: true }).eq('id', message.id);
         } catch (error) {
           console.error('Error marking message as read:', error);
         }
@@ -130,7 +147,11 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
       }
 
       // Get the facilitator ID from the application
-      const { data: applicationData, error: appError } = await incubationPaymentService.getApplicationDetails(applicationId);
+      const { data: applicationData, error: appError } = await supabase
+        .from('opportunity_applications')
+        .select('facilitator_id')
+        .eq('id', applicationId)
+        .maybeSingle();
       
       if (appError || !applicationData) {
         throw new Error('Unable to get application details. Please refresh and try again.');
@@ -144,13 +165,16 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
 
       // Send message
       console.log('Startup sending message to facilitator:', { applicationId, facilitatorId, newMessage, messageType: selectedFile ? 'file' : 'text' });
-      await incubationPaymentService.sendMessage(
-        applicationId,
-        facilitatorId,
-        newMessage,
-        selectedFile ? 'file' : 'text',
-        attachmentUrl
-      );
+      const { error: sendError } = await supabase.from('incubation_messages').insert({
+        application_id: applicationId,
+        sender_id: currentUserId,
+        receiver_id: facilitatorId,
+        message: newMessage,
+        message_type: selectedFile ? 'file' : 'text',
+        attachment_url: attachmentUrl,
+        is_read: false
+      });
+      if (sendError) throw sendError;
       console.log('Message sent successfully from startup to facilitator');
 
       // Add the sent message to the state immediately (fallback in case real-time doesn't trigger)

@@ -67,6 +67,8 @@ export interface Database {
           email: string
           name: string
           role: 'Investor' | 'Startup' | 'CA' | 'CS' | 'Admin' | 'Startup Facilitation Center'
+          startup_name?: string
+          center_name?: string
           registration_date: string
           created_at: string
           updated_at: string
@@ -76,6 +78,8 @@ export interface Database {
           email: string
           name: string
           role: 'Investor' | 'Startup' | 'CA' | 'CS' | 'Admin' | 'Startup Facilitation Center'
+          startup_name?: string
+          center_name?: string
           registration_date?: string
           created_at?: string
           updated_at?: string
@@ -85,6 +89,8 @@ export interface Database {
           email?: string
           name?: string
           role?: 'Investor' | 'Startup' | 'CA' | 'CS' | 'Admin' | 'Startup Facilitation Center'
+          startup_name?: string
+          center_name?: string
           registration_date?: string
           created_at?: string
           updated_at?: string

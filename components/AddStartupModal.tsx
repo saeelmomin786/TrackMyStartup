@@ -1,140 +1,122 @@
 import React, { useState } from 'react';
-import { InvestmentType } from '../types';
-import { startupService } from '../lib/database';
 import Modal from './ui/Modal';
-import Button from './ui/Button';
 import Input from './ui/Input';
-import Select from './ui/Select';
+import Button from './ui/Button';
+import { X, User, Mail, Phone, Building } from 'lucide-react';
 
 interface AddStartupModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onStartupAdded: () => void;
+  onAddStartup: (startupData: StartupFormData) => Promise<void>;
+  facilitatorCode: string;
+}
+
+export interface StartupFormData {
+  name: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
 }
 
 const AddStartupModal: React.FC<AddStartupModalProps> = ({
   isOpen,
   onClose,
-  onStartupAdded
+  onAddStartup,
+  facilitatorCode
 }) => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string>('');
-  
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<StartupFormData>({
     name: '',
-    investment_type: InvestmentType.Seed,
-    investment_value: '',
-    equity_allocation: '',
-    current_valuation: '',
-    sector: '',
-    total_funding: '',
-    total_revenue: '',
-    registration_date: '',
-    founders: [{ name: '', email: '' }]
+    contactPerson: '',
+    email: '',
+    phone: ''
   });
+  const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<Partial<StartupFormData>>({});
 
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const handleFounderChange = (index: number, field: 'name' | 'email', value: string) => {
-    const newFounders = [...formData.founders];
-    newFounders[index] = { ...newFounders[index], [field]: value };
-    setFormData(prev => ({ ...prev, founders: newFounders }));
-  };
-
-  const addFounder = () => {
-    setFormData(prev => ({
-      ...prev,
-      founders: [...prev.founders, { name: '', email: '' }]
-    }));
-  };
-
-  const removeFounder = (index: number) => {
-    if (formData.founders.length > 1) {
-      const newFounders = formData.founders.filter((_, i) => i !== index);
-      setFormData(prev => ({ ...prev, founders: newFounders }));
+  const validateForm = (): boolean => {
+    const newErrors: Partial<StartupFormData> = {};
+    
+    if (!formData.name.trim()) {
+      newErrors.name = 'Startup name is required';
     }
+    
+    if (!formData.contactPerson.trim()) {
+      newErrors.contactPerson = 'Contact person name is required';
+    }
+    
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+    
+    if (!formData.phone.trim()) {
+      newErrors.phone = 'Phone number is required';
+    } else if (!/^[\+]?[1-9][\d]{0,15}$/.test(formData.phone.replace(/\s/g, ''))) {
+      newErrors.phone = 'Please enter a valid phone number';
+    }
+    
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+
     setIsLoading(true);
-    setError('');
-
     try {
-      // Validate required fields
-      if (!formData.name || !formData.sector || !formData.registration_date) {
-        throw new Error('Please fill in all required fields');
-      }
-
-      // Validate numeric fields
-      const numericFields = ['investment_value', 'equity_allocation', 'current_valuation', 'total_funding', 'total_revenue'];
-      for (const field of numericFields) {
-        if (isNaN(Number(formData[field as keyof typeof formData]))) {
-          throw new Error(`${field.replace('_', ' ')} must be a valid number`);
-        }
-      }
-
-      // Validate founders
-      const validFounders = formData.founders.filter(f => f.name && f.email);
-      if (validFounders.length === 0) {
-        throw new Error('At least one founder is required');
-      }
-
-      const startupData = {
-        name: formData.name,
-        investment_type: formData.investment_type,
-        investment_value: Number(formData.investment_value),
-        equity_allocation: Number(formData.equity_allocation),
-        current_valuation: Number(formData.current_valuation),
-        sector: formData.sector,
-        total_funding: Number(formData.total_funding),
-        total_revenue: Number(formData.total_revenue),
-        registration_date: formData.registration_date,
-        founders: validFounders
-      };
-
-      await startupService.createStartup(startupData);
-      
-      // Reset form
+      await onAddStartup(formData);
       setFormData({
         name: '',
-        investment_type: InvestmentType.Seed,
-        investment_value: '',
-        equity_allocation: '',
-        current_valuation: '',
-        sector: '',
-        total_funding: '',
-        total_revenue: '',
-        registration_date: '',
-        founders: [{ name: '', email: '' }]
+        contactPerson: '',
+        email: '',
+        phone: ''
       });
-
-      onStartupAdded();
+      setErrors({});
       onClose();
     } catch (error) {
-      console.error('Error creating startup:', error);
-      setError(error instanceof Error ? error.message : 'Failed to create startup');
+      console.error('Error adding startup:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add New Startup">
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-            {error}
-          </div>
-        )}
+  const handleInputChange = (field: keyof StartupFormData, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: undefined }));
+    }
+  };
 
-        {/* Basic Information */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} size="lg">
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-slate-800">Add New Startup</h2>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+
+        <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="flex items-center gap-2 mb-2">
+            <Building className="h-5 w-5 text-blue-600" />
+            <span className="font-medium text-blue-800">Your Facilitator Code</span>
+          </div>
+          <p className="text-blue-700 text-sm">
+            Share this code with the startup: <span className="font-bold text-blue-900">{facilitatorCode}</span>
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
               Startup Name *
@@ -144,198 +126,91 @@ const AddStartupModal: React.FC<AddStartupModalProps> = ({
               value={formData.name}
               onChange={(e) => handleInputChange('name', e.target.value)}
               placeholder="Enter startup name"
-              required
+              className={errors.name ? 'border-red-500' : ''}
             />
+            {errors.name && (
+              <p className="mt-1 text-sm text-red-600">{errors.name}</p>
+            )}
           </div>
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              Sector *
+              Contact Person Name *
             </label>
-            <Input
-              type="text"
-              value={formData.sector}
-              onChange={(e) => handleInputChange('sector', e.target.value)}
-              placeholder="e.g., FinTech, HealthTech"
-              required
-            />
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
+              <Input
+                type="text"
+                value={formData.contactPerson}
+                onChange={(e) => handleInputChange('contactPerson', e.target.value)}
+                placeholder="Enter contact person name"
+                className={`pl-10 ${errors.contactPerson ? 'border-red-500' : ''}`}
+              />
+            </div>
+            {errors.contactPerson && (
+              <p className="mt-1 text-sm text-red-600">{errors.contactPerson}</p>
+            )}
           </div>
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              Investment Type
+              Email Address *
             </label>
-            <Select
-              value={formData.investment_type}
-              onChange={(e) => handleInputChange('investment_type', e.target.value)}
-            >
-              {Object.values(InvestmentType).map(type => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </Select>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
+              <Input
+                type="email"
+                value={formData.email}
+                onChange={(e) => handleInputChange('email', e.target.value)}
+                placeholder="Enter email address"
+                className={`pl-10 ${errors.email ? 'border-red-500' : ''}`}
+              />
+            </div>
+            {errors.email && (
+              <p className="mt-1 text-sm text-red-600">{errors.email}</p>
+            )}
           </div>
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              Registration Date *
+              Phone Number *
             </label>
-            <Input
-              type="date"
-              value={formData.registration_date}
-              onChange={(e) => handleInputChange('registration_date', e.target.value)}
-              required
-            />
-          </div>
-        </div>
-
-        {/* Financial Information */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Investment Value (Lakhs)
-            </label>
-            <Input
-              type="number"
-              value={formData.investment_value}
-              onChange={(e) => handleInputChange('investment_value', e.target.value)}
-              placeholder="0"
-              min="0"
-            />
+            <div className="relative">
+              <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
+              <Input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => handleInputChange('phone', e.target.value)}
+                placeholder="Enter phone number"
+                className={`pl-10 ${errors.phone ? 'border-red-500' : ''}`}
+              />
+            </div>
+            {errors.phone && (
+              <p className="mt-1 text-sm text-red-600">{errors.phone}</p>
+            )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Equity Allocation (%)
-            </label>
-            <Input
-              type="number"
-              value={formData.equity_allocation}
-              onChange={(e) => handleInputChange('equity_allocation', e.target.value)}
-              placeholder="0"
-              min="0"
-              max="100"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Current Valuation (Lakhs)
-            </label>
-            <Input
-              type="number"
-              value={formData.current_valuation}
-              onChange={(e) => handleInputChange('current_valuation', e.target.value)}
-              placeholder="0"
-              min="0"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Total Funding (Lakhs)
-            </label>
-            <Input
-              type="number"
-              value={formData.total_funding}
-              onChange={(e) => handleInputChange('total_funding', e.target.value)}
-              placeholder="0"
-              min="0"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Total Revenue (Lakhs)
-            </label>
-            <Input
-              type="number"
-              value={formData.total_revenue}
-              onChange={(e) => handleInputChange('total_revenue', e.target.value)}
-              placeholder="0"
-              min="0"
-            />
-          </div>
-        </div>
-
-        {/* Founders */}
-        <div>
-          <div className="flex justify-between items-center mb-4">
-            <label className="block text-sm font-medium text-slate-700">
-              Founders *
-            </label>
+          <div className="flex justify-end gap-3 pt-4">
             <Button
               type="button"
-              onClick={addFounder}
-              className="text-sm bg-blue-600 hover:bg-blue-700"
+              variant="outline"
+              onClick={onClose}
+              disabled={isLoading}
             >
-              Add Founder
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={isLoading}
+              className="bg-brand-primary hover:bg-brand-primary/90"
+            >
+              {isLoading ? 'Adding...' : 'Add Startup'}
             </Button>
           </div>
-
-          <div className="space-y-3">
-            {formData.founders.map((founder, index) => (
-              <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 border border-slate-200 rounded-md">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Founder Name
-                  </label>
-                  <Input
-                    type="text"
-                    value={founder.name}
-                    onChange={(e) => handleFounderChange(index, 'name', e.target.value)}
-                    placeholder="Enter founder name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Founder Email
-                  </label>
-                  <Input
-                    type="email"
-                    value={founder.email}
-                    onChange={(e) => handleFounderChange(index, 'email', e.target.value)}
-                    placeholder="Enter founder email"
-                  />
-                </div>
-                {formData.founders.length > 1 && (
-                  <div className="md:col-span-2">
-                    <Button
-                      type="button"
-                      onClick={() => removeFounder(index)}
-                      className="text-sm bg-red-600 hover:bg-red-700"
-                    >
-                      Remove Founder
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex justify-end gap-3">
-          <Button
-            type="button"
-            onClick={onClose}
-            className="bg-slate-300 hover:bg-slate-400 text-slate-700"
-            disabled={isLoading}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            className="bg-brand-primary hover:bg-brand-primary-dark"
-            disabled={isLoading}
-          >
-            {isLoading ? 'Creating...' : 'Create Startup'}
-          </Button>
-        </div>
-      </form>
+        </form>
+      </div>
     </Modal>
   );
 };
 
 export default AddStartupModal;
-
-

@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { BasicRegistrationStep } from './BasicRegistrationStep';
 import { DocumentUploadStep } from './DocumentUploadStep';
 import { UserRole } from '../types';
-import StartupPaymentStep from './StartupPaymentStep';
-import StartupSubscriptionStep from './StartupSubscriptionStep';
+// Payment steps removed
 import { authService, AuthUser } from '../lib/auth';
 import { storageService } from '../lib/storage';
 
@@ -44,7 +43,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
   onNavigateToLogin,
   onNavigateToLanding
 }) => {
-  const [currentStep, setCurrentStep] = useState<'basic' | 'documents' | 'payment'>('basic');
+  const [currentStep, setCurrentStep] = useState<'basic' | 'documents'>('basic');
   const [pendingDocuments, setPendingDocuments] = useState<any | null>(null);
   const [pendingFounders, setPendingFounders] = useState<any[] | null>(null);
   const [pendingCountry, setPendingCountry] = useState<string | undefined>(undefined);
@@ -94,18 +93,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     founders: any[],
     country?: string
   ) => {
-    // For Startup role, go to payment step first (₹1 verification)
-    if (userData?.role === 'Startup') {
-      // Cache payload to finalize after payment success
-      setPendingDocuments(documents);
-      setPendingFounders(founders);
-      setPendingCountry(country);
-      try {
-        localStorage.setItem('startupPaymentRequired', '1');
-      } catch {}
-      setCurrentStep('payment');
-      return;
-    }
+    // Payment step removed; proceed to finalize for all roles
 
     // Non-startup roles proceed to finalize directly
     await finalizeRegistration(userData, documents, founders, country);
@@ -399,71 +387,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     );
   }
 
-  if (currentStep === 'payment' && userData) {
-    // Attempt to fetch saved razorpay_customer_id from profile for cleanup (best-effort)
-    const [razorpayCustomerId, setRazorpayCustomerId] = useState<string | undefined>(undefined);
-    useState(() => {
-      (async () => {
-        try {
-          const { data: { user } } = await authService.supabase.auth.getUser();
-          if (user?.id) {
-            const { data: profile } = await authService.supabase
-              .from('users')
-              .select('razorpay_customer_id')
-              .eq('id', user.id)
-              .single();
-            if (profile?.razorpay_customer_id) setRazorpayCustomerId(profile.razorpay_customer_id);
-          }
-        } catch {}
-      })();
-      return undefined;
-    });
-    // Render the Razorpay Subscription Button step for Startup role
-    if (userData.role === 'Startup') {
-      return (
-        <StartupSubscriptionStep
-          userEmail={userData.email}
-          razorpayCustomerId={razorpayCustomerId}
-          subscriptionButtonId={process.env.RAZORPAY_SUBSCRIPTION_BUTTON_ID || 'pl_RMvYPEir7kvx3E'}
-          onSuccess={async () => {
-            try {
-              await finalizeRegistration(
-                userData,
-                pendingDocuments || {},
-                pendingFounders || [],
-                pendingCountry || userData.country
-              );
-            } catch (e) {
-              console.error(e);
-            }
-          }}
-          onBack={() => setCurrentStep('documents')}
-        />
-      );
-    }
-
-    // Fallback for non-startup (shouldn't happen as we gate earlier)
-    return (
-      <StartupPaymentStep
-        userName={userData.name}
-        userEmail={userData.email}
-        applicationId={userData.email}
-        onSuccess={async () => {
-          try {
-            await finalizeRegistration(
-              userData,
-              pendingDocuments || {},
-              pendingFounders || [],
-              pendingCountry || userData.country
-            );
-          } catch (e) {
-            console.error(e);
-          }
-        }}
-        onBack={() => setCurrentStep('documents')}
-      />
-    );
-  }
+  // Payment step removed
 
   return (
     <BasicRegistrationStep

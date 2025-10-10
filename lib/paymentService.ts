@@ -1,11 +1,30 @@
 import { supabase } from './supabase';
 
+// Razorpay configuration
+const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+const RAZORPAY_KEY_SECRET = import.meta.env.VITE_RAZORPAY_KEY_SECRET;
+
+// Types
+export interface PaymentOrder {
+  id: string;
+  amount: number;
+  currency: string;
+  receipt: string;
+  status: string;
+}
+
+export interface PaymentResponse {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+}
+
 export interface SubscriptionPlan {
   id: string;
   name: string;
   price: number;
   currency: string;
-  billing_interval: 'monthly' | 'yearly';
+  interval: 'monthly' | 'yearly';
   description: string;
   user_type: string;
   country: string;
@@ -19,818 +38,714 @@ export interface UserSubscription {
   status: 'active' | 'inactive' | 'cancelled' | 'past_due';
   current_period_start: string;
   current_period_end: string;
-  startup_count: number;
   amount: number;
-  billing_interval: string;
-  is_in_trial?: boolean;
+  interval: 'monthly' | 'yearly';
+  is_in_trial: boolean;
   trial_start?: string;
   trial_end?: string;
-  razorpay_subscription_id?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PaymentIntent {
-  id: string;
-  amount: number;
-  currency: string;
-  status: 'pending' | 'succeeded' | 'failed';
-  client_secret: string;
-}
-
-export interface DiscountCoupon {
-  id: string;
-  code: string;
-  discount_type: 'percentage' | 'fixed';
-  discount_value: number;
-  max_uses: number;
-  used_count: number;
-  valid_from: string;
-  valid_until: string;
-  is_active: boolean;
-  created_by: string;
-  created_at: string;
-}
-
-export interface DueDiligenceRequest {
-  id: string;
-  user_id: string;
-  startup_id: string;
-  amount: number;
-  currency: string;
-  status: 'pending' | 'paid' | 'completed' | 'failed';
-  payment_intent_id?: string;
-  created_at: string;
-  completed_at?: string;
-}
-
-export interface SubscriptionSummary {
-  totalDue: number;
-  totalSubscriptions: number;
-  activeSubscriptions: UserSubscription[];
-  upcomingPayments: Array<{
-    plan: SubscriptionPlan;
-    amount: number;
-    dueDate: string;
-  }>;
 }
 
 class PaymentService {
-  // Get subscription plans for a specific user type and country
-  async getSubscriptionPlans(userType: string, country: string): Promise<SubscriptionPlan[]> {
-    try {
-      // For startup users, only show Indian plans
-      if (userType === 'Startup') {
-        const { data, error } = await supabase
-          .from('subscription_plans')
-          .select('*')
-          .eq('user_type', userType)
-          .eq('country', 'India')
-          .eq('is_active', true)
-          .order('price', { ascending: true });
+  // Centralized payment success callback
+  private paymentSuccessCallback?: () => void;
 
-        if (error) throw error;
-        return data || [];
-      }
+  // Set payment success callback
+  setPaymentSuccessCallback(callback: () => void) {
+    this.paymentSuccessCallback = callback;
+  }
 
-      // For other user types, use the original logic
-      let { data, error } = await supabase
-        .from('subscription_plans')
-        .select('*')
-        .eq('user_type', userType)
-        .eq('country', country)
-        .eq('is_active', true)
-        .order('price', { ascending: true });
-
-      // If no country-specific plans found, fall back to Global plans
-      if (!data || data.length === 0) {
-        const { data: globalData, error: globalError } = await supabase
-          .from('subscription_plans')
-          .select('*')
-          .eq('user_type', userType)
-          .eq('country', 'Global')
-          .eq('is_active', true)
-          .order('price', { ascending: true });
-        
-        if (globalError) throw globalError;
-        data = globalData;
-      }
-
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      console.error('Error fetching subscription plans:', error);
-      throw error;
+  // Trigger payment success callback
+  private triggerPaymentSuccess() {
+    if (this.paymentSuccessCallback) {
+      console.log('🎉 CENTRALIZED PAYMENT SUCCESS: Triggering callback');
+      console.log('🎉 This will unlock the dashboard for the user');
+      this.paymentSuccessCallback();
+    } else {
+      console.log('⚠️ No payment success callback set - payment completed but no dashboard unlock');
     }
   }
 
-  async setRazorpaySubscription(userId: string, subscriptionId: string): Promise<void> {
-    try {
-      const { error } = await supabase
-        .from('user_subscriptions')
-        .update({ 
-          razorpay_subscription_id: subscriptionId,
-          is_in_trial: false,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId)
-        .eq('status', 'active');
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error linking Razorpay subscription id:', error);
-      throw error;
-    }
-  }
-
-  // Get user's current subscription
-  async getUserSubscription(userId: string): Promise<UserSubscription | null> {
-    try {
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select(`
-          *,
-          subscription_plans (price, billing_interval)
-        `)
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .single();
-
-      if (error && error.code !== 'PGRST116') throw error;
-      
-      if (data && data.subscription_plans) {
-        // Calculate amount and add billing_interval from plan
-        data.amount = data.subscription_plans.price * data.startup_count;
-        data.billing_interval = data.subscription_plans.billing_interval;
+  // Load Razorpay script dynamically
+  private loadRazorpayScript(): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
       }
-      
-      return data;
-    } catch (error) {
-      console.error('Error fetching user subscription:', error);
-      throw error;
-    }
+
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
   }
 
-  // Create payment intent
-  async createPaymentIntent(amount: number, currency: string, userId: string, planId: string): Promise<PaymentIntent> {
+  // Create Razorpay order
+  async createOrder(plan: SubscriptionPlan, userId: string, finalAmount?: number): Promise<PaymentOrder> {
     try {
-      const response = await fetch('/api/payment/create-intent', {
+      const amount = finalAmount || plan.price;
+      const response = await fetch('http://localhost:3001/api/razorpay/create-order', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          amount: Math.round(amount * 100), // Convert to cents
-          currency: currency.toLowerCase(),
-          userId,
-          planId,
+          amount: Math.round(amount * 100), // Convert to smallest currency unit
+          currency: plan.currency,
+          receipt: `order_${Date.now()}`, // Shorter receipt to meet Razorpay's 40 char limit
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create payment intent');
+        throw new Error('Failed to create order');
       }
 
-      return await response.json();
+      const order = await response.json();
+      return order;
     } catch (error) {
-      console.error('Error creating payment intent:', error);
+      console.error('Error creating Razorpay order:', error);
       throw error;
     }
   }
 
-  // Confirm payment and create subscription
-  async confirmPayment(paymentIntentId: string, userId: string, planId: string, startupCount: number): Promise<UserSubscription> {
+  // Create Razorpay subscription for autopay (dynamic plan based on UI total)
+  async createSubscription(plan: SubscriptionPlan, userId: string): Promise<PaymentOrder> {
     try {
-      // First get the plan to calculate amount
-      const { data: plan, error: planError } = await supabase
-        .from('subscription_plans')
-        .select('price, billing_interval')
-        .eq('id', planId)
-        .single();
+      // Compute recurring amount (price + tax)
+      const taxPercentage = (plan as any).tax_percentage || 0;
+      const taxAmount = taxPercentage > 0 ? this.calculateTaxAmount(plan.price, taxPercentage) : 0;
+      const finalAmount = plan.price + taxAmount;
 
-      if (planError) throw planError;
-
-      const amount = plan.price * startupCount;
-      const billing_interval = plan.billing_interval;
-
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .insert({
-          user_id: userId,
-          plan_id: planId,
-          status: 'active',
-          startup_count: startupCount,
-          amount: amount,
-          billing_interval: billing_interval,
-          // legacy column compatibility
-          interval: billing_interval,
-          current_period_start: new Date().toISOString(),
-          current_period_end: new Date(Date.now() + (billing_interval === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000).toISOString(),
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error confirming payment:', error);
-      throw error;
-    }
-  }
-
-  // Start a 5-minute trial (no immediate charge beyond ₹1 verification handled elsewhere)
-  async startTrial(userId: string, planId: string, startupCount: number): Promise<UserSubscription> {
-    try {
-      const trialStart = new Date();
-      const trialEnd = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-      // Fetch plan to set billing_interval and compute notional amount (0 during trial)
-      const { data: plan, error: planError } = await supabase
-        .from('subscription_plans')
-        .select('price, billing_interval')
-        .eq('id', planId)
-        .single();
-
-      if (planError) throw planError;
-
-      const billing_interval = plan.billing_interval;
-
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .upsert({
-          user_id: userId,
-          plan_id: planId,
-          status: 'active',
-          startup_count: startupCount,
-          amount: 0,
-          billing_interval,
-          // legacy column compatibility
-          interval: billing_interval,
-          is_in_trial: true,
-          trial_start: trialStart.toISOString(),
-          trial_end: trialEnd.toISOString(),
-          current_period_start: trialStart.toISOString(),
-          current_period_end: trialEnd.toISOString()
-        }, { onConflict: 'user_id,plan_id' })
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error starting trial:', error);
-      throw error;
-    }
-  }
-
-  // Create Razorpay trial subscription for startup role
-  async createTrialSubscription(userId: string, planType: 'monthly' | 'yearly', startupCount: number = 1): Promise<any> {
-    try {
-      // HARD-SET single API endpoint for local testing
-      const API_BASE = 'http://localhost:3001';
-      const url = `${API_BASE}/api/razorpay/create-trial-subscription`;
-      console.log('🔍 Trying trial subscription endpoint:', url);
-      const response = await fetch(url, {
+      const response = await fetch('http://localhost:3001/api/razorpay/create-subscription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, plan_type: planType, startup_count: startupCount }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          final_amount: finalAmount,
+          interval: plan.interval,
+          plan_name: plan.name,
+          customer_notify: 1,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create trial subscription');
+        throw new Error('Failed to create subscription');
       }
 
       const subscription = await response.json();
-      
-      // Store the subscription in our database
-      await this.storeTrialSubscription(userId, planType, subscription.id, startupCount);
-      
       return subscription;
     } catch (error) {
-      console.error('Error creating trial subscription:', error);
+      console.error('Error creating Razorpay subscription:', error);
       throw error;
     }
   }
 
-  // Store trial subscription in database
-  async storeTrialSubscription(userId: string, planType: 'monthly' | 'yearly', razorpaySubscriptionId: string, startupCount: number): Promise<UserSubscription> {
-    try {
-      const trialStart = new Date();
-      const trialEnd = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-      // Find the appropriate plan based on type
-      const { data: plan, error: planError } = await supabase
-        .from('subscription_plans')
-        .select('id, price, billing_interval')
-        .eq('user_type', 'Startup')
-        .eq('billing_interval', planType === 'yearly' ? 'yearly' : 'monthly')
-        .eq('is_active', true)
-        .single();
-
-      if (planError) throw planError;
-
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .upsert({
-          user_id: userId,
-          plan_id: plan.id,
-          status: 'active',
-          startup_count: startupCount,
-          amount: 0, // No charge during trial
-          billing_interval: plan.billing_interval,
-          // legacy column compatibility
-          interval: plan.billing_interval,
-          is_in_trial: true,
-          trial_start: trialStart.toISOString(),
-          trial_end: trialEnd.toISOString(),
-          razorpay_subscription_id: razorpaySubscriptionId,
-          current_period_start: trialStart.toISOString(),
-          current_period_end: trialEnd.toISOString()
-        }, { onConflict: 'user_id,plan_id' })
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error storing trial subscription:', error);
-      throw error;
-    }
-  }
-
-  // Check if user is in trial period
-  async isUserInTrial(userId: string): Promise<boolean> {
-    try {
-      // Short-circuit in development to avoid Supabase 406 loops
+  // Create trial subscription with payment method setup (dynamic plan based on UI total)
+  async createTrialSubscription(plan: SubscriptionPlan, userId: string, currentUser?: any): Promise<boolean> {
+    return new Promise(async (resolve, reject) => {
       try {
-        const dev = (typeof import.meta !== 'undefined') && (import.meta as any).env && (import.meta as any).env.DEV;
-        if (dev) {
-          return false;
+        // Load Razorpay script
+        const scriptLoaded = await this.loadRazorpayScript();
+        if (!scriptLoaded) {
+          throw new Error('Failed to load Razorpay script');
         }
-      } catch {}
+        // Compute recurring amount (price + tax) for post-trial charges
+        const taxPercentage = (plan as any).tax_percentage || 0;
+        const taxAmount = taxPercentage > 0 ? this.calculateTaxAmount(plan.price, taxPercentage) : 0;
+        const finalAmount = plan.price + taxAmount;
 
+        // Create trial subscription with Razorpay
+        const response = await fetch('http://localhost:3001/api/razorpay/create-trial-subscription', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            trial_days: 30, // 30-day trial
+            interval: plan.interval,
+            plan_name: plan.name,
+            final_amount: finalAmount,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to create trial subscription');
+        }
+
+        const subscription = await response.json();
+
+        // Open Razorpay checkout for trial setup (no immediate charge)
+        const options = {
+          key: RAZORPAY_KEY_ID,
+          subscription_id: subscription.id,
+          name: 'Track My Startup',
+          description: `Free Trial: ${plan.name}`,
+          prefill: {
+            name: currentUser?.name || 'Startup User',
+            email: currentUser?.email || 'user@startup.com',
+          },
+          theme: {
+            color: '#1e40af',
+          },
+          handler: async (response: PaymentResponse) => {
+            try {
+              console.log('Trial setup payment response:', response);
+              // Verify trial setup
+              await this.verifyTrialSetup(response, plan, userId);
+              console.log('Trial setup completed successfully');
+              
+              // Trigger centralized payment success callback
+              this.triggerPaymentSuccess();
+              
+              resolve(true);
+            } catch (error) {
+              console.error('Trial setup verification failed:', error);
+              reject(error);
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              console.log('❌ Trial setup modal dismissed by user - trial cancelled');
+              reject(new Error('Trial setup cancelled by user'));
+            },
+          },
+        };
+
+        // Open Razorpay checkout
+        const razorpay = new (window as any).Razorpay(options);
+        razorpay.open();
+
+      } catch (error) {
+        console.error('Error creating trial subscription:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // Get tax configuration for user type and country
+  async getTaxConfiguration(userType: string, country: string = 'Global'): Promise<any> {
+    try {
       const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select('is_in_trial, trial_end')
-        .eq('user_id', userId)
-        .eq('status', 'active')
+        .from('tax_configurations')
+        .select('tax_percentage, name')
+        .eq('applies_to_user_type', userType)
+        .eq('country', country)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
         .single();
 
-      if (error && error.code !== 'PGRST116') throw error;
-      
-      if (!data) return false;
-
-      // Check if trial is still active
-      if (data.is_in_trial && data.trial_end) {
-        const trialEndDate = new Date(data.trial_end);
-        const now = new Date();
-        return now < trialEndDate;
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching tax configuration:', error);
+        return null;
       }
 
-      return false;
-    } catch (error) {
-      console.error('Error checking trial status:', error);
-      return false;
-    }
-  }
-
-  // Get trial subscription details
-  async getTrialSubscription(userId: string): Promise<UserSubscription | null> {
-    try {
-      // Short-circuit in development to avoid Supabase 406 loops
-      try {
-        const dev = (typeof import.meta !== 'undefined') && (import.meta as any).env && (import.meta as any).env.DEV;
-        if (dev) {
-          return null;
-        }
-      } catch {}
-
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select(`
-          *,
-          subscription_plans (price, billing_interval, name)
-        `)
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .eq('is_in_trial', true)
-        .single();
-
-      if (error && error.code !== 'PGRST116') throw error;
       return data;
     } catch (error) {
-      console.error('Error fetching trial subscription:', error);
+      console.error('Error getting tax configuration:', error);
       return null;
     }
   }
 
-  // End trial and convert to paid subscription
-  async endTrial(userId: string): Promise<UserSubscription> {
+  // Calculate tax amount
+  calculateTaxAmount(baseAmount: number, taxPercentage: number): number {
+    return Math.round((baseAmount * taxPercentage / 100) * 100) / 100; // Round to 2 decimal places
+  }
+
+  // Process payment with Razorpay
+  async processPayment(plan: SubscriptionPlan, userId: string, couponCode?: string, currentUser?: any): Promise<boolean> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        // Load Razorpay script
+        const scriptLoaded = await this.loadRazorpayScript();
+        if (!scriptLoaded) {
+          throw new Error('Failed to load Razorpay script');
+        }
+
+        // Calculate base price with coupon
+        let baseAmount = plan.price;
+        if (couponCode) {
+          const coupon = await this.validateCoupon(couponCode);
+          if (coupon) {
+            if (coupon.discount_type === 'percentage') {
+              baseAmount = plan.price * (1 - coupon.discount_value / 100);
+            } else {
+              baseAmount = Math.max(0, plan.price - coupon.discount_value);
+            }
+          }
+        }
+
+        // Get tax percentage from plan
+        const taxPercentage = plan.tax_percentage || 0;
+        let taxAmount = 0;
+        let finalAmount = baseAmount;
+
+        if (taxPercentage > 0) {
+          taxAmount = this.calculateTaxAmount(baseAmount, taxPercentage);
+          finalAmount = baseAmount + taxAmount;
+          
+          console.log(`Tax calculation: Base: ${baseAmount}, Tax: ${taxPercentage}%, Tax Amount: ${taxAmount}, Total: ${finalAmount}`);
+        } else {
+          console.log('No tax configured for this plan, using base amount only');
+        }
+
+        // Handle free payments (100% discount)
+        if (finalAmount <= 0) {
+          console.log('Free payment detected, creating subscription directly...');
+          const taxInfo = taxPercentage > 0 ? {
+            taxPercentage: taxPercentage,
+            taxAmount: taxAmount,
+            totalAmountWithTax: finalAmount
+          } : undefined;
+          
+          await this.createUserSubscription(plan, userId, couponCode, taxInfo);
+          
+          // Trigger centralized payment success callback for free payments
+          this.triggerPaymentSuccess();
+          
+          resolve(true);
+          return;
+        }
+
+        // Create one-time order for the discounted amount
+        const order = await this.createOrder(plan, userId, finalAmount);
+
+        // Razorpay options for one-time payment
+        const options = {
+          key: RAZORPAY_KEY_ID,
+          amount: Math.round(finalAmount * 100), // Convert to paise
+          currency: plan.currency,
+          order_id: order.id,
+          name: 'Track My Startup',
+          description: `Subscription: ${plan.name}`,
+          prefill: {
+            name: currentUser?.name || 'Startup User',
+            email: currentUser?.email || 'user@startup.com',
+          },
+          theme: {
+            color: '#1e40af',
+          },
+          handler: async (response: PaymentResponse) => {
+            try {
+              console.log('Payment handler triggered:', response);
+              
+              // Prepare tax information for verification
+              const taxInfo = taxPercentage > 0 ? {
+                taxPercentage: taxPercentage,
+                taxAmount: taxAmount,
+                totalAmountWithTax: finalAmount
+              } : undefined;
+              
+              // Verify the first payment with tax information
+              await this.verifyPayment(
+                response,
+                plan,
+                userId,
+                couponCode,
+                taxInfo,
+                { finalAmount, interval: plan.interval, planName: plan.name }
+              );
+              
+              // IMMEDIATE success callback - no delays
+              console.log('✅ Payment verified, triggering immediate success callback');
+              this.triggerPaymentSuccess();
+              
+              // Background subscription creation (non-blocking) always for Pay Now
+              console.log('🔄 Creating subscription for future autopay in background...');
+              this.createSubscription(plan, userId).catch(error => {
+                console.error('⚠️ Background subscription creation failed (non-critical):', error);
+              });
+              
+              resolve(true);
+            } catch (error) {
+              console.error('Payment verification failed:', error);
+              reject(error);
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              console.log('❌ Payment modal dismissed by user - payment cancelled');
+              reject(new Error('Payment cancelled by user'));
+            },
+          },
+        };
+
+        // Open Razorpay checkout
+        const razorpay = new (window as any).Razorpay(options);
+        razorpay.open();
+
+      } catch (error) {
+        console.error('Error processing payment:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // Verify payment
+  async verifyPayment(
+    paymentResponse: PaymentResponse,
+    plan: SubscriptionPlan,
+    userId: string,
+    couponCode?: string,
+    taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number },
+    context?: { finalAmount: number; interval: 'monthly' | 'yearly'; planName: string }
+  ): Promise<boolean> {
     try {
-      // Get current trial subscription
-      const trialSub = await this.getTrialSubscription(userId);
-      if (!trialSub) {
-        throw new Error('No active trial subscription found');
+      console.log('🔍 Verifying payment with Razorpay...');
+      console.log('Payment response:', paymentResponse);
+      console.log('Plan:', plan);
+      console.log('User ID:', userId);
+      
+      const response = await fetch('http://localhost:3001/api/razorpay/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          razorpay_payment_id: paymentResponse.razorpay_payment_id,
+          razorpay_order_id: paymentResponse.razorpay_order_id,
+          razorpay_signature: paymentResponse.razorpay_signature,
+          // persistence context
+          user_id: userId,
+          plan_id: plan.id,
+          amount: context?.finalAmount ?? taxInfo?.totalAmountWithTax ?? plan.price,
+          currency: plan.currency,
+          tax_percentage: taxInfo?.taxPercentage,
+          tax_amount: taxInfo?.taxAmount,
+          total_amount_with_tax: taxInfo?.totalAmountWithTax ?? context?.finalAmount,
+          interval: context?.interval ?? plan.interval,
+        }),
+      });
+
+      console.log('Verification response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Payment verification failed:', errorText);
+        throw new Error(`Payment verification failed: ${errorText}`);
       }
 
-      // Calculate the actual amount based on plan price and startup count
-      const planPrice = (trialSub as any).subscription_plans?.price || 0;
-      const amount = planPrice * trialSub.startup_count;
+      const verificationResult = await response.json();
+      console.log('Verification result:', verificationResult);
+      
+      if (verificationResult.success) {
+        console.log('✅ Payment verified successfully, creating subscription...');
+        // Create user subscription with tax information
+        await this.createUserSubscription(plan, userId, couponCode, taxInfo);
+        console.log('✅ User subscription created successfully');
+        return true;
+      } else {
+        console.error('❌ Payment verification failed:', verificationResult);
+        throw new Error('Payment verification failed');
+      }
+    } catch (error) {
+      console.error('❌ Error verifying payment:', error);
+      throw error;
+    }
+  }
 
-      // Update subscription to end trial
+  // Verify trial setup
+  async verifyTrialSetup(
+    paymentResponse: PaymentResponse,
+    plan: SubscriptionPlan,
+    userId: string
+  ): Promise<boolean> {
+    try {
+      console.log('🔍 Setting up trial subscription...');
+      console.log('Trial setup payment response:', paymentResponse);
+      console.log('Plan:', plan);
+      console.log('User ID:', userId);
+      
+      // For trial setup, we don't need payment verification
+      // Just create the trial subscription directly
+      await this.createTrialUserSubscription(plan, userId);
+      
+      console.log('✅ Trial subscription created successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Error creating trial subscription:', error);
+      throw error;
+    }
+  }
+
+  // Create user subscription
+  async createUserSubscription(
+    plan: SubscriptionPlan,
+    userId: string,
+    couponCode?: string,
+    taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number }
+  ): Promise<UserSubscription> {
+    try {
+      const now = new Date();
+      const periodEnd = new Date();
+      
+      if (plan.interval === 'monthly') {
+        periodEnd.setMonth(periodEnd.getMonth() + 1);
+      } else {
+        periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+      }
+
+      const subscriptionData: any = {
+        user_id: userId,
+        plan_id: plan.id,
+        status: 'active',
+        current_period_start: now.toISOString(),
+        current_period_end: periodEnd.toISOString(),
+        amount: plan.price,
+        interval: plan.interval,
+        is_in_trial: false,
+      };
+
+      // Add tax information if provided
+      if (taxInfo) {
+        subscriptionData.tax_percentage = taxInfo.taxPercentage;
+        subscriptionData.tax_amount = taxInfo.taxAmount;
+        subscriptionData.total_amount_with_tax = taxInfo.totalAmountWithTax;
+      }
+
+      console.log('Creating user subscription with data:', subscriptionData);
+      
       const { data, error } = await supabase
         .from('user_subscriptions')
-        .update({
-          is_in_trial: false,
-          amount: amount,
-          current_period_start: new Date().toISOString(),
-          current_period_end: new Date(Date.now() + (trialSub.billing_interval === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000).toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', trialSub.id)
+        .insert(subscriptionData)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error creating user subscription:', error);
+        console.error('Subscription data:', subscriptionData);
+        throw error;
+      }
+
+      console.log('User subscription created successfully:', data);
+
+      // Record coupon usage if applicable
+      if (couponCode) {
+        await this.recordCouponUsage(couponCode, userId, data.id);
+      }
+
       return data;
     } catch (error) {
-      console.error('Error ending trial:', error);
+      console.error('Error creating user subscription:', error);
       throw error;
     }
   }
 
-  // Update subscription startup count
-  async updateSubscriptionStartupCount(userId: string, newCount: number): Promise<void> {
+  // Create trial user subscription
+  async createTrialUserSubscription(
+    plan: SubscriptionPlan,
+    userId: string
+  ): Promise<UserSubscription> {
     try {
-      const { error } = await supabase
-        .from('user_subscriptions')
-        .update({ 
-          startup_count: newCount,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId)
-        .eq('status', 'active');
+      console.log('🔍 Creating trial user subscription...');
+      console.log('Plan:', plan);
+      console.log('User ID:', userId);
+      
+      const now = new Date();
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 30); // 30-day trial
 
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error updating subscription startup count:', error);
-      throw error;
-    }
-  }
+      const subscriptionData = {
+        user_id: userId,
+        plan_id: plan.id,
+        status: 'active',
+        current_period_start: now.toISOString(),
+        current_period_end: trialEnd.toISOString(),
+        amount: 0, // Free trial
+        interval: plan.interval,
+        is_in_trial: true,
+      };
 
-  // Validate discount coupon
-  async validateDiscountCoupon(code: string): Promise<DiscountCoupon | null> {
-    try {
+      console.log('Trial subscription data:', subscriptionData);
+
       const { data, error } = await supabase
-        .from('discount_coupons')
+        .from('user_subscriptions')
+        .insert(subscriptionData)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Error creating trial subscription:', error);
+        console.error('Subscription data:', subscriptionData);
+        throw error;
+      }
+
+      console.log('✅ Trial subscription created successfully:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ Error creating trial user subscription:', error);
+      throw error;
+    }
+  }
+
+  // Validate coupon
+  async validateCoupon(code: string): Promise<any> {
+    try {
+      console.log('PaymentService: Validating coupon:', code);
+      
+      const { data, error } = await supabase
+        .from('coupons')
         .select('*')
-        .eq('code', code.toUpperCase())
+        .eq('code', code)
         .eq('is_active', true)
         .single();
 
-      if (error && error.code !== 'PGRST116') throw error;
-      
-      if (!data) return null;
+      console.log('PaymentService: Database response:', { data, error });
+
+      if (error || !data) {
+        console.log('PaymentService: Coupon not found or error:', error);
+        return null;
+      }
 
       // Check if coupon is still valid
       const now = new Date();
-      const validFrom = new Date(data.valid_from);
-      const validUntil = new Date(data.valid_until);
-
-      if (now < validFrom || now > validUntil) {
+      if (data.valid_from && new Date(data.valid_from) > now) {
+        console.log('PaymentService: Coupon not yet valid');
         return null;
       }
-
-      // Check if max uses exceeded
+      if (data.valid_until && new Date(data.valid_until) < now) {
+        console.log('PaymentService: Coupon expired');
+        return null;
+      }
       if (data.used_count >= data.max_uses) {
+        console.log('PaymentService: Coupon usage limit reached');
         return null;
       }
 
+      console.log('PaymentService: Coupon is valid!');
       return data;
     } catch (error) {
-      console.error('Error validating discount coupon:', error);
-      throw error;
+      console.error('PaymentService: Error validating coupon:', error);
+      return null;
     }
   }
 
-  // Apply discount coupon
-  async applyDiscountCoupon(code: string, userId: string): Promise<{ coupon: DiscountCoupon; discountAmount: number }> {
+  // Record coupon usage
+  async recordCouponUsage(couponCode: string, userId: string, subscriptionId: string): Promise<void> {
     try {
-      const coupon = await this.validateDiscountCoupon(code);
-      if (!coupon) {
-        throw new Error('Invalid or expired coupon');
+      // Get coupon details
+      const { data: coupon } = await supabase
+        .from('coupons')
+        .select('id')
+        .eq('code', couponCode)
+        .single();
+
+      if (coupon) {
+        // Record redemption
+        await supabase
+          .from('coupon_redemptions')
+          .insert({
+            coupon_id: coupon.id,
+            user_id: userId,
+            subscription_id: subscriptionId,
+            redeemed_at: new Date().toISOString(),
+          });
+
+        // Update usage count
+        await supabase
+          .from('coupons')
+          .update({ used_count: supabase.raw('used_count + 1') })
+          .eq('id', coupon.id);
       }
-
-      // Increment used count
-      const { error } = await supabase
-        .from('discount_coupons')
-        .update({ used_count: coupon.used_count + 1 })
-        .eq('id', coupon.id);
-
-      if (error) throw error;
-
-      return {
-        coupon,
-        discountAmount: coupon.discount_value
-      };
     } catch (error) {
-      console.error('Error applying discount coupon:', error);
-      throw error;
+      console.error('Error recording coupon usage:', error);
     }
   }
 
-  // Calculate scouting fee for Investment Advisors
-  calculateScoutingFee(
-    advisoryFee: number,
-    investorInNetwork: boolean,
-    startupInNetwork: boolean
-  ): number {
-    // Scenario 1: Both in network - 0% fee
-    if (investorInNetwork && startupInNetwork) {
-      return 0;
-    }
-    
-    // Scenario 2: Only investor in network - 30% from investor
-    if (investorInNetwork && !startupInNetwork) {
-      return advisoryFee * 0.3;
-    }
-    
-    // Scenario 3: Only startup in network - 30% from startup
-    if (!investorInNetwork && startupInNetwork) {
-      return advisoryFee * 0.3;
-    }
-    
-    // Neither in network - full fee (no scouting fee)
-    return advisoryFee;
-  }
-
-  // Record scouting fee payment
-  async recordScoutingFee(
-    advisorId: string,
-    amount: number,
-    investorId: string,
-    startupId: string,
-    advisoryFee: number
-  ): Promise<void> {
+  // Get user subscription status
+  async getUserSubscriptionStatus(userId: string): Promise<any> {
     try {
-      const { error } = await supabase
-        .from('scouting_fees')
-        .insert({
-          advisor_id: advisorId,
-          amount: amount,
-          investor_id: investorId,
-          startup_id: startupId,
-          advisory_fee: advisoryFee,
-          created_at: new Date().toISOString()
-        });
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error recording scouting fee:', error);
-      throw error;
-    }
-  }
-
-  // Get subscription summary for user
-  async getSubscriptionSummary(userId: string): Promise<SubscriptionSummary> {
-    try {
-      const { data: subscriptions, error } = await supabase
+      const { data, error } = await supabase
         .from('user_subscriptions')
         .select(`
           *,
-          subscription_plans (*)
+          subscription_plans (
+            name,
+            price,
+            currency,
+            interval,
+            description
+          )
         `)
         .eq('user_id', userId)
-        .eq('status', 'active');
+        .eq('status', 'active')
+        .single();
 
-      if (error) throw error;
-
-      const activeSubscriptions = subscriptions || [];
-      let totalDue = 0;
-      const upcomingPayments: Array<{
-        plan: SubscriptionPlan;
-        amount: number;
-        dueDate: string;
-      }> = [];
-
-      for (const subscription of activeSubscriptions) {
-        const plan = subscription.subscription_plans;
-        const amount = plan.price * subscription.startup_count;
-        totalDue += amount;
-        
-        upcomingPayments.push({
-          plan,
-          amount,
-          dueDate: subscription.current_period_end
-        });
+      if (error && error.code !== 'PGRST116') { // Not found error
+        throw error;
       }
 
-      return {
-        totalDue,
-        totalSubscriptions: activeSubscriptions.length,
-        activeSubscriptions,
-        upcomingPayments
-      };
-    } catch (error) {
-      console.error('Error getting subscription summary:', error);
-      throw error;
-    }
-  }
-
-  // Create due diligence request
-  async createDueDiligenceRequest(userId: string, startupId: string): Promise<DueDiligenceRequest> {
-    try {
-      const dueDiligenceAmount = 150; // €150 per startup
-      
-      const { data, error } = await supabase
-        .from('due_diligence_requests')
-        .insert({
-          user_id: userId,
-          startup_id: startupId,
-          amount: dueDiligenceAmount,
-          currency: 'EUR',
-          status: 'pending',
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error creating due diligence request:', error);
-      throw error;
-    }
-  }
-
-  // Process due diligence payment
-  async processDueDiligencePayment(requestId: string, paymentIntentId: string): Promise<void> {
-    try {
-      const { error } = await supabase
-        .from('due_diligence_requests')
-        .update({
-          status: 'paid',
-          payment_intent_id: paymentIntentId,
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', requestId);
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error processing due diligence payment:', error);
-      throw error;
-    }
-  }
-
-  // Get due diligence requests for user
-  async getUserDueDiligenceRequests(userId: string): Promise<DueDiligenceRequest[]> {
-    try {
-      const { data, error } = await supabase
-        .from('due_diligence_requests')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      console.error('Error getting due diligence requests:', error);
-      throw error;
-    }
-  }
-
-  // Update subscription plan
-  async updateSubscriptionPlan(userId: string, newPlanId: string): Promise<UserSubscription> {
-    try {
-      // Get the new plan details
-      const { data: newPlan, error: planError } = await supabase
-        .from('subscription_plans')
-        .select('price, billing_interval')
-        .eq('id', newPlanId)
-        .single();
-
-      if (planError) throw planError;
-
-      // Get current subscription
-      const currentSub = await this.getUserSubscription(userId);
-      if (!currentSub) {
-        throw new Error('No active subscription found');
-      }
-
-      // Calculate new amount based on new plan and current startup count
-      const newAmount = newPlan.price * currentSub.startup_count;
-
-      // Update subscription
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .update({
-          plan_id: newPlanId,
-          amount: newAmount,
-          billing_interval: newPlan.billing_interval,
-          interval: newPlan.billing_interval,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', currentSub.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error updating subscription plan:', error);
-      throw error;
+      console.error('Error getting subscription status:', error);
+      return null;
     }
   }
 
   // Cancel subscription
-  async cancelSubscription(userId: string): Promise<void> {
+  async cancelSubscription(userId: string): Promise<boolean> {
     try {
       const { error } = await supabase
         .from('user_subscriptions')
-        .update({
-          status: 'cancelled',
-          updated_at: new Date().toISOString()
-        })
+        .update({ status: 'cancelled' })
         .eq('user_id', userId)
         .eq('status', 'active');
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
+
+      return true;
     } catch (error) {
       console.error('Error cancelling subscription:', error);
-      throw error;
+      return false;
     }
   }
 
-  // Generate invoice for subscription
-  async generateInvoice(userId: string): Promise<{ invoiceData: any; downloadUrl: string }> {
+  // Get subscription plans
+  async getSubscriptionPlans(userType: string = 'Startup'): Promise<SubscriptionPlan[]> {
     try {
-      const subscription = await this.getUserSubscription(userId);
-      if (!subscription) {
-        throw new Error('No active subscription found');
+      const { data, error } = await supabase
+        .from('subscription_plans')
+        .select('*')
+        .eq('user_type', userType)
+        .eq('is_active', true)
+        .order('price', { ascending: true });
+
+      if (error) {
+        throw error;
       }
 
-      // Get plan details
-      const { data: plan, error: planError } = await supabase
-        .from('subscription_plans')
-        .select('name, price, currency')
-        .eq('id', subscription.plan_id)
-        .single();
-
-      if (planError) throw planError;
-
-      // Generate invoice data
-      const invoiceData = {
-        invoiceId: `INV-${Date.now()}`,
-        date: new Date().toISOString(),
-        subscriptionId: subscription.id,
-        planName: plan.name,
-        amount: subscription.amount,
-        currency: plan.currency,
-        billingPeriod: {
-          start: subscription.current_period_start,
-          end: subscription.current_period_end
-        },
-        startupCount: subscription.startup_count
-      };
-
-      // In a real implementation, you would generate a PDF here
-      // For now, we'll return a mock download URL
-      const downloadUrl = `/api/invoice/download/${subscription.id}`;
-
-      return { invoiceData, downloadUrl };
+      return data || [];
     } catch (error) {
-      console.error('Error generating invoice:', error);
-      throw error;
+      console.error('Error getting subscription plans:', error);
+      return [];
     }
   }
 
-  // Get billing information
-  async getBillingInfo(userId: string): Promise<any> {
+  // Get available coupons
+  async getAvailableCoupons(): Promise<any[]> {
     try {
-      const subscription = await this.getUserSubscription(userId);
-      if (!subscription) {
-        throw new Error('No active subscription found');
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .eq('is_active', true)
+        .eq('applies_to_user_type', 'Startup')
+        .gte('valid_until', new Date().toISOString())
+        .or('valid_until.is.null');
+
+      if (error) {
+        throw error;
       }
 
-      // Get plan details
-      const { data: plan, error: planError } = await supabase
-        .from('subscription_plans')
-        .select('name, price, currency, billing_interval')
-        .eq('id', subscription.plan_id)
-        .single();
-
-      if (planError) throw planError;
-
-      return {
-        subscription,
-        plan,
-        nextBillingDate: subscription.current_period_end,
-        amount: subscription.amount,
-        currency: plan.currency,
-        interval: plan.billing_interval
-      };
+      return data || [];
     } catch (error) {
-      console.error('Error getting billing info:', error);
-      throw error;
+      console.error('Error getting coupons:', error);
+      return [];
     }
   }
 }

@@ -1,4 +1,14 @@
 {
+  "functions": {
+    "api/razorpay/webhook.ts": {
+      "runtime": "nodejs20.x",
+      "maxDuration": 10,
+      "memory": 256
+    }
+  }
+}
+
+{
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",

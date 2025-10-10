@@ -836,9 +836,40 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
             if (createError) {
               console.error('❌ Error creating startup:', createError);
-              throw createError;
+              console.error('❌ Create error details:', {
+                message: createError.message,
+                code: createError.code,
+                details: createError.details,
+                hint: createError.hint
+              });
+              console.error('❌ Startup data that failed:', {
+                name: userData.startupName || `${userData.name}'s Startup`,
+                user_id: userData.id,
+                current_valuation: calculatedCurrentValuation
+              });
+              
+              // If it's a unique constraint violation, try to find the existing startup
+              if (createError.code === '23505' || createError.message.includes('duplicate')) {
+                console.log('🔄 Unique constraint violation detected, trying to find existing startup...');
+                const { data: existingStartup, error: findError } = await authService.supabase
+                  .from('startups')
+                  .select('*')
+                  .eq('user_id', userData.id)
+                  .single();
+                
+                if (findError) {
+                  console.error('❌ Could not find existing startup:', findError);
+                  throw createError; // Throw original error
+                } else {
+                  console.log('✅ Found existing startup:', existingStartup);
+                  startup = existingStartup;
+                }
+              } else {
+                throw createError;
+              }
+            } else {
+              startup = newStartup;
             }
-            startup = newStartup;
           }
 
           if (startup) {

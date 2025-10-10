@@ -599,10 +599,13 @@ const App: React.FC = () => {
       const now = Date.now();
       const awayMs = lastHiddenAtRef.current ? now - lastHiddenAtRef.current : 0;
       if (awayMs >= REFRESH_THRESHOLD_MS) {
+        if ((window as any).__isRefreshingData) return;
+        (window as any).__isRefreshingData = true;
         console.log(`🔄 Returning after ${Math.round(awayMs/1000)}s away, refreshing data`);
-        setHasInitialDataLoaded(false);
-        hasInitialDataLoadedRef.current = false;
-        fetchData(true).catch(() => {});
+        // Background refresh only; keep current UI intact
+        fetchData(true)
+          .catch(() => {})
+          .finally(() => { (window as any).__isRefreshingData = false; });
       }
       lastHiddenAtRef.current = 0;
     };
@@ -616,8 +619,15 @@ const App: React.FC = () => {
       if (document.hidden) onHidden(); else onVisible();
     };
 
+    // Debounce focus to avoid rapid toggles
+    let __focusDebounce: any = null;
+    const debouncedFocus = () => {
+      if (__focusDebounce) clearTimeout(__focusDebounce);
+      __focusDebounce = setTimeout(() => { onFocus(); }, 300);
+    };
+
     document.addEventListener('visibilitychange', visibilityHandler);
-    window.addEventListener('focus', onFocus);
+    window.addEventListener('focus', debouncedFocus);
     window.addEventListener('blur', onBlur);
 
     // Set up auth state listener
@@ -903,7 +913,7 @@ const App: React.FC = () => {
       isMounted = false;
       subscription?.unsubscribe();
       document.removeEventListener('visibilitychange', visibilityHandler);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', debouncedFocus);
       window.removeEventListener('blur', onBlur);
     };
   }, []);

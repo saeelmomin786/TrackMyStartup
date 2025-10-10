@@ -84,8 +84,7 @@ class PaymentService {
   async createOrder(plan: SubscriptionPlan, userId: string, finalAmount?: number): Promise<PaymentOrder> {
     try {
       const amount = finalAmount || plan.price;
-      const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
-      const response = await fetch(`${apiBase}/api/razorpay/create-order`, {
+      const response = await fetch(`/api/razorpay/create-order`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -117,8 +116,7 @@ class PaymentService {
       const taxAmount = taxPercentage > 0 ? this.calculateTaxAmount(plan.price, taxPercentage) : 0;
       const finalAmount = plan.price + taxAmount;
 
-      const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
-      const response = await fetch(`${apiBase}/api/razorpay/create-subscription`, {
+      const response = await fetch(`/api/razorpay/create-subscription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -159,8 +157,7 @@ class PaymentService {
         const finalAmount = plan.price + taxAmount;
 
         // Create trial subscription with Razorpay
-        const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
-        const response = await fetch(`${apiBase}/api/razorpay/create-trial-subscription`, {
+        const response = await fetch(`/api/razorpay/create-trial-subscription`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -402,8 +399,7 @@ class PaymentService {
       console.log('Plan:', plan);
       console.log('User ID:', userId);
       
-      const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
-      const response = await fetch(`${apiBase}/api/razorpay/verify`, {
+      const response = await fetch(`/api/razorpay/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

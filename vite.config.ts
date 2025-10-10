@@ -41,8 +41,8 @@ export default defineConfig(({ mode }) => {
             },
           },
         },
-        // Add build optimizations for Vercel
-        minify: 'terser',
+        // Use esbuild (default) to avoid optional terser dependency on Vercel
+        minify: 'esbuild',
         sourcemap: false,
         // Ensure compatibility with Vercel's build environment
         target: 'esnext',

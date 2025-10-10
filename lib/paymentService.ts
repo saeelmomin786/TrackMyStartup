@@ -1,8 +1,7 @@
 import { supabase } from './supabase';
 
-// Razorpay configuration
+// Razorpay configuration (only public key on client)
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
-const RAZORPAY_KEY_SECRET = import.meta.env.VITE_RAZORPAY_KEY_SECRET;
 
 // Types
 export interface PaymentOrder {
@@ -85,7 +84,8 @@ class PaymentService {
   async createOrder(plan: SubscriptionPlan, userId: string, finalAmount?: number): Promise<PaymentOrder> {
     try {
       const amount = finalAmount || plan.price;
-      const response = await fetch('http://localhost:3001/api/razorpay/create-order', {
+      const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
+      const response = await fetch(`${apiBase}/api/razorpay/create-order`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -117,7 +117,8 @@ class PaymentService {
       const taxAmount = taxPercentage > 0 ? this.calculateTaxAmount(plan.price, taxPercentage) : 0;
       const finalAmount = plan.price + taxAmount;
 
-      const response = await fetch('http://localhost:3001/api/razorpay/create-subscription', {
+      const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
+      const response = await fetch(`${apiBase}/api/razorpay/create-subscription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -158,7 +159,8 @@ class PaymentService {
         const finalAmount = plan.price + taxAmount;
 
         // Create trial subscription with Razorpay
-        const response = await fetch('http://localhost:3001/api/razorpay/create-trial-subscription', {
+        const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
+        const response = await fetch(`${apiBase}/api/razorpay/create-trial-subscription`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -400,7 +402,8 @@ class PaymentService {
       console.log('Plan:', plan);
       console.log('User ID:', userId);
       
-      const response = await fetch('http://localhost:3001/api/razorpay/verify', {
+      const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
+      const response = await fetch(`${apiBase}/api/razorpay/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

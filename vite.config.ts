@@ -17,9 +17,8 @@ export default defineConfig(({ mode }) => {
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL),
         'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY),
-        // Explicitly expose Razorpay envs to ensure availability at build time
+        // Explicitly expose Razorpay public envs to ensure availability at build time
         'import.meta.env.VITE_RAZORPAY_KEY_ID': JSON.stringify(env.VITE_RAZORPAY_KEY_ID),
-        'import.meta.env.VITE_RAZORPAY_KEY_SECRET': JSON.stringify(env.VITE_RAZORPAY_KEY_SECRET),
         'import.meta.env.VITE_RAZORPAY_ENVIRONMENT': JSON.stringify(env.VITE_RAZORPAY_ENVIRONMENT)
       },
       resolve: {

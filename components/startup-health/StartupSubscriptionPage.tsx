@@ -829,29 +829,3 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
   );
 }
 
-
-            <h3 className="text-lg font-semibold text-slate-700 mb-4">Frequently Asked Questions</h3>
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-medium text-slate-700 mb-1">Can I change my plan later?</h4>
-                <p className="text-sm text-slate-600">Yes, you can upgrade or downgrade your plan at any time from your dashboard.</p>
-            </div>
-
-              <div>
-                <h4 className="font-medium text-slate-700 mb-1">What payment methods do you accept?</h4>
-                <p className="text-sm text-slate-600">We accept all major credit cards, debit cards, UPI, net banking, and digital wallets.</p>
-            </div>
-
-              <div>
-                <h4 className="font-medium text-slate-700 mb-1">Is there a money-back guarantee?</h4>
-                <p className="text-sm text-slate-600">Yes, we offer a 30-day money-back guarantee if you're not satisfied with our service.</p>
-            </div>
-          </div>
-        </div>
-      </Card>
-        </div>
-    </div>
-  );
-}
-
-

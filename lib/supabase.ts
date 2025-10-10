@@ -4,7 +4,13 @@ import { getCurrentConfig } from '../config/environment'
 // Get current environment configuration
 const config = getCurrentConfig();
 
-console.log('Current environment config:', config);
+if (typeof window !== 'undefined' && window.location.host.endsWith('trackmystartup.com')) {
+  // Suppress noisy logs in production
+} else {
+  // Keep logs in development
+  // eslint-disable-next-line no-console
+  console.log('Current environment config:', config);
+}
 
 // Custom storage implementation that doesn't trigger on window focus
 const customStorage = {
@@ -32,30 +38,38 @@ const customStorage = {
   }
 };
 
-export const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    storageKey: 'supabase-auth',
-    autoRefreshToken: false, // Disable automatic token refresh to prevent window focus triggers
-    detectSessionInUrl: true,
-    flowType: 'pkce',
-    // Use custom storage to prevent window focus triggers
-    storage: customStorage,
-    // Disable debug mode to reduce unnecessary events
-    debug: false
-  },
-  global: {
-    headers: {
-      'X-Client-Info': 'supabase-js/2.38.0'
+// Avoid multiple clients in the same browser context
+const globalAny = window as any;
+if (!globalAny.__supabaseClient) {
+  globalAny.__supabaseClient = createClient(config.supabaseUrl, config.supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      storageKey: 'supabase-auth',
+      autoRefreshToken: false, // Disable automatic token refresh to prevent window focus triggers
+      detectSessionInUrl: true,
+      flowType: 'pkce',
+      // Use custom storage to prevent window focus triggers
+      storage: customStorage,
+      // Disable debug mode to reduce unnecessary events
+      debug: false
+    },
+    global: {
+      headers: {
+        'X-Client-Info': 'supabase-js/2.38.0'
+      }
+    },
+    db: {
+      schema: 'public'
     }
-  },
-  db: {
-    schema: 'public'
-  }
-})
+  });
+}
 
-console.log('Supabase client initialized successfully');
-console.log('Email redirect URL:', config.emailRedirectUrl);
+export const supabase = globalAny.__supabaseClient as ReturnType<typeof createClient>;
+
+if (!(typeof window !== 'undefined' && window.location.host.endsWith('trackmystartup.com'))) {
+  console.log('Supabase client initialized successfully');
+  console.log('Email redirect URL:', config.emailRedirectUrl);
+}
 
 // Types for our database schema
 export interface Database {

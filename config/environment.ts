@@ -22,15 +22,13 @@ export const environment = {
 // Function to get current environment
 export const getCurrentEnvironment = () => {
   if (typeof window !== 'undefined') {
+    const host = window.location.host;
     const hostname = window.location.hostname;
-    
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'development';
-    }
-    
+    // Force production for your domain and any Vercel preview under it
+    if (host.endsWith('trackmystartup.com')) return 'production';
+    if (hostname === 'localhost' || hostname === '127.0.0.1') return 'development';
     return 'production';
   }
-  
   return 'development';
 };
 

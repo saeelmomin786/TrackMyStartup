@@ -2339,19 +2339,26 @@ const App: React.FC = () => {
         );
       }
       
-      // If no startup found, show appropriate message
+      // If no startup found, only show the message AFTER initial data has fully loaded.
+      // During quick tab switches or initial load, keep the previous UI (no flashing).
       if (hasInitialDataLoaded) {
         console.log('❌ No startup found for user:', currentUser.email);
-      }
-      return (
-        <div className="text-center py-20">
-          <h2 className="text-xl font-semibold">No Startup Found</h2>
-          <p className="text-slate-500 mt-2">No startup associated with your account. Please contact support.</p>
-          <div className="mt-4 text-sm text-slate-400">
-            <p>Debug Info:</p>
-            <p>User startup_name: {currentUser.startup_name || 'NULL'}</p>
-            <p>Available startups: {startups.length}</p>
+        return (
+          <div className="text-center py-20">
+            <h2 className="text-xl font-semibold">No Startup Found</h2>
+            <p className="text-slate-500 mt-2">No startup associated with your account. Please contact support.</p>
+            <div className="mt-4 text-sm text-slate-400">
+              <p>Debug Info:</p>
+              <p>User startup_name: {currentUser.startup_name || 'NULL'}</p>
+              <p>Available startups: {startups.length}</p>
+            </div>
           </div>
+        );
+      }
+      // Not loaded yet: preserve screen without showing fallback
+      return (
+        <div className="flex items-center justify-center min-h-[200px]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary" />
         </div>
       );
     }

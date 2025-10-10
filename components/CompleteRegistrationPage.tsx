@@ -725,6 +725,9 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           // Add Investment Advisor specific fields
           logo_url: logoUrl || null,
           financial_advisor_license_url: licenseUrl || null,
+          // Add company_name and country for startup users
+          company_name: userData.role === 'Startup' ? userData.startupName : null,
+          country: profileData.country,
           updated_at: new Date().toISOString()
       };
 

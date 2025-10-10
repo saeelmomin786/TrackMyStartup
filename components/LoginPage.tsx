@@ -45,7 +45,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 // Check if user needs to complete Form 2 (document upload)
                 const { data: profiles, error: profileError } = await authService.supabase
                     .from('users')
-                    .select('government_id, ca_license')
+                    .select('government_id, ca_license, company_name, country')
                     .eq('id', user.id);
                 
                 const profile = profiles && profiles.length > 0 ? profiles[0] : null;
@@ -71,10 +71,15 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     console.log('No profile found - redirecting to Form 2');
                     onNavigateToCompleteRegistration();
                     return;
-                } else if (!profile.government_id || !profile.ca_license) {
+                } else if (!profile.government_id || !profile.ca_license || !profile.company_name || !profile.country) {
                     // Profile exists but documents missing - user needs to complete Form 2
                     console.log('Profile exists but documents missing - redirecting to Form 2');
-                    console.log('Missing documents:', { govId: profile.government_id, caLicense: profile.ca_license });
+                    console.log('Missing fields:', { 
+                      govId: profile.government_id, 
+                      caLicense: profile.ca_license,
+                      companyName: profile.company_name,
+                      country: profile.country
+                    });
                     onNavigateToCompleteRegistration();
                     return;
                 } else {

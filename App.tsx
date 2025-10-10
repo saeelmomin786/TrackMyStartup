@@ -1918,8 +1918,14 @@ const App: React.FC = () => {
     );
   }
 
-  // Check if we need to show payment page (mandatory after registration)
+  // Guard: never show payment unless registration Form 2 is complete
+  // Minimal completeness: require government_id and ca_license (extend as needed)
   if (currentPage === 'payment') {
+    const requiresForm2 = !currentUser?.government_id || !currentUser?.ca_license;
+    if (requiresForm2) {
+      console.log('🔒 Blocking payment: Form 2 incomplete, redirecting to complete-registration');
+      setCurrentPage('complete-registration');
+    }
     console.log('💳 Showing Payment Page (mandatory after registration)');
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col">

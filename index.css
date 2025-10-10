@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global app styles can go below */
+html, body, #root {
+  height: 100%;
+}
+
+

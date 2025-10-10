@@ -1953,6 +1953,12 @@ const App: React.FC = () => {
   // Guard: never show payment unless registration Form 2 is complete
   // Minimal completeness: require government_id and ca_license (extend as needed)
   if (currentPage === 'payment') {
+    // Only Startup users should ever see the payment page
+    if (!currentUser || currentUser.role !== 'Startup') {
+      console.log('🔒 Blocking payment: non-Startup user attempted to access payment, redirecting');
+      setCurrentPage('login');
+      // Fall through to render the appropriate view after page change
+    }
     const requiresForm2 = !currentUser?.government_id || !currentUser?.ca_license;
     if (requiresForm2) {
       console.log('🔒 Blocking payment: Form 2 incomplete, redirecting to complete-registration');

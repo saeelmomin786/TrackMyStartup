@@ -158,7 +158,12 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
         setShowTrialAndCoupon(false);
         setShowPaymentSummary(false);
         
-        // Payment success will be handled by centralized callback
+        // Trigger navigation redundantly to be safe (in addition to centralized callback)
+        try {
+          onPaymentSuccess && onPaymentSuccess();
+        } catch {}
+
+        // Payment success will also be handled by centralized callback
         console.log('✅ Payment completed successfully');
       } else {
         setError('Payment was cancelled or failed. Please try again.');

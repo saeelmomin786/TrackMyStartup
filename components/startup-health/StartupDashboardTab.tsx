@@ -266,69 +266,19 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           allApplications = simpleData || [];
         }
         
-        // Now try the joined query
-        const { data: joinedData, error: joinedError } = await supabase
-          .from('opportunity_applications')
-          .select(`
-            *,
-            diligence_status,
-            diligence_urls,
-            incubation_opportunities!opportunity_applications_opportunity_id_fkey (
-              program_name,
-              facilitator_id,
-              facilitator_code,
-              users!incubation_opportunities_facilitator_id_fkey (
-                name,
-                facilitator_code
-              )
-            )
-          `)
-          .eq('startup_id', startup.id);
-        
-        console.log('🔍 Joined query result:', joinedData);
-        console.log('🔍 Joined query error:', joinedError);
-        
-        if (!joinedError && joinedData) {
-          allApplications = joinedData;
-        } else {
-          // If joins fail, try to manually fetch facilitator data
-          console.log('🔍 Joins failed, trying manual approach...');
-          
-          // Get all opportunity IDs from applications
-          const opportunityIds = allApplications.map(app => app.opportunity_id).filter(Boolean);
-          
-          if (opportunityIds.length > 0) {
-            // Fetch opportunities with facilitator data
-            const { data: opportunities, error: oppError } = await supabase
-              .from('incubation_opportunities')
-              .select(`
-                id,
-                program_name,
-                facilitator_id,
-                facilitator_code,
-                users!incubation_opportunities_facilitator_id_fkey (
-                  name,
-                  facilitator_code
-                )
-              `)
-              .in('id', opportunityIds);
-            
-            console.log('🔍 Opportunities data:', opportunities);
-            console.log('🔍 Opportunities error:', oppError);
-            
-            if (!oppError && opportunities) {
-              // Merge the facilitator data into applications
-              allApplications = allApplications.map(app => {
-                const opportunity = opportunities.find(opp => opp.id === app.opportunity_id);
-                if (opportunity) {
-                  return {
-                    ...app,
-                    incubation_opportunities: opportunity
-                  };
-                }
-                return app;
-              });
-            }
+        // Joined query removed to avoid 400 errors in production (schema cache mismatch)
+        // Proceed with manual enrichment only
+        const opportunityIds = allApplications.map(app => app.opportunity_id).filter(Boolean);
+        if (opportunityIds.length > 0) {
+          const { data: opportunities, error: oppError } = await supabase
+            .from('incubation_opportunities')
+            .select(`id, program_name, facilitator_id, facilitator_code`)
+            .in('id', opportunityIds);
+          if (!oppError && opportunities) {
+            allApplications = allApplications.map(app => {
+              const opportunity = opportunities.find(opp => opp.id === app.opportunity_id);
+              return opportunity ? { ...app, incubation_opportunities: opportunity } : app;
+            });
           }
         }
         

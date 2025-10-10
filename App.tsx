@@ -1987,6 +1987,15 @@ const App: React.FC = () => {
               console.log('✅ Payment successful, showing dashboard immediately');
               setIsAuthenticated(true);
               setCurrentPage('login'); // This will show the main dashboard immediately
+              // Hard-redirect fallback in case SPA state is stale/cached on some devices
+              try {
+                setTimeout(() => {
+                  const isOnDashboard = window.location.pathname === '/' || window.location.pathname === '/index.html';
+                  if (!isOnDashboard) {
+                    window.location.assign('/');
+                  }
+                }, 300);
+              } catch {}
               
               // Background refresh of user data (non-blocking)
               try {

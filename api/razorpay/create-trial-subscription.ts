@@ -8,6 +8,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { user_id, trial_days = 30, interval = 'monthly', plan_name = 'Startup Plan', final_amount } = req.body || {};
+    console.log('[create-trial-subscription] body:', req.body);
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
     const keyId = process.env.RAZORPAY_KEY_ID;
@@ -16,7 +17,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Pick plan id for interval; if you intend dynamic amount plan creation, wire that here
     let plan_id = interval === 'yearly' ? process.env.RAZORPAY_STARTUP_PLAN_ID_YEARLY : process.env.RAZORPAY_STARTUP_PLAN_ID_MONTHLY;
-    if (!plan_id) return res.status(400).json({ error: `Plan ID not configured for ${interval} plan` });
+    if (!plan_id) {
+      console.error('[create-trial-subscription] Missing plan ID for interval:', interval);
+      return res.status(400).json({ error: `Plan ID not configured for ${interval} plan. Set RAZORPAY_STARTUP_PLAN_ID_${interval === 'yearly' ? 'YEARLY' : 'MONTHLY'} in Vercel env.` });
+    }
 
     const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
     const trialPeriod = Number(trial_days) * 24 * 60 * 60; // seconds

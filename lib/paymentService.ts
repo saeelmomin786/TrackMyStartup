@@ -172,7 +172,8 @@ class PaymentService {
         });
 
         if (!response.ok) {
-          throw new Error('Failed to create trial subscription');
+          const text = await response.text();
+          throw new Error(`Failed to create trial subscription: ${text}`);
         }
 
         const subscription = await response.json();

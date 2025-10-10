@@ -732,17 +732,57 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       };
 
 
-      const { error: updateError } = await authService.supabase
+      console.log('🔍 Attempting to update user profile with data:', updateData);
+      console.log('🔍 User ID:', userData.id);
+      
+      // First, let's try a simple update with just the essential fields
+      const essentialUpdateData = {
+        government_id: governmentIdUrl,
+        ca_license: roleSpecificUrl,
+        verification_documents: verificationDocuments,
+        updated_at: new Date().toISOString()
+      };
+      
+      console.log('🔍 Trying essential fields first:', essentialUpdateData);
+      
+      const { data: essentialResult, error: essentialError } = await authService.supabase
         .from('users')
-        .update(updateData)
-        .eq('id', userData.id);
+        .update(essentialUpdateData)
+        .eq('id', userData.id)
+        .select();
 
-      if (updateError) {
-        console.error('❌ Database update failed:', updateError);
-        throw new Error('Failed to update user profile');
+      if (essentialError) {
+        console.error('❌ Essential fields update failed:', essentialError);
+        throw new Error(`Failed to update essential user profile: ${essentialError.message}`);
       }
 
-      console.log('✅ User profile updated successfully in database');
+      console.log('✅ Essential fields updated successfully:', essentialResult);
+      
+      // Now try to update with additional fields if they exist
+      try {
+        const additionalUpdateData = {
+          company: userData.role === 'Startup' ? userData.startupName : null,
+          country: profileData.country,
+        };
+        
+        console.log('🔍 Trying additional fields:', additionalUpdateData);
+        
+        const { data: additionalResult, error: additionalError } = await authService.supabase
+          .from('users')
+          .update(additionalUpdateData)
+          .eq('id', userData.id)
+          .select();
+
+        if (additionalError) {
+          console.warn('⚠️ Additional fields update failed (columns might not exist):', additionalError);
+          console.log('✅ Continuing with essential fields only');
+        } else {
+          console.log('✅ Additional fields updated successfully:', additionalResult);
+        }
+      } catch (additionalError) {
+        console.warn('⚠️ Additional fields update failed:', additionalError);
+        console.log('✅ Continuing with essential fields only');
+      }
 
       // If user is a startup, create startup and founders with comprehensive data
       if (userData.role === 'Startup') {
@@ -768,8 +808,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             // Calculate current valuation from price per share and total shares
             const calculatedCurrentValuation = shareData.pricePerShare * shareData.totalShares;
             
-            // Validate that valuation is not less than 20,000,000 (20 million)
-            const minimumValuation = 20000000;
+            // Validate that valuation is not less than 100,000 (100k) - reasonable for early-stage startups
+            const minimumValuation = 100000;
             if (calculatedCurrentValuation < minimumValuation) {
               throw new Error(`Startup valuation (${calculatedCurrentValuation.toLocaleString()}) must be at least ${minimumValuation.toLocaleString()}. Please increase the price per share or total shares.`);
             }
@@ -828,8 +868,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             // Calculate current valuation from price per share and total shares
             const calculatedCurrentValuation = shareData.pricePerShare * shareData.totalShares;
             
-            // Validate that valuation is not less than 20,000,000 (20 million)
-            const minimumValuation = 20000000;
+            // Validate that valuation is not less than 100,000 (100k) - reasonable for early-stage startups
+            const minimumValuation = 100000;
             if (calculatedCurrentValuation < minimumValuation) {
               throw new Error(`Startup valuation (${calculatedCurrentValuation.toLocaleString()}) must be at least ${minimumValuation.toLocaleString()}. Please increase the price per share or total shares.`);
             }
@@ -1321,7 +1361,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   <div className="mt-2 text-xs text-blue-600">
                     {(() => {
                       const calculatedValuation = shareData.pricePerShare * shareData.totalShares;
-                      const minimumValuation = 20000000;
+                      const minimumValuation = 100000;
                       if (calculatedValuation < minimumValuation) {
                         return `⚠️ Valuation must be at least ${minimumValuation.toLocaleString()} to proceed`;
                       }

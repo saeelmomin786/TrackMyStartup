@@ -123,6 +123,41 @@ const App: React.FC = () => {
     }
   }, [currentPage, currentUser?.id]);
 
+  // CRITICAL FIX: Refresh user data if startup_name is missing for Startup users
+  useEffect(() => {
+    if (isAuthenticated && currentUser && currentUser.role === 'Startup' && !currentUser.startup_name) {
+      console.log('🔍 Startup user missing startup_name, attempting to refresh user data...');
+      const refreshStartupData = async () => {
+        try {
+          const refreshedUser = await authService.getCurrentUser();
+          if (refreshedUser && refreshedUser.startup_name) {
+            console.log('✅ Startup data refreshed:', refreshedUser.startup_name);
+            setCurrentUser(refreshedUser);
+          } else {
+            console.log('❌ Still no startup_name after refresh, checking startups table...');
+            // Fallback: try to get startup name from startups table
+            const { data: startupData, error: startupError } = await authService.supabase
+              .from('startups')
+              .select('name')
+              .eq('user_id', currentUser.id)
+              .maybeSingle();
+            
+            if (startupData && !startupError) {
+              console.log('✅ Found startup name from startups table:', startupData.name);
+              setCurrentUser({ ...currentUser, startup_name: startupData.name });
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error refreshing startup data:', error);
+        }
+      };
+      
+      // Add a small delay to avoid race conditions
+      const timeoutId = setTimeout(refreshStartupData, 1000);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isAuthenticated, currentUser]);
+
   // Listen for URL changes to handle reset password links
   useEffect(() => {
     const handleUrlChange = () => {
@@ -754,6 +789,29 @@ const App: React.FC = () => {
                 const completeUser = await authService.getCurrentUser();
                 if (completeUser) {
                   console.log('✅ Complete user data loaded:', completeUser);
+                  console.log('🔍 User startup_name from complete data:', completeUser.startup_name);
+                  
+                  // CRITICAL FIX: If startup_name is missing, try to fetch it from startups table
+                  if (!completeUser.startup_name && completeUser.role === 'Startup') {
+                    console.log('🔍 Startup user missing startup_name, attempting to fetch from startups table...');
+                    try {
+                      const { data: startupData, error: startupError } = await authService.supabase
+                        .from('startups')
+                        .select('name')
+                        .eq('user_id', completeUser.id)
+                        .maybeSingle();
+                      
+                      if (startupData && !startupError) {
+                        console.log('✅ Found startup name from startups table:', startupData.name);
+                        completeUser.startup_name = startupData.name;
+                      } else {
+                        console.log('❌ No startup found in startups table for user:', completeUser.id);
+                      }
+                    } catch (startupFetchError) {
+                      console.error('❌ Error fetching startup name:', startupFetchError);
+                    }
+                  }
+                  
                   setCurrentUser(completeUser);
                   setIsAuthenticated(true);
                   setIsLoading(false);

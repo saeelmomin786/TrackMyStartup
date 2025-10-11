@@ -43,42 +43,63 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 console.log('User authenticated:', user.email);
                 
                 // Check if user needs to complete Form 2 (document upload)
-                const { data: profiles, error: profileError } = await authService.supabase
+                // Fetch from users table for documents
+                const { data: userProfiles, error: userProfileError } = await authService.supabase
                     .from('users')
-                    .select('government_id, ca_license, company, country')
+                    .select('government_id, ca_license')
                     .eq('id', user.id);
                 
-                const profile = profiles && profiles.length > 0 ? profiles[0] : null;
+                // Fetch from startups table for company info
+                const { data: startupProfiles, error: startupProfileError } = await authService.supabase
+                    .from('startups')
+                    .select('name, country')
+                    .eq('user_id', user.id);
+                
+                const userProfile = userProfiles && userProfiles.length > 0 ? userProfiles[0] : null;
+                const startupProfile = startupProfiles && startupProfiles.length > 0 ? startupProfiles[0] : null;
                 
                 console.log('Profile check result:', { 
-                    profile, 
-                    profileError,
-                    hasGovId: !!profile?.government_id, 
-                    hasCaLicense: !!profile?.ca_license,
-                    govIdValue: profile?.government_id,
-                    caLicenseValue: profile?.ca_license
+                    userProfile, 
+                    startupProfile,
+                    userProfileError,
+                    startupProfileError,
+                    hasGovId: !!userProfile?.government_id, 
+                    hasCaLicense: !!userProfile?.ca_license,
+                    hasCompanyName: !!startupProfile?.name,
+                    hasCountry: !!startupProfile?.country,
+                    govIdValue: userProfile?.government_id,
+                    caLicenseValue: userProfile?.ca_license,
+                    companyNameValue: startupProfile?.name,
+                    countryValue: startupProfile?.country
                 });
                 
-                if (profileError) {
-                    console.error('Error fetching profile:', profileError);
+                if (userProfileError || startupProfileError) {
+                    console.error('Error fetching profiles:', { userProfileError, startupProfileError });
                     // If error fetching profile, redirect to Form 2
                     onNavigateToCompleteRegistration();
                     return;
                 }
                 
-                if (!profile) {
-                    // No profile found - user needs to complete Form 2
-                    console.log('No profile found - redirecting to Form 2');
+                if (!userProfile) {
+                    // No user profile found - user needs to complete Form 2
+                    console.log('No user profile found - redirecting to Form 2');
                     onNavigateToCompleteRegistration();
                     return;
-                } else if (!profile.government_id || !profile.ca_license || !profile.company || !profile.country) {
-                    // Profile exists but documents missing - user needs to complete Form 2
-                    console.log('Profile exists but documents missing - redirecting to Form 2');
+                } else if (!userProfile.government_id || !userProfile.ca_license) {
+                    // User profile exists but documents missing - user needs to complete Form 2
+                    console.log('User profile exists but documents missing - redirecting to Form 2');
                     console.log('Missing fields:', { 
-                      govId: profile.government_id, 
-                      caLicense: profile.ca_license,
-                      company: profile.company,
-                      country: profile.country
+                      govId: userProfile.government_id, 
+                      caLicense: userProfile.ca_license
+                    });
+                    onNavigateToCompleteRegistration();
+                    return;
+                } else if (!startupProfile || !startupProfile.name || !startupProfile.country) {
+                    // User documents complete but startup profile missing - user needs to complete Form 2
+                    console.log('User documents complete but startup profile missing - redirecting to Form 2');
+                    console.log('Missing startup fields:', { 
+                      companyName: startupProfile?.name,
+                      country: startupProfile?.country
                     });
                     onNavigateToCompleteRegistration();
                     return;

@@ -85,12 +85,11 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     console.log('No user profile found - redirecting to Form 2');
                     onNavigateToCompleteRegistration();
                     return;
-                } else if (!userProfile.government_id || !userProfile.ca_license) {
-                    // User profile exists but documents missing - user needs to complete Form 2
-                    console.log('User profile exists but documents missing - redirecting to Form 2');
-                    console.log('Missing fields:', { 
-                      govId: userProfile.government_id, 
-                      caLicense: userProfile.ca_license
+                } else if (!userProfile.government_id) {
+                    // User profile exists but government_id missing - user needs to complete Form 2
+                    console.log('User profile exists but government_id missing - redirecting to Form 2');
+                    console.log('Missing field:', { 
+                      govId: userProfile.government_id
                     });
                     onNavigateToCompleteRegistration();
                     return;

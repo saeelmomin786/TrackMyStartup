@@ -134,3 +134,4 @@ The `startup_invitations` table includes:
 
 The system is now ready for use and will significantly improve the facilitator's ability to onboard and manage startups in their portfolio.
 
+

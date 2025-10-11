@@ -1969,7 +1969,7 @@ const App: React.FC = () => {
       setCurrentPage('login');
       // Fall through to render the appropriate view after page change
     }
-    const requiresForm2 = !currentUser?.government_id || !currentUser?.ca_license;
+    const requiresForm2 = !currentUser?.government_id;
     if (requiresForm2) {
       console.log('🔒 Blocking payment: Form 2 incomplete, redirecting to complete-registration');
       setCurrentPage('complete-registration');
@@ -1988,27 +1988,43 @@ const App: React.FC = () => {
               setIsAuthenticated(true);
               setCurrentPage('login'); // This will show the main dashboard immediately
               
-              // Background refresh of user data (non-blocking)
-              try {
-                console.log('🔄 Refreshing user data in background...');
-                const refreshedUser = await authService.getCurrentUser();
-                if (refreshedUser) {
-                  console.log('✅ User data refreshed in background:', refreshedUser);
-                  setCurrentUser(refreshedUser);
-                  
-                  // Background verification (non-blocking)
-                  const hasActiveSubscription = await checkPaymentStatus(refreshedUser.id);
-                  console.log('🔍 Background payment status check:', hasActiveSubscription);
-                  
-                  if (!hasActiveSubscription) {
-                    console.log('⚠️ Background check: No active subscription found, but dashboard already shown');
-                    // Dashboard is already shown, so this is just a warning
+              // Background refresh of user data with retry mechanism
+              const refreshUserData = async (retryCount = 0) => {
+                try {
+                  console.log(`🔄 Refreshing user data in background (attempt ${retryCount + 1})...`);
+                  const refreshedUser = await authService.getCurrentUser();
+                  if (refreshedUser) {
+                    console.log('✅ User data refreshed in background:', refreshedUser);
+                    setCurrentUser(refreshedUser);
+                    
+                    // Background verification (non-blocking)
+                    const hasActiveSubscription = await checkPaymentStatus(refreshedUser.id);
+                    console.log('🔍 Background payment status check:', hasActiveSubscription);
+                    
+                    if (!hasActiveSubscription) {
+                      console.log('⚠️ Background check: No active subscription found, but dashboard already shown');
+                      // Dashboard is already shown, so this is just a warning
+                    }
+                  } else if (retryCount < 3) {
+                    // Retry after a short delay if profile not found
+                    console.log(`⚠️ Profile not found, retrying in 2 seconds (attempt ${retryCount + 1}/3)`);
+                    setTimeout(() => refreshUserData(retryCount + 1), 2000);
+                  } else {
+                    console.log('⚠️ Profile refresh failed after 3 attempts, but dashboard is already shown');
+                  }
+                } catch (error) {
+                  console.error(`⚠️ Background user data refresh failed (attempt ${retryCount + 1}):`, error);
+                  if (retryCount < 3) {
+                    console.log(`🔄 Retrying in 2 seconds (attempt ${retryCount + 1}/3)`);
+                    setTimeout(() => refreshUserData(retryCount + 1), 2000);
+                  } else {
+                    console.log('⚠️ Profile refresh failed after 3 attempts, but dashboard is already shown');
                   }
                 }
-              } catch (error) {
-                console.error('⚠️ Background user data refresh failed (non-critical):', error);
-                // Dashboard is already shown, so this error doesn't matter
-              }
+              };
+              
+              // Start the refresh process
+              refreshUserData();
             }}
             onLogout={async () => {
               console.log('🚪 Logout initiated from subscription page');

@@ -163,8 +163,8 @@ export const authService = {
         return false;
       }
 
-      // Profile is complete if user has uploaded verification documents
-      return !!(profile.government_id || profile.ca_license || 
+      // Profile is complete if user has uploaded government_id document
+      return !!(profile.government_id || 
                 (profile.verification_documents && profile.verification_documents.length > 0));
     } catch (error) {
       console.error('Error checking profile completion:', error);
@@ -189,7 +189,7 @@ export const authService = {
         .from('users')
         .select('*')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
       const profileTimeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Profile check timeout after 5 seconds')), 5000);

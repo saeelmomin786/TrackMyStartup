@@ -73,6 +73,17 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     countryValue: startupProfile?.country
                 });
                 
+                console.log('🔍 Detailed Form 2 verification:', {
+                    userProfileExists: !!userProfile,
+                    governmentIdExists: !!userProfile?.government_id,
+                    startupProfileExists: !!startupProfile,
+                    startupNameExists: !!startupProfile?.name,
+                    startupCountryExists: !!startupProfile?.country,
+                    willRedirectToForm2: !userProfile || !userProfile.government_id || !startupProfile || !startupProfile.name || !startupProfile.country,
+                    userProfileData: userProfile,
+                    startupProfileData: startupProfile
+                });
+                
                 if (userProfileError || startupProfileError) {
                     console.error('Error fetching profiles:', { userProfileError, startupProfileError });
                     // If error fetching profile, redirect to Form 2
@@ -105,21 +116,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 } else {
                     // User is complete, proceed to dashboard
                     console.log('User complete, proceeding to dashboard');
-                    
-                    // Fetch the full user profile with all fields including government_id
-                    try {
-                        const fullUserProfile = await authService.getCurrentUser();
-                        if (fullUserProfile) {
-                            console.log('✅ Full user profile fetched:', fullUserProfile);
-                            onLogin(fullUserProfile);
-                        } else {
-                            console.log('⚠️ Could not fetch full profile, using basic user data');
-                            onLogin(user);
-                        }
-                    } catch (error) {
-                        console.error('❌ Error fetching full user profile:', error);
-                        onLogin(user);
-                    }
+                    onLogin(user);
                 }
             } else if (loginError) {
                 setError(loginError);

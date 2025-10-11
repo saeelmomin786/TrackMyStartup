@@ -104,6 +104,25 @@ const App: React.FC = () => {
   const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
   const [ignoreAuthEvents, setIgnoreAuthEvents] = useState(false);
 
+  // Refresh user data when accessing payment page to ensure Form 2 completion is checked with latest data
+  useEffect(() => {
+    if (currentPage === 'payment' && currentUser?.id) {
+      const refreshUserForPayment = async () => {
+        try {
+          console.log('🔄 Refreshing user data for payment page Form 2 check...');
+          const refreshedUser = await authService.getCurrentUser();
+          if (refreshedUser) {
+            console.log('✅ User data refreshed for payment page:', refreshedUser);
+            setCurrentUser(refreshedUser);
+          }
+        } catch (error) {
+          console.error('❌ Error refreshing user data for payment page:', error);
+        }
+      };
+      refreshUserForPayment();
+    }
+  }, [currentPage, currentUser?.id]);
+
   // Listen for URL changes to handle reset password links
   useEffect(() => {
     const handleUrlChange = () => {
@@ -722,38 +741,52 @@ const App: React.FC = () => {
               return;
             }
             
-            // Immediately set minimal user so UI can proceed
+            // Get complete user data from database
             if (isMounted) {
-              const basicUser: AuthUser = {
-                id: session.user.id,
-                email: session.user.email || '',
-                name: session.user.user_metadata?.name || 'Unknown',
-                role: session.user.user_metadata?.role || 'Investor',
-                startup_name: session.user.user_metadata?.startupName || undefined,
-                registration_date: new Date().toISOString().split('T')[0]
-              };
-              const beforeUser = currentUser;
-              const microSteps = [
-                `1. Creating basic user from session`,
-                `2. User email: ${basicUser.email}`,
-                `3. User role: ${basicUser.role}`,
-                `4. User startup name: ${basicUser.startup_name || 'none'}`,
-                `5. Registration date: ${basicUser.registration_date}`,
-                `6. Previous user: ${beforeUser?.email || 'none'}`,
-                `7. Previous role: ${beforeUser?.role || 'none'}`,
-                `8. About to call setCurrentUser`
-              ];
-              
-              setCurrentUser(basicUser);
-              setIsAuthenticated(true);
-              setIsLoading(false);
+              console.log('🔄 Fetching complete user data from database...');
+              try {
+                const completeUser = await authService.getCurrentUser();
+                if (completeUser) {
+                  console.log('✅ Complete user data loaded:', completeUser);
+                  setCurrentUser(completeUser);
+                  setIsAuthenticated(true);
+                  setIsLoading(false);
+                } else {
+                  console.log('❌ Could not load complete user data, using basic user');
+                  const basicUser: AuthUser = {
+                    id: session.user.id,
+                    email: session.user.email || '',
+                    name: session.user.user_metadata?.name || 'Unknown',
+                    role: session.user.user_metadata?.role || 'Investor',
+                    startup_name: session.user.user_metadata?.startupName || undefined,
+                    registration_date: new Date().toISOString().split('T')[0]
+                  };
+                  setCurrentUser(basicUser);
+                  setIsAuthenticated(true);
+                  setIsLoading(false);
+                }
+              } catch (error) {
+                console.error('❌ Error loading complete user data:', error);
+                const basicUser: AuthUser = {
+                  id: session.user.id,
+                  email: session.user.email || '',
+                  name: session.user.user_metadata?.name || 'Unknown',
+                  role: session.user.user_metadata?.role || 'Investor',
+                  startup_name: session.user.user_metadata?.startupName || undefined,
+                  registration_date: new Date().toISOString().split('T')[0]
+                };
+                setCurrentUser(basicUser);
+                setIsAuthenticated(true);
+                setIsLoading(false);
+              }
               
               // Check payment status for Startup users after authentication
-              if (basicUser.role === 'Startup') {
-                console.log('🔍 Checking payment status for startup user during auth initialization:', basicUser.email);
+              const userForPaymentCheck = completeUser || basicUser;
+              if (userForPaymentCheck?.role === 'Startup') {
+                console.log('🔍 Checking payment status for startup user during auth initialization:', userForPaymentCheck.email);
                 
                 try {
-                  const hasActiveSubscription = await checkPaymentStatus(basicUser.id);
+                  const hasActiveSubscription = await checkPaymentStatus(userForPaymentCheck.id);
                   
                   if (!hasActiveSubscription) {
                     console.log('💳 No active subscription found, redirecting to payment page');
@@ -1961,7 +1994,7 @@ const App: React.FC = () => {
   }
 
   // Guard: never show payment unless registration Form 2 is complete
-  // Check both user documents and startup profile data
+  // Minimal completeness: require government_id and ca_license (extend as needed)
   if (currentPage === 'payment') {
     // Only Startup users should ever see the payment page
     if (!currentUser || currentUser.role !== 'Startup') {
@@ -1970,21 +2003,19 @@ const App: React.FC = () => {
       // Fall through to render the appropriate view after page change
     }
     
-    // Check Form 2 completion: require government_id + startup profile data
-    console.log('🔍 Payment guard - checking Form 2 completion:', {
+    const requiresForm2 = !currentUser?.government_id;
+    console.log('🔍 Form 2 check for payment:', {
       currentUser: currentUser,
       government_id: currentUser?.government_id,
-      hasGovernmentId: !!currentUser?.government_id
+      requiresForm2: requiresForm2,
+      currentUserKeys: currentUser ? Object.keys(currentUser) : 'null',
+      currentUserRole: currentUser?.role,
+      currentUserEmail: currentUser?.email
     });
-    
-    const requiresForm2 = !currentUser?.government_id;
     if (requiresForm2) {
       console.log('🔒 Blocking payment: Form 2 incomplete, redirecting to complete-registration');
       setCurrentPage('complete-registration');
     }
-    
-    // Additional check: if user has government_id but no startup profile, also redirect to Form 2
-    // This will be handled by the CompleteRegistrationPage component itself
     console.log('💳 Showing Payment Page (mandatory after registration)');
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col">

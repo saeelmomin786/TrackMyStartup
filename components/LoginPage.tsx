@@ -105,7 +105,21 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 } else {
                     // User is complete, proceed to dashboard
                     console.log('User complete, proceeding to dashboard');
-                    onLogin(user);
+                    
+                    // Fetch the full user profile with all fields including government_id
+                    try {
+                        const fullUserProfile = await authService.getCurrentUser();
+                        if (fullUserProfile) {
+                            console.log('✅ Full user profile fetched:', fullUserProfile);
+                            onLogin(fullUserProfile);
+                        } else {
+                            console.log('⚠️ Could not fetch full profile, using basic user data');
+                            onLogin(user);
+                        }
+                    } catch (error) {
+                        console.error('❌ Error fetching full user profile:', error);
+                        onLogin(user);
+                    }
                 }
             } else if (loginError) {
                 setError(loginError);

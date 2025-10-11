@@ -272,22 +272,48 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
             startupData.investment_advisor_code = investmentAdvisorCode.trim();
           }
 
-          // Use upsert to handle both create and update cases
-          const { data: startupResult, error: startupError } = await authService.supabase
+          // Check if startup already exists for this user
+          const { data: existingStartup } = await authService.supabase
             .from('startups')
-            .upsert(startupData, { 
-              onConflict: 'name',
-              ignoreDuplicates: false 
-            })
-            .select()
-            .single();
+            .select('id')
+            .eq('user_id', user.id)
+            .maybeSingle();
 
-          if (startupError) {
-            console.error('Startup upsert error:', startupError);
-            throw new Error(`Failed to create/update startup: ${startupError.message}`);
+          let startupResult;
+          if (existingStartup) {
+            // Update existing startup
+            const { data, error: updateError } = await authService.supabase
+              .from('startups')
+              .update(startupData)
+              .eq('id', existingStartup.id)
+              .select()
+              .single();
+            
+            if (updateError) {
+              console.error('Startup update error:', updateError);
+              throw new Error(`Failed to update startup: ${updateError.message}`);
+            }
+            startupResult = data;
+          } else {
+            // Create new startup
+            const { data, error: createError } = await authService.supabase
+              .from('startups')
+              .insert(startupData)
+              .select()
+              .single();
+            
+            if (createError) {
+              console.error('Startup creation error:', createError);
+              throw new Error(`Failed to create startup: ${createError.message}`);
+            }
+            startupResult = data;
           }
 
+
           const startupId = startupResult?.id;
+          if (!startupId) {
+            throw new Error('Failed to create startup - no startup ID returned');
+          }
           console.log('✅ Startup created/updated:', startupId);
 
           // Add founders if startup exists and founders provided
@@ -316,7 +342,8 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
             console.log('✅ Founders added successfully');
           }
         } catch (error) {
-          console.error('Error handling startup/founders:', error);
+          console.error('❌ Critical error in startup creation:', error);
+          console.error('❌ Registration will be marked as FAILED');
           throw error; // Re-throw to prevent silent failures
         }
       }
@@ -350,7 +377,8 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
         financial_advisor_license_url: updatedProfile.financial_advisor_license_url
       };
 
-      // Registration successful
+      // Registration successful - only if all steps completed
+      console.log('🎉 Registration complete! All steps successful.');
       onRegister(
         authUser, 
         userData.role === 'Startup' ? founders : [], 

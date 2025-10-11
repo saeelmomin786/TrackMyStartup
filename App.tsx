@@ -1961,7 +1961,7 @@ const App: React.FC = () => {
   }
 
   // Guard: never show payment unless registration Form 2 is complete
-  // Minimal completeness: require government_id and ca_license (extend as needed)
+  // Check both user documents and startup profile data
   if (currentPage === 'payment') {
     // Only Startup users should ever see the payment page
     if (!currentUser || currentUser.role !== 'Startup') {
@@ -1969,11 +1969,22 @@ const App: React.FC = () => {
       setCurrentPage('login');
       // Fall through to render the appropriate view after page change
     }
+    
+    // Check Form 2 completion: require government_id + startup profile data
+    console.log('🔍 Payment guard - checking Form 2 completion:', {
+      currentUser: currentUser,
+      government_id: currentUser?.government_id,
+      hasGovernmentId: !!currentUser?.government_id
+    });
+    
     const requiresForm2 = !currentUser?.government_id;
     if (requiresForm2) {
       console.log('🔒 Blocking payment: Form 2 incomplete, redirecting to complete-registration');
       setCurrentPage('complete-registration');
     }
+    
+    // Additional check: if user has government_id but no startup profile, also redirect to Form 2
+    // This will be handled by the CompleteRegistrationPage component itself
     console.log('💳 Showing Payment Page (mandatory after registration)');
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col">

@@ -678,19 +678,25 @@ const App: React.FC = () => {
 
       // Note: Duplicate auth event filtering is now handled at the Supabase level in auth.ts
       
-      // Prevent multiple simultaneous auth state changes
-      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-        // Check if we're already processing an auth state change
-        if (isProcessingAuthChange) {
-          console.log('Auth state change already in progress, skipping...');
-          return;
-        }
+        // Prevent multiple simultaneous auth state changes
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+          // Check if we're already processing an auth state change
+          if (isProcessingAuthChange) {
+            console.log('Auth state change already in progress, skipping...');
+            return;
+          }
+          
+          // Additional check: if we already have the same user authenticated, skip
+          if (isAuthenticatedRef.current && currentUserRef.current && session?.user && currentUserRef.current.id === session.user.id) {
+            console.log('🚫 User already authenticated with same ID, skipping duplicate auth event');
+            return;
+          }
         
-        // AGGRESSIVE FIX: Only block duplicate auth events, not all auth events
+        // IMPROVED FIX: Only block duplicate auth events, not all auth events
         if (isAuthenticatedRef.current && currentUserRef.current && hasInitialDataLoadedRef.current && session?.user && currentUserRef.current.id === session.user.id) {
           // Only block if this is a duplicate event (like window focus), not legitimate auth changes
           if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
-            console.log('🚫 AGGRESSIVE FIX: Blocking duplicate auth event to prevent unnecessary refresh');
+            console.log('🚫 IMPROVED FIX: Blocking duplicate auth event to prevent unnecessary refresh');
             return;
           }
           // Allow other auth events to proceed (like profile updates, data changes)

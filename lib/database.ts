@@ -898,7 +898,7 @@ export const investmentService = {
         .select('id, email, name, role, investment_advisor_code, logo_url')
         .eq('investment_advisor_code', advisorCode)
         .eq('role', 'Investment Advisor')
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('❌ Database: Error fetching investment advisor:', error);

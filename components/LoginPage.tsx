@@ -46,14 +46,30 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 // Fetch from users table for documents
                 const { data: userProfiles, error: userProfileError } = await authService.supabase
                     .from('users')
-                    .select('government_id, ca_license')
+                    .select('government_id, ca_license, startup_name')
                     .eq('id', user.id);
                 
                 // Fetch from startups table for company info
-                const { data: startupProfiles, error: startupProfileError } = await authService.supabase
+                // First try with user_id, then fallback to startup_name matching
+                let { data: startupProfiles, error: startupProfileError } = await authService.supabase
                     .from('startups')
-                    .select('name, country')
+                    .select('name, country, user_id')
                     .eq('user_id', user.id);
+                
+                // If no startup found by user_id, try matching by startup_name from user profile
+                if ((!startupProfiles || startupProfiles.length === 0) && userProfile?.startup_name) {
+                    console.log('🔍 No startup found by user_id, trying startup_name match:', userProfile.startup_name);
+                    const { data: startupByName, error: startupByNameError } = await authService.supabase
+                        .from('startups')
+                        .select('name, country, user_id')
+                        .eq('name', userProfile.startup_name);
+                    
+                    if (startupByName && startupByName.length > 0) {
+                        startupProfiles = startupByName;
+                        startupProfileError = startupByNameError;
+                        console.log('✅ Found startup by name match:', startupByName[0]);
+                    }
+                }
                 
                 const userProfile = userProfiles && userProfiles.length > 0 ? userProfiles[0] : null;
                 const startupProfile = startupProfiles && startupProfiles.length > 0 ? startupProfiles[0] : null;
@@ -70,7 +86,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     govIdValue: userProfile?.government_id,
                     caLicenseValue: userProfile?.ca_license,
                     companyNameValue: startupProfile?.name,
-                    countryValue: startupProfile?.country
+                    countryValue: startupProfile?.country,
+                    userStartupName: userProfile?.startup_name,
+                    startupUserId: startupProfile?.user_id,
+                    currentUserId: user.id
                 });
                 
                 console.log('🔍 Detailed Form 2 verification:', {
@@ -105,12 +124,23 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     onNavigateToCompleteRegistration();
                     return;
                 } else if (!startupProfile || !startupProfile.name || !startupProfile.country) {
-                    // User documents complete but startup profile missing - user needs to complete Form 2
-                    console.log('User documents complete but startup profile missing - redirecting to Form 2');
+                    // User documents complete but startup profile missing - check if user has startup_name in profile
+                    console.log('User documents complete but startup profile missing - checking for startup_name in user profile');
                     console.log('Missing startup fields:', { 
                       companyName: startupProfile?.name,
-                      country: startupProfile?.country
+                      country: startupProfile?.country,
+                      userStartupName: userProfile?.startup_name
                     });
+                    
+                    // If user has startup_name in their profile, they might have completed Form 2 but startup record is missing
+                    // In this case, let them proceed to dashboard and the system will handle the missing startup record
+                    if (userProfile?.startup_name) {
+                        console.log('✅ User has startup_name in profile, allowing dashboard access');
+                        onLogin(user);
+                        return;
+                    }
+                    
+                    // Otherwise, redirect to Form 2
                     onNavigateToCompleteRegistration();
                     return;
                 } else {

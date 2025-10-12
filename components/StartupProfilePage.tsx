@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, User, Bell, HelpCircle, LogOut, Edit3, Shield, RefreshCw, Building2 } from 'lucide-react';
+import { ArrowLeft, User, Bell, HelpCircle, Edit3, Shield, RefreshCw, Building2 } from 'lucide-react';
 import Button from './ui/Button';
 import EditProfileModal from './EditProfileModal';
 // PaymentSection removed
@@ -13,15 +13,13 @@ interface StartupProfilePageProps {
   startup?: Startup;
   onBack: () => void;
   onProfileUpdate?: (updatedUser: AuthUser) => void;
-  onLogout?: () => void;
 }
 
 const StartupProfilePage: React.FC<StartupProfilePageProps> = ({ 
   currentUser, 
   startup, 
   onBack, 
-  onProfileUpdate, 
-  onLogout 
+  onProfileUpdate
 }) => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [refreshedProfile, setRefreshedProfile] = useState<AuthUser | null>(currentUser);
@@ -92,15 +90,6 @@ const StartupProfilePage: React.FC<StartupProfilePageProps> = ({
     }
   ];
 
-  const handleLogout = () => {
-    console.log('Logging out...');
-    if (onLogout) {
-      onLogout();
-    } else {
-      // Fallback logout logic
-      window.location.href = '/logout';
-    }
-  };
 
   const handleSaveProfile = async (updatedData: any) => {
     if (!currentUser?.id) {
@@ -300,16 +289,6 @@ const StartupProfilePage: React.FC<StartupProfilePageProps> = ({
         ))}
       </div>
 
-      {/* Logout Section */}
-      <div className="bg-white mt-4">
-        <button
-          onClick={handleLogout}
-          className="w-full px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3 text-red-600 hover:bg-red-50 transition-colors"
-        >
-          <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
-          <span className="text-sm sm:text-base font-medium">Logout</span>
-        </button>
-      </div>
 
       {/* Edit Profile Modal */}
       <EditProfileModal

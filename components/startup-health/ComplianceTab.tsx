@@ -3,12 +3,14 @@ import { Startup, ComplianceStatus, UserRole } from '../../types';
 import { complianceRulesIntegrationService, IntegratedComplianceTask } from '../../lib/complianceRulesIntegrationService';
 import { complianceService, ComplianceUpload } from '../../lib/complianceService';
 import { supabase } from '../../lib/supabase';
+import { messageService } from '../../lib/messageService';
 import { getCountryProfessionalTitles } from '../../lib/utils';
 import { UploadCloud, Download, Trash2, Eye, X, CheckCircle, AlertCircle, Clock, FileText, Calendar, User } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import ComplianceSubmissionButton from '../ComplianceSubmissionButton';
+import CompanyDocumentsSection from './CompanyDocumentsSection';
 import IPTrademarkSection from './IPTrademarkSection';
 
 type CurrentUserLike = { role: UserRole; email?: string; serviceCode?: string };
@@ -509,11 +511,17 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                     setUploadSuccess(false);
                 }, 2000);
             } else {
-                alert('Upload failed. Please check if the database tables are set up correctly.');
+                messageService.error(
+                  'Upload Failed',
+                  'Upload failed. Please check if the database tables are set up correctly.'
+                );
             }
         } catch (error) {
             console.error('Error uploading file:', error);
-            alert('Error uploading file. Please try again.');
+            messageService.error(
+              'Upload Error',
+              'Error uploading file. Please try again.'
+            );
         } finally {
             setUploading(false);
         }
@@ -536,11 +544,17 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                 console.log('Delete successful');
                 loadComplianceData(); // Refresh data
             } else {
-                alert('Delete failed. Please try again.');
+                messageService.error(
+                  'Delete Failed',
+                  'Delete failed. Please try again.'
+                );
             }
         } catch (error) {
             console.error('Delete error:', error);
-            alert('Delete failed. Please try again.');
+            messageService.error(
+              'Delete Failed',
+              'Delete failed. Please try again.'
+            );
         } finally {
             setDeleteModalOpen(false);
             setDeleteTargetId(null);
@@ -679,6 +693,20 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                     />
                 )}
             </div>
+
+            {/* Company Documents Section */}
+            <CompanyDocumentsSection 
+                startupId={startup.id}
+                currentUser={currentUser}
+                isViewOnly={isViewOnly}
+            />
+
+            {/* IP/Trademark Section */}
+            <IPTrademarkSection 
+                startupId={startup.id}
+                currentUser={currentUser}
+                isViewOnly={isViewOnly}
+            />
             
             <div className="flex justify-end items-center">
                 {/* Filters */}
@@ -882,7 +910,10 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                                         if (file) {
                                             // Check if file is PDF
                                             if (file.type !== 'application/pdf') {
-                                                alert('Please select a PDF file only.');
+                                                messageService.warning(
+                                                  'Invalid File Type',
+                                                  'Please select a PDF file only.'
+                                                );
                                                 return;
                                             }
                                             handleFileSelect(file);
@@ -975,13 +1006,6 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                     </div>
                 </div>
             </Modal>
-
-            {/* IP/Trademark Section */}
-            <IPTrademarkSection 
-                startupId={startup.id}
-                currentUser={currentUser}
-                isViewOnly={isViewOnly}
-            />
         </div>
                     );
 };

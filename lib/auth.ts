@@ -149,12 +149,12 @@ export const authService = {
     }
   },
 
-  // Check if user profile is complete (has verification documents)
+  // Check if user profile is complete (has verification documents and role-specific requirements)
   async isProfileComplete(userId: string): Promise<boolean> {
     try {
       const { data: profiles, error } = await supabase
         .from('users')
-        .select('government_id, ca_license, verification_documents')
+        .select('government_id, ca_license, verification_documents, role, center_name')
         .eq('id', userId);
       
       const profile = profiles && profiles.length > 0 ? profiles[0] : null;
@@ -163,9 +163,36 @@ export const authService = {
         return false;
       }
 
-      // Profile is complete if user has uploaded government_id document
-      return !!(profile.government_id || 
-                (profile.verification_documents && profile.verification_documents.length > 0));
+      // Check basic document requirements (government_id)
+      const hasBasicDocuments = !!(profile.government_id || 
+                                  (profile.verification_documents && profile.verification_documents.length > 0));
+
+      if (!hasBasicDocuments) {
+        return false;
+      }
+
+      // Role-specific completion requirements
+      switch (profile.role) {
+        case 'Startup Facilitation Center':
+          // Facilitators need center_name in addition to documents
+          return !!(profile.center_name && profile.center_name.trim() !== '');
+        
+        case 'Investment Advisor':
+          // Investment Advisors need both government_id and ca_license (role-specific document)
+          return !!(profile.government_id && profile.ca_license);
+        
+        case 'Startup':
+          // Startups need both documents and startup profile (checked separately in startup table)
+          return !!(profile.government_id && profile.ca_license);
+        
+        case 'Investor':
+          // Investors need both documents
+          return !!(profile.government_id && profile.ca_license);
+        
+        default:
+          // For other roles, just check basic documents
+          return hasBasicDocuments;
+      }
     } catch (error) {
       console.error('Error checking profile completion:', error);
       return false;

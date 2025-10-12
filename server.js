@@ -7,8 +7,8 @@ import crypto from "crypto";
 import { createClient } from '@supabase/supabase-js';
 
 // Load environment variables
-dotenv.config();
-const loadedEnvPath = ".env";
+dotenv.config({ path: "backend .env" });
+const loadedEnvPath = "backend .env";
 
 const app = express();
 app.use(cors());
@@ -222,20 +222,44 @@ app.post("/api/razorpay/create-trial-subscription", async (req, res) => {
     const period = (interval || plan_type) === 'yearly' ? 'yearly' : 'monthly';
     const subscriptionTotalCount = total_count || ((interval || plan_type) === 'yearly' ? 1 : 12);
     
-    // Get or create Razorpay plan dynamically for the provided final_amount
-    const plan_id = await getOrCreateRazorpayPlan({
-      amountPaise: Math.round((final_amount || 0) * 100),
-      currency: 'INR',
-      period,
-      intervalCount: 1,
-      name: `${plan_name} (${interval || plan_type})`
-    }, { keyId, keySecret });
+    // Create Razorpay plan dynamically for the provided final_amount
+    let plan_id;
+    const authHeader = "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64");
     
-    if (!plan_id) return res.status(400).json({ error: `Plan ID not configured for ${plan_type} plan` });
+    try {
+      const planResp = await fetch('https://api.razorpay.com/v1/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({
+          period,
+          interval: 1,
+          item: {
+            name: `${plan_name} (${interval || plan_type})`,
+            amount: Math.round((final_amount || 0) * 100),
+            currency: 'INR'
+          }
+        })
+      });
+
+      if (!planResp.ok) {
+        const txt = await planResp.text();
+        console.error('Razorpay plan creation failed:', txt);
+        return res.status(planResp.status).json({ error: txt });
+      }
+      
+      const planJson = await planResp.json();
+      plan_id = planJson?.id;
+      
+      if (!plan_id) {
+        console.error('No plan id in Razorpay response');
+        return res.status(500).json({ error: 'Failed to create Razorpay plan' });
+      }
+    } catch (planError) {
+      console.error('Error creating Razorpay plan:', planError);
+      return res.status(500).json({ error: 'Failed to create Razorpay plan' });
+    }
 
     console.log(`Creating trial subscription for ${interval || plan_type} plan with ID: ${plan_id}, total count: ${subscriptionTotalCount}`);
-
-    const authHeader = "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64");
 
     // Create subscription with trial period
     const trialPeriod = trial_days * 24 * 60 * 60; // Convert days to seconds
@@ -612,47 +636,8 @@ app.post('/api/razorpay/verify', async (req, res) => {
 });
 
 // --------------------
-// Create Trial Subscription
+// Create Trial Subscription (REMOVED DUPLICATE)
 // --------------------
-app.post("/api/razorpay/create-trial-subscription", async (req, res) => {
-  try {
-    console.log("[create-trial-subscription] body:", req.body);
-
-    const { user_id, plan_type = 'monthly', startup_count = 1 } = req.body;
-    if (!user_id) return res.status(400).json({ error: "user_id is required" });
-
-    const keyId = process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.VITE_RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET;
-    if (!keyId || !keySecret) return res.status(500).json({ error: "Razorpay keys not configured" });
-
-    // Determine plan based on type
-    let plan_id;
-    if (plan_type === 'yearly') plan_id = process.env.RAZORPAY_STARTUP_PLAN_ID_YEARLY || process.env.RAZORPAY_STARTUP_PLAN_ID;
-    else plan_id = process.env.RAZORPAY_STARTUP_PLAN_ID_MONTHLY || process.env.RAZORPAY_STARTUP_PLAN_ID;
-
-    if (!plan_id) return res.status(400).json({ error: `Plan ID not configured for ${plan_type} plan` });
-
-    const authHeader = "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64");
-
-    const r = await fetch("https://api.razorpay.com/v1/subscriptions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: authHeader },
-      body: JSON.stringify({
-        plan_id,
-        total_count: plan_type === 'yearly' ? 1 : 12,
-        customer_notify: 1,
-        notes: { user_id, startup_count, trial_startup: "true", plan_type }
-      }),
-    });
-
-    if (!r.ok) return res.status(r.status).send(await r.text());
-    const sub = await r.json();
-    res.json(sub);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Server error" });
-  }
-});
 
 // Extra aliases to avoid client/route mismatch during local testing
 app.post('/razorpay/create-trial-subscription', (req, res, next) => createSubscriptionHandler(req, res, next));

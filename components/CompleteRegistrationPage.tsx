@@ -71,6 +71,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     caServiceCode: '',
     csServiceCode: '',
     currency: 'USD',
+    centerName: '', // For facilitators
   });
 
   // Share and equity information
@@ -576,6 +577,15 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       }
     }
 
+    // For facilitators, center name is required
+    if (userData.role === 'Startup Facilitation Center') {
+      if (!profileData.centerName || profileData.centerName.trim() === '') {
+        setError('Facilitation center name is required');
+        setIsLoading(false);
+        return;
+      }
+    }
+
     if (userData.role === 'Startup') {
       const invalidFounders = founders.filter(f => !f.name.trim() || !f.email.trim());
       if (invalidFounders.length > 0) {
@@ -723,6 +733,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           // Add Investment Advisor specific fields
           logo_url: logoUrl || null,
           financial_advisor_license_url: licenseUrl || null,
+          // Add facilitator specific fields
+          center_name: userData.role === 'Startup Facilitation Center' ? profileData.centerName : null,
           updated_at: new Date().toISOString()
       };
 
@@ -769,7 +781,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 investment_type: 'Seed',
                 investment_value: 0,
                 equity_allocation: 0,
-                current_valuation: 0,
+                current_valuation: shareData.totalShares * shareData.pricePerShare,
                 compliance_status: 'Pending',
                 sector: 'Technology',
                 total_funding: 0,
@@ -822,7 +834,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               currency: profileData.currency,
               total_shares: shareData.totalShares,
               price_per_share: shareData.pricePerShare,
-              esop_reserved_shares: shareData.esopReservedShares
+              esop_reserved_shares: shareData.esopReservedShares,
+              current_valuation: shareData.totalShares * shareData.pricePerShare
             };
 
             console.log('💾 Updating startup with profile data:', startupUpdateData);
@@ -1122,6 +1135,31 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               </select>
             </div>
           </div>
+
+          {/* Center Name - Only for Startup Facilitation Center role */}
+          {userData.role === 'Startup Facilitation Center' && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center">
+                <Building2 className="h-5 w-5 mr-2" />
+                Facilitation Center Information
+              </h3>
+              <p className="text-sm text-slate-600">
+                Provide your facilitation center's name.
+              </p>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Center Name</label>
+                <input
+                  type="text"
+                  value={profileData.centerName}
+                  onChange={(e) => setProfileData(prev => ({ ...prev, centerName: e.target.value }))}
+                  className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-slate-900 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter your facilitation center name"
+                  required
+                />
+              </div>
+            </div>
+          )}
 
           {/* Company Profile Information - Only for Startup role */}
           {userData.role === 'Startup' && (

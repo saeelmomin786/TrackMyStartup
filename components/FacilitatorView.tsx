@@ -23,7 +23,10 @@ import { profileService } from '../lib/profileService';
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, getCurrencyForCountry, getCurrencyForCountryCode } from '../lib/utils';
 import AddStartupModal, { StartupFormData } from './AddStartupModal';
 import StartupInvitationModal from './StartupInvitationModal';
+import EditStartupModal from './EditStartupModal';
 import { startupInvitationService, StartupInvitation } from '../lib/startupInvitationService';
+import { messageService } from '../lib/messageService';
+import MessageContainer from './MessageContainer';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -120,7 +123,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         const sel = new Date(newOpportunity.deadline);
         sel.setHours(0,0,0,0);
         if (sel < today) {
-          alert('Deadline cannot be in the past. Please choose today or a future date.');
+          messageService.warning(
+            'Invalid Deadline',
+            'Deadline cannot be in the past. Please choose today or a future date.'
+          );
           return;
         }
       }
@@ -198,6 +204,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [myReceivedApplications, setMyReceivedApplications] = useState<ReceivedApplication[]>([]);
   const [recognitionRecords, setRecognitionRecords] = useState<any[]>([]);
   const [isLoadingRecognition, setIsLoadingRecognition] = useState(false);
+  const [domainStageMap, setDomainStageMap] = useState<{ [key: number]: { domain: string; stage: string } }>({});
   const [portfolioStartups, setPortfolioStartups] = useState<StartupDashboardData[]>([]);
   const [isLoadingPortfolio, setIsLoadingPortfolio] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -218,6 +225,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
   const [facilitatorCode, setFacilitatorCode] = useState<string>('');
   
+  // State for edit startup functionality
+  const [isEditStartupModalOpen, setIsEditStartupModalOpen] = useState(false);
+  const [selectedStartupForEdit, setSelectedStartupForEdit] = useState<StartupInvitation | null>(null);
+  
   // State for showing more items in dashboard cards
   const [showAllStartups, setShowAllStartups] = useState(false);
   const [showAllOpportunities, setShowAllOpportunities] = useState(false);
@@ -230,7 +241,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const handleOpenMessaging = (application: ReceivedApplication) => {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(application.id)) {
-      alert('Messaging is only available for valid program applications. Open from Applications where an application exists.');
+      messageService.info(
+        'Messaging Location',
+        'Messaging is only available for valid program applications. Open from Applications where an application exists.'
+      );
       return;
     }
     setSelectedApplicationForMessaging(application);
@@ -341,11 +355,18 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       setIsDiligenceModalOpen(false);
       setSelectedApplicationForDiligence(null);
       
-      alert('Diligence request approved! The startup has been notified.');
+      messageService.success(
+        'Diligence Approved',
+        'Diligence request approved! The startup has been notified.',
+        3000
+      );
       
     } catch (err) {
       console.error('Error approving diligence:', err);
-      alert('Failed to approve diligence request. Please try again.');
+      messageService.error(
+        'Approval Failed',
+        'Failed to approve diligence request. Please try again.'
+      );
     } finally {
       setIsProcessingAction(false);
     }
@@ -393,11 +414,18 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       setIsDiligenceModalOpen(false);
       setSelectedApplicationForDiligence(null);
       
-      alert('Diligence request rejected. The startup can upload new documents and request again.');
+      messageService.success(
+        'Diligence Rejected',
+        'Diligence request rejected. The startup can upload new documents and request again.',
+        3000
+      );
       
     } catch (err) {
       console.error('Error rejecting diligence:', err);
-      alert('Failed to reject diligence request. Please try again.');
+      messageService.error(
+        'Rejection Failed',
+        'Failed to reject diligence request. Please try again.'
+      );
     } finally {
       setIsProcessingAction(false);
     }
@@ -487,7 +515,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
         console.log('Using clipboard API');
         await navigator.clipboard.writeText(details);
-        alert('Startup details copied to clipboard');
+        messageService.success(
+          'Copied to Clipboard',
+          'Startup details copied to clipboard',
+          2000
+        );
       } else {
         console.log('Using fallback copy method');
         // Fallback: hidden textarea copy
@@ -497,11 +529,18 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        alert('Startup details copied to clipboard');
+        messageService.success(
+          'Copied to Clipboard',
+          'Startup details copied to clipboard',
+          2000
+        );
       }
     } catch (err) {
       console.error('Share failed', err);
-      alert('Unable to share. Try copying manually.');
+      messageService.error(
+        'Share Failed',
+        'Unable to share. Try copying manually.'
+      );
     }
   };
 
@@ -586,66 +625,37 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       
       if (error) {
         console.error('❌ Error loading recognition requests:', error);
-        // Fallback: Query without foreign key join but with startup data
-        const { data: fallbackData, error: fallbackError } = await supabase
-          .from('recognition_records')
-          .select(`
-            *,
-            startups (
-              id, 
-              name, 
-              sector, 
-              total_funding,
-              total_revenue,
-              registration_date,
-              currency,
-              startup_shares (
-                price_per_share
-              )
-            )
-          `)
-          .eq('facilitator_code', facilitatorCode)
-          .order('date_added', { ascending: false });
-        
-        if (fallbackError) {
-          console.error('❌ Fallback query also failed:', fallbackError);
-          setRecognitionRecords([]);
-          return;
-        }
-        
-        // Map the fallback data
-        const mappedRecords = (fallbackData || []).map(record => ({
-          id: record.id.toString(),
-          startupId: record.startup_id,
-          programName: record.program_name,
-          facilitatorName: record.facilitator_name,
-          facilitatorCode: record.facilitator_code,
-          incubationType: record.incubation_type,
-          feeType: record.fee_type,
-          feeAmount: record.fee_amount,
-          shares: record.shares,
-          pricePerShare: record.price_per_share,
-          investmentAmount: record.investment_amount,
-          equityAllocated: record.equity_allocated,
-          preMoneyValuation: record.pre_money_valuation,
-          postMoneyValuation: record.post_money_valuation,
-          signedAgreementUrl: record.signed_agreement_url,
-          status: record.status || 'pending',
-          dateAdded: record.date_added,
-          startup: {
-            ...record.startups,
-            currentPricePerShare: record.startups?.startup_shares?.[0]?.price_per_share || 0
-          } // Include startup data with current price
-        }));
-        
-        // console.log('Mapped recognition records:', mappedRecords);
-        setRecognitionRecords(mappedRecords);
+        setRecognitionRecords([]);
         return;
       }
+
+      // Fetch domain and stage data from opportunity_applications for these startups
+      const startupIds = data?.map(record => record.startup_id) || [];
+      let tempDomainStageMap: { [key: number]: { domain: string; stage: string } } = {};
       
-      // Map database data to RecognitionRecord interface
+      if (startupIds.length > 0) {
+        const { data: applicationData, error: applicationError } = await supabase
+          .from('opportunity_applications')
+          .select('startup_id, domain, stage')
+          .in('startup_id', startupIds)
+          .eq('status', 'accepted'); // Only get accepted applications
+
+        if (!applicationError && applicationData) {
+          applicationData.forEach(app => {
+            tempDomainStageMap[app.startup_id] = {
+              domain: app.domain || 'N/A',
+              stage: app.stage || 'N/A'
+            };
+          });
+        }
+      }
+      
+      // Set the domain stage map in state
+      setDomainStageMap(tempDomainStageMap);
+
+      // Map database data to RecognitionRecord interface with domain and stage
       const mappedRecords = (data || []).map(record => ({
-        id: record.id.toString(),
+        id: record.id.toString(), // Keep as string for UI consistency
         startupId: record.startup_id,
         programName: record.program_name,
         facilitatorName: record.facilitator_name,
@@ -653,29 +663,35 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         incubationType: record.incubation_type,
         feeType: record.fee_type,
         feeAmount: record.fee_amount,
-        shares: record.shares,
-        pricePerShare: record.price_per_share,
-        investmentAmount: record.investment_amount,
         equityAllocated: record.equity_allocated,
         preMoneyValuation: record.pre_money_valuation,
         postMoneyValuation: record.post_money_valuation,
         signedAgreementUrl: record.signed_agreement_url,
         status: record.status || 'pending',
         dateAdded: record.date_added,
-        // Include startup data for display with current price
+        // Include startup data for display with current price and domain/stage
         startup: {
           ...record.startups,
-          currentPricePerShare: record.startups?.startup_shares?.[0]?.price_per_share || 0
+          currentPricePerShare: record.startups?.startup_shares?.[0]?.price_per_share || 0,
+          // Override sector with domain from opportunity_applications
+          sector: tempDomainStageMap[record.startup_id]?.domain || record.startups?.sector || 'N/A',
+          // Add stage information
+          stage: tempDomainStageMap[record.startup_id]?.stage || 'N/A'
         }
       }));
       
+      console.log('📋 Mapped recognition records with domain/stage:', mappedRecords);
+      console.log('🔍 Debug domain/stage mapping:', tempDomainStageMap);
       setRecognitionRecords(mappedRecords);
+      return;
     } catch (err) {
       console.error('Error loading recognition requests:', err);
+      setRecognitionRecords([]);
     } finally {
       setIsLoadingRecognition(false);
     }
   };
+
 
 
 
@@ -1206,7 +1222,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
       if (error) {
         console.error('Error rejecting application:', error);
-        alert('Failed to reject application. Please try again.');
+        messageService.error(
+          'Rejection Failed',
+          'Failed to reject application. Please try again.'
+        );
         return;
       }
 
@@ -1219,10 +1238,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         )
       );
 
-      alert('Application rejected successfully.');
+      messageService.success(
+        'Application Rejected',
+        'Application rejected successfully.',
+        3000
+      );
     } catch (error) {
       console.error('Error rejecting application:', error);
-      alert('Failed to reject application. Please try again.');
+      messageService.error(
+        'Rejection Failed',
+        'Failed to reject application. Please try again.'
+      );
     } finally {
       setIsProcessingAction(false);
     }
@@ -1242,39 +1268,57 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         table: 'opportunity_applications'
       });
       
+      // Instead of deleting, withdraw the application to preserve data
       const { data, error } = await supabase
         .from('opportunity_applications')
-        .delete()
+        .update({ 
+          application_status: 'withdrawn',
+          status: 'withdrawn',
+          updated_at: new Date().toISOString()
+        })
         .eq('id', application.id)
         .select();
 
       console.log('🗑️ Delete result:', { data, error });
 
       if (error) {
-        console.error('Error deleting application:', error);
+        console.error('Error withdrawing application:', error);
         console.error('Error details:', {
           code: error.code,
           message: error.message,
           details: error.details,
           hint: error.hint
         });
-        alert('Failed to delete application. Please try again.');
+        messageService.error(
+          'Withdrawal Failed',
+          'Failed to withdraw application. Please try again.'
+        );
         return;
       }
 
       if (!data || data.length === 0) {
-        console.warn('⚠️ No rows were deleted. Record might not exist or already deleted.');
-        alert('Application was not found or was already deleted.');
+        console.warn('⚠️ No rows were updated. Application might not exist or already withdrawn.');
+        messageService.warning(
+          'Application Not Found',
+          'Application was not found or was already withdrawn.'
+        );
         return;
       }
 
       // Update local state
       setMyReceivedApplications(prev => prev.filter(app => app.id !== application.id));
 
-      alert('Application deleted successfully.');
+      messageService.success(
+        'Application Withdrawn',
+        'Application has been withdrawn. Startup data is preserved.',
+        3000
+      );
     } catch (error) {
-      console.error('Error deleting application:', error);
-      alert('Failed to delete application. Please try again.');
+      console.error('Error withdrawing application:', error);
+      messageService.error(
+        'Withdrawal Failed',
+        'Failed to withdraw application. Please try again.'
+      );
     } finally {
       setIsProcessingAction(false);
     }
@@ -1294,6 +1338,32 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         table: 'facilitator_startups'
       });
       
+      // First check if the relationship exists
+      const { data: existingRelationship, error: checkError } = await supabase
+        .from('facilitator_startups')
+        .select('id, startup_id, facilitator_id, status')
+        .eq('startup_id', startupId)
+        .eq('facilitator_id', facilitatorId)
+        .single();
+      
+      console.log('🔍 Relationship check:', { existingRelationship, checkError });
+      
+      if (checkError || !existingRelationship) {
+        console.warn('⚠️ Relationship not found before deletion attempt:', { startupId, facilitatorId, checkError });
+        messageService.warning(
+          'Relationship Not Found',
+          'Startup relationship was not found. It may have already been removed or you may not have permission to remove it.'
+        );
+        return;
+      }
+      
+      console.log('🔍 Relationship found, proceeding with delete:', {
+        relationshipId: existingRelationship.id,
+        startupId: existingRelationship.startup_id,
+        facilitatorId: existingRelationship.facilitator_id,
+        status: existingRelationship.status
+      });
+      
       // Remove from facilitator_startups table (correct table name)
       const { data, error } = await supabase
         .from('facilitator_startups')
@@ -1305,30 +1375,54 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       console.log('🗑️ Delete result:', { data, error });
 
       if (error) {
-        console.error('Error removing startup from portfolio:', error);
-        console.error('Error details:', {
+        console.error('❌ Error removing startup from portfolio:', error);
+        console.error('❌ Error details:', {
           code: error.code,
           message: error.message,
           details: error.details,
           hint: error.hint
         });
-        alert('Failed to remove startup from portfolio. Please try again.');
+        
+        // Check if it's an RLS policy error
+        if (error.message.includes('policy') || error.message.includes('permission') || error.message.includes('RLS')) {
+          console.error('🔒 RLS Policy Error: User may not have DELETE permission on facilitator_startups table');
+          messageService.error(
+            'Permission Denied',
+            'You may not have permission to remove this startup from your portfolio. Please contact support.'
+          );
+        } else {
+          messageService.error(
+            'Removal Failed',
+            'Failed to remove startup from portfolio. Please try again.'
+          );
+        }
         return;
       }
 
       if (!data || data.length === 0) {
         console.warn('⚠️ No rows were deleted. Record might not exist or already deleted.');
-        alert('Startup was not found in your portfolio or was already removed.');
+        console.warn('⚠️ Delete attempt details:', { startupId, facilitatorId });
+        messageService.warning(
+          'Startup Not Found',
+          'Startup was not found in your portfolio or was already removed. Please refresh the page to see the current data.'
+        );
         return;
       }
 
       // Update local state
       setPortfolioStartups(prev => prev.filter(startup => startup.id !== startupId));
 
-      alert('Startup removed from portfolio successfully.');
+      messageService.success(
+        'Startup Removed',
+        'Startup removed from portfolio successfully.',
+        3000
+      );
     } catch (error) {
       console.error('Error removing startup from portfolio:', error);
-      alert('Failed to remove startup from portfolio. Please try again.');
+      messageService.error(
+        'Removal Failed',
+        'Failed to remove startup from portfolio. Please try again.'
+      );
     } finally {
       setIsProcessingAction(false);
     }
@@ -1337,7 +1431,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   // New functions for startup invitation functionality
   const handleAddStartup = async (startupData: StartupFormData) => {
     if (!facilitatorId || !facilitatorCode) {
-      alert('Facilitator information not available. Please try again.');
+      messageService.error(
+        'Facilitator Info Missing',
+        'Facilitator information not available. Please try again.'
+      );
       return;
     }
 
@@ -1359,11 +1456,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         setSelectedStartupForInvitation(startupData);
         setIsInvitationModalOpen(true);
       } else {
-        alert('Failed to add startup. Please try again.');
+        messageService.error(
+          'Addition Failed',
+          'Failed to add startup. Please try again.'
+        );
       }
     } catch (error) {
       console.error('Error adding startup:', error);
-      alert('Failed to add startup. Please try again.');
+      messageService.error(
+        'Addition Failed',
+        'Failed to add startup. Please try again.'
+      );
     } finally {
       setIsLoadingInvitations(false);
     }
@@ -1413,6 +1516,44 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   };
 
+  const handleEditStartup = (startup: StartupInvitation) => {
+    setSelectedStartupForEdit(startup);
+    setIsEditStartupModalOpen(true);
+  };
+
+  const handleSaveStartupEdit = async (updatedData: {
+    startupName: string;
+    contactPerson: string;
+    email: string;
+    phone: string;
+  }) => {
+    if (!selectedStartupForEdit) return;
+
+    try {
+      const updatedInvitation = await startupInvitationService.updateInvitation(
+        selectedStartupForEdit.id,
+        updatedData
+      );
+
+      if (updatedInvitation) {
+        // Update local state
+        setStartupInvitations(prev => 
+          prev.map(inv => 
+            inv.id === selectedStartupForEdit.id 
+              ? updatedInvitation
+              : inv
+          )
+        );
+        console.log('✅ Startup information updated successfully');
+      } else {
+        throw new Error('Failed to update startup information');
+      }
+    } catch (error) {
+      console.error('Error updating startup:', error);
+      throw error;
+    }
+  };
+
   const handleDeleteRecognitionRecord = async (recordId: string) => {
     if (!confirm('Are you sure you want to delete this recognition record?')) {
       return;
@@ -1427,10 +1568,40 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       });
       
       // Delete from recognition_records table
+      // Convert string recordId to integer (database expects integer)
+      const idValue = parseInt(recordId, 10);
+      
+      if (isNaN(idValue)) {
+        console.error('❌ Invalid recordId:', recordId);
+        messageService.error(
+          'Invalid Record ID',
+          'Invalid record ID. Please refresh the page and try again.'
+        );
+        return;
+      }
+      
+      console.log('🗑️ Delete attempt:', { recordId, idValue });
+      
+      // First check if the record exists
+      const { data: existingRecord, error: checkError } = await supabase
+        .from('recognition_records')
+        .select('id')
+        .eq('id', idValue)
+        .single();
+      
+      if (checkError || !existingRecord) {
+        console.warn('⚠️ Record not found before deletion attempt:', { recordId, idValue, checkError });
+        messageService.warning(
+          'Record Not Found',
+          'Recognition record was not found. It may have already been deleted or you may not have permission to delete it.'
+        );
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('recognition_records')
         .delete()
-        .eq('id', parseInt(recordId))
+        .eq('id', idValue)
         .select();
 
       console.log('🗑️ Delete result:', { data, error });
@@ -1443,23 +1614,37 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           details: error.details,
           hint: error.hint
         });
-        alert('Failed to delete recognition record. Please try again.');
+        messageService.error(
+          'Deletion Failed',
+          'Failed to delete recognition record. Please try again.'
+        );
         return;
       }
 
       if (!data || data.length === 0) {
         console.warn('⚠️ No rows were deleted. Record might not exist or already deleted.');
-        alert('Recognition record was not found or was already deleted.');
+        console.warn('⚠️ Delete attempt details:', { recordId, idValue });
+        messageService.warning(
+          'Record Not Found',
+          'Recognition record was not found or was already deleted. Please refresh the page to see the current data.'
+        );
         return;
       }
 
       // Update local state
       setRecognitionRecords(prev => prev.filter(record => record.id !== recordId));
 
-      alert('Recognition record deleted successfully.');
+      messageService.success(
+        'Record Deleted',
+        'Recognition record deleted successfully.',
+        3000
+      );
     } catch (error) {
       console.error('Error deleting recognition record:', error);
-      alert('Failed to delete recognition record. Please try again.');
+      messageService.error(
+        'Deletion Failed',
+        'Failed to delete recognition record. Please try again.'
+      );
     } finally {
       setIsProcessingAction(false);
     }
@@ -1469,11 +1654,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       if (file.type !== 'application/pdf') {
-        alert('Please upload a PDF file for the agreement.');
+        messageService.warning(
+          'Invalid File Type',
+          'Please upload a PDF file for the agreement.'
+        );
         return;
       }
       if (file.size > 10 * 1024 * 1024) { // 10MB limit
-        alert('File size must be less than 10MB.');
+        messageService.warning(
+          'File Too Large',
+          'File size must be less than 10MB.'
+        );
         return;
       }
       setAgreementFile(file);
@@ -1483,7 +1674,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const handleAcceptSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedApplication || !agreementFile) {
-      alert('Please upload an agreement PDF.');
+      messageService.warning(
+        'File Required',
+        'Please upload an agreement PDF.'
+      );
       return;
     }
 
@@ -1550,7 +1744,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       document.body.appendChild(successMessage);
     } catch (e) {
       console.error('Failed to accept application:', e);
-      alert('Failed to accept application. Please try again.');
+      messageService.error(
+        'Acceptance Failed',
+        'Failed to accept application. Please try again.'
+      );
     } finally {
       setIsProcessingAction(false);
     }
@@ -1594,7 +1791,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       document.body.appendChild(successMessage);
     } catch (e) {
       console.error('Failed to request diligence:', e);
-      alert('Failed to request diligence. Please try again.');
+      messageService.error(
+        'Diligence Request Failed',
+        'Failed to request diligence. Please try again.'
+      );
     } finally {
       setIsProcessingAction(false);
     }
@@ -1604,7 +1804,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
   const handleApproveRecognition = async (recordId: string) => {
     if (!facilitatorId) {
-      alert('Facilitator ID not found. Please refresh the page.');
+      messageService.error(
+        'Facilitator ID Missing',
+        'Facilitator ID not found. Please refresh the page.'
+      );
       return;
     }
 
@@ -1614,14 +1817,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               // Find the record to get startup ID
         const record = recognitionRecords.find(r => r.id === recordId);
         if (!record) {
-          alert('Record not found. Please try again.');
+          messageService.warning(
+            'Record Not Found',
+            'Record not found. Please try again.'
+          );
           return;
         }
         
                 // Validate data types
         if (typeof record.startupId !== 'number') {
           console.error('❌ Invalid startup ID type:', typeof record.startupId, record.startupId);
-          alert('Invalid startup data. Please try again.');
+          messageService.error(
+            'Invalid Data',
+            'Invalid startup data. Please try again.'
+          );
           return;
         }
         
@@ -1629,7 +1838,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       const dbId = parseInt(recordId);
       if (isNaN(dbId)) {
         console.error('❌ Invalid record ID format:', recordId);
-        alert('Invalid record ID. Please try again.');
+        messageService.error(
+          'Invalid Record ID',
+          'Invalid record ID. Please try again.'
+        );
         return;
       }
 
@@ -1662,25 +1874,37 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       
       if (recordCheck.status === 'rejected' || !recordCheck.value.data) {
         console.error('❌ Recognition record not found in database:', recordCheck.status === 'rejected' ? recordCheck.reason : 'No data');
-        alert('Recognition record not found. Please try again.');
+        messageService.warning(
+          'Record Not Found',
+          'Recognition record not found. Please try again.'
+        );
             return;
           }
           
       if (startupCheck.status === 'rejected' || !startupCheck.value.data) {
         console.error('❌ Startup not found in database:', startupCheck.status === 'rejected' ? startupCheck.reason : 'No data');
-        alert('Startup not found. Please try again.');
+        messageService.warning(
+          'Startup Not Found',
+          'Startup not found. Please try again.'
+        );
           return;
         }
         
       if (userCheck.status === 'rejected' || !userCheck.value.data) {
         console.error('❌ User not found in database:', userCheck.status === 'rejected' ? userCheck.reason : 'No data');
-            alert('User not found. Please try again.');
+            messageService.warning(
+              'User Not Found',
+              'User not found. Please try again.'
+            );
             return;
           }
           
       if (userCheck.value.data.role !== 'Startup Facilitation Center') {
         console.error('❌ User is not a facilitator:', userCheck.value.data.role);
-            alert('User is not authorized as a facilitator. Please try again.');
+            messageService.error(
+              'Unauthorized',
+              'User is not authorized as a facilitator. Please try again.'
+            );
             return;
           }
           
@@ -1694,7 +1918,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         
         if (updateError) {
           console.error('Error updating recognition request status:', updateError);
-          alert('Failed to approve recognition. Please try again.');
+          messageService.error(
+            'Approval Failed',
+            'Failed to approve recognition. Please try again.'
+          );
           return;
         }
         
@@ -1738,11 +1965,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           `;
           document.body.appendChild(successMessage);
         } else {
-          alert('Failed to add startup to portfolio. Please try again.');
+          messageService.error(
+            'Portfolio Addition Failed',
+            'Failed to add startup to portfolio. Please try again.'
+          );
         }
     } catch (err) {
       console.error('Error approving recognition:', err);
-      alert('Failed to approve recognition. Please try again.');
+      messageService.error(
+        'Approval Failed',
+        'Failed to approve recognition. Please try again.'
+      );
     } finally {
       setProcessingRecognitionId(null);
     }
@@ -1756,13 +1989,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       
       // Validate file type
       if (!file.type.startsWith('image/')) {
-        alert('Please upload an image file (JPEG, PNG, GIF, WebP, SVG).');
+        messageService.warning(
+          'Invalid Image Type',
+          'Please upload an image file (JPEG, PNG, GIF, WebP, SVG).'
+        );
         return;
       }
       
       // Validate file size (5MB limit)
       if (file.size > 5 * 1024 * 1024) {
-        alert('File size must be less than 5MB.');
+        messageService.warning(
+          'File Too Large',
+          'File size must be less than 5MB.'
+        );
         return;
       }
       
@@ -1775,7 +2014,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const handleSubmitOpportunity = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!facilitatorId) {
-      alert('Unable to find facilitator account. Please re-login.');
+      messageService.error(
+        'Account Not Found',
+        'Unable to find facilitator account. Please re-login.'
+      );
       return;
     }
 
@@ -1864,7 +2106,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       setNewOpportunity(initialNewOppState);
     } catch (err) {
       console.error('Failed to save opportunity:', err);
-      alert('Failed to save opportunity. Please try again.');
+      messageService.error(
+        'Save Failed',
+        'Failed to save opportunity. Please try again.'
+      );
     }
   };
 
@@ -2174,28 +2419,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   size="sm" 
                                   variant="outline"
                                   onClick={async () => {
-                                    try {
-                                      const numericId = await resolveStartupNumericId(startup.id, startup.name);
-                                      if (!numericId) throw new Error('Startup ID not found.');
-                                      const appId = await incubationPaymentService.ensureApplicationForConversation(numericId, facilitatorId || '');
-                                      const realApplication: ReceivedApplication = {
-                                        id: appId,
-                                        startupId: numericId,
-                                        startupName: startup.name,
-                                        opportunityId: '',
-                                        status: 'pending',
-                                        pitchDeckUrl: '',
-                                        pitchVideoUrl: '',
-                                        diligenceStatus: 'none',
-                                        agreementUrl: '',
-                                        sector: startup.sector,
-                                        stage: startup.stage,
-                                        createdAt: new Date().toISOString()
-                                      };
-                                      handleOpenMessaging(realApplication);
-                                    } catch (e: any) {
-                                      alert(e?.message || 'Unable to start conversation.');
-                                    }
+                                    // Redirect to Intake Management tab where applications exist
+                                    setActiveTab('intakeManagement');
+                                    messageService.info(
+                                      'Messaging Location',
+                                      'Please use messaging from the "Intake Management" tab where valid program applications exist.'
+                                    );
                                   }}
                                   title="Send message to startup"
                                 >
@@ -2300,7 +2529,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Contact Person</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
                           <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
@@ -2315,19 +2543,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="text-sm text-slate-900">{startup.email}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                startup.status === 'pending' 
-                                  ? 'bg-yellow-100 text-yellow-800'
-                                  : startup.status === 'sent'
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : startup.status === 'accepted'
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-red-100 text-red-800'
-                              }`}>
-                                {startup.status.charAt(0).toUpperCase() + startup.status.slice(1)}
-                              </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <div className="flex items-center gap-2 justify-end">
@@ -2351,10 +2566,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => {
-                                    // TODO: Implement edit functionality
-                                    alert('Edit functionality coming soon!');
-                                  }}
+                                  onClick={() => handleEditStartup(startup)}
                                   className="text-green-600 border-green-600 hover:bg-green-50"
                                 >
                                   <Edit className="h-4 w-4 mr-1" />
@@ -2370,7 +2582,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                         setStartupInvitations(prev => prev.filter(inv => inv.id !== startup.id));
                                       } catch (error) {
                                         console.error('Error deleting invitation:', error);
-                                        alert('Failed to delete invitation. Please try again.');
+                                        messageService.error(
+                                          'Deletion Failed',
+                                          'Failed to delete invitation. Please try again.'
+                                        );
                                       }
                                     }
                                   }}
@@ -2575,7 +2790,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               <tr key={record.id}>
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <div className="text-sm font-medium text-slate-900">{record.startup?.name || 'Unknown Startup'}</div>
-                                  <div className="text-xs text-slate-500">{record.startup?.sector || 'N/A'}</div>
+                                  <div className="text-xs text-slate-500">
+                                    {(() => {
+                                      // Use domain from opportunity_applications if available, otherwise fallback to startup sector
+                                      const domainFromApplications = domainStageMap[record.startupId]?.domain;
+                                      const sector = domainFromApplications || record.startup?.sector || 'N/A';
+                                      console.log('🔍 Debug sector for startup:', record.startup?.name, 'domain from apps:', domainFromApplications, 'startup sector:', record.startup?.sector, 'final sector:', sector);
+                                      return sector;
+                                    })()}
+                                  </div>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">{record.programName}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
@@ -2682,11 +2905,22 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             <Button size="sm" variant="outline" onClick={async () => {
                               if (!confirm('Delete this opportunity?')) return;
                               const target = myPostedOpportunities[idx];
+                              // Instead of deleting, close the opportunity to preserve data
                               const { error } = await supabase
                                 .from('incubation_opportunities')
-                                .delete()
+                                .update({ 
+                                  opportunity_status: 'closed',
+                                  updated_at: new Date().toISOString()
+                                })
                                 .eq('id', target.id);
-                              if (!error) setMyPostedOpportunities(prev => prev.filter((_, i) => i !== idx));
+                              if (!error) {
+                                setMyPostedOpportunities(prev => prev.filter((_, i) => i !== idx));
+                                messageService.success(
+                                  'Opportunity Closed',
+                                  'Opportunity has been closed. Applications and data are preserved.',
+                                  3000
+                                );
+                              }
                             }} title="Delete">✕</Button>
             </div>
                         </li>
@@ -3178,7 +3412,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   }
 
   return (
-    <div className="space-y-6">
+    <>
+      <MessageContainer />
+      <div className="space-y-6">
       {/* Header with facilitator code display */}
       <div className="flex justify-between items-center mb-6">
         <div>
@@ -3477,11 +3713,25 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         />
       )}
 
+      {/* Edit Startup Modal */}
+      {selectedStartupForEdit && (
+        <EditStartupModal
+          isOpen={isEditStartupModalOpen}
+          onClose={() => {
+            setIsEditStartupModalOpen(false);
+            setSelectedStartupForEdit(null);
+          }}
+          startup={selectedStartupForEdit}
+          onSave={handleSaveStartupEdit}
+        />
+      )}
+
       <style>{`
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fade-in 0.4s ease-out forwards; }
       `}</style>
-    </div>
+      </div>
+    </>
   );
 };
 

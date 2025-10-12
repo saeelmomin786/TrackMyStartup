@@ -223,7 +223,7 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 border border-gray-200 rounded-lg p-4 bg-white">
             <div className="flex justify-between items-center">
                 <h3 className="text-xl font-semibold text-slate-700">Intellectual Property & Trademarks</h3>
                 {!isViewOnly && (
@@ -237,26 +237,7 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
                 )}
             </div>
 
-            {records.length === 0 ? (
-                <Card>
-                    <div className="p-8 text-center">
-                        <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                        <h4 className="text-lg font-medium text-gray-900 mb-2">No IP/Trademark Records</h4>
-                        <p className="text-gray-600 mb-4">
-                            Start by adding your intellectual property and trademark records.
-                        </p>
-                        {!isViewOnly && (
-                            <Button 
-                                onClick={() => setShowAddModal(true)}
-                                className="flex items-center gap-2 mx-auto"
-                            >
-                                <Plus className="w-4 h-4" />
-                                Add First Record
-                            </Button>
-                        )}
-                    </div>
-                </Card>
-            ) : (
+            {records.length > 0 && (
                 <div className="grid gap-4">
                     {records.map((record) => (
                         <Card key={record.id}>

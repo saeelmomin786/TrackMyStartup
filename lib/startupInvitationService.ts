@@ -101,6 +101,55 @@ class StartupInvitationService {
     }
   }
 
+  // Update invitation details
+  async updateInvitation(
+    invitationId: string,
+    updateData: {
+      startupName?: string;
+      contactPerson?: string;
+      email?: string;
+      phone?: string;
+    }
+  ): Promise<StartupInvitation | null> {
+    try {
+      const { data, error } = await supabase
+        .from('startup_invitations')
+        .update({
+          startup_name: updateData.startupName,
+          contact_person: updateData.contactPerson,
+          email: updateData.email,
+          phone: updateData.phone,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', invitationId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Error updating invitation:', error);
+        throw error;
+      }
+
+      return {
+        id: data.id,
+        facilitatorId: data.facilitator_id,
+        startupName: data.startup_name,
+        contactPerson: data.contact_person,
+        email: data.email,
+        phone: data.phone,
+        facilitatorCode: data.facilitator_code,
+        status: data.status,
+        invitationSentAt: data.invitation_sent_at,
+        responseReceivedAt: data.response_received_at,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at
+      };
+    } catch (error) {
+      console.error('Error in updateInvitation:', error);
+      return null;
+    }
+  }
+
   // Update invitation status
   async updateInvitationStatus(
     invitationId: string,

@@ -146,11 +146,15 @@ class FacilitatorStartupService {
       // Create a map of startup_id to domain for quick lookup
       const domainMap: { [key: number]: string } = {};
       if (applicationData) {
+        console.log('🔍 Portfolio Debug - Application data fetched:', applicationData);
         applicationData.forEach(app => {
           if (app.domain && !domainMap[app.startup_id]) {
             domainMap[app.startup_id] = app.domain;
           }
         });
+        console.log('🔍 Portfolio Debug - Domain map created:', domainMap);
+      } else {
+        console.log('🔍 Portfolio Debug - No application data found');
       }
 
       // Fetch investment records for current valuation (using existing table)
@@ -227,7 +231,10 @@ class FacilitatorStartupService {
       if (investmentError) console.warn('Warning: Could not fetch investment data:', investmentError);
 
       // Map the data
-      return (startups || []).map(startup => {
+      console.log('🔍 Portfolio Debug - Startups fetched:', startups);
+      console.log('🔍 Portfolio Debug - Final domain map:', domainMap);
+      
+      const mappedStartups = (startups || []).map(startup => {
         const startupCapTable = capTableData?.filter(c => c.startup_id === startup.id) || [];
         const startupCompliance = complianceData?.filter(c => c.startup_id === startup.id) || [];
         const startupFinancial = financialData?.filter(c => c.startup_id === startup.id) || [];
@@ -245,10 +252,13 @@ class FacilitatorStartupService {
         // Calculate overall compliance status
         const complianceStatus = this.calculateOverallComplianceStatus(startupCompliance);
 
+        const finalSector = domainMap[startup.id] || startup.sector || 'N/A';
+        console.log(`🔍 Portfolio Debug - Startup ${startup.name} (ID: ${startup.id}): original sector=${startup.sector}, domain=${domainMap[startup.id]}, final sector=${finalSector}`);
+        
         return {
           id: startup.id,
           name: startup.name,
-          sector: domainMap[startup.id] || startup.sector || 'N/A', // Use domain from applications, fallback to startup sector
+          sector: finalSector, // Use domain from applications, fallback to startup sector
           currentValuation,
           complianceStatus,
           totalFunding: startup.total_funding || 0,
@@ -261,6 +271,9 @@ class FacilitatorStartupService {
           investmentData: startupInvestments
         };
       });
+      
+      console.log('🔍 Portfolio Debug - Final mapped startups:', mappedStartups);
+      return mappedStartups;
     } catch (error) {
       console.error('Error in getFacilitatorPortfolio:', error);
       return [];

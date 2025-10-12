@@ -181,6 +181,27 @@ class EmployeesService {
 
     if (error) throw error;
 
+    // Create financial records for the new employee
+    try {
+      const { data: financialResult, error: financialError } = await supabase.rpc(
+        'insert_monthly_salary_expenses_for_startup',
+        {
+          p_startup_id: startupId,
+          p_run_date: new Date().toISOString().split('T')[0]
+        }
+      );
+      
+      if (financialError) {
+        console.warn('Failed to create financial records for new employee:', financialError);
+        // Don't throw error here as the employee was created successfully
+      } else {
+        console.log(`Created ${financialResult || 0} financial records for new employee ${data.id}`);
+      }
+    } catch (financialError) {
+      console.warn('Failed to create financial records for new employee:', financialError);
+      // Don't throw error here as the employee was created successfully
+    }
+
     return {
       id: data.id,
       name: data.name,
@@ -288,6 +309,25 @@ class EmployeesService {
     allocationType?: 'one-time' | 'annually' | 'quarterly' | 'monthly',
     esopPerAllocation?: number
   ): Promise<void> {
+    // First, get the employee's joining date for validation
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('joining_date')
+      .eq('id', id)
+      .single();
+
+    if (employeeError) throw employeeError;
+    if (!employeeData?.joining_date) {
+      throw new Error('Employee joining date not found');
+    }
+
+    // Validate the increment date
+    const { validateIncrementDate } = await import('./dateValidation');
+    const dateValidation = validateIncrementDate(effectiveDate, employeeData.joining_date);
+    if (!dateValidation.isValid) {
+      throw new Error(dateValidation.error);
+    }
+
     // Write to history table; do not change base employee row (so past months stay intact)
     const payload: any = {
       employee_id: id,
@@ -301,6 +341,27 @@ class EmployeesService {
       .from('employees_increments')
       .insert(payload);
     if (error) throw error;
+
+    // Manually update financial records for future months
+    try {
+      const { data: updateResult, error: updateError } = await supabase.rpc(
+        'update_future_salary_records_for_employee',
+        {
+          p_employee_id: id,
+          p_effective_date: effectiveDate
+        }
+      );
+      
+      if (updateError) {
+        console.warn('Failed to update financial records automatically:', updateError);
+        // Don't throw error here as the increment was successful
+      } else {
+        console.log(`Updated ${updateResult || 0} financial records for employee ${id}`);
+      }
+    } catch (updateError) {
+      console.warn('Failed to update financial records:', updateError);
+      // Don't throw error here as the increment was successful
+    }
   }
 
   async deleteEmployee(id: string): Promise<void> {
@@ -310,6 +371,74 @@ class EmployeesService {
       .eq('id', id);
 
     if (error) throw error;
+  }
+
+  // Get current effective salary for an employee (considering increments)
+  async getCurrentEffectiveSalary(employeeId: string, asOfDate?: string): Promise<number> {
+    const targetDate = asOfDate || new Date().toISOString().split('T')[0];
+    
+    try {
+      // First get the base salary from the employee record
+      const { data: employeeData, error: employeeError } = await supabase
+        .from('employees')
+        .select('salary')
+        .eq('id', employeeId)
+        .single();
+
+      if (employeeError) {
+        console.error('Error getting employee base salary:', employeeError);
+        return 0;
+      }
+
+      if (!employeeData?.salary) {
+        console.warn('No base salary found for employee:', employeeId);
+        return 0;
+      }
+
+      let currentSalary = employeeData.salary;
+
+      // Check for any increments that are effective on or before the target date
+      const { data: increments, error: incrementsError } = await supabase
+        .from('employees_increments')
+        .select('salary, effective_date')
+        .eq('employee_id', employeeId)
+        .lte('effective_date', targetDate)
+        .order('effective_date', { ascending: false })
+        .limit(1);
+
+      if (incrementsError) {
+        console.warn('Error getting increments for employee:', incrementsError);
+        // Return base salary if we can't get increments
+        return currentSalary;
+      }
+
+      // If there's a more recent increment, use that salary
+      if (increments && increments.length > 0) {
+        currentSalary = increments[0].salary;
+        console.log(`Using increment salary ${currentSalary} for employee ${employeeId} (base was ${employeeData.salary})`);
+      }
+
+      return currentSalary;
+    } catch (error) {
+      console.error('Error getting current effective salary:', error);
+      return 0;
+    }
+  }
+
+  // Manually refresh financial records for a startup (useful after salary changes)
+  async refreshFinancialRecordsForStartup(startupId: number): Promise<number> {
+    try {
+      const { data, error } = await supabase.rpc('insert_monthly_salary_expenses_for_startup', {
+        p_startup_id: startupId,
+        p_run_date: new Date().toISOString().split('T')[0]
+      });
+      
+      if (error) throw error;
+      return data || 0;
+    } catch (error) {
+      console.error('Error refreshing financial records:', error);
+      return 0;
+    }
   }
 
   // =====================================================

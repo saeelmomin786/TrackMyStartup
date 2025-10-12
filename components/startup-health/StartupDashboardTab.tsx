@@ -18,6 +18,7 @@ import Input from '../ui/Input';
 import Select from '../ui/Select';
 import { capTableService } from '../../lib/capTableService';
 import { IncubationType, FeeType } from '../../types';
+import { messageService } from '../../lib/messageService';
 
 // Types for offers received
 interface OfferReceived {
@@ -100,12 +101,15 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         const calculatedMetrics = await DashboardMetricsService.calculateMetrics(startup);
         setMetrics(calculatedMetrics);
         
-        // Load all financial records to get available years
-        const allRecords = await financialsService.getFinancialRecords(startup.id);
+        // Generate available years based on company registration date
+        const registrationYear = new Date(startup.registrationDate).getFullYear();
+        const currentYear = new Date().getFullYear();
         
-        // Extract available years
-        const years = [...new Set(allRecords.map(record => new Date(record.date).getFullYear()))]
-          .sort((a, b) => b - a);
+        // Create array of years from registration year to current year
+        const years = [];
+        for (let year = currentYear; year >= registrationYear; year--) {
+          years.push(year);
+        }
         setAvailableYears(years);
         
         // Load data for selected year
@@ -576,15 +580,25 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         .eq('id', offer.applicationId);
       if (error) {
         console.error('Error approving due diligence:', error);
-        alert('Failed to accept due diligence request.');
+        messageService.error(
+          'Diligence Failed',
+          'Failed to accept due diligence request.'
+        );
         return;
       }
       // Reload offers; backend trigger will grant dashboard access
       await loadOffersReceived();
-      alert('Due diligence request accepted. Access has been granted.');
+      messageService.success(
+        'Diligence Accepted',
+        'Due diligence request accepted. Access has been granted.',
+        3000
+      );
     } catch (e) {
       console.error('Failed to accept due diligence:', e);
-      alert('Failed to accept due diligence request.');
+      messageService.error(
+        'Diligence Failed',
+        'Failed to accept due diligence request.'
+      );
     }
   };
 
@@ -605,7 +619,10 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       console.log('✅ Agreement download initiated');
     } catch (err) {
       console.error('Error downloading agreement:', err);
-      alert('Failed to download agreement. Please try again.');
+      messageService.error(
+        'Download Failed',
+        'Failed to download agreement. Please try again.'
+      );
     }
   };
 
@@ -617,13 +634,20 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       
         await investmentService.acceptOfferSimple(String(offer.investmentOfferId));
       console.log('✅ Investment offer accepted');
-      alert('Investment offer accepted! Contact details will be revealed based on advisor assignment.');
+      messageService.success(
+        'Offer Accepted',
+        'Investment offer accepted! Contact details will be revealed based on advisor assignment.',
+        3000
+      );
       
       await loadOffersReceived();
       
     } catch (err) {
       console.error('Error accepting investment offer:', err);
-      alert('Failed to accept investment offer. Please try again.');
+      messageService.error(
+        'Acceptance Failed',
+        'Failed to accept investment offer. Please try again.'
+      );
     }
   };
 
@@ -637,10 +661,17 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       await loadOffersReceived();
       
       console.log('✅ Investment offer rejected successfully');
-      alert('Investment offer rejected successfully.');
+      messageService.success(
+        'Offer Rejected',
+        'Investment offer rejected successfully.',
+        3000
+      );
     } catch (err) {
       console.error('Error rejecting investment offer:', err);
-      alert('Failed to reject investment offer. Please try again.');
+      messageService.error(
+        'Rejection Failed',
+        'Failed to reject investment offer. Please try again.'
+      );
     }
   };
 
@@ -693,7 +724,10 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       
       setIsContractModalOpen(true);
     } else {
-      alert('No application ID found for this offer.');
+      messageService.warning(
+        'Application Missing',
+        'No application ID found for this offer.'
+      );
     }
   };
 
@@ -783,10 +817,17 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       setIsRecognitionModalOpen(false);
       // Optionally refresh offers (not required for hiding button now)
       // await loadOffersReceived();
-      alert('Agreement uploaded and equity allocation recorded.');
+      messageService.success(
+        'Agreement Uploaded',
+        'Agreement uploaded and equity allocation recorded.',
+        3000
+      );
     } catch (err) {
       console.error('Failed to submit recognition entry:', err);
-      alert('Failed to submit. Please try again.');
+      messageService.error(
+        'Submission Failed',
+        'Failed to submit. Please try again.'
+      );
     }
   };
 

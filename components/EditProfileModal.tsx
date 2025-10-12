@@ -27,8 +27,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
     city: currentUser?.city || '',
     state: currentUser?.state || '',
     country: currentUser?.country || '',
-    company: currentUser?.company || '',
-    company_type: currentUser?.company_type || '', // Added company type field
+    company: currentUser?.company || currentUser?.startup_name || '',
     government_id: currentUser?.government_id || '',
     ca_license: currentUser?.ca_license || '',
     // Investment Advisor specific fields
@@ -292,6 +291,11 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
               startupProfileData.investmentAdvisorCode = formData.investment_advisor_code_entered;
             }
             
+            // Add company name if provided
+            if (formData.company) {
+              startupProfileData.name = formData.company;
+            }
+            
             // Add company type if provided
             if (formData.company_type) {
               startupProfileData.companyType = formData.company_type;
@@ -445,18 +449,21 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
               <div>
                 <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
-                  Company/Organization
+                  Company/Startup Name
                 </label>
                 <div className="relative">
                   <Building className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400" />
                   <input
                     type="text"
-                    value={formData.company}
+                    value={formData.company || currentUser?.startup_name || ''}
                     onChange={(e) => handleInputChange('company', e.target.value)}
                     className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="Enter company name"
+                    placeholder="Enter your startup/company name"
                   />
                 </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  This is the name you entered during registration
+                </p>
               </div>
 
               <div>
@@ -465,23 +472,18 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 </label>
                 <div className="relative">
                   <Building className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400" />
-                  <select
-                    value={formData.company_type}
-                    onChange={(e) => handleInputChange('company_type', e.target.value)}
-                    className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-                  >
-                    <option value="">Select Company Type</option>
-                    <option value="C-Corporation">C-Corporation</option>
-                    <option value="S-Corporation">S-Corporation</option>
-                    <option value="LLC">LLC</option>
-                    <option value="Partnership">Partnership</option>
-                    <option value="Sole Proprietorship">Sole Proprietorship</option>
-                    <option value="Private Limited">Private Limited</option>
-                    <option value="Public Limited">Public Limited</option>
-                    <option value="Other">Other</option>
-                  </select>
+                  <input
+                    type="text"
+                    value={currentUser?.company_type || 'Not specified'}
+                    disabled
+                    className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md bg-slate-50 text-slate-500 cursor-not-allowed"
+                  />
                 </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Company type selected during registration (cannot be changed)
+                </p>
               </div>
+
             </div>
           </div>
 
@@ -551,63 +553,6 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
             </div>
           </div>
 
-          {/* Professional Information (Read-only) */}
-          <div className="space-y-3 sm:space-y-4">
-            <h3 className="text-sm sm:text-base md:text-lg font-medium text-slate-900 border-b border-slate-200 pb-2">
-              Professional Information
-            </h3>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4">
-              <div>
-                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
-                  Role
-                </label>
-                <div className="relative">
-                  <Shield className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400" />
-                  <input
-                    type="text"
-                    value={currentUser?.role === 'CA' ? 'Chartered Accountant' : 
-                           currentUser?.role === 'CS' ? 'Company Secretary' : 'User'}
-                    disabled
-                    className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md bg-slate-50 text-slate-500 cursor-not-allowed"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Role cannot be changed</p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
-                  {currentUser?.role === 'CA' ? 'CA Code' : 'CS Code'}
-                </label>
-                <div className="relative">
-                  <Building className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400" />
-                  <input
-                    type="text"
-                    value={currentUser?.ca_code || currentUser?.cs_code || 'N/A'}
-                    disabled
-                    className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md bg-slate-50 text-slate-500 cursor-not-allowed"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Code cannot be changed</p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
-                  Registration Date
-                </label>
-                <div className="relative">
-                  <Calendar className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400" />
-                  <input
-                    type="text"
-                    value={currentUser?.registration_date ? new Date(currentUser.registration_date).toLocaleDateString() : 'N/A'}
-                    disabled
-                    className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md bg-slate-50 text-slate-500 cursor-not-allowed"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Registration date cannot be changed</p>
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* Verification Documents */}
           <div className="space-y-3 sm:space-y-4">

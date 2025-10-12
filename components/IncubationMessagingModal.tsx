@@ -14,6 +14,7 @@ type IncubationMessage = {
 };
 import { storageService } from '../lib/storage';
 import { supabase } from '../lib/supabase';
+import { messageService } from '../lib/messageService';
 
 interface IncubationMessagingModalProps {
   isOpen: boolean;
@@ -164,10 +165,13 @@ const IncubationMessagingModal: React.FC<IncubationMessagingModalProps> = ({
         }
       }
 
-      // Get the receiver ID from the application using the database function
+      // Get the receiver ID from the application using a join with startups table
       const { data: applicationData, error: appError } = await supabase
         .from('opportunity_applications')
-        .select('startup_user_id')
+        .select(`
+          startup_id,
+          startups!inner(user_id)
+        `)
         .eq('id', applicationId)
         .maybeSingle();
       
@@ -175,7 +179,7 @@ const IncubationMessagingModal: React.FC<IncubationMessagingModalProps> = ({
         throw new Error('Unable to get application details. Please refresh and try again.');
       }
       
-      const receiverId = applicationData.startup_user_id;
+      const receiverId = applicationData.startups?.user_id;
       
       if (!receiverId) {
         throw new Error('Unable to determine receiver. Please refresh and try again.');
@@ -220,7 +224,10 @@ const IncubationMessagingModal: React.FC<IncubationMessagingModalProps> = ({
       // Real-time subscription will also trigger, but this ensures immediate visibility
     } catch (error) {
       console.error('Error sending message:', error);
-      alert('Failed to send message. Please try again.');
+      messageService.error(
+        'Send Failed',
+        'Failed to send message. Please try again.'
+      );
     } finally {
       setIsSending(false);
     }

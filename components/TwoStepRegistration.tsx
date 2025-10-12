@@ -117,8 +117,8 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
         console.log('📤 Uploading government ID...');
         const result = await storageService.uploadVerificationDocument(
           documents.government_id, 
-          userData.email, 
-          'government-id'
+            userData.email, 
+            'government-id'
         );
         if (result.success && result.url) {
           governmentIdUrl = result.url;
@@ -130,12 +130,12 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
         const roleDocType = getRoleSpecificDocumentType(userData.role);
         console.log('📤 Uploading role-specific document:', roleDocType);
         const result = await storageService.uploadVerificationDocument(
-          documents.roleSpecific, 
-          userData.email, 
-          roleDocType
+            documents.roleSpecific, 
+            userData.email, 
+            roleDocType
         );
         if (result.success && result.url) {
-          roleSpecificUrl = result.url;
+              roleSpecificUrl = result.url;
           console.log('✅ Role-specific document uploaded successfully:', roleSpecificUrl);
         }
       }
@@ -163,7 +163,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
       console.log('✅ Registration completed successfully');
       onRegister(user, founders, userData.startupName, country);
 
-    } catch (error) {
+        } catch (error) {
       console.error('❌ Error finalizing registration:', error);
       throw error;
     }

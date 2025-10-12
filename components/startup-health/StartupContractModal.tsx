@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Download, Upload, FileText, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { messageService } from '../../lib/messageService';
 type IncubationContract = {
   id: string;
   application_id: string;
@@ -92,13 +93,20 @@ const StartupContractModal: React.FC<StartupContractModalProps> = ({
         await loadContracts();
         setSelectedFile(null);
         setUploadProgress(0);
-        alert('Contract uploaded successfully!');
+        messageService.success(
+          'Contract Uploaded',
+          'Contract uploaded successfully!',
+          3000
+        );
       } else {
         throw new Error('Failed to upload file');
       }
     } catch (error) {
       console.error('Error uploading contract:', error);
-      alert('Failed to upload contract. Please try again.');
+      messageService.error(
+        'Upload Failed',
+        'Failed to upload contract. Please try again.'
+      );
     } finally {
       setIsUploading(false);
     }

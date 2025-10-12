@@ -31,6 +31,8 @@ import StartupSubscriptionPage from './components/startup-health/StartupSubscrip
 import { Briefcase, BarChart3, LogOut } from 'lucide-react';
 import LogoTMS from './components/public/logoTMS.svg';
 import { FacilitatorCodeDisplay } from './components/FacilitatorCodeDisplay';
+import MessageContainer from './components/MessageContainer';
+import { messageService } from './lib/messageService';
 
 const App: React.FC = () => {
   // Check if we're on a standalone page (footer links)
@@ -931,7 +933,7 @@ const App: React.FC = () => {
               }
               
               // Check payment status for Startup users after authentication
-              const userForPaymentCheck = completeUser || basicUser;
+              const userForPaymentCheck = currentUser;
               if (userForPaymentCheck?.role === 'Startup') {
                 console.log('🔍 Checking payment status for startup user during auth initialization:', userForPaymentCheck.email);
                 
@@ -1034,10 +1036,13 @@ const App: React.FC = () => {
                 
                 if (profileUser && isMounted) {
                   console.log('Full profile loaded. Updating currentUser with startup_name:', profileUser.startup_name);
-                  console.log('Profile completion status:', profileUser.is_profile_complete);
+                  
+                  // Check if profile is complete using the proper method
+                  const isProfileComplete = await authService.isProfileComplete(profileUser.id);
+                  console.log('Profile completion status:', isProfileComplete);
                   
                   // Check if profile is complete before setting as authenticated
-                  if (!profileUser.is_profile_complete) {
+                  if (!isProfileComplete) {
                     console.log('Profile not complete, redirecting to complete-registration page');
                     setCurrentUser(profileUser);
                     setCurrentPage('complete-registration');
@@ -1551,7 +1556,10 @@ const App: React.FC = () => {
       
       if (startupData.error || !startupData.data) {
         console.error('Error fetching startup from database:', startupData.error);
-        alert('Unable to access startup. Please check your permissions.');
+        messageService.error(
+          'Access Denied',
+          'Unable to access startup. Please check your permissions.'
+        );
         return;
       }
       
@@ -1627,7 +1635,10 @@ const App: React.FC = () => {
       console.log('🔍 Facilitator startup access completed');
     } catch (error) {
       console.error('Error in facilitator startup access:', error);
-      alert('Unable to access startup. Please try again.');
+      messageService.error(
+        'Access Failed',
+        'Unable to access startup. Please try again.'
+      );
     }
   };
 
@@ -1651,7 +1662,10 @@ const App: React.FC = () => {
       // Find the startup request
       const startupRequest = startupAdditionRequests.find(req => req.id === requestId);
       if (!startupRequest) {
-        alert('Startup request not found.');
+        messageService.warning(
+          'Request Not Found',
+          'Startup request not found.'
+        );
         return;
       }
 
@@ -1659,7 +1673,10 @@ const App: React.FC = () => {
       setPendingStartupRequest(startupRequest);
     } catch (error) {
       console.error('Error preparing startup request:', error);
-      alert('Failed to prepare startup request. Please try again.');
+      messageService.error(
+        'Preparation Failed',
+        'Failed to prepare startup request. Please try again.'
+      );
     }
   }, [startupAdditionRequests]);
 
@@ -1686,13 +1703,20 @@ const App: React.FC = () => {
       setStartups(prev => [...prev, newStartup]);
       setStartupAdditionRequests(prev => prev.filter(req => req.id !== pendingStartupRequest.id));
       
-      alert(`${newStartup.name} has been added to your portfolio.`);
+      messageService.success(
+        'Startup Added',
+        `${newStartup.name} has been added to your portfolio.`,
+        3000
+      );
       
       // Reset pending request
       setPendingStartupRequest(null);
     } catch (error) {
       console.error('Error accepting startup request:', error);
-      alert('Failed to accept startup request. Please try again.');
+      messageService.error(
+        'Acceptance Failed',
+        'Failed to accept startup request. Please try again.'
+      );
     }
   }, [pendingStartupRequest, showSubscriptionPage, fetchData]);
 
@@ -1768,9 +1792,17 @@ const App: React.FC = () => {
             requestDate: new Date().toISOString().split('T')[0],
         };
         setVerificationRequests(prev => [newRequest, ...prev]);
-        alert(`${startup.name} is now listed for fundraising and a verification request has been sent to the admin.`);
+        messageService.success(
+          'Startup Listed',
+          `${startup.name} is now listed for fundraising and a verification request has been sent to the admin.`,
+          3000
+        );
     } else {
-        alert(`${startup.name} is now listed for fundraising.`);
+        messageService.success(
+          'Startup Listed',
+          `${startup.name} is now listed for fundraising.`,
+          3000
+        );
     }
   }, []);
 
@@ -1830,10 +1862,17 @@ const App: React.FC = () => {
           console.log('✅ Startup addition request created and saved to database:', savedRequest);
           console.log('✅ Local state updated with request ID:', requestWithDbId.id);
           
-          alert(`Investor request created for ${startup.name}. It will appear in the investor's Approve Startup Requests.`);
+          messageService.success(
+            'Request Created',
+            `Investor request created for ${startup.name}. It will appear in the investor's Approve Startup Requests.`,
+            3000
+          );
       } catch (error) {
           console.error('❌ Error creating startup addition request:', error);
-          alert('Failed to create investor request. Please try again.');
+          messageService.error(
+            'Request Failed',
+            'Failed to create investor request. Please try again.'
+          );
       }
   }, []);
 
@@ -1846,7 +1885,11 @@ const App: React.FC = () => {
     if (selectedStartup?.id === startupId) {
         setSelectedStartup(prev => prev ? { ...prev, founders } : null);
     }
-    alert('Founder information updated successfully.');
+    messageService.success(
+      'Founder Updated',
+      'Founder information updated successfully.',
+      3000
+    );
   }, []);
 
   const handleSubmitOffer = useCallback(async (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, country?: string, startupAmountRaised?: number) => {
@@ -1870,9 +1913,17 @@ const App: React.FC = () => {
       
       const scoutingFee = newOffer.startup_scouting_fee_paid || 0;
       if (scoutingFee > 0) {
-        alert(`Your offer for ${opportunity.name} has been submitted successfully! A startup scouting fee of $${scoutingFee.toFixed(2)} has been paid. The startup will now review your offer.`);
+        messageService.success(
+          'Offer Submitted',
+          `Your offer for ${opportunity.name} has been submitted successfully! A startup scouting fee of $${scoutingFee.toFixed(2)} has been paid. The startup will now review your offer.`,
+          5000
+        );
       } else {
-        alert(`Your offer for ${opportunity.name} has been submitted successfully! The startup will now review your offer.`);
+        messageService.success(
+          'Offer Submitted',
+          `Your offer for ${opportunity.name} has been submitted successfully! The startup will now review your offer.`,
+          3000
+        );
       }
     } catch (error) {
       console.error('Error submitting offer:', error);
@@ -1885,7 +1936,10 @@ const App: React.FC = () => {
         errorMessage = `Submit failed: ${JSON.stringify(error)}`;
       }
       
-      alert(errorMessage);
+      messageService.error(
+        'Submission Failed',
+        errorMessage
+      );
     }
   }, []);
 
@@ -1898,14 +1952,25 @@ const App: React.FC = () => {
         setVerificationRequests(prev => prev.filter(r => r.id !== requestId));
         
         if (status === 'approved') {
-          alert(`Verification request has been approved and startup is now "Startup Nation Verified".`);
+          messageService.success(
+            'Verification Approved',
+            'Verification request has been approved and startup is now "Startup Nation Verified".',
+            3000
+          );
         } else {
-          alert(`Verification request has been rejected.`);
+          messageService.warning(
+            'Verification Rejected',
+            'Verification request has been rejected.',
+            3000
+          );
         }
       }
     } catch (error) {
       console.error('Error processing verification:', error);
-      alert('Failed to process verification. Please try again.');
+      messageService.error(
+        'Processing Failed',
+        'Failed to process verification. Please try again.'
+      );
     }
   }, []);
 
@@ -1928,11 +1993,17 @@ const App: React.FC = () => {
           message += ' The investment transaction has been completed!';
         }
         
-        alert(message);
+        messageService.info(
+          'Offer Status',
+          message
+        );
       }
     } catch (error) {
       console.error('Error processing offer:', error);
-      alert('Failed to process offer. Please try again.');
+      messageService.error(
+        'Processing Failed',
+        'Failed to process offer. Please try again.'
+      );
     }
   }, []);
 
@@ -1947,7 +2018,11 @@ const App: React.FC = () => {
         o.id === offerId ? { ...o, offerAmount, equityPercentage } : o
       ));
       
-      alert('Offer updated successfully!');
+      messageService.success(
+        'Offer Updated',
+        'Offer updated successfully!',
+        3000
+      );
     } catch (error) {
       console.error('Error updating offer:', error);
       
@@ -1959,7 +2034,10 @@ const App: React.FC = () => {
         errorMessage = `Update failed: ${JSON.stringify(error)}`;
       }
       
-      alert(errorMessage);
+      messageService.error(
+        'Submission Failed',
+        errorMessage
+      );
     }
   }, []);
 
@@ -1970,10 +2048,17 @@ const App: React.FC = () => {
       // Update local state
       setInvestmentOffers(prev => prev.filter(o => o.id !== offerId));
       
-      alert('Offer cancelled successfully!');
+      messageService.success(
+        'Offer Cancelled',
+        'Offer cancelled successfully!',
+        3000
+      );
     } catch (error) {
       console.error('Error cancelling offer:', error);
-      alert('Failed to cancel offer. Please try again.');
+      messageService.error(
+        'Cancellation Failed',
+        'Failed to cancel offer. Please try again.'
+      );
     }
   }, []);
 
@@ -1988,11 +2073,18 @@ const App: React.FC = () => {
       
       const request = validationRequestsRef.current.find(r => r.id === requestId);
       if (request) {
-        alert(`The validation request for ${request.startupName} has been ${status}.`);
+        messageService.success(
+          'Validation Processed',
+          `The validation request for ${request.startupName} has been ${status}.`,
+          3000
+        );
       }
     } catch (error) {
       console.error('Error processing validation request:', error);
-      alert('Failed to process validation request. Please try again.');
+      messageService.error(
+        'Processing Failed',
+        'Failed to process validation request. Please try again.'
+      );
     }
   }, []);
 
@@ -2052,10 +2144,17 @@ const App: React.FC = () => {
       const startupName = startup?.name || 'Startup';
       
       console.log(`✅ Successfully updated ${startupName} compliance status to ${status}`);
-      alert(`${startupName} compliance status has been updated to ${status}.`);
+      messageService.success(
+        'Compliance Updated',
+        `${startupName} compliance status has been updated to ${status}.`,
+        3000
+      );
     } catch (error) {
       console.error('❌ Error updating compliance:', error);
-      alert(`Failed to update compliance status: ${error.message || 'Unknown error'}. Please try again.`);
+      messageService.error(
+        'Update Failed',
+        `Failed to update compliance status: ${error.message || 'Unknown error'}. Please try again.`
+      );
     }
   }, []);
 
@@ -2317,10 +2416,29 @@ const App: React.FC = () => {
     )
   }
 
-  // Auth redirect guard: if authenticated and still on 'landing', go to dashboard view ('login')
+  // Auth redirect guard: if authenticated and still on 'landing', check profile completion first
   if (isAuthenticated && currentPage === 'landing') {
-    console.log('🔁 Auth redirect guard: redirecting landing -> dashboard');
-    setCurrentPage('login');
+    console.log('🔁 Auth redirect guard: checking profile completion before redirect');
+    
+    // Check if user profile is complete before redirecting to dashboard
+    if (currentUser) {
+      authService.isProfileComplete(currentUser.id).then((isComplete) => {
+        if (isComplete) {
+          console.log('🔁 Profile complete, redirecting to dashboard');
+          setCurrentPage('login');
+        } else {
+          console.log('🔁 Profile incomplete, redirecting to complete-registration');
+          setCurrentPage('complete-registration');
+        }
+      }).catch((error) => {
+        console.error('❌ Error checking profile completion:', error);
+        // Default to complete-registration if check fails
+        setCurrentPage('complete-registration');
+      });
+    } else {
+      console.log('🔁 No current user, redirecting to complete-registration');
+      setCurrentPage('complete-registration');
+    }
   }
 
   const MainContent = () => {
@@ -2605,7 +2723,9 @@ const App: React.FC = () => {
 
 
     return (
-      <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
+      <>
+        <MessageContainer />
+        <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
         <header className="bg-white shadow-sm sticky top-0 z-50">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
             <div className="flex items-center gap-3">
@@ -2742,7 +2862,8 @@ const App: React.FC = () => {
       
       {/* Footer removed - only shows on landing page */}
       <Analytics />
-      </div>
+        </div>
+      </>
     );
 };
 

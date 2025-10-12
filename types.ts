@@ -549,3 +549,30 @@ export interface UpdateIPTrademarkRecordData {
     estimatedValue?: number;
     notes?: string;
 }
+
+// Company Documents Types
+export interface CompanyDocument {
+    id: string;
+    startupId: number;
+    documentName: string;
+    description?: string;
+    documentUrl: string;
+    documentType?: string;
+    createdBy?: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface CreateCompanyDocumentData {
+    documentName: string;
+    description?: string;
+    documentUrl: string;
+    documentType?: string;
+}
+
+export interface UpdateCompanyDocumentData {
+    documentName?: string;
+    description?: string;
+    documentUrl?: string;
+    documentType?: string;
+}

@@ -11,6 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { Plus, Trash2, Edit, Edit3, Save, X, TrendingUp, Users, DollarSign, PieChart as PieChartIcon, UserPlus, Download, Upload, Check, Eye, RefreshCw } from 'lucide-react';
 import PricePerShareInput from './PricePerShareInput';
 import { capTableService } from '../../lib/capTableService';
+import { messageService } from '../../lib/messageService';
 import { startupAdditionService, investmentService } from '../../lib/database';
 import { incubationProgramsService } from '../../lib/incubationProgramsService';
 import { financialsService } from '../../lib/financialsService';
@@ -1132,10 +1133,18 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     console.log('✅ Validation request processed:', validationRequest);
                     
                     // Show success message with validation info
-                    alert(startup.name + ' fundraising is now active! A Startup Nation validation request has been submitted and is pending admin approval.');
+                    messageService.success(
+                      'Fundraising Activated',
+                      startup.name + ' fundraising is now active! A Startup Nation validation request has been submitted and is pending admin approval.',
+                      5000
+                    );
                 } catch (validationError) {
                     console.error('❌ Error processing validation request:', validationError);
-                    alert(startup.name + ' fundraising is now active! However, there was an issue submitting the validation request. Please contact support.');
+                    messageService.warning(
+                      'Fundraising Activated with Issue',
+                      startup.name + ' fundraising is now active! However, there was an issue submitting the validation request. Please contact support.',
+                      5000
+                    );
                 }
             } else {
                 // If validation was unchecked, remove any existing validation request
@@ -1150,7 +1159,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 
                 // Call parent callback for non-validation fundraising
                 onActivateFundraising(savedFundraising, startup);
-                alert(startup.name + ' fundraising is now active!');
+                messageService.success(
+                  'Fundraising Activated',
+                  startup.name + ' fundraising is now active!',
+                  3000
+                );
             }
             
             // Exit edit mode
@@ -1713,7 +1726,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const handleEditIncubationProgram = (program: any) => {
         console.log('🔧 Editing incubation program:', program);
         // TODO: Implement edit modal functionality
-        alert('Edit functionality will be implemented in the next update');
+        messageService.info(
+          'Coming Soon',
+          'Edit functionality will be implemented in the next update'
+        );
     };
 
     const handleDownloadProof = async (proofUrl: string, investorName: string) => {
@@ -1790,7 +1806,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             console.log('✅ Fund utilization report downloaded successfully as PDF');
         } catch (error) {
             console.error('❌ Error generating fund utilization report:', error);
-            alert('Failed to generate fund utilization report. Please try again.');
+            messageService.error(
+              'Report Generation Failed',
+              'Failed to generate fund utilization report. Please try again.'
+            );
         }
     };
 
@@ -1852,7 +1871,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             console.log('✅ Individual fund utilization report downloaded successfully as PDF');
         } catch (error) {
             console.error('❌ Error generating individual fund utilization report:', error);
-            alert('Failed to generate individual fund utilization report. Please try again.');
+            messageService.error(
+              'Report Generation Failed',
+              'Failed to generate individual fund utilization report. Please try again.'
+            );
         }
     };
 
@@ -2098,13 +2120,9 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                      <p className="text-sm font-medium text-slate-500">Current Valuation</p>
                      <p className="text-2xl font-bold">
                         {(() => {
-                            if (investmentRecords.length > 0) {
-                                const latest = [...investmentRecords]
-                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-                                const latestPost = (latest as any)?.postMoneyValuation;
-                                if (latestPost && latestPost > 0) return formatCurrency(latestPost, startupCurrency);
-                            }
-                            return formatCurrency(startup.currentValuation, startupCurrency);
+                            // Use cumulative current valuation from startup object
+                            // This ensures we show the total valuation, not just the latest investment
+                            return formatCurrency(startup.currentValuation || 0, startupCurrency);
                         })()}
                     </p>
                 </Card>
@@ -2139,24 +2157,19 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     const calculatedTotalShares = calculateTotalShares();
                                     
                                     if (calculatedTotalShares > 0) {
-                                        let latestValuation = startup.currentValuation || 0;
-                                        if (investmentRecords && investmentRecords.length > 0) {
-                                            const latest = [...investmentRecords]
-                                                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
-                                            if (latest?.postMoneyValuation && latest.postMoneyValuation > 0) {
-                                                latestValuation = latest.postMoneyValuation;
-                                            }
-                                        }
-                                        const computedPricePerShare = latestValuation / calculatedTotalShares;
+                                        // Use cumulative current valuation for price per share calculation
+                                        // This ensures consistent pricing across all shares
+                                        const cumulativeValuation = startup.currentValuation || 0;
+                                        const computedPricePerShare = cumulativeValuation / calculatedTotalShares;
                                         
                                         // DETAILED DEBUG: Track Equity Allocation price calculation
                                         console.log('🔍 DETAILED DEBUG - Equity Allocation Price Per Share Calculation:', {
                                             'startup.currentValuation': startup.currentValuation,
-                                            'latestValuation': latestValuation,
+                                            'cumulativeValuation': cumulativeValuation,
                                             'calculatedTotalShares': calculatedTotalShares,
                                             'computedPricePerShare': computedPricePerShare,
                                             'formattedPrice': formatCurrency(computedPricePerShare, startupCurrency),
-                                            'calculation': latestValuation + ' / ' + calculatedTotalShares + ' = ' + computedPricePerShare
+                                            'calculation': cumulativeValuation + ' / ' + calculatedTotalShares + ' = ' + computedPricePerShare
                                         });
                                         
                                         // Save the calculated price per share to database
@@ -3595,13 +3608,20 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     try {
                                         // TODO: Implement actual update logic
                                         console.log('Saving investment:', editingInvestment);
-                                        alert('Investment updated successfully! (This is a placeholder - actual save functionality will be implemented)');
+                                        messageService.success(
+                                          'Investment Updated',
+                                          'Investment updated successfully! (This is a placeholder - actual save functionality will be implemented)',
+                                          3000
+                                        );
                                         setIsEditInvestmentModalOpen(false);
                                         // Refresh the investment list
                                         await loadCapTableData();
                                     } catch (error) {
                                         console.error('Error updating investment:', error);
-                                        alert('Failed to update investment');
+                                        messageService.error(
+                                          'Update Failed',
+                                          'Failed to update investment'
+                                        );
                                     }
                                 }}
                             >

@@ -170,6 +170,44 @@ export function getMaxAllowedDateString(): string {
 }
 
 /**
+ * Validates employee increment dates - must be after joining date and not in the future
+ */
+export function validateIncrementDate(incrementDate: string, joiningDate: string): DateValidationResult {
+  if (!incrementDate) {
+    return { isValid: false, error: 'Increment date is required' };
+  }
+
+  if (!joiningDate) {
+    return { isValid: false, error: 'Employee joining date is required for validation' };
+  }
+
+  const incrementDateObj = new Date(incrementDate);
+  const joiningDateObj = new Date(joiningDate);
+  const today = new Date();
+  today.setHours(23, 59, 59, 999); // End of today
+
+  if (isNaN(incrementDateObj.getTime())) {
+    return { isValid: false, error: 'Invalid increment date format' };
+  }
+
+  if (isNaN(joiningDateObj.getTime())) {
+    return { isValid: false, error: 'Invalid joining date format' };
+  }
+
+  // Check if increment date is in the future
+  if (incrementDateObj > today) {
+    return { isValid: false, error: 'Increment date cannot be in the future' };
+  }
+
+  // Check if increment date is before joining date
+  if (incrementDateObj < joiningDateObj) {
+    return { isValid: false, error: `Increment date cannot be before the employee's joining date (${joiningDate}). Please select a date on or after the joining date.` };
+  }
+
+  return { isValid: true };
+}
+
+/**
  * Gets the minimum allowed date string (50 years ago) for HTML date inputs
  */
 export function getMinAllowedDateString(): string {

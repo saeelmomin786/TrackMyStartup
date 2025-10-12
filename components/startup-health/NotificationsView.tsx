@@ -264,21 +264,7 @@ const NotificationsView: React.FC<NotificationsViewProps> = ({ startupId, onClos
                                             Message
                                         </Button>
                                         
-                                        {application.status === 'accepted' && (
-                                            <>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => handleOpenContract(application)}
-                                                    className="flex items-center"
-                                                >
-                                                    <FileText className="w-4 h-4 mr-1" />
-                                                    Contracts
-                                                </Button>
-                                                
-                                                {/* Payment button removed as requested */}
-                                            </>
-                                        )}
+                                        {/* Contracts button removed as requested */}
                                     </div>
                                 </div>
                             </Card>

@@ -137,9 +137,26 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
 
   // Recompute monthly salary expense whenever employees change
   useEffect(() => {
-      const computeMonthly = (employees: Employee[]) => {
-          return employees.reduce((sum, emp) => {
-              const monthlySalary = (emp.salary || 0) / 12;
+      const computeMonthly = async (employees: Employee[]) => {
+          console.log('🔄 Computing monthly salary expense for employees:', employees.length);
+          let totalMonthlyExpense = 0;
+          
+          for (const emp of employees) {
+              console.log(`📊 Processing employee: ${emp.name} (ID: ${emp.id})`);
+              
+              // Get current effective salary (considering increments)
+              let currentSalary = await employeesService.getCurrentEffectiveSalary(emp.id);
+              console.log(`💰 Current salary for ${emp.name}: ${currentSalary}`);
+              
+              // Fallback to base salary if getCurrentEffectiveSalary returns 0
+              if (currentSalary === 0) {
+                  currentSalary = emp.salary || 0;
+                  console.log(`⚠️ Using fallback base salary for ${emp.name}: ${currentSalary}`);
+              }
+              
+              const monthlySalary = currentSalary / 12;
+              console.log(`📅 Monthly salary for ${emp.name}: ${monthlySalary}`);
+              
               let esopMonthly = 0;
               switch (emp.allocationType) {
                   case 'monthly':
@@ -154,11 +171,24 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                   default:
                       esopMonthly = 0; // one-time not counted as recurring monthly
               }
-              return sum + monthlySalary + esopMonthly;
-          }, 0);
+              
+              const employeeTotal = monthlySalary + esopMonthly;
+              totalMonthlyExpense += employeeTotal;
+              console.log(`➕ Employee ${emp.name} total monthly: ${employeeTotal} (salary: ${monthlySalary}, ESOP: ${esopMonthly})`);
+          }
+          
+          console.log(`🎯 Total monthly salary expense: ${totalMonthlyExpense}`);
+          return totalMonthlyExpense;
       };
 
-      setMonthlySalaryExpense(computeMonthly(mockEmployees));
+      // Use async computation
+      computeMonthly(mockEmployees).then(result => {
+          console.log('✅ Setting monthly salary expense to:', result);
+          setMonthlySalaryExpense(result);
+      }).catch(error => {
+          console.error('❌ Error computing monthly salary expense:', error);
+          setMonthlySalaryExpense(0);
+      });
   }, [mockEmployees]);
 
     const loadData = async () => {
@@ -436,6 +466,14 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 }
             }
 
+            // Refresh financial records to ensure monthly expenditure is updated
+            try {
+              await employeesService.refreshFinancialRecordsForStartup(startup.id);
+              console.log('Financial records refreshed after adding new employee');
+            } catch (refreshError) {
+              console.warn('Failed to refresh financial records:', refreshError);
+            }
+
             // Reload data
             console.log('🔄 Reloading data...');
             await loadData();
@@ -478,10 +516,30 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             const newSalary = Number(incrementSalaryDraft);
             const newEsopAllocation = Number(incrementEsopAllocationDraft) || 0;
             const newEsopPerAllocation = Number(incrementEsopPerAllocationDraft) || 0;
+            
+            // Basic validation
             if (!incrementDateDraft || !Number.isFinite(newSalary) || newSalary < 0) {
                 setError('Please enter valid effective date and non-negative salary');
                 return;
             }
+
+            // Client-side validation: Check if increment date is before joining date
+            const incrementDate = new Date(incrementDateDraft);
+            const joiningDate = new Date(isIncrementModalOpen.joiningDate);
+            
+            if (incrementDate < joiningDate) {
+                setError(`Increment date cannot be before the employee's joining date (${isIncrementModalOpen.joiningDate}). Please select a date on or after the joining date.`);
+                return;
+            }
+
+            // Check if increment date is in the future
+            const today = new Date();
+            today.setHours(23, 59, 59, 999);
+            if (incrementDate > today) {
+                setError('Increment date cannot be in the future');
+                return;
+            }
+
             await employeesService.addSalaryIncrement(
               isIncrementModalOpen.id,
               newSalary,
@@ -490,6 +548,15 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
               incrementAllocationTypeDraft,
               newEsopPerAllocation
             );
+            
+            // Refresh financial records to ensure monthly expenditure is updated
+            try {
+              await employeesService.refreshFinancialRecordsForStartup(startup.id);
+              console.log('Financial records refreshed after salary increment');
+            } catch (refreshError) {
+              console.warn('Failed to refresh financial records:', refreshError);
+            }
+            
             setIsIncrementModalOpen(null);
             setIncrementDateDraft('');
             setIncrementSalaryDraft('');
@@ -499,7 +566,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             await loadData();
         } catch (err) {
             console.error('Error adding increment:', err);
-            setError('Failed to add increment');
+            setError(err instanceof Error ? err.message : 'Failed to add increment');
         }
     };
 
@@ -871,7 +938,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     </div>
                 </div>
                 <Card>
-                    <h3 className="text-lg font-semibold mb-4 text-slate-700">Salary Expense</h3>
+                    <h3 className="text-lg font-semibold mb-4 text-slate-700">Monthly Salary Expense</h3>
                     <div style={{ width: '100%', height: 250 }}>
                         <ResponsiveContainer>
                             <LineChart data={monthlyExpenseData.filter(d => {
@@ -883,13 +950,13 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                 <YAxis fontSize={12}/>
                                 <Tooltip />
                                 <Legend />
-                                <Line type="monotone" dataKey="salary" stroke="#16a34a" />
+                                <Line type="monotone" dataKey="salary" stroke="#16a34a" name="Monthly Salary" />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
                 </Card>
                 <Card>
-                    <h3 className="text-lg font-semibold mb-4 text-slate-700">ESOP Expenses</h3>
+                    <h3 className="text-lg font-semibold mb-4 text-slate-700">Cumulative ESOP Expenses</h3>
                     <div style={{ width: '100%', height: 250 }}>
                         <ResponsiveContainer>
                             <LineChart data={monthlyExpenseData.filter(d => {
@@ -901,7 +968,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                 <YAxis fontSize={12}/>
                                 <Tooltip />
                                 <Legend />
-                                <Line type="monotone" dataKey="esop" stroke="#3b82f6" />
+                                <Line type="monotone" dataKey="esop" stroke="#3b82f6" name="Cumulative ESOP" />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
@@ -1164,7 +1231,21 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             >
                 <div className="space-y-3">
                     <p className="text-sm text-slate-600">Set the effective date and new values. Previous data remains unchanged before the date.</p>
-                    <Input label="Effective Date" type="date" value={incrementDateDraft} onChange={(e) => setIncrementDateDraft(e.target.value)} />
+                    {isIncrementModalOpen && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                            <p className="text-sm text-blue-800">
+                                <strong>Note:</strong> Increment date must be on or after the employee's joining date ({isIncrementModalOpen.joiningDate}) and cannot be in the future.
+                            </p>
+                        </div>
+                    )}
+                    <Input 
+                        label="Effective Date" 
+                        type="date" 
+                        value={incrementDateDraft} 
+                        onChange={(e) => setIncrementDateDraft(e.target.value)}
+                        min={isIncrementModalOpen ? isIncrementModalOpen.joiningDate : undefined}
+                        max={new Date().toISOString().split('T')[0]}
+                    />
                     <Input label="New Salary (Annual)" type="number" min="0" value={incrementSalaryDraft} onChange={(e) => setIncrementSalaryDraft(e.target.value)} />
                     <Input 
                         label={`ESOP Allocation (${startupCurrency})`} 

@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { messageService } from '../../lib/messageService';
 import Modal from '../ui/Modal';
 
 interface StartupRef {
@@ -179,11 +180,17 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
             if (file.type !== 'application/pdf') {
-                alert('Please upload a PDF file for the pitch deck.');
+                messageService.warning(
+                  'Invalid File Type',
+                  'Please upload a PDF file for the pitch deck.'
+                );
                 return;
             }
             if (file.size > 10 * 1024 * 1024) {
-                alert('File size must be less than 10MB.');
+                messageService.warning(
+                  'File Too Large',
+                  'File size must be less than 10MB.'
+                );
                 return;
             }
             setApplyPitchDeckFile(file);
@@ -193,15 +200,24 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     const submitApplication = async () => {
         if (!applyingOppId) return;
         if (!applyPitchDeckFile && !applyPitchVideoUrl.trim()) {
-            alert('Please provide either a pitch deck file or a pitch video URL.');
+            messageService.warning(
+              'Content Required',
+              'Please provide either a pitch deck file or a pitch video URL.'
+            );
             return;
         }
          if (!applySector.trim()) {
-             alert('Please select a domain for your startup.');
+             messageService.warning(
+               'Domain Required',
+               'Please select a domain for your startup.'
+             );
              return;
          }
          if (!applyStage.trim()) {
-             alert('Please select your startup stage.');
+             messageService.warning(
+              'Stage Required',
+              'Please select your startup stage.'
+            );
             return;
         }
 
@@ -269,7 +285,10 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             document.body.appendChild(successMessage);
         } catch (e:any) {
             console.error('Failed to submit application:', e);
-            alert('Failed to submit application. ' + (e.message || ''));
+            messageService.error(
+              'Submission Failed',
+              'Failed to submit application. ' + (e.message || '')
+            );
         } finally {
             setIsSubmittingApplication(false);
         }

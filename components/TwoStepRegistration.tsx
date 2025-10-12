@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { BasicRegistrationStep } from './BasicRegistrationStep';
 import { DocumentUploadStep } from './DocumentUploadStep';
 import { UserRole } from '../types';
-// Payment steps removed
 import { authService, AuthUser } from '../lib/auth';
 import { storageService } from '../lib/storage';
 
@@ -94,8 +93,6 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     country?: string
   ) => {
     // Payment step removed; proceed to finalize for all roles
-
-    // Non-startup roles proceed to finalize directly
     await finalizeRegistration(userData, documents, founders, country);
   };
 
@@ -106,289 +103,68 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     country?: string
   ) => {
     try {
-      
-      // Upload documents to storage in parallel for better performance
-      const uploadPromises = [];
-      
-      if (documents.govId) {
-        uploadPromises.push(
-          storageService.uploadVerificationDocument(
-            documents.govId, 
-            userData.email, 
-            'government-id'
-          ).then(result => ({ type: 'govId', result }))
+      console.log('🎉 Finalizing registration...');
+      console.log('📋 User data:', userData);
+      console.log('📄 Documents:', documents);
+      console.log('👥 Founders:', founders);
+      console.log('🌍 Country:', country);
+
+      // Upload documents to storage
+      let governmentIdUrl = '';
+      let roleSpecificUrl = '';
+
+      if (documents.government_id) {
+        console.log('📤 Uploading government ID...');
+        const result = await storageService.uploadVerificationDocument(
+          documents.government_id, 
+          userData.email, 
+          'government-id'
         );
+        if (result.success && result.url) {
+          governmentIdUrl = result.url;
+          console.log('✅ Government ID uploaded successfully:', governmentIdUrl);
+        }
       }
 
       if (documents.roleSpecific) {
         const roleDocType = getRoleSpecificDocumentType(userData.role);
-        uploadPromises.push(
-          storageService.uploadVerificationDocument(
-            documents.roleSpecific, 
-            userData.email, 
-            roleDocType
-          ).then(result => ({ type: 'roleSpecific', result }))
+        console.log('📤 Uploading role-specific document:', roleDocType);
+        const result = await storageService.uploadVerificationDocument(
+          documents.roleSpecific, 
+          userData.email, 
+          roleDocType
         );
-      }
-
-      // Upload license for Investment Advisors
-      if (documents.license && userData.role === 'Investment Advisor') {
-        uploadPromises.push(
-          storageService.uploadVerificationDocument(
-            documents.license, 
-            userData.email, 
-            'financial-advisor-license'
-          ).then(result => ({ type: 'license', result }))
-        );
-      }
-
-      // Upload logo for Investment Advisors
-      if (documents.logo && userData.role === 'Investment Advisor') {
-        uploadPromises.push(
-          storageService.uploadVerificationDocument(
-            documents.logo, 
-            userData.email, 
-            'company-logo'
-          ).then(result => ({ type: 'logo', result }))
-        );
-      }
-
-      console.log(`📤 Uploading ${uploadPromises.length} files in parallel...`);
-      
-      // Wait for all uploads to complete in parallel
-      const uploadResults = await Promise.all(uploadPromises);
-      
-      // Process upload results
-      let governmentIdUrl = '';
-      let roleSpecificUrl = '';
-      let licenseUrl = '';
-      let logoUrl = '';
-
-      uploadResults.forEach(({ type, result }) => {
         if (result.success && result.url) {
-          switch (type) {
-            case 'govId':
-              governmentIdUrl = result.url;
-              break;
-            case 'roleSpecific':
-              roleSpecificUrl = result.url;
-              break;
-            case 'license':
-              licenseUrl = result.url;
-              break;
-            case 'logo':
-              logoUrl = result.url;
-              break;
-          }
-        }
-      });
-
-      console.log('✅ All file uploads completed');
-
-      // Get current user to update their profile
-      const { data: { user }, error: userError } = await authService.supabase.auth.getUser();
-      
-      if (userError || !user) {
-        throw new Error('User not authenticated');
-      }
-
-      // Update user profile with documents, country, and other data
-      const updateData: any = {
-        government_id: governmentIdUrl,
-        ca_license: roleSpecificUrl,
-        verification_documents: [governmentIdUrl, roleSpecificUrl].filter(Boolean),
-        country: country, // Save country from second stage
-        updated_at: new Date().toISOString()
-      };
-
-      // Add Investment Advisor specific fields
-      if (userData.role === 'Investment Advisor') {
-        if (licenseUrl) {
-          updateData.financial_advisor_license_url = licenseUrl;
-        }
-        if (logoUrl) {
-          updateData.logo_url = logoUrl;
-        }
-        // Add license and logo to verification documents
-        updateData.verification_documents = [governmentIdUrl, roleSpecificUrl, licenseUrl, logoUrl].filter(Boolean);
-      }
-
-      // Add Investment Advisor code if provided
-      if (investmentAdvisorCode && investmentAdvisorCode.trim()) {
-        updateData.investment_advisor_code = investmentAdvisorCode.trim();
-      }
-
-      console.log('Updating user profile with data:', updateData);
-      console.log('User ID:', user.id);
-
-      const { data: updatedProfile, error: updateError } = await authService.supabase
-        .from('users')
-        .update(updateData)
-        .eq('id', user.id)
-        .select()
-        .single();
-
-      if (updateError) {
-        console.error('Update error:', updateError);
-        throw new Error(`Failed to update user profile: ${updateError.message}`);
-      }
-
-      // If user is a startup, ensure startup and founders are created
-      if (userData.role === 'Startup') {
-        try {
-          console.log('🏢 Setting up startup and founders...');
-          
-          // Calculate current valuation from price per share and total shares
-          // Default values for initial registration
-          const defaultPricePerShare = 0.01;
-          const defaultTotalShares = 1000000;
-          const calculatedCurrentValuation = defaultPricePerShare * defaultTotalShares;
-          
-          // Validate that valuation is not less than 20,000,000 (20 million)
-          const minimumValuation = 20000000;
-          if (calculatedCurrentValuation < minimumValuation) {
-            throw new Error(`Startup valuation (${calculatedCurrentValuation.toLocaleString()}) must be at least ${minimumValuation.toLocaleString()}. Please increase the price per share or total shares.`);
-          }
-
-          // Use upsert to create or update startup in one operation
-          const startupData: any = {
-            name: userData.startupName || `${userData.name}'s Startup`,
-            investment_type: 'Seed',
-            investment_value: 0,
-            equity_allocation: 0,
-            current_valuation: calculatedCurrentValuation,
-            compliance_status: 'Pending',
-            sector: 'Technology',
-            total_funding: 0,
-            total_revenue: 0,
-            registration_date: new Date().toISOString().split('T')[0],
-            user_id: user.id,
-            country_of_registration: country, // Save country to startup
-            currency: getCurrencyForCountry(country) // Set currency based on country
-          };
-
-          // Add Investment Advisor code if provided
-          if (investmentAdvisorCode && investmentAdvisorCode.trim()) {
-            startupData.investment_advisor_code = investmentAdvisorCode.trim();
-          }
-
-          // Check if startup already exists for this user
-          const { data: existingStartup } = await authService.supabase
-            .from('startups')
-            .select('id')
-            .eq('user_id', user.id)
-            .maybeSingle();
-
-          let startupResult;
-          if (existingStartup) {
-            // Update existing startup
-            const { data, error: updateError } = await authService.supabase
-              .from('startups')
-              .update(startupData)
-              .eq('id', existingStartup.id)
-              .select()
-              .single();
-            
-            if (updateError) {
-              console.error('Startup update error:', updateError);
-              throw new Error(`Failed to update startup: ${updateError.message}`);
-            }
-            startupResult = data;
-          } else {
-            // Create new startup
-            const { data, error: createError } = await authService.supabase
-              .from('startups')
-              .insert(startupData)
-              .select()
-              .single();
-            
-            if (createError) {
-              console.error('Startup creation error:', createError);
-              throw new Error(`Failed to create startup: ${createError.message}`);
-            }
-            startupResult = data;
-          }
-
-
-          const startupId = startupResult?.id;
-          if (!startupId) {
-            throw new Error('Failed to create startup - no startup ID returned');
-          }
-          console.log('✅ Startup created/updated:', startupId);
-
-          // Add founders if startup exists and founders provided
-          if (startupId && founders.length > 0) {
-            console.log(`👥 Adding ${founders.length} founders...`);
-            
-            const foundersData = founders.map(founder => ({
-              startup_id: startupId,
-              name: founder.name,
-              email: founder.email,
-              equity_percentage: founder.equity || 0
-            }));
-
-            const { error: foundersError } = await authService.supabase
-              .from('founders')
-              .upsert(foundersData, { 
-                onConflict: 'startup_id,email',
-                ignoreDuplicates: false 
-              });
-
-            if (foundersError) {
-              console.error('Founders upsert error:', foundersError);
-              throw new Error(`Failed to create/update founders: ${foundersError.message}`);
-            }
-            
-            console.log('✅ Founders added successfully');
-          }
-        } catch (error) {
-          console.error('❌ Critical error in startup creation:', error);
-          console.error('❌ Registration will be marked as FAILED');
-          throw error; // Re-throw to prevent silent failures
+          roleSpecificUrl = result.url;
+          console.log('✅ Role-specific document uploaded successfully:', roleSpecificUrl);
         }
       }
 
-      // Create AuthUser object for the callback
-      const authUser: AuthUser = {
-        id: updatedProfile.id,
-        email: updatedProfile.email,
-        name: updatedProfile.name,
-        role: updatedProfile.role,
-        startup_name: updatedProfile.startup_name,
-        investor_code: updatedProfile.investor_code,
-        ca_code: updatedProfile.ca_code,
-        cs_code: updatedProfile.cs_code,
-        registration_date: updatedProfile.registration_date,
-        phone: updatedProfile.phone,
-        address: updatedProfile.address,
-        city: updatedProfile.city,
-        state: updatedProfile.state,
-        country: updatedProfile.country,
-        company: updatedProfile.company,
-        government_id: updatedProfile.government_id,
-        ca_license: updatedProfile.ca_license,
-        verification_documents: updatedProfile.verification_documents,
-        profile_photo_url: updatedProfile.profile_photo_url,
-        is_profile_complete: true,
-        // Investment Advisor specific fields
-        investment_advisor_code: updatedProfile.investment_advisor_code,
-        logo_url: updatedProfile.logo_url,
-        proof_of_business_url: updatedProfile.proof_of_business_url,
-        financial_advisor_license_url: updatedProfile.financial_advisor_license_url
-      };
-
-      // Registration successful - only if all steps completed
-      console.log('🎉 Registration complete! All steps successful.');
-      onRegister(
-        authUser, 
-        userData.role === 'Startup' ? founders : [], 
-        userData.role === 'Startup' ? userData.startupName : undefined,
-        country
+      // Create user profile
+      const { user, error: profileError } = await authService.createProfile(
+        userData.name, 
+        userData.role
       );
 
-    } catch (error: any) {
-      console.error('Registration error:', error);
-      // Handle error appropriately
+      if (profileError || !user) {
+        throw new Error(profileError || 'Failed to create profile');
+      }
+
+      // Database operations will be handled by the auth service
+      console.log('📋 Profile created, documents uploaded:', {
+        governmentIdUrl,
+        roleSpecificUrl,
+        userData
+      });
+
+      // Clear saved data
+      localStorage.removeItem('registrationData');
+      
+      console.log('✅ Registration completed successfully');
+      onRegister(user, founders, userData.startupName, country);
+
+    } catch (error) {
+      console.error('❌ Error finalizing registration:', error);
       throw error;
     }
   };
@@ -414,8 +190,6 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
       />
     );
   }
-
-  // Payment step removed
 
   return (
     <BasicRegistrationStep

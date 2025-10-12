@@ -56,6 +56,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     .select('name, country, user_id')
                     .eq('user_id', user.id);
                 
+                const userProfile = userProfiles && userProfiles.length > 0 ? userProfiles[0] : null;
+                
                 // If no startup found by user_id, try matching by startup_name from user profile
                 if ((!startupProfiles || startupProfiles.length === 0) && userProfile?.startup_name) {
                     console.log('🔍 No startup found by user_id, trying startup_name match:', userProfile.startup_name);
@@ -71,7 +73,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     }
                 }
                 
-                const userProfile = userProfiles && userProfiles.length > 0 ? userProfiles[0] : null;
                 const startupProfile = startupProfiles && startupProfiles.length > 0 ? startupProfiles[0] : null;
                 
                 console.log('Profile check result:', { 

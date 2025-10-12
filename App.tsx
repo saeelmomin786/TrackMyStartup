@@ -812,22 +812,108 @@ const App: React.FC = () => {
                     }
                   }
                   
+                  // ADDITIONAL FIX: If user has startup_name but no startup record, create one
+                  if (completeUser.startup_name && completeUser.role === 'Startup') {
+                    console.log('🔍 User has startup_name, checking if startup record exists...');
+                    try {
+                      const { data: existingStartup, error: startupCheckError } = await authService.supabase
+                        .from('startups')
+                        .select('id, name')
+                        .eq('user_id', completeUser.id)
+                        .maybeSingle();
+                      
+                      if (!existingStartup && !startupCheckError) {
+                        console.log('🔍 No startup record found, creating one for user:', completeUser.startup_name);
+                        const { data: newStartup, error: createStartupError } = await authService.supabase
+                          .from('startups')
+                          .insert({
+                            name: completeUser.startup_name || 'Unnamed Startup',
+                            user_id: completeUser.id,
+                            sector: 'Technology', // Default sector
+                            current_valuation: 0,
+                            total_funding: 0,
+                            total_revenue: 0,
+                            compliance_status: 'pending',
+                            registration_date: new Date().toISOString().split('T')[0],
+                            investment_type: 'Seed',
+                            investment_value: 0,
+                            equity_allocation: 0
+                          } as any)
+                          .select()
+                          .single();
+                        
+                        if (newStartup && !createStartupError) {
+                          console.log('✅ Created startup record:', newStartup);
+                        } else {
+                          console.error('❌ Error creating startup record:', createStartupError);
+                          console.error('❌ Startup creation failed. Details:', {
+                            error: createStartupError,
+                            user_id: completeUser.id,
+                            startup_name: completeUser.startup_name,
+                            user_role: completeUser.role
+                          });
+                        }
+                      } else if (existingStartup) {
+                        console.log('✅ Startup record already exists:', existingStartup.name);
+                      }
+                    } catch (startupRecordError) {
+                      console.error('❌ Error checking/creating startup record:', startupRecordError);
+                    }
+                  }
+                  
                   setCurrentUser(completeUser);
                   setIsAuthenticated(true);
                   setIsLoading(false);
                 } else {
-                  console.log('❌ Could not load complete user data, using basic user');
-                  const basicUser: AuthUser = {
-                    id: session.user.id,
-                    email: session.user.email || '',
-                    name: session.user.user_metadata?.name || 'Unknown',
-                    role: session.user.user_metadata?.role || 'Investor',
-                    startup_name: session.user.user_metadata?.startupName || undefined,
-                    registration_date: new Date().toISOString().split('T')[0]
-                  };
-                  setCurrentUser(basicUser);
-                  setIsAuthenticated(true);
-                  setIsLoading(false);
+                  console.log('❌ Could not load complete user data, creating basic profile...');
+                  
+                  // Create a basic profile for users who don't have one
+                  try {
+                    const { data: newProfile, error: createError } = await authService.supabase
+                      .from('users')
+                      .insert({
+                        id: session.user.id,
+                        email: session.user.email,
+                        name: session.user.user_metadata?.name || 'Unknown',
+                        role: session.user.user_metadata?.role || 'Investor',
+                        startup_name: session.user.user_metadata?.startupName || null,
+                        registration_date: new Date().toISOString().split('T')[0],
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                      })
+                      .select()
+                      .single();
+                    
+                    if (newProfile && !createError) {
+                      console.log('✅ Created new user profile:', newProfile);
+                      setCurrentUser(newProfile);
+                      setIsAuthenticated(true);
+                      setIsLoading(false);
+                      
+                      // For new users, redirect to Form 2 to complete their profile
+                      if (newProfile.role === 'Startup') {
+                        console.log('🔄 New startup user created, redirecting to Form 2');
+                        setCurrentPage('complete-registration');
+                        return;
+                      }
+                    } else {
+                      console.error('❌ Error creating user profile:', createError);
+                      throw createError;
+                    }
+                  } catch (profileCreateError) {
+                    console.error('❌ Failed to create user profile, using basic user:', profileCreateError);
+                    const basicUser: AuthUser = {
+                      id: session.user.id,
+                      email: session.user.email || '',
+                      name: session.user.user_metadata?.name || 'Unknown',
+                      role: session.user.user_metadata?.role || 'Investor',
+                      startup_name: session.user.user_metadata?.startupName || undefined,
+                      registration_date: new Date().toISOString().split('T')[0]
+                    };
+                    setCurrentUser(basicUser);
+                    setIsAuthenticated(true);
+                    setIsLoading(false);
+                  }
                 }
               } catch (error) {
                 console.error('❌ Error loading complete user data:', error);
@@ -2022,31 +2108,38 @@ const App: React.FC = () => {
           <CompleteRegistrationPage 
             onNavigateToRegister={() => setCurrentPage('register')}
             onNavigateToDashboard={async () => {
-              console.log('🔄 Registration completed, checking payment status...');
+              console.log('🔄 Registration completed, refreshing user data first...');
               
-              // Check if user has active subscription
-              const hasActiveSubscription = await checkPaymentStatus(currentUser?.id || '');
-              
-              if (hasActiveSubscription) {
-                console.log('✅ Active subscription found, navigating to dashboard');
-                // Refresh the current user data to get updated Investment Advisor code and logo
-                try {
-                  const refreshedUser = await authService.getCurrentUser();
-                  if (refreshedUser) {
-                    console.log('✅ User data refreshed for dashboard:', refreshedUser);
-                    setCurrentUser(refreshedUser);
-                    setIsAuthenticated(true);
+              // CRITICAL: Refresh user data FIRST before any checks
+              try {
+                const refreshedUser = await authService.getCurrentUser();
+                if (refreshedUser) {
+                  console.log('✅ User data refreshed after Form 2 completion:', refreshedUser);
+                  setCurrentUser(refreshedUser);
+                  setIsAuthenticated(true);
+                  
+                  // Now check payment status with fresh data
+                  console.log('🔄 Checking payment status with refreshed data...');
+                  const hasActiveSubscription = await checkPaymentStatus(refreshedUser.id);
+                  
+                  if (hasActiveSubscription) {
+                    console.log('✅ Active subscription found, navigating to dashboard');
                     setCurrentPage('login'); // This will show the main dashboard
+                  } else {
+                    console.log('💳 No active subscription found, redirecting to payment page');
+                    setCurrentPage('payment');
                   }
-                } catch (error) {
-                  console.error('❌ Error refreshing user data:', error);
-                  // Still navigate even if refresh fails
+                } else {
+                  console.error('❌ Failed to refresh user data after Form 2 completion');
+                  // Fallback: still try to navigate
                   setIsAuthenticated(true);
                   setCurrentPage('login');
                 }
-              } else {
-                console.log('💳 No active subscription found, redirecting to payment page');
-                setCurrentPage('payment');
+              } catch (error) {
+                console.error('❌ Error refreshing user data after Form 2 completion:', error);
+                // Fallback: still try to navigate
+                setIsAuthenticated(true);
+                setCurrentPage('login');
               }
             }}
           />

@@ -210,6 +210,53 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [editRecEquityDraft, setEditRecEquityDraft] = useState<string>('');
     const [editRecPostMoneyDraft, setEditRecPostMoneyDraft] = useState<string>('');
 
+    // Always keep local price per share synced with the most recent investment
+    useEffect(() => {
+        try {
+            if (!startup?.id) return;
+            const totalSharesNow = calculateTotalShares();
+
+            if (investmentRecords && investmentRecords.length > 0) {
+                const latest = [...investmentRecords].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+                const nextPricePerShare = (latest?.postMoneyValuation && totalSharesNow > 0) ? (latest.postMoneyValuation / totalSharesNow) : 0;
+                if (nextPricePerShare > 0 && nextPricePerShare !== pricePerShare) {
+                    setPricePerShare(nextPricePerShare);
+                    capTableService.upsertPricePerShare(startup.id, nextPricePerShare).catch(() => {});
+                    if (startup) startup.pricePerShare = nextPricePerShare;
+                }
+            } else {
+                // Fallback: use price per share provided during second registration (stored on startup)
+                const profilePps = Number(startup.pricePerShare) || 0;
+                if (profilePps > 0 && profilePps !== pricePerShare) {
+                    setPricePerShare(profilePps);
+                    capTableService.upsertPricePerShare(startup.id, profilePps).catch(() => {});
+                }
+            }
+        } catch (e) {
+            // ignore
+        }
+        // Recompute when any share components change as they affect total shares
+    }, [investmentRecords, founders, recognitionRecords, startup?.esopReservedShares, startup?.pricePerShare]);
+
+    // Auto-calc for Edit Investment modal (amount, equity %, post-money)
+    useEffect(() => {
+        if (!isEditInvestmentModalOpen || !editingInvestment) return;
+        const shares = Number((editingInvestment as any).shares) || 0;
+        const pps = Number((editingInvestment as any).pricePerShare) || 0;
+        if (shares > 0 && pps > 0) {
+            const amount = shares * pps;
+            const currentTotalShares = calculateTotalShares();
+            const equityPercentage = currentTotalShares > 0 ? (shares / currentTotalShares) * 100 : 0;
+            const postMoney = equityPercentage > 0 ? (amount * 100) / equityPercentage : 0;
+            setEditingInvestment(prev => prev ? ({
+                ...prev,
+                investmentAmount: amount,
+                equityAllocated: Number(equityPercentage.toFixed(2)),
+                postMoneyValuation: postMoney,
+            }) : prev);
+        }
+    }, [isEditInvestmentModalOpen, editingInvestment?.shares, editingInvestment?.pricePerShare]);
+
     // Helper function to calculate total shares including recognition records with equity
     const calculateTotalShares = () => {
         const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
@@ -1338,6 +1385,21 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setInvPostMoneyDraft('');
             setInvSharesDraft('');
             setInvPricePerShareDraft('');
+
+            // 2) Recompute price per share from latest post-money
+            try {
+                const latestList = [...(investmentRecords || []), savedInvestment].sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                const latest = latestList[0];
+                const totalSharesNow = calculateTotalShares();
+                const nextPricePerShare = (latest?.postMoneyValuation && totalSharesNow > 0) ? (latest.postMoneyValuation / totalSharesNow) : 0;
+                if (nextPricePerShare > 0) {
+                    await capTableService.upsertPricePerShare(startup.id, nextPricePerShare);
+                    setPricePerShare(nextPricePerShare);
+                    if (startup) startup.pricePerShare = nextPricePerShare;
+                }
+            } catch (ppsErr) {
+                console.warn('Failed to recompute price per share after investment:', ppsErr);
+            }
 
             // Note: Investor code validation can be added here in the future
             if (investorCode && investorCode.trim().length > 0) {
@@ -3075,9 +3137,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     <table className="min-w-full divide-y divide-slate-200 text-sm">
                         <thead className="bg-slate-50">
                             <tr>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Date</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Investor Name</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Investor Code</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Amount</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Price/Share</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Equity</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Post-Money</th>
                                 <th className="px-4 py-2 text-left font-medium text-slate-500">Fund Utilization</th>
@@ -3085,8 +3149,9 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200">
-                            {investmentRecords.map(inv => (
+                            {[...investmentRecords].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(inv => (
                                     <tr key={inv.id}>
+                                        <td className="px-4 py-2 text-slate-500">{new Date(inv.date).toLocaleDateString()}</td>
                                         <td className="px-4 py-2 font-medium text-slate-900">{inv.investorName}</td>
                                         <td className="px-4 py-2 text-slate-500 font-mono text-xs">
                                             {inv.investorCode ? (
@@ -3098,6 +3163,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             )}
                                         </td>
                                         <td className="px-4 py-2 text-slate-500">{formatCurrency(inv.amount, startupCurrency)}</td>
+                                        <td className="px-4 py-2 text-slate-500">{formatCurrency(inv.pricePerShare || 0, startupCurrency)}</td>
                                         <td className="px-4 py-2 text-slate-500">{inv.equityAllocated}%</td>
                                         <td className="px-4 py-2 text-slate-500">{formatCurrency(inv.postMoneyValuation || ((inv.equityAllocated && inv.equityAllocated > 0) ? (inv.amount * 100) / inv.equityAllocated : 0), startupCurrency)}</td>
                                         <td className="px-4 py-2 text-slate-500">
@@ -3606,22 +3672,44 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                             <Button
                                 onClick={async () => {
                                     try {
-                                        // TODO: Implement actual update logic
-                                        console.log('Saving investment:', editingInvestment);
-                                        messageService.success(
-                                          'Investment Updated',
-                                          'Investment updated successfully! (This is a placeholder - actual save functionality will be implemented)',
-                                          3000
-                                        );
+                                        if (!editingInvestment) return;
+                                        // Persist changes
+                                        const updated = await capTableService.updateInvestmentRecord(String(editingInvestment.id), {
+                                            date: (editingInvestment as any).investmentDate || editingInvestment.date,
+                                            investorType: editingInvestment.investorType,
+                                            investmentType: editingInvestment.investmentType,
+                                            investorName: editingInvestment.investorName,
+                                            investorCode: editingInvestment.investorCode,
+                                            amount: (editingInvestment.shares || 0) * (editingInvestment.pricePerShare || 0),
+                                            equityAllocated: editingInvestment.equityAllocated,
+                                            shares: editingInvestment.shares,
+                                            pricePerShare: editingInvestment.pricePerShare,
+                                            postMoneyValuation: editingInvestment.postMoneyValuation,
+                                            preMoneyValuation: editingInvestment.preMoneyValuation,
+                                            proofUrl: editingInvestment.proofOfInvestment
+                                        } as any);
+
+                                        // Recompute and persist price per share based on latest post-money
+                                        try {
+                                            const latestList = [...investmentRecords.map(i => ({...i})), updated].sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                                            const latest = latestList[0];
+                                            const totalSharesNow = calculateTotalShares();
+                                            const nextPricePerShare = (latest?.postMoneyValuation && totalSharesNow > 0) ? (latest.postMoneyValuation / totalSharesNow) : 0;
+                                            if (nextPricePerShare > 0) {
+                                                await capTableService.upsertPricePerShare(startup.id, nextPricePerShare);
+                                                setPricePerShare(nextPricePerShare);
+                                                if (startup) startup.pricePerShare = nextPricePerShare;
+                                            }
+                                        } catch (ppsErr) {
+                                            console.warn('Failed to recompute price per share after edit:', ppsErr);
+                                        }
+
+                                        messageService.success('Investment Updated', 'Investment updated successfully!', 3000);
                                         setIsEditInvestmentModalOpen(false);
-                                        // Refresh the investment list
                                         await loadCapTableData();
                                     } catch (error) {
                                         console.error('Error updating investment:', error);
-                                        messageService.error(
-                                          'Update Failed',
-                                          'Failed to update investment'
-                                        );
+                                        messageService.error('Update Failed', 'Failed to update investment');
                                     }
                                 }}
                             >

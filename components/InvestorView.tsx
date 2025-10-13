@@ -7,6 +7,7 @@ import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
 import { TrendingUp, DollarSign, CheckSquare, Eye, PlusCircle, Activity, FileText, Video, Users, Heart, CheckCircle, LayoutGrid, Film, Edit, X, Clock, CheckCircle2, Shield, Menu, User, Settings, LogOut, Star, Search, Share2 } from 'lucide-react';
+import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { investmentService } from '../lib/database';
 import ProfilePage from './ProfilePage';
@@ -56,8 +57,12 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const handleShare = async (startup: ActiveFundraisingStartup) => {
         console.log('Share button clicked for startup:', startup.name);
         console.log('Startup object:', startup);
-        const videoUrl = startup.pitchVideoUrl || 'Video not available';
-        const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: $${(startup.currentValuation || 0).toLocaleString()}\n\nPitch Video: ${videoUrl}`;
+        // Build a deep link to this pitch in Discover (reels) tab
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', 'reels');
+        url.searchParams.set('pitchId', String(startup.id));
+        const shareUrl = url.toString();
+        const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\n\nOpen pitch: ${shareUrl}`;
         console.log('Share details:', details);
         try {
             if (navigator.share) {
@@ -65,7 +70,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 const shareData = {
                     title: startup.name || 'Startup Pitch',
                     text: details,
-                    url: videoUrl !== 'Video not available' ? videoUrl : undefined
+                    url: shareUrl
                 };
                 await navigator.share(shareData);
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -91,7 +96,25 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     
     const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
     const [selectedOpportunity, setSelectedOpportunity] = useState<ActiveFundraisingStartup | null>(null);
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'reels' | 'offers' | 'recommendations'>('dashboard');
+    const [selectedPitchId, setSelectedPitchId] = useState<number | null>(() => {
+      const fromUrl = getQueryParam('pitchId');
+      return fromUrl ? Number(fromUrl) : null;
+    });
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'reels' | 'offers' | 'recommendations'>(() => {
+      const fromUrl = (getQueryParam('tab') as any) || 'dashboard';
+      const valid = ['dashboard','reels','offers','recommendations'];
+      return valid.includes(fromUrl) ? fromUrl : 'dashboard';
+    });
+    useEffect(() => {
+      setQueryParam('tab', activeTab, true);
+    }, [activeTab]);
+
+    // Keep selected pitch in URL when on reels tab
+    useEffect(() => {
+      if (activeTab === 'reels') {
+        setQueryParam('pitchId', selectedPitchId ? String(selectedPitchId) : '', true);
+      }
+    }, [selectedPitchId, activeTab]);
     const [activeFundraisingStartups, setActiveFundraisingStartups] = useState<ActiveFundraisingStartup[]>([]);
     const [recommendedOpportunities, setRecommendedOpportunities] = useState<any[]>([]);
     const [shuffledPitches, setShuffledPitches] = useState<ActiveFundraisingStartup[]>([]);
@@ -770,7 +793,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         ) : (
                           <div
                             className="relative w-full h-full group cursor-pointer"
-                            onClick={() => setPlayingVideoId(inv.id)}
+                            onClick={() => { setPlayingVideoId(inv.id); setSelectedPitchId(inv.id); }}
                           >
                             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
                             <div className="absolute inset-0 flex items-center justify-center">

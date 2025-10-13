@@ -24,6 +24,7 @@ import { TwoStepRegistration } from './components/TwoStepRegistration';
 import { CompleteRegistrationPage } from './components/CompleteRegistrationPage';
 import ResetPasswordPage from './components/ResetPasswordPage';
 import LandingPage from './components/LandingPage';
+import { getQueryParam, setQueryParam } from './lib/urlState';
 import Footer from './components/Footer';
 import PageRouter from './components/PageRouter';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
@@ -79,13 +80,11 @@ const App: React.FC = () => {
   const [viewKey, setViewKey] = useState(0); // Force re-render key
   const [forceRender, setForceRender] = useState(0); // Additional force render
   const [currentPage, setCurrentPage] = useState<'landing' | 'login' | 'register' | 'complete-registration' | 'payment' | 'reset-password'>(() => {
-    // Check if we're on a reset password URL
     if (typeof window !== 'undefined') {
       const pathname = window.location.pathname;
       const searchParams = new URLSearchParams(window.location.search);
       const hash = window.location.hash;
-      
-      // Check for reset password indicators
+      // Reset-password has priority over query param
       if (pathname === '/reset-password' || 
           searchParams.get('type') === 'recovery' ||
           hash.includes('type=recovery') ||
@@ -93,9 +92,17 @@ const App: React.FC = () => {
           searchParams.get('refresh_token')) {
         return 'reset-password';
       }
+      const fromQuery = (getQueryParam('page') as any) || 'landing';
+      const valid = ['landing','login','register','complete-registration','payment','reset-password'];
+      return valid.includes(fromQuery) ? fromQuery : 'landing';
     }
     return 'landing';
   });
+
+  // Keep URL ?page= in sync with currentPage
+  useEffect(() => {
+    setQueryParam('page', currentPage, true);
+  }, [currentPage]);
   
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [assignedInvestmentAdvisor, setAssignedInvestmentAdvisor] = useState<AuthUser | null>(null);

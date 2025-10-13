@@ -77,7 +77,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   // Share and equity information
   const [shareData, setShareData] = useState({
     totalShares: 1000000,
-    pricePerShare: 0.01,
+    pricePerShare: 10,
     esopReservedShares: 10000  // Fixed: Changed from 100000 to 10000 to match database default
   });
 

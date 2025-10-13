@@ -4,7 +4,8 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart } from 'lucide-react';
+import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
@@ -181,10 +182,24 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
     return null;
   };
-  const [activeTab, setActiveTab] = useState<FacilitatorTab>('dashboard');
-  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<FacilitatorTab>((() => {
+    const fromUrl = (getQueryParam('tab') as FacilitatorTab) || 'dashboard';
+    const valid: FacilitatorTab[] = ['dashboard','discover','intakeManagement','trackMyStartups','ourInvestments'];
+    return valid.includes(fromUrl) ? fromUrl : 'dashboard';
+  })());
+  // Keep URL in sync when tab changes
+  useEffect(() => {
+    setQueryParam('tab', activeTab, true);
+  }, [activeTab]);
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(() => getQueryParam('opportunityId'));
   const [showProfilePage, setShowProfilePage] = useState(false);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
+  // Sync selected opportunity to URL for shareable link
+  useEffect(() => {
+    if (activeTab === 'intakeManagement') {
+      setQueryParam('opportunityId', selectedOpportunityId || '', true);
+    }
+  }, [selectedOpportunityId, activeTab]);
   const [isAcceptModalOpen, setIsAcceptModalOpen] = useState(false);
   const [isDiligenceModalOpen, setIsDiligenceModalOpen] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<ReceivedApplication | null>(null);
@@ -198,7 +213,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [processingRecognitionId, setProcessingRecognitionId] = useState<string | null>(null);
   const [activeFundraisingStartups, setActiveFundraisingStartups] = useState<ActiveFundraisingStartup[]>([]);
   const [isLoadingPitches, setIsLoadingPitches] = useState(false);
-  const [playingVideoId, setPlayingVideoId] = useState<number | null>(null);
+  const [playingVideoId, setPlayingVideoId] = useState<number | null>(() => {
+    const fromUrl = getQueryParam('pitchId');
+    return fromUrl ? Number(fromUrl) : null;
+  });
+  const [favoritedPitches, setFavoritedPitches] = useState<Set<number>>(new Set());
+  const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
+  const [showOnlyValidated, setShowOnlyValidated] = useState(false);
+  const [shuffledPitches, setShuffledPitches] = useState<ActiveFundraisingStartup[]>([]);
   const [facilitatorId, setFacilitatorId] = useState<string | null>(null);
   const [myPostedOpportunities, setMyPostedOpportunities] = useState<IncubationOpportunity[]>([]);
   const [myReceivedApplications, setMyReceivedApplications] = useState<ReceivedApplication[]>([]);
@@ -492,7 +514,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const handleShare = async (startup: ActiveFundraisingStartup) => {
     console.log('Share button clicked for startup:', startup.name);
     console.log('Startup object:', startup);
-    const videoUrl = startup.pitchVideoUrl || 'Video not available';
+    // Build a deep link to this pitch in Facilitator Discover tab
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', 'discover');
+    url.searchParams.set('pitchId', String(startup.id));
+    const shareUrl = url.toString();
     // Calculate valuation from investment value and equity allocation
     const valuation = startup.equityAllocation > 0 ? (startup.investmentValue / (startup.equityAllocation / 100)) : 0;
     const inferredCurrency =
@@ -501,7 +527,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       ((startup as any).profile?.country ? resolveCurrency((startup as any).profile?.country) : undefined) ||
       (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
     const symbol = getCurrencySymbol(inferredCurrency);
-    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: ${symbol}${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: ${symbol}${valuation.toLocaleString()}\n\nPitch Video: ${videoUrl}`;
+    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: ${symbol}${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: ${symbol}${valuation.toLocaleString()}\n\nOpen pitch: ${shareUrl}`;
     console.log('Share details:', details);
         try {
             if (navigator.share) {
@@ -509,7 +535,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 const shareData = {
                     title: startup.name || 'Startup Pitch',
                     text: details,
-                    url: videoUrl !== 'Video not available' ? videoUrl : undefined
+                    url: shareUrl
                 };
                 await navigator.share(shareData);
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -855,6 +881,46 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       .finally(() => { if (mounted) setIsLoadingPitches(false); });
     return () => { mounted = false; };
   }, [activeTab]);
+
+  // Keep selected pitch in URL when on discover tab
+  useEffect(() => {
+    if (activeTab === 'discover') {
+      setQueryParam('pitchId', playingVideoId ? String(playingVideoId) : '', true);
+    }
+  }, [playingVideoId, activeTab]);
+
+  // Shuffle pitches like investor reels: interleave verified and unverified (2:1)
+  useEffect(() => {
+    if (activeTab !== 'discover' || activeFundraisingStartups.length === 0) return;
+    const verified = activeFundraisingStartups.filter(s => s.complianceStatus === ComplianceStatus.Compliant);
+    const unverified = activeFundraisingStartups.filter(s => s.complianceStatus !== ComplianceStatus.Compliant);
+    const shuffle = (arr: ActiveFundraisingStartup[]) => {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+    const sv = shuffle(verified);
+    const su = shuffle(unverified);
+    const result: ActiveFundraisingStartup[] = [];
+    let i = 0, j = 0;
+    while (i < sv.length || j < su.length) {
+      if (i < sv.length) result.push(sv[i++]);
+      if (i < sv.length) result.push(sv[i++]);
+      if (j < su.length) result.push(su[j++]);
+    }
+    setShuffledPitches(result);
+  }, [activeTab, activeFundraisingStartups]);
+
+  const handleFavoriteToggle = (pitchId: number) => {
+    setFavoritedPitches(prev => {
+      const next = new Set(prev);
+      if (next.has(pitchId)) next.delete(pitchId); else next.add(pitchId);
+      return next;
+    });
+  };
 
 
 
@@ -2935,120 +3001,226 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 </div>
         );
       case 'discover':
-        // Filter startups based on search term
-        const filteredStartups = searchTerm.trim() 
-          ? activeFundraisingStartups.filter(startup => 
-              startup.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              startup.sector.toLowerCase().includes(searchTerm.toLowerCase())
-            )
-          : activeFundraisingStartups;
+        // Prepare list using shuffled pitches to mirror investor experience
+        let list = shuffledPitches.length > 0 ? shuffledPitches : activeFundraisingStartups;
+        // Apply search
+        if (searchTerm.trim()) {
+          const term = searchTerm.toLowerCase();
+          list = list.filter(s => s.name.toLowerCase().includes(term) || s.sector.toLowerCase().includes(term));
+        }
+        // Apply filters
+        if (showOnlyValidated) list = list.filter(s => s.complianceStatus === ComplianceStatus.Compliant);
+        if (showOnlyFavorites) list = list.filter(s => favoritedPitches.has(s.id));
 
         return (
-          <div className="animate-fade-in max-w-3xl mx-auto w-full">
-            {/* Search Bar */}
-            <div className="mb-6">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search startups by name or sector..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm"
-                />
+          <div className="animate-fade-in max-w-4xl mx-auto w-full">
+            {/* Header with Search and Filters */}
+            <div className="mb-8">
+              <div className="text-center mb-6">
+                <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 mb-2">Discover Pitches</h2>
+                <p className="text-sm text-slate-600">Watch startup videos and explore opportunities to incubate</p>
+              </div>
+
+              {/* Search Bar */}
+              <div className="mb-6">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search startups by name or sector..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border border-blue-100 gap-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <button
+                      onClick={() => { setShowOnlyValidated(false); setShowOnlyFavorites(false); }}
+                      className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
+                        !showOnlyValidated && !showOnlyFavorites ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-600 border border-slate-200'
+                      }`}
+                    >
+                      <Film className="h-4 w-4" />
+                      <span className="hidden sm:inline">All</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setShowOnlyValidated(true); setShowOnlyFavorites(false); }}
+                      className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
+                        showOnlyValidated && !showOnlyFavorites ? 'bg-green-600 text-white shadow-green-200' : 'bg-white text-slate-600 hover:bg-green-50 hover:text-green-600 border border-slate-200'
+                      }`}
+                    >
+                      <CheckCircle className={`h-4 w-4 ${showOnlyValidated && !showOnlyFavorites ? 'fill-current' : ''}`} />
+                      <span className="hidden sm:inline">Verified</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setShowOnlyValidated(false); setShowOnlyFavorites(true); }}
+                      className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
+                        showOnlyFavorites ? 'bg-red-600 text-white shadow-red-200' : 'bg-white text-slate-600 hover:bg-red-50 hover:text-red-600 border border-slate-200'
+                      }`}
+                    >
+                      <Heart className={`h-4 w-4 ${showOnlyFavorites ? 'fill-current' : ''}`} />
+                      <span className="hidden sm:inline">Favorites</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-xs sm:text-sm font-medium">{activeFundraisingStartups.length} active pitches</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-slate-500">
+                  <Film className="h-5 w-5" />
+                  <span className="text-xs sm:text-sm">Pitch Reels</span>
+                </div>
               </div>
             </div>
 
+            {/* Results */}
             {isLoadingPitches ? (
-              <Card className="text-center py-16">
-                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                <p className="text-slate-600">Loading Pitches...</p>
+              <Card className="text-center py-20">
+                <div className="max-w-sm mx-auto">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Pitches...</h3>
+                  <p className="text-slate-500">Fetching active fundraising startups</p>
+                </div>
               </Card>
-            ) : filteredStartups.length === 0 ? (
-              <Card className="p-8 text-center">
-                <Film className="h-10 w-10 text-slate-400 mx-auto mb-2" />
-                <p className="text-slate-600">
-                  {searchTerm.trim() ? 'No startups found matching your search.' : 'No active fundraising pitches.'}
-                </p>
+            ) : list.length === 0 ? (
+              <Card className="text-center py-20">
+                <div className="max-w-sm mx-auto">
+                  <Film className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-slate-800 mb-2">
+                    {searchTerm.trim() ? 'No Matching Startups' : showOnlyValidated ? 'No Verified Startups' : showOnlyFavorites ? 'No Favorited Pitches' : 'No Active Fundraising'}
+                  </h3>
+                  <p className="text-slate-500">
+                    {searchTerm.trim() ? 'No startups found matching your search. Try adjusting your search terms or filters.' : showOnlyValidated ? 'No Startup Nation verified startups are currently fundraising. Try removing the verification filter or check back later.' : showOnlyFavorites ? 'Start favoriting pitches to see them here.' : 'No startups are currently fundraising. Check back later for new opportunities.'}
+                  </p>
+                </div>
               </Card>
             ) : (
-              <div className="space-y-6">
-                {filteredStartups.map(inv => {
+              <div className="space-y-8">
+                {list.map(inv => {
                   const embedUrl = investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
                   return (
-                    <Card key={inv.id} className="!p-0 overflow-hidden shadow-lg">
-                      <div className="relative w-full aspect-[16/9] bg-slate-900">
+                    <Card key={inv.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white">
+                      {/* Video section */}
+                      <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
                         {embedUrl ? (
                           playingVideoId === inv.id ? (
-                            <iframe 
-                              src={embedUrl}
-                              title={`Pitch video for ${inv.name}`}
-                              frameBorder="0"
-                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                              allowFullScreen
-                              className="absolute top-0 left-0 w-full h-full"
-                            />
+                            <div className="relative w-full h-full">
+                              <iframe
+                                src={embedUrl}
+                                title={`Pitch video for ${inv.name}`}
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                                className="absolute top-0 left-0 w-full h-full"
+                              ></iframe>
+                              <button
+                                onClick={() => setPlayingVideoId(null)}
+                                className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"
+                              >
+                                ×
+                              </button>
+                            </div>
                           ) : (
                             <div 
                               className="relative w-full h-full group cursor-pointer"
                               onClick={() => setPlayingVideoId(inv.id)}
                             >
-                              <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/20" />
+                              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
                               <div className="absolute inset-0 flex items-center justify-center">
-                                <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform duration-200">
-                                  <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="M8 5v14l11-7z"/>
+                                <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
+                                  <svg className="w-10 h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M8 5v14l11-7z" />
                                   </svg>
                                 </div>
+                              </div>
+                              <div className="absolute bottom-4 left-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                <p className="text-sm font-medium">Click to play</p>
                               </div>
                             </div>
                           )
                         ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
-                            <div className="text-center text-slate-400">
+                          <div className="w-full h-full flex items-center justify-center text-slate-400">
+                            <div className="text-center">
                               <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
-                              <p className="text-sm">Video not available</p>
+                              <p className="text-sm">No video available</p>
                             </div>
                           </div>
                         )}
                       </div>
-                      <div className="p-5">
-                        <div className="flex items-center justify-between mb-1">
+
+                      {/* Content */}
+                      <div className="p-6">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex-1">
+                            <h3 className="text-2xl font-bold text-slate-800 mb-2">{inv.name}</h3>
+                            <p className="text-slate-600 font-medium">{inv.sector}</p>
+                          </div>
                           <div className="flex items-center gap-2">
-                            <h3 className="text-xl font-bold text-slate-800">{inv.name}</h3>
                             {inv.complianceStatus === ComplianceStatus.Compliant && (
-                              <div className="flex items-center gap-1 bg-blue-600 text-white px-3 py-1.5 rounded-full text-xs font-medium">
+                              <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
                                 <CheckCircle className="h-3 w-3" />
-                                Startup Nation Verified
+                                Verified
                               </div>
                             )}
                           </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-4 mt-6">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className={`!rounded-full !p-3 transition-all duration-200 ${
+                              favoritedPitches.has(inv.id) ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200' : 'hover:bg-red-50 hover:text-red-600 border border-slate-200'
+                            }`}
+                            onClick={() => handleFavoriteToggle(inv.id)}
+                          >
+                            <Heart className={`h-5 w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
+                          </Button>
+
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleShare(inv)}
-                            className="flex items-center gap-2"
+                            className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
                           >
-                            <Share2 className="h-4 w-4" />
-                            Share
+                            <Share2 className="h-5 w-5" />
                           </Button>
-                        </div>
-                        <p className="text-sm text-slate-500 font-medium">{inv.sector}</p>
-                        <div className="mt-3 text-sm">
-                          {(() => {
-                            const ccy = (inv as any).currency || (inv as any).startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
-                            const sym = getCurrencySymbol(ccy);
-                            return `${'Ask: '}${sym}${inv.investmentValue.toLocaleString()} ${'for '}`;
-                          })()}
-                          <span className="font-semibold text-blue-600">{inv.equityAllocation}%</span> equity
-                        </div>
-                        <div className="mt-3 text-sm text-slate-500">
-                          {inv.pitchDeckUrl ? (
-                            <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-blue-600"><FileText className="h-4 w-4"/> View Deck</a>
-                          ) : (
-                            <span className="inline-flex items-center gap-2 text-slate-400"><FileText className="h-4 w-4"/> Deck not available</span>
+
+                          {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
+                            <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
+                              <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200">
+                                <FileText className="h-4 w-4 mr-2" /> View Deck
+                              </Button>
+                            </a>
                           )}
                         </div>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="bg-gradient-to-r from-slate-50 to-blue-50 px-6 py-4 flex justify-between items-center border-t border-slate-200">
+                        <div className="text-base">
+                          <span className="font-semibold text-slate-800">Ask:</span> {(() => {
+                            const ccy = (inv as any).currency || (inv as any).startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
+                            const sym = getCurrencySymbol(ccy);
+                            return `${sym}${inv.investmentValue.toLocaleString()}`;
+                          })()} for <span className="font-semibold text-blue-600">{inv.equityAllocation}%</span> equity
+                        </div>
+                        {inv.complianceStatus === ComplianceStatus.Compliant && (
+                          <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
+                            <CheckCircle className="h-4 w-4" />
+                            <span className="text-xs font-semibold">Verified</span>
+                          </div>
+                        )}
                       </div>
                     </Card>
                   );

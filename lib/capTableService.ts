@@ -440,6 +440,8 @@ class CapTableService {
     if (investmentData.equityAllocated !== undefined) updateData.equity_allocated = investmentData.equityAllocated;
     if (investmentData.preMoneyValuation !== undefined) updateData.pre_money_valuation = investmentData.preMoneyValuation;
     if ((investmentData as any).postMoneyValuation !== undefined) (updateData as any).post_money_valuation = (investmentData as any).postMoneyValuation;
+    if ((investmentData as any).shares !== undefined) (updateData as any).shares = (investmentData as any).shares;
+    if ((investmentData as any).pricePerShare !== undefined) (updateData as any).price_per_share = (investmentData as any).pricePerShare;
     if (investmentData.proofUrl !== undefined) updateData.proof_url = investmentData.proofUrl;
 
     const { data, error } = await supabase

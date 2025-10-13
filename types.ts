@@ -225,8 +225,22 @@ export interface Employee {
     esopAllocation: number; // Represents currency value
     allocationType: 'one-time' | 'annually' | 'quarterly' | 'monthly';
     esopPerAllocation: number;
+    pricePerShare?: number; // Price per share at time of allocation
+    numberOfShares?: number; // Number of shares allocated (auto-calculated)
     contractUrl?: string;
     terminationDate?: string;
+}
+
+export interface EmployeeLedgerEntry {
+    id: string;
+    employee_id: string;
+    ledger_date: string;
+    salary: number;
+    esop_allocated: number;
+    price_per_share: number;
+    number_of_shares: number;
+    created_at: string;
+    updated_at: string;
 }
 
 export enum InvestorType {

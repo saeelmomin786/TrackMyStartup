@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Employee } from '../types';
+import { Employee, EmployeeLedgerEntry } from '../types';
 import { validateJoiningDate } from './dateValidation';
 
 export interface EmployeeFilters {
@@ -37,6 +37,8 @@ export interface EmployeeIncrementRecord {
   esop_allocation: number;
   allocation_type: 'one-time' | 'annually' | 'quarterly' | 'monthly';
   esop_per_allocation: number;
+  price_per_share?: number;
+  number_of_shares?: number;
 }
 
 class EmployeesService {
@@ -131,6 +133,8 @@ class EmployeesService {
       esopAllocation: record.esop_allocation,
       allocationType: record.allocation_type,
       esopPerAllocation: record.esop_per_allocation,
+      pricePerShare: record.price_per_share,
+      numberOfShares: record.number_of_shares,
       contractUrl: record.contract_url,
       terminationDate: record.termination_date
     }));
@@ -173,6 +177,8 @@ class EmployeesService {
         esop_allocation: employeeData.esopAllocation,
         allocation_type: employeeData.allocationType,
         esop_per_allocation: employeeData.esopPerAllocation,
+        price_per_share: employeeData.pricePerShare || 0,
+        number_of_shares: employeeData.numberOfShares || 0,
         contract_url: employeeData.contractUrl,
         termination_date: employeeData.terminationDate || null
       })
@@ -212,6 +218,8 @@ class EmployeesService {
       esopAllocation: data.esop_allocation,
       allocationType: data.allocation_type,
       esopPerAllocation: data.esop_per_allocation,
+      pricePerShare: data.price_per_share,
+      numberOfShares: data.number_of_shares,
       contractUrl: data.contract_url,
       terminationDate: data.termination_date
     };
@@ -307,7 +315,9 @@ class EmployeesService {
     effectiveDate: string,
     esopAllocation?: number,
     allocationType?: 'one-time' | 'annually' | 'quarterly' | 'monthly',
-    esopPerAllocation?: number
+    esopPerAllocation?: number,
+    pricePerShare?: number,
+    numberOfShares?: number
   ): Promise<void> {
     // First, get the employee's joining date for validation
     const { data: employeeData, error: employeeError } = await supabase
@@ -336,6 +346,8 @@ class EmployeesService {
       esop_allocation: esopAllocation ?? 0,
       allocation_type: allocationType ?? 'one-time',
       esop_per_allocation: esopPerAllocation ?? 0,
+      price_per_share: pricePerShare ?? 0,
+      number_of_shares: numberOfShares ?? 0,
     };
     const { error } = await supabase
       .from('employees_increments')
@@ -477,6 +489,90 @@ class EmployeesService {
     // Temporarily use only manual calculation until RPC functions are fixed
     console.log('🔍 Using manual calculation for monthly data (startup_id:', startupId, ', year:', year, ')');
     return this.calculateMonthlySalaryDataManually(startupId, year);
+  }
+
+  // =====================================================
+  // EMPLOYEE LEDGER FUNCTIONS
+  // =====================================================
+
+  async getEmployeeLedger(employeeId: string, startDate?: string, endDate?: string): Promise<EmployeeLedgerEntry[]> {
+    let query = supabase
+      .from('employee_ledger')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('ledger_date', { ascending: true });
+
+    if (startDate) {
+      query = query.gte('ledger_date', startDate);
+    }
+    if (endDate) {
+      query = query.lte('ledger_date', endDate);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return data || [];
+  }
+
+  async generateEmployeeLedger(employeeId: string, startDate: string, endDate: string): Promise<number> {
+    const { data, error } = await supabase.rpc('generate_employee_ledger_entries', {
+      p_employee_id: employeeId,
+      p_start_date: startDate,
+      p_end_date: endDate
+    });
+
+    if (error) throw error;
+    return data || 0;
+  }
+
+  async generateStartupEmployeeLedger(startupId: number, startDate: string, endDate: string): Promise<number> {
+    const { data, error } = await supabase.rpc('generate_startup_employee_ledger', {
+      p_startup_id: startupId,
+      p_start_date: startDate,
+      p_end_date: endDate
+    });
+
+    if (error) throw error;
+    return data || 0;
+  }
+
+  async deleteEmployeeLedger(employeeId: string, startDate?: string, endDate?: string): Promise<void> {
+    let query = supabase
+      .from('employee_ledger')
+      .delete()
+      .eq('employee_id', employeeId);
+
+    if (startDate) {
+      query = query.gte('ledger_date', startDate);
+    }
+    if (endDate) {
+      query = query.lte('ledger_date', endDate);
+    }
+
+    const { error } = await query;
+    if (error) throw error;
+  }
+
+  // Sum total number_of_shares across ledger for all employees of a startup
+  async getTotalLedgerSharesForStartup(startupId: number, startDate?: string, endDate?: string): Promise<number> {
+    // Join employee_ledger with employees to filter by startup_id
+    let query = supabase
+      .from('employee_ledger')
+      .select('number_of_shares, employees!inner(startup_id)')
+      .eq('employees.startup_id', startupId);
+
+    if (startDate) {
+      query = query.gte('ledger_date', startDate);
+    }
+    if (endDate) {
+      query = query.lte('ledger_date', endDate);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    const total = (data || []).reduce((sum: number, row: any) => sum + (Number(row.number_of_shares) || 0), 0);
+    return total;
   }
 
   // =====================================================

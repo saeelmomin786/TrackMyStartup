@@ -92,7 +92,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     const startupCurrency = useStartupCurrency(startup);
     const [isEditing, setIsEditing] = useState(false);
     const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
-    const [editFormData, setEditFormData] = useState<{ name: string; joiningDate: string; entity: string; department: string; salary: number; esopAllocation: number; allocationType: 'one-time' | 'annually' | 'quarterly' | 'monthly'; esopPerAllocation: number }>({ name: '', joiningDate: '', entity: 'Parent Company', department: '', salary: 0, esopAllocation: 0, allocationType: 'one-time', esopPerAllocation: 0 });
+    const [editFormData, setEditFormData] = useState<{ name: string; joiningDate: string; entity: string; department: string; salary: number; esopAllocation: number; allocationType: 'one-time' | 'annually' | 'quarterly' | 'monthly'; esopPerAllocation: number; pricePerShare: number; numberOfShares: number }>({ name: '', joiningDate: '', entity: 'Parent Company', department: '', salary: 0, esopAllocation: 0, allocationType: 'one-time', esopPerAllocation: 0, pricePerShare: 0, numberOfShares: 0 });
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
@@ -111,6 +111,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     const [esopReservedDraft, setEsopReservedDraft] = useState<string>('0');
     const [pricePerShare, setPricePerShare] = useState<number>(0);
     const [totalShares, setTotalShares] = useState<number>(0);
+    const [totalAllocatedLedgerShares, setTotalAllocatedLedgerShares] = useState<number>(0);
     const [esopAllocationDraft, setEsopAllocationDraft] = useState<string>('');
     const [allocationTypeDraft, setAllocationTypeDraft] = useState<'one-time' | 'annually' | 'quarterly' | 'monthly'>('one-time');
     const [esopPerAllocationDraft, setEsopPerAllocationDraft] = useState<string>('0');
@@ -123,12 +124,25 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     const [incrementEsopAllocationDraft, setIncrementEsopAllocationDraft] = useState<string>('');
     const [incrementAllocationTypeDraft, setIncrementAllocationTypeDraft] = useState<'one-time' | 'annually' | 'quarterly' | 'monthly'>('one-time');
     const [incrementEsopPerAllocationDraft, setIncrementEsopPerAllocationDraft] = useState<string>('0');
+    const [incrementPricePerShareDraft, setIncrementPricePerShareDraft] = useState<string>('');
+    const [incrementNumberOfSharesDraft, setIncrementNumberOfSharesDraft] = useState<string>('0');
     const [historyEmployee, setHistoryEmployee] = useState<null | Employee>(null);
     const [historyItems, setHistoryItems] = useState<any[]>([]);
     const [isHistoryLoading, setIsHistoryLoading] = useState<boolean>(false);
+    const [ledgerItems, setLedgerItems] = useState<any[]>([]);
+    const [isLedgerLoading, setIsLedgerLoading] = useState<boolean>(false);
+    const [showLedger, setShowLedger] = useState<boolean>(false);
     
     // Allow editing for Startup/Admin; also allow when role is not yet loaded
     const canEdit = ((userRole === 'Startup' || userRole === 'Admin' || !userRole) && !isViewOnly);
+
+    // Auto-calculation function for number of shares
+    const calculateNumberOfShares = (esopAllocation: number, pricePerShare: number): number => {
+        if (pricePerShare > 0 && esopAllocation > 0) {
+            return Math.floor(esopAllocation / pricePerShare);
+        }
+        return 0;
+    };
 
     // Load data on component mount and when startup changes
     useEffect(() => {
@@ -158,15 +172,29 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
               console.log(`📅 Monthly salary for ${emp.name}: ${monthlySalary}`);
               
               let esopMonthly = 0;
+              const currentDate = new Date();
+              const currentMonth = currentDate.getMonth() + 1; // 1-12
+              
               switch (emp.allocationType) {
                   case 'monthly':
-                      esopMonthly = emp.esopPerAllocation || 0; // already monthly
+                      // Total allocation / 12 for each month
+                      esopMonthly = (emp.esopAllocation || 0) / 12;
                       break;
                   case 'quarterly':
-                      esopMonthly = (emp.esopPerAllocation || 0) / 3; // spread across months in a quarter
+                      // Total allocation / 4, only in Jan (1), Apr (4), Jul (7), Oct (10)
+                      if ([1, 4, 7, 10].includes(currentMonth)) {
+                          esopMonthly = (emp.esopAllocation || 0) / 4;
+                      } else {
+                          esopMonthly = 0;
+                      }
                       break;
                   case 'annually':
-                      esopMonthly = (emp.esopPerAllocation || 0) / 12; // spread across months in a year
+                      // Total allocation / 1, only in January
+                      if (currentMonth === 1) {
+                          esopMonthly = emp.esopAllocation || 0;
+                      } else {
+                          esopMonthly = 0;
+                      }
                       break;
                   default:
                       esopMonthly = 0; // one-time not counted as recurring monthly
@@ -257,6 +285,14 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 }
             }
             
+            // After price per share resolved, compute total allocated shares from ledger (all-time)
+            let ledgerSharesTotal = 0;
+            try {
+                ledgerSharesTotal = await employeesService.getTotalLedgerSharesForStartup(startup.id);
+            } catch (e) {
+                console.warn('Failed to load total ledger shares:', e);
+            }
+
             // Debug: Log the loaded values
             console.log('🔍 Loaded ESOP data:', {
                 startupId: startup.id,
@@ -264,6 +300,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 totalShares: shares,
                 esopReservedShares: esopShares,
                 summaryData: summaryData,
+                ledgerSharesTotal,
                 esopValueCalculation: `${esopShares} × ${calculatedPricePerShare} = ${(esopShares || 0) * calculatedPricePerShare}`
             });
             
@@ -333,6 +370,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             setSummary(summaryData);
             setPricePerShare(calculatedPricePerShare);
             setTotalShares(shares || 0);
+            setTotalAllocatedLedgerShares(ledgerSharesTotal || 0);
             
             // Populate entities from profile data
             const entityList = ['Parent Company'];
@@ -439,6 +477,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 esopAllocation: esopAllocationValue || 0,
                 allocationType: allocationTypeDraft,
                 esopPerAllocation: esopPerAllocationValue || 0,
+                pricePerShare: pricePerShare || 0,
+                numberOfShares: calculateNumberOfShares(esopAllocationValue || 0, pricePerShare || 0),
                 contractUrl: ''
             };
 
@@ -540,13 +580,18 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 return;
             }
 
+            const newPricePerShare = pricePerShare || 0;
+            const newNumberOfShares = calculateNumberOfShares(newEsopAllocation, newPricePerShare);
+            
             await employeesService.addSalaryIncrement(
               isIncrementModalOpen.id,
               newSalary,
               incrementDateDraft,
               newEsopAllocation,
               incrementAllocationTypeDraft,
-              newEsopPerAllocation
+              newEsopPerAllocation,
+              newPricePerShare,
+              newNumberOfShares
             );
             
             // Refresh financial records to ensure monthly expenditure is updated
@@ -563,6 +608,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             setIncrementEsopAllocationDraft('');
             setIncrementEsopPerAllocationDraft('0');
             setIncrementAllocationTypeDraft('one-time');
+            setIncrementPricePerShareDraft(String(pricePerShare || 0));
+            setIncrementNumberOfSharesDraft('0');
             await loadData();
         } catch (err) {
             console.error('Error adding increment:', err);
@@ -583,6 +630,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             esopAllocation: current?.esopAllocation ?? emp.esopAllocation,
             allocationType: current?.allocationType ?? emp.allocationType,
             esopPerAllocation: current?.esopPerAllocation ?? emp.esopPerAllocation,
+            pricePerShare: emp.pricePerShare ?? pricePerShare,
+            numberOfShares: emp.numberOfShares ?? calculateNumberOfShares(current?.esopAllocation ?? emp.esopAllocation, emp.pricePerShare ?? pricePerShare),
         });
 
         // Then try to refine from latest increment if table exists
@@ -616,6 +665,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     esop_allocation: emp.esopAllocation,
                     allocation_type: emp.allocationType,
                     esop_per_allocation: emp.esopPerAllocation,
+                    price_per_share: emp.pricePerShare || 0,
+                    number_of_shares: emp.numberOfShares || 0,
                 },
                 ...increments
             ].sort((a: any, b: any) => new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime());
@@ -624,6 +675,42 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             setHistoryItems([]);
         } finally {
             setIsHistoryLoading(false);
+        }
+    };
+
+    const openLedger = async (emp: Employee) => {
+        try {
+            setIsLedgerLoading(true);
+            setHistoryEmployee(emp);
+            setShowLedger(true);
+            
+            // Generate ledger entries for the employee from joining date to current date
+            const joiningDate = emp.joiningDate;
+            const currentDate = new Date().toISOString().split('T')[0];
+            
+            console.log('🔍 Generating ledger for employee:', emp.name, 'from', joiningDate, 'to', currentDate);
+            
+            // First, try to get existing ledger entries
+            let ledger = await employeesService.getEmployeeLedger(emp.id, joiningDate, currentDate);
+            console.log('📊 Existing ledger entries:', ledger.length);
+            
+            // If no entries exist, generate them
+            if (ledger.length === 0) {
+                console.log('🔄 No existing entries, generating new ledger...');
+                const entriesGenerated = await employeesService.generateEmployeeLedger(emp.id, joiningDate, currentDate);
+                console.log('✅ Generated', entriesGenerated, 'ledger entries');
+                
+                // Fetch the newly generated entries
+                ledger = await employeesService.getEmployeeLedger(emp.id, joiningDate, currentDate);
+                console.log('📊 New ledger entries:', ledger.length);
+            }
+            
+            setLedgerItems(ledger);
+        } catch (e) {
+            console.error('❌ Error loading employee ledger:', e);
+            setLedgerItems([]);
+        } finally {
+            setIsLedgerLoading(false);
         }
     };
 
@@ -649,7 +736,9 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     salary: editFormData.salary,
                     esopAllocation: editFormData.esopAllocation,
                     allocationType: editFormData.allocationType,
-                    esopPerAllocation: editFormData.esopPerAllocation
+                    esopPerAllocation: editFormData.esopPerAllocation,
+                    pricePerShare: editFormData.pricePerShare,
+                    numberOfShares: editFormData.numberOfShares
                 } as any);
             }
 
@@ -696,7 +785,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
         'expectedCalculation': `If using Cap Table price (₹975.35): ${esopReservedShares} × 975.35 = ${(esopReservedShares || 0) * 975.35}`,
         'priceSource': pricePerShare > 0 ? 'local' : (startup.pricePerShare > 0 ? 'startup' : 'none')
     });
-    const allocatedEsopValue = summary?.total_esop_allocated || mockEmployees.reduce((acc, emp) => acc + emp.esopAllocation, 0);
+    // New calculation: total allocated equity value = (sum of ledger shares) × (current price per share)
+    const allocatedEsopValue = (totalAllocatedLedgerShares || 0) * (updatedPricePerShare || 0);
     
     // Calculate ESOP percentage with improved logic
     const esopPercentage = (() => {
@@ -1066,6 +1156,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                 const amount = parseFloat(val) || 0;
                                 const periods = allocationTypeDraft === 'monthly' ? 12 : allocationTypeDraft === 'quarterly' ? 4 : 1;
                                 setEsopPerAllocationDraft(String(amount / periods));
+                                
+                                // Auto-calculate number of shares
+                                const pricePerShareValue = pricePerShare || 0;
+                                const numberOfShares = calculateNumberOfShares(amount, pricePerShareValue);
+                                setEsopAllocationDraft(val);
                             }}
                         />
                         <Select 
@@ -1092,6 +1187,24 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             min="0"
                             value={esopPerAllocationDraft}
                             readOnly
+                        />
+                        <Input 
+                            label={`Price per Share (${startupCurrency})`} 
+                            name="pricePerShare" 
+                            type="number" 
+                            min="0" 
+                            value={pricePerShare || 0}
+                            readOnly
+                            placeholder="Auto-filled from Cap Table"
+                        />
+                        <Input 
+                            label="Number of Shares" 
+                            name="numberOfShares" 
+                            type="number" 
+                            min="0"
+                            value={calculateNumberOfShares(parseFloat(esopAllocationDraft) || 0, pricePerShare || 0)}
+                            readOnly
+                            placeholder="Auto-calculated"
                         />
                         <Input id="employee-contract" label="Employee Contract" name="contract" type="file" accept=".pdf,.doc,.docx" />
                         <div className="flex items-end pt-5 col-span-1 md:col-span-2 justify-end">
@@ -1135,6 +1248,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                     <td className="px-4 py-2 text-right">
                                         <div className="inline-flex gap-2">
                                             <Button type="button" size="sm" variant="outline" onClick={() => openHistory(emp)}>History</Button>
+                                            <Button type="button" size="sm" variant="outline" onClick={() => openLedger(emp)}>Ledger</Button>
                                             <Button type="button" size="sm" variant="outline" disabled={!canEdit || !!emp.terminationDate} onClick={() => openEditEmployee(emp)}>Edit</Button>
                                             <Button 
                                                 type="button"
@@ -1186,6 +1300,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                         <th className="px-4 py-2 text-left font-medium text-slate-500">ESOP Allocation</th>
                                         <th className="px-4 py-2 text-left font-medium text-slate-500">Allocation Type</th>
                                         <th className="px-4 py-2 text-left font-medium text-slate-500">ESOP per Allocation</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Price per Share</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Number of Shares</th>
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-slate-200">
@@ -1197,6 +1313,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                                             <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(it.esop_allocation) || 0, startupCurrency)}</td>
                                             <td className="px-4 py-2 text-slate-600">{it.allocation_type}</td>
                                             <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(it.esop_per_allocation) || 0, startupCurrency)}</td>
+                                            <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(it.price_per_share) || 0, startupCurrency)}</td>
+                                            <td className="px-4 py-2 text-slate-600">{Number(it.number_of_shares) || 0}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -1205,6 +1323,102 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     )}
                 </div>
             </SimpleModal>
+
+            {/* Employee Ledger Modal */}
+            <SimpleModal 
+                isOpen={!!historyEmployee && showLedger}
+                onClose={() => { setHistoryEmployee(null); setLedgerItems([]); setShowLedger(false); }}
+                title={historyEmployee ? `Employee Ledger - ${historyEmployee.name}` : 'Employee Ledger'}
+                width="900px"
+            >
+                <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            {historyEmployee?.terminationDate && (
+                                <div className="text-sm text-red-600">Terminated on {new Date(historyEmployee.terminationDate).toLocaleDateString()}</div>
+                            )}
+                        </div>
+                        <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={async () => {
+                                if (historyEmployee) {
+                                    setIsLedgerLoading(true);
+                                    try {
+                                        const joiningDate = historyEmployee.joiningDate;
+                                        const currentDate = new Date().toISOString().split('T')[0];
+                                        await employeesService.generateEmployeeLedger(historyEmployee.id, joiningDate, currentDate);
+                                        const ledger = await employeesService.getEmployeeLedger(historyEmployee.id, joiningDate, currentDate);
+                                        setLedgerItems(ledger);
+                                    } catch (e) {
+                                        console.error('Error regenerating ledger:', e);
+                                    } finally {
+                                        setIsLedgerLoading(false);
+                                    }
+                                }
+                            }}
+                            disabled={isLedgerLoading}
+                        >
+                            {isLedgerLoading ? 'Regenerating...' : 'Regenerate Ledger'}
+                        </Button>
+                    </div>
+                    {isLedgerLoading ? (
+                        <div className="text-sm text-slate-500">Generating ledger entries...</div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-slate-200 text-sm">
+                                <thead className="bg-slate-50">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Date</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Salary</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">ESOP Allocated</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Price per Share</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-500">Number of Shares</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-slate-200">
+                                    {ledgerItems.map((entry: any, idx: number) => (
+                                        <tr key={idx}>
+                                            <td className="px-4 py-2 text-slate-600">{new Date(entry.ledger_date).toLocaleDateString()}</td>
+                                            <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(entry.salary) || 0, startupCurrency)}</td>
+                                            <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(entry.esop_allocated) || 0, startupCurrency)}</td>
+                                            <td className="px-4 py-2 text-slate-600">{formatCurrencyUtil(Number(entry.price_per_share) || 0, startupCurrency)}</td>
+                                            <td className="px-4 py-2 text-slate-600">{Number(entry.number_of_shares) || 0}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {ledgerItems.length === 0 && (
+                                <div className="text-center py-8 text-slate-500">
+                                    <p>No ledger entries found.</p>
+                                    <Button 
+                                        onClick={async () => {
+                                            if (historyEmployee) {
+                                                setIsLedgerLoading(true);
+                                                try {
+                                                    const joiningDate = historyEmployee.joiningDate;
+                                                    const currentDate = new Date().toISOString().split('T')[0];
+                                                    await employeesService.generateEmployeeLedger(historyEmployee.id, joiningDate, currentDate);
+                                                    const ledger = await employeesService.getEmployeeLedger(historyEmployee.id, joiningDate, currentDate);
+                                                    setLedgerItems(ledger);
+                                                } catch (e) {
+                                                    console.error('Error regenerating ledger:', e);
+                                                } finally {
+                                                    setIsLedgerLoading(false);
+                                                }
+                                            }
+                                        }}
+                                        className="mt-4"
+                                    >
+                                        Generate Ledger Entries
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </SimpleModal>
+
             {/* Terminate Modal */}
             <SimpleModal 
                 isOpen={!!isTerminateModalOpen}
@@ -1225,7 +1439,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             {/* Increment Modal */}
             <SimpleModal 
                 isOpen={!!isIncrementModalOpen}
-                onClose={() => { setIsIncrementModalOpen(null); setIncrementDateDraft(''); setIncrementSalaryDraft(''); setIncrementEsopAllocationDraft(''); setIncrementEsopPerAllocationDraft('0'); setIncrementAllocationTypeDraft('one-time'); }}
+                onClose={() => { setIsIncrementModalOpen(null); setIncrementDateDraft(''); setIncrementSalaryDraft(''); setIncrementEsopAllocationDraft(''); setIncrementEsopPerAllocationDraft('0'); setIncrementAllocationTypeDraft('one-time'); setIncrementPricePerShareDraft(''); setIncrementNumberOfSharesDraft('0'); }}
                 title={isIncrementModalOpen ? `Add Increment - ${isIncrementModalOpen.name}` : 'Add Increment'}
                 width="500px"
             >
@@ -1258,6 +1472,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             const amount = parseFloat(val) || 0;
                             const periods = incrementAllocationTypeDraft === 'monthly' ? 12 : incrementAllocationTypeDraft === 'quarterly' ? 4 : 1;
                             setIncrementEsopPerAllocationDraft(String(amount / periods));
+                            
+                            // Auto-calculate number of shares
+                            const pricePerShareValue = pricePerShare || 0;
+                            const numberOfShares = calculateNumberOfShares(amount, pricePerShareValue);
+                            setIncrementNumberOfSharesDraft(String(numberOfShares));
                         }}
                     />
                     <Select 
@@ -1269,6 +1488,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             const amount = parseFloat(incrementEsopAllocationDraft) || 0;
                             const periods = type === 'monthly' ? 12 : type === 'quarterly' ? 4 : 1;
                             setIncrementEsopPerAllocationDraft(String(amount / periods));
+                            
+                            // Auto-calculate number of shares
+                            const pricePerShareValue = pricePerShare || 0;
+                            const numberOfShares = calculateNumberOfShares(amount, pricePerShareValue);
+                            setIncrementNumberOfSharesDraft(String(numberOfShares));
                         }}
                     >
                         <option value="one-time">One-time</option>
@@ -1283,8 +1507,24 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                         value={incrementEsopPerAllocationDraft}
                         readOnly
                     />
+                    <Input 
+                        label={`Price per Share (${startupCurrency})`} 
+                        type="number" 
+                        min="0"
+                        value={incrementPricePerShareDraft || pricePerShare || 0}
+                        readOnly
+                        placeholder="Auto-filled from Cap Table"
+                    />
+                    <Input 
+                        label="Number of Shares" 
+                        type="number" 
+                        min="0"
+                        value={incrementNumberOfSharesDraft}
+                        readOnly
+                        placeholder="Auto-calculated"
+                    />
                     <div className="flex justify-end gap-2 pt-2">
-                        <Button variant="outline" onClick={() => { setIsIncrementModalOpen(null); setIncrementDateDraft(''); setIncrementSalaryDraft(''); setIncrementEsopAllocationDraft(''); setIncrementEsopPerAllocationDraft('0'); setIncrementAllocationTypeDraft('one-time'); }}>Cancel</Button>
+                        <Button variant="outline" onClick={() => { setIsIncrementModalOpen(null); setIncrementDateDraft(''); setIncrementSalaryDraft(''); setIncrementEsopAllocationDraft(''); setIncrementEsopPerAllocationDraft('0'); setIncrementAllocationTypeDraft('one-time'); setIncrementPricePerShareDraft(''); setIncrementNumberOfSharesDraft('0'); }}>Cancel</Button>
                         <Button onClick={handleAddIncrement}>Save</Button>
                     </div>
                 </div>
@@ -1328,6 +1568,20 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             <option value="monthly">Monthly</option>
                         </Select>
                         <Input label="ESOP per Allocation" type="number" value={editFormData.esopPerAllocation} readOnly />
+                        <Input 
+                            label={`Price per Share (${startupCurrency})`} 
+                            type="number" 
+                            value={editFormData.pricePerShare} 
+                            readOnly
+                            placeholder="Auto-filled from Cap Table"
+                        />
+                        <Input 
+                            label="Number of Shares" 
+                            type="number" 
+                            value={editFormData.numberOfShares} 
+                            readOnly
+                            placeholder="Auto-calculated"
+                        />
                         <Input id="edit-employee-contract" label="Employee Contract" name="contract" type="file" accept=".pdf,.doc,.docx" />
                         <div className="flex justify-end gap-2 pt-2 md:col-span-2">
                             <Button variant="outline" onClick={() => setEditingEmployee(null)}>Cancel</Button>

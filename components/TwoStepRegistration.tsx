@@ -55,8 +55,8 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     country: string;
     investmentAdvisorCode?: string;
   } | null>(() => {
-    // Try to restore data from localStorage
-    const saved = localStorage.getItem('registrationData');
+    // Try to restore data from sessionStorage (short-lived)
+    const saved = sessionStorage.getItem('registrationData');
     if (saved) {
       const data = JSON.parse(saved);
       // If we have saved data, start at documents step
@@ -73,8 +73,8 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     role: UserRole;
     startupName?: string;
   }) => {
-    // Save data to localStorage
-    localStorage.setItem('registrationData', JSON.stringify(data));
+    // Save data to sessionStorage (short-lived, cleared on tab close)
+    sessionStorage.setItem('registrationData', JSON.stringify(data));
     setUserData(data);
     setCurrentStep('documents');
   };
@@ -83,7 +83,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     setCurrentStep('basic');
     setUserData(null);
     // Clear saved data when going back
-    localStorage.removeItem('registrationData');
+    sessionStorage.removeItem('registrationData');
   };
 
   const handleComplete = async (
@@ -158,7 +158,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
       });
 
       // Clear saved data
-      localStorage.removeItem('registrationData');
+      sessionStorage.removeItem('registrationData');
       
       console.log('✅ Registration completed successfully');
       onRegister(user, founders, userData.startupName, country);

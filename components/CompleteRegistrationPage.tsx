@@ -1367,7 +1367,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                         type="number"
                         min="0"
                         max="100"
-                        step="0.1"
+                        step="0.01"
                         value={founder.equity ? Number(founder.equity).toFixed(2) : 0}
                         onChange={(e) => {
                           const equity = parseFloat(e.target.value) || 0;
@@ -1414,17 +1414,17 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                           <div className="flex justify-between">
                             <span className="text-slate-600">Founder Shares:</span>
                             <span className={totalFounderShares > shareData.totalShares ? "text-red-600 font-medium" : "text-slate-700"}>
-                              {totalFounderShares.toLocaleString()} ({totalFounderEquity.toFixed(1)}%)
+                              {totalFounderShares.toLocaleString()} ({totalFounderEquity.toFixed(2)}%)
                             </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-slate-600">ESOP Reserved:</span>
-                            <span className="text-slate-700">{esopReservedShares.toLocaleString()} ({esopEquityPercentage.toFixed(1)}%)</span>
+                            <span className="text-slate-700">{esopReservedShares.toLocaleString()} ({esopEquityPercentage.toFixed(2)}%)</span>
                           </div>
                           <div className="flex justify-between font-medium pt-2 border-t border-slate-200">
                             <span className="text-slate-700">Available for Investment:</span>
                             <span className={availableShares < 0 ? "text-red-600" : availableShares === 0 ? "text-yellow-600" : "text-green-600"}>
-                              {availableShares.toLocaleString()} ({availableEquityPercentage.toFixed(1)}%)
+                              {availableShares.toLocaleString()} ({availableEquityPercentage.toFixed(2)}%)
                             </span>
                           </div>
                           {isOverAllocated && (
@@ -1436,7 +1436,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                           )}
                           {totalFounderEquity > 100 && (
                             <div className="text-red-600 text-sm font-medium mt-3 p-3 bg-red-50 border border-red-200 rounded">
-                              ⚠️ Total founder equity exceeds 100% ({totalFounderEquity.toFixed(1)}%)
+                              ⚠️ Total founder equity exceeds 100% ({totalFounderEquity.toFixed(2)}%)
                               <br />
                               <span className="text-xs">Please adjust founder equity percentages.</span>
                             </div>

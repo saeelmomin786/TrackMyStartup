@@ -188,15 +188,15 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             url.searchParams.set('view', 'program');
             url.searchParams.set('opportunityId', opp.id);
             const shareUrl = url.toString();
-            const text = `${opp.programName}\nDeadline: ${opp.deadline || '—'}\n\nOpen program: ${shareUrl}`;
+            const text = `${opp.programName}\nDeadline: ${opp.deadline || '—'}`;
             if (navigator.share) {
                 await navigator.share({ title: opp.programName, text, url: shareUrl });
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(text);
+                await navigator.clipboard.writeText(`${text}\n\n${shareUrl}`);
                 messageService.success('Copied', 'Shareable link copied to clipboard', 2000);
             } else {
                 const ta = document.createElement('textarea');
-                ta.value = text;
+                ta.value = `${text}\n\n${shareUrl}`;
                 document.body.appendChild(ta);
                 ta.select();
                 document.execCommand('copy');

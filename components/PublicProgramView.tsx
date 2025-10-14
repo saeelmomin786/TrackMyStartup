@@ -99,16 +99,16 @@ const PublicProgramView: React.FC = () => {
         try {
             const url = new URL(window.location.href);
             const shareUrl = url.toString();
-            const text = `${opportunity.programName}\nDeadline: ${opportunity.deadline || '—'}\n\nView program: ${shareUrl}`;
+            const text = `${opportunity.programName}\nDeadline: ${opportunity.deadline || '—'}`;
             
             if (navigator.share) {
                 await navigator.share({ title: opportunity.programName, text, url: shareUrl });
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(text);
+                await navigator.clipboard.writeText(`${text}\n\n${shareUrl}`);
                 messageService.success('Copied', 'Shareable link copied to clipboard', 2000);
             } else {
                 const ta = document.createElement('textarea');
-                ta.value = text;
+                ta.value = `${text}\n\n${shareUrl}`;
                 document.body.appendChild(ta);
                 ta.select();
                 document.execCommand('copy');

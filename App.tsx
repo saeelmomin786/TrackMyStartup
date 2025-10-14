@@ -45,6 +45,7 @@ const App: React.FC = () => {
   const isPublicProgramView = getQueryParam('view') === 'program' && getQueryParam('opportunityId');
   
   
+  
   if (standalonePages.includes(currentPath)) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col">
@@ -55,10 +56,6 @@ const App: React.FC = () => {
     );
   }
 
-  // Show public program view if on /program with opportunityId
-  if (isPublicProgramView) {
-    return <PublicProgramView />;
-  }
 
   // Cookie utility functions
   const setCookie = (name: string, value: string, days: number = 7) => {
@@ -2380,6 +2377,11 @@ const App: React.FC = () => {
   }
 
   console.log('🔍 App.tsx render - currentPage:', currentPage, 'isAuthenticated:', isAuthenticated);
+  
+  // Show public program view if on /program with opportunityId (BEFORE auth check)
+  if (isPublicProgramView) {
+    return <PublicProgramView />;
+  }
   
   if (!isAuthenticated) {
     return (

@@ -35,11 +35,14 @@ const PublicProgramView: React.FC = () => {
 
         const loadOpportunity = async () => {
             try {
+                console.log('🔍 Loading opportunity with ID:', opportunityId);
                 const { data, error } = await supabase
                     .from('incubation_opportunities')
                     .select('*')
                     .eq('id', opportunityId)
                     .single();
+
+                console.log('🔍 Supabase response:', { data, error });
 
                 if (error) {
                     console.error('Error loading opportunity:', error);

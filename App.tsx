@@ -1406,9 +1406,14 @@ const App: React.FC = () => {
     
     // Check for returnUrl to redirect back to program view
     const returnUrl = getQueryParam('returnUrl');
-    if (returnUrl) {
+    if (returnUrl && returnUrl.includes('view=program')) {
       console.log('🔄 Redirecting to returnUrl:', returnUrl);
-      window.location.href = returnUrl;
+      // Clear the returnUrl parameter to prevent loops
+      setQueryParam('returnUrl', null, true);
+      // Use setTimeout to prevent blocking the auth flow
+      setTimeout(() => {
+        window.location.href = returnUrl;
+      }, 100);
       return;
     }
     

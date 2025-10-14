@@ -2962,11 +2962,36 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     <ul className="divide-y divide-slate-200">
                       {myPostedOpportunities.map((opp, idx) => (
                         <li key={opp.id} className="py-3 flex justify-between items-center">
-                  <div>
+                          <div>
                             <p className="font-semibold text-slate-800">{opp.programName}</p>
                             <p className="text-xs text-slate-500">Deadline: {opp.deadline || '—'}</p>
                           </div>
                           <div className="flex items-center gap-2">
+                            <Button size="sm" variant="outline" onClick={() => {
+                              try {
+                                const url = new URL(window.location.origin);
+                                url.searchParams.set('view', 'program');
+                                url.searchParams.set('opportunityId', opp.id);
+                                const shareUrl = url.toString();
+                                const text = `${opp.programName}\nDeadline: ${opp.deadline || '—'}\n\nOpen program: ${shareUrl}`;
+                                if ((navigator as any).share) {
+                                  (navigator as any).share({ title: opp.programName, text, url: shareUrl });
+                                } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                                  navigator.clipboard.writeText(text);
+                                  messageService.success('Copied', 'Shareable link copied to clipboard', 2000);
+                                } else {
+                                  const ta = document.createElement('textarea');
+                                  ta.value = text;
+                                  document.body.appendChild(ta);
+                                  ta.select();
+                                  document.execCommand('copy');
+                                  document.body.removeChild(ta);
+                                  messageService.success('Copied', 'Shareable link copied to clipboard', 2000);
+                                }
+                              } catch (e) {
+                                messageService.error('Share Failed', 'Unable to share link.');
+                              }
+                            }} title="Share"><Share2 className="h-4 w-4"/></Button>
                             <Button size="sm" variant="outline" onClick={() => handleEditClick(idx)} title="Edit"><Edit className="h-4 w-4"/></Button>
                             <Button size="sm" variant="outline" onClick={async () => {
                               if (!confirm('Delete this opportunity?')) return;

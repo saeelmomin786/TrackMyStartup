@@ -27,6 +27,7 @@ import LandingPage from './components/LandingPage';
 import { getQueryParam, setQueryParam } from './lib/urlState';
 import Footer from './components/Footer';
 import PageRouter from './components/PageRouter';
+import PublicProgramView from './components/PublicProgramView';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
 
 import { Briefcase, BarChart3, LogOut } from 'lucide-react';
@@ -40,6 +41,10 @@ const App: React.FC = () => {
   const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products'];
   const currentPath = window.location.pathname;
   
+  // Check if we're on a public program view page
+  const isPublicProgramView = getQueryParam('view') === 'program' && getQueryParam('opportunityId');
+  
+  
   if (standalonePages.includes(currentPath)) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col">
@@ -48,6 +53,11 @@ const App: React.FC = () => {
         </main>
       </div>
     );
+  }
+
+  // Show public program view if on /program with opportunityId
+  if (isPublicProgramView) {
+    return <PublicProgramView />;
   }
 
   // Cookie utility functions
@@ -1396,6 +1406,14 @@ const App: React.FC = () => {
     console.log(`User ${user.email} logged in as ${user.role}`);
     setIsAuthenticated(true);
     setCurrentUser(user);
+    
+    // Check for returnUrl to redirect back to program view
+    const returnUrl = getQueryParam('returnUrl');
+    if (returnUrl) {
+      console.log('🔄 Redirecting to returnUrl:', returnUrl);
+      window.location.href = returnUrl;
+      return;
+    }
     
     // Check payment status for all users (especially Startup users)
     if (user.role === 'Startup') {

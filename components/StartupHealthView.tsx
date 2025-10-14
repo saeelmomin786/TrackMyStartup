@@ -16,6 +16,7 @@ import FinancialsTab from './startup-health/FinancialsTab';
 import EmployeesTab from './startup-health/EmployeesTab';
 import CapTableTab from './startup-health/CapTableTab';
 import StartupProfilePage from './StartupProfilePage';
+import { getQueryParam, setQueryParam } from '../lib/urlState';
 
 
 interface StartupHealthViewProps {
@@ -53,8 +54,9 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             return 'compliance'; // Default fallback
         }
         
-        // Always start with dashboard for regular users on login
-        return 'dashboard';
+        // Prefer URL param if provided; otherwise default to dashboard
+        const fromUrl = (getQueryParam('tab') as TabId) || 'dashboard';
+        return fromUrl;
     });
     const [currentStartup, setCurrentStartup] = useState<Startup>(startup);
     const [localOffers, setLocalOffers] = useState<InvestmentOffer[]>(investmentOffers || []);
@@ -145,6 +147,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
 
     const handleTabChange = (tabId: TabId) => {
         setActiveTab(tabId);
+        setQueryParam('tab', tabId, true);
         setIsMobileMenuOpen(false); // Close mobile menu when tab changes
     };
 

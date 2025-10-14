@@ -2,10 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
-import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText } from 'lucide-react';
+import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText, Share2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { messageService } from '../../lib/messageService';
 import Modal from '../ui/Modal';
+import { getQueryParam, setQueryParam } from '../../lib/urlState';
 
 interface StartupRef {
     id: number;
@@ -164,6 +165,49 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
         setIsApplyModalOpen(true);
     };
 
+    // Sync selected opportunity with URL (?opportunityId=...)
+    useEffect(() => {
+        const fromQuery = getQueryParam('opportunityId');
+        if (fromQuery && opportunities.length > 0 && !selectedOpportunity) {
+            const match = opportunities.find(o => o.id === fromQuery);
+            if (match) {
+                setSelectedOpportunity(match);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [opportunities]);
+
+    useEffect(() => {
+        const id = selectedOpportunity?.id || '';
+        setQueryParam('opportunityId', id, true);
+    }, [selectedOpportunity]);
+
+    const handleShareOpportunity = async (opp: OpportunityItem) => {
+        try {
+            const url = new URL(window.location.origin);
+            url.searchParams.set('view', 'program');
+            url.searchParams.set('opportunityId', opp.id);
+            const shareUrl = url.toString();
+            const text = `${opp.programName}\nDeadline: ${opp.deadline || '—'}\n\nOpen program: ${shareUrl}`;
+            if (navigator.share) {
+                await navigator.share({ title: opp.programName, text, url: shareUrl });
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                messageService.success('Copied', 'Shareable link copied to clipboard', 2000);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                messageService.success('Copied', 'Shareable link copied to clipboard', 2000);
+            }
+        } catch (e) {
+            messageService.error('Share Failed', 'Unable to share link.');
+        }
+    };
+
 
     const handlePaymentSuccess = () => {
         // Refresh applications to show updated payment status
@@ -304,7 +348,12 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
 
             {selectedOpportunity ? (
                 <div>
-                    <Button onClick={() => setSelectedOpportunity(null)} variant="secondary" className="mb-4">Back</Button>
+                    <div className="flex items-center gap-2 mb-4">
+                        <Button onClick={() => setSelectedOpportunity(null)} variant="secondary">Back</Button>
+                        <Button onClick={() => handleShareOpportunity(selectedOpportunity)} variant="outline" title="Share program">
+                            <Share2 className="h-4 w-4" />
+                        </Button>
+                    </div>
                     <Card className="!p-0 overflow-hidden">
                         {(() => {
                             const embed = getYoutubeEmbedUrl(selectedOpportunity.videoUrl || undefined);
@@ -393,10 +442,22 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                 )}
                                 <div className="p-4 flex flex-col flex-grow">
                                     <div className="flex-grow">
-                                        <p className="text-sm font-medium text-brand-primary">{opp.facilitatorName || 'Program Facilitator'}</p>
-                                        <h3 className="text-lg font-semibold text-slate-800 mt-1 cursor-pointer hover:text-brand-primary transition-colors" onClick={() => setSelectedOpportunity(opp)}>
-                                            {opp.programName}
-                                        </h3>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div>
+                                                <p className="text-sm font-medium text-brand-primary">{opp.facilitatorName || 'Program Facilitator'}</p>
+                                                <h3 className="text-lg font-semibold text-slate-800 mt-1 cursor-pointer hover:text-brand-primary transition-colors" onClick={() => setSelectedOpportunity(opp)}>
+                                                    {opp.programName}
+                                                </h3>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                title="Share program"
+                                                onClick={() => handleShareOpportunity(opp)}
+                                            >
+                                                <Share2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
                                         <p className="text-sm text-slate-500 mt-2 mb-4">{opp.description.substring(0, 100)}...</p>
                                     </div>
                                     <div className="border-t pt-4 mt-4">

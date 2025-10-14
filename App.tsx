@@ -44,6 +44,16 @@ const App: React.FC = () => {
   // Check if we're on a public program view page
   const isPublicProgramView = getQueryParam('view') === 'program' && getQueryParam('opportunityId');
   
+  // Debug logging for public program view
+  console.log('🔍 Public program view debug:', {
+    view: getQueryParam('view'),
+    opportunityId: getQueryParam('opportunityId'),
+    isPublicProgramView,
+    currentPath,
+    currentPage,
+    isAuthenticated
+  });
+  
   
   
   if (standalonePages.includes(currentPath)) {

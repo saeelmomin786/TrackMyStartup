@@ -4,6 +4,9 @@ import Button from './ui/Button';
 import Input from './ui/Input';
 import { UserRole } from '../types';
 import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2, LogOut } from 'lucide-react';
+import Select from './ui/Select';
+import { InvestmentType, StartupDomain, StartupStage, FundraisingDetails } from '../types';
+import { capTableService } from '../lib/capTableService';
 import LogoTMS from './public/logoTMS.svg';
 import { authService } from '../lib/auth';
 import { storageService } from '../lib/storage';
@@ -105,6 +108,34 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   const [isCheckingUser, setIsCheckingUser] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  // Incubation Center Invite
+  const [inviteCenter, setInviteCenter] = useState<{ name: string; email: string; phone: string }>({ name: '', email: '', phone: '' });
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
+  // Investor Invite
+  const [inviteInvestor, setInviteInvestor] = useState<{ name: string; email: string; phone: string }>({ name: '', email: '', phone: '' });
+  const [isSendingInvestorInvite, setIsSendingInvestorInvite] = useState(false);
+  // Fundraising (optional at registration)
+  const [fundraising, setFundraising] = useState<{
+    active: boolean;
+    type: InvestmentType | '';
+    value: number | '';
+    equity: number | '';
+    domain?: StartupDomain | '';
+    stage?: StartupStage | '';
+    pitchDeckFile?: File | null;
+    pitchVideoUrl?: string;
+    validationRequested?: boolean;
+  }>({
+    active: false,
+    type: '',
+    value: '',
+    equity: '',
+    domain: '',
+    stage: '',
+    pitchDeckFile: null,
+    pitchVideoUrl: '',
+    validationRequested: false
+  });
   
   // Admin-managed compliance rules for company types
   const [rulesMap, setRulesMap] = useState<any>({});
@@ -403,6 +434,114 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       setUploadedFiles(prev => ({ ...prev, [documentType]: file }));
     }
   };
+  const handleFundraisingDeckChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (file && file.type !== 'application/pdf') {
+      setError('Please upload a PDF file for the pitch deck.');
+      return;
+    }
+    if (file && file.size > 10 * 1024 * 1024) {
+      setError('Pitch deck file size must be less than 10MB.');
+      return;
+    }
+    setError(null);
+    setFundraising(prev => ({ ...prev, pitchDeckFile: file }));
+  };
+
+  const validateEmail = (email: string): boolean => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
+  const validatePhone = (phone: string): boolean => {
+    // Very basic validation allowing digits, spaces, +, -, and parentheses
+    return /^[0-9+()\-\s]{6,20}$/.test(phone);
+  };
+
+  const sendIncubationInvite = async () => {
+    if (!inviteCenter.name.trim()) {
+      setError('Please enter incubation center name');
+      return;
+    }
+    if (!validateEmail(inviteCenter.email)) {
+      setError('Please enter a valid incubation center email');
+      return;
+    }
+    if (inviteCenter.phone && !validatePhone(inviteCenter.phone)) {
+      setError('Please enter a valid contact number');
+      return;
+    }
+    setError(null);
+    setIsSendingInvite(true);
+    try {
+      const appUrl = window.location.origin;
+      const isProd = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+      const inviteApi = isProd ? '/api/send-invite' : ((import.meta as any).env?.VITE_INVITE_API_URL || '/api/send-invite');
+      const res = await fetch(inviteApi, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'center',
+          name: inviteCenter.name,
+          email: inviteCenter.email,
+          phone: inviteCenter.phone,
+          startupName: userData?.startupName,
+          appUrl
+        })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to send email');
+      }
+      alert('Center details shared via email.');
+    } catch (e: any) {
+      setError(e?.message || 'Failed to send email');
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
+
+  const sendInvestorInvite = async () => {
+    if (!inviteInvestor.name.trim()) {
+      setError('Please enter investor name');
+      return;
+    }
+    if (!validateEmail(inviteInvestor.email)) {
+      setError('Please enter a valid investor email');
+      return;
+    }
+    if (inviteInvestor.phone && !validatePhone(inviteInvestor.phone)) {
+      setError('Please enter a valid investor contact number');
+      return;
+    }
+    setError(null);
+    setIsSendingInvestorInvite(true);
+    try {
+      const appUrl = window.location.origin;
+      const isProd = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+      const inviteApi = isProd ? '/api/send-invite' : ((import.meta as any).env?.VITE_INVITE_API_URL || '/api/send-invite');
+      const res = await fetch(inviteApi, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'investor',
+          name: inviteInvestor.name,
+          email: inviteInvestor.email,
+          phone: inviteInvestor.phone,
+          startupName: userData?.startupName,
+          appUrl
+        })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to send email');
+      }
+      alert('Investor details shared via email.');
+    } catch (e: any) {
+      setError(e?.message || 'Failed to send email');
+    } finally {
+      setIsSendingInvestorInvite(false);
+    }
+  };
 
   const addFounder = () => {
     const newId = (founders.length + 1).toString();
@@ -590,6 +729,18 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       const invalidFounders = founders.filter(f => !f.name.trim() || !f.email.trim());
       if (invalidFounders.length > 0) {
         setError('Please fill in all founder details');
+        setIsLoading(false);
+        return;
+      }
+
+      // Optional fundraising validation if user fills it
+      if (fundraising.type && (fundraising.value === '' || Number(fundraising.value) <= 0)) {
+        setError('Please enter a valid fundraising value.');
+        setIsLoading(false);
+        return;
+      }
+      if (fundraising.type && (fundraising.equity === '' || Number(fundraising.equity) <= 0 || Number(fundraising.equity) > 100)) {
+        setError('Please enter a valid equity percentage (1-100).');
         setIsLoading(false);
         return;
       }
@@ -892,6 +1043,35 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               price_per_share: (updatedStartup as any)?.[0]?.price_per_share,
               esop_reserved_shares: (updatedStartup as any)?.[0]?.esop_reserved_shares
             });
+
+            // Save fundraising if provided
+            try {
+              if (fundraising.type && fundraising.value !== '' && fundraising.equity !== '') {
+                let deckUrl: string | undefined = undefined;
+                if (fundraising.pitchDeckFile) {
+                  try {
+                    deckUrl = await capTableService.uploadPitchDeck(fundraising.pitchDeckFile, startup.id);
+                  } catch (e) {
+                    console.warn('Pitch deck upload failed (non-blocking):', e);
+                  }
+                }
+                const frToSave: FundraisingDetails = {
+                  active: !!fundraising.active,
+                  type: fundraising.type as any,
+                  value: Number(fundraising.value),
+                  equity: Number(fundraising.equity),
+                  domain: (fundraising.domain || undefined) as any,
+                  stage: (fundraising.stage || undefined) as any,
+                  validationRequested: !!fundraising.validationRequested,
+                  pitchDeckUrl: deckUrl,
+                  pitchVideoUrl: fundraising.pitchVideoUrl || undefined
+                };
+                await capTableService.updateFundraisingDetails(startup.id, frToSave);
+                console.log('✅ Fundraising details saved during complete registration');
+              }
+            } catch (e) {
+              console.warn('Failed to save fundraising during complete registration (non-blocking):', e);
+            }
 
             // Shares data is already stored in the startups table above
             console.log('✅ Shares data already stored in startups table');
@@ -1460,56 +1640,203 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             </div>
           )}
 
-          {/* Service Provider Codes - Only for Startup role */}
+          {/* Service Provider Codes (TMS-allocated codes, optional) - Only for Startup role */}
           {userData.role === 'Startup' && (
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-slate-900 flex items-center">
                 <CheckCircle className="h-5 w-5 mr-2" />
-                Service Provider Codes
+                Service Provider Codes (Optional)
               </h3>
               <p className="text-sm text-slate-600">
-                Enter the appropriate professional service types for your country. Suggestions are provided based on your selected country.
+                Enter CA/CS codes allocated by TrackMyStartup if you have them. You can leave these blank and add them later.
               </p>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    {selectedCountryInfo?.ca_type || 'CA Type'}
-                  </label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">CA Code (optional)</label>
                   <input
                     type="text"
                     value={profileData.caServiceCode || ''}
                     onChange={(e) => setProfileData(prev => ({ ...prev, caServiceCode: e.target.value }))}
-                    placeholder={`Enter ${selectedCountryInfo?.ca_type || 'CA type'} for your country`}
+                    placeholder="Enter TMS-allocated CA code (e.g., CA-XXXX)"
                     className="w-full border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  {selectedCountryInfo?.ca_type && (
-                    <p className="text-xs text-slate-500 mt-1">
-                      Suggested: {selectedCountryInfo.ca_type}
-                    </p>
-                  )}
+                  <p className="text-xs text-slate-500 mt-1">Leave blank if not assigned yet.</p>
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    {selectedCountryInfo?.cs_type || 'CS Type'}
-                  </label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">CS Code (optional)</label>
                   <input
                     type="text"
                     value={profileData.csServiceCode || ''}
                     onChange={(e) => setProfileData(prev => ({ ...prev, csServiceCode: e.target.value }))}
-                    placeholder={`Enter ${selectedCountryInfo?.cs_type || 'CS type'} for your country`}
+                    placeholder="Enter TMS-allocated CS code (e.g., CS-XXXX)"
                     className="w-full border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  {selectedCountryInfo?.cs_type && (
-                    <p className="text-xs text-slate-500 mt-1">
-                      Suggested: {selectedCountryInfo.cs_type}
-                    </p>
-                  )}
+                  <p className="text-xs text-slate-500 mt-1">Leave blank if not assigned yet.</p>
                 </div>
               </div>
             </div>
           )}
+
+          {/* Incubation Centers (Optional) - Only for Startup role */}
+          {userData.role === 'Startup' && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center">
+                <CheckCircle className="h-5 w-5 mr-2" />
+                Your Incubation center
+              </h3>
+              <p className="text-sm text-slate-600">please enter the details of Incubation centers and accelerators you are associated with.</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Input
+                  label="Center Name"
+                  type="text"
+                  value={inviteCenter.name}
+                  onChange={(e) => setInviteCenter(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., ABC Innovation Hub"
+                />
+                <Input
+                  label="Contact Number"
+                  type="text"
+                  value={inviteCenter.phone}
+                  onChange={(e) => setInviteCenter(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="e.g., +1 555 123 4567"
+                />
+                <Input
+                  label="Email"
+                  type="email"
+                  value={inviteCenter.email}
+                  onChange={(e) => setInviteCenter(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="e.g., contact@abcinnovations.org"
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button type="button" onClick={sendIncubationInvite} disabled={isSendingInvite}>{isSendingInvite ? 'Preparing email...' : 'Share Details via Email'}</Button>
+              </div>
+            </div>
+          )}
+
+          {/* Investors (Optional) - Only for Startup role */}
+          {userData.role === 'Startup' && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center">
+                <CheckCircle className="h-5 w-5 mr-2" />
+                Your Investor
+              </h3>
+              <p className="text-sm text-slate-600">Please list the investor that have invested (grant, debt or equity) in your startup</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Input
+                  label="Investor Name"
+                  type="text"
+                  value={inviteInvestor.name}
+                  onChange={(e) => setInviteInvestor(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., Jane Doe"
+                />
+                <Input
+                  label="Contact Number"
+                  type="text"
+                  value={inviteInvestor.phone}
+                  onChange={(e) => setInviteInvestor(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="e.g., +1 555 987 6543"
+                />
+                <Input
+                  label="Email"
+                  type="email"
+                  value={inviteInvestor.email}
+                  onChange={(e) => setInviteInvestor(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="e.g., jane@example.com"
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button type="button" onClick={sendInvestorInvite} disabled={isSendingInvestorInvite}>{isSendingInvestorInvite ? 'Preparing email...' : 'Share Details via Email'}</Button>
+              </div>
+            </div>
+          )}
+
+        {/* Fundraising (Optional) - Only for Startup role */}
+        {userData.role === 'Startup' && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-slate-900">Fundraising (Optional)</h3>
+            <div className="flex items-center gap-2">
+              <input
+                id="fr-active"
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary"
+                checked={fundraising.active}
+                onChange={(e) => setFundraising(prev => ({ ...prev, active: e.target.checked }))}
+              />
+              <label htmlFor="fr-active" className="text-sm text-slate-700">Activate Fundraising Round</label>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Select
+                label="Type"
+                id="fr-type"
+                value={fundraising.type as any}
+                onChange={(e) => setFundraising(prev => ({ ...prev, type: e.target.value as any }))}
+              >
+                <option value="">Select round type</option>
+                {Object.values(InvestmentType).map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </Select>
+              <Input
+                label="Value"
+                id="fr-value"
+                type="number"
+                value={fundraising.value as any}
+                onChange={(e) => setFundraising(prev => ({ ...prev, value: e.target.value === '' ? '' : Number(e.target.value) }))}
+              />
+              <Input
+                label="Equity (%)"
+                id="fr-equity"
+                type="number"
+                value={fundraising.equity as any}
+                onChange={(e) => setFundraising(prev => ({ ...prev, equity: e.target.value === '' ? '' : Number(e.target.value) }))}
+              />
+              <Select
+                label="Domain"
+                id="fr-domain"
+                value={(fundraising.domain || '') as any}
+                onChange={(e) => setFundraising(prev => ({ ...prev, domain: (e.target.value || '') as any }))}
+              >
+                <option value="">Select domain</option>
+                {Object.values(StartupDomain).map(d => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </Select>
+              <Select
+                label="Stage"
+                id="fr-stage"
+                value={(fundraising.stage || '') as any}
+                onChange={(e) => setFundraising(prev => ({ ...prev, stage: (e.target.value || '') as any }))}
+              >
+                <option value="">Select stage</option>
+                {Object.values(StartupStage).map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </Select>
+              <Input
+                label="Pitch Video URL"
+                id="fr-video"
+                type="url"
+                value={fundraising.pitchVideoUrl || ''}
+                onChange={(e) => setFundraising(prev => ({ ...prev, pitchVideoUrl: e.target.value }))}
+              />
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
+                <input
+                  id="fr-deck"
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFundraisingDeckChange}
+                  className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                />
+                <p className="text-xs text-slate-500 mt-1">Max 10MB</p>
+              </div>
+            </div>
+            {/* Startup Nation validation removed as per requirement */}
+          </div>
+        )}
 
           {/* Subsidiaries - Only for Startup role */}
           {userData.role === 'Startup' && (

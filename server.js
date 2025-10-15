@@ -1,14 +1,15 @@
 // Lightweight local API server for Razorpay orders and subscriptions
 import express from "express";
 import fetch from "node-fetch";
+import nodemailer from "nodemailer";
 import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import { createClient } from '@supabase/supabase-js';
 
-// Load environment variables
-dotenv.config({ path: "backend .env" });
-const loadedEnvPath = "backend .env";
+// Load environment variables from default .env (for local testing)
+dotenv.config();
+const loadedEnvPath = ".env";
 
 const app = express();
 app.use(cors());
@@ -162,6 +163,8 @@ app.get('/api/diagnostics/supabase', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Diagnostics failed' });
   }
 });
+
+// (Invite email route removed - handled by Vercel /api/send-invite)
 
 // --------------------
 // Create Razorpay Order

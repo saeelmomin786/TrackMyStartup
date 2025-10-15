@@ -3,7 +3,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
 import Select from './ui/Select';
-import { UserRole } from '../types';
+import { UserRole, InvestmentType, StartupDomain, StartupStage } from '../types';
 import { Upload, FileText, Users, CheckCircle } from 'lucide-react';
 import LogoTMS from './public/logoTMS.svg';
 
@@ -14,6 +14,18 @@ interface Founder {
   equity: number;
 }
 
+interface FundraisingFormData {
+  active: boolean;
+  type: InvestmentType | '';
+  value: number | '';
+  equity: number | '';
+  domain?: StartupDomain | '';
+  stage?: StartupStage | '';
+  pitchDeckFile?: File | null;
+  pitchVideoUrl?: string;
+  validationRequested?: boolean;
+}
+
 interface DocumentUploadStepProps {
   userData: {
     name: string;
@@ -22,7 +34,7 @@ interface DocumentUploadStepProps {
     role: UserRole;
     startupName?: string;
   };
-  onComplete: (userData: any, documents: any, founders: Founder[], country?: string) => void;
+  onComplete: (userData: any, documents: any, founders: Founder[], country?: string, fundraising?: FundraisingFormData) => void;
   onBack: () => void;
 }
 
@@ -52,6 +64,19 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Fundraising state (only for Startup role)
+  const [fundraising, setFundraising] = useState<FundraisingFormData>({
+    active: false,
+    type: '',
+    value: '',
+    equity: '',
+    domain: '',
+    stage: '',
+    pitchDeckFile: null,
+    pitchVideoUrl: '',
+    validationRequested: false
+  });
+
   // Debug: Log the user role
   console.log('DocumentUploadStep - User role:', userData.role);
   console.log('DocumentUploadStep - Is Investment Advisor?', userData.role === 'Investment Advisor');
@@ -61,6 +86,20 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
     if (file) {
       setUploadedFiles(prev => ({ ...prev, [documentType]: file }));
     }
+  };
+
+  const handleFundraisingDeckChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (file && file.type !== 'application/pdf') {
+      setError('Please upload a PDF file for the pitch deck.');
+      return;
+    }
+    if (file && file.size > 10 * 1024 * 1024) {
+      setError('Pitch deck file size must be less than 10MB.');
+      return;
+    }
+    setError(null);
+    setFundraising(prev => ({ ...prev, pitchDeckFile: file }));
   };
 
   const addFounder = () => {
@@ -137,12 +176,24 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
         setIsLoading(false);
         return;
       }
+
+      // Basic fundraising validation at registration time (optional but recommended fields)
+      if (fundraising.type && (fundraising.value === '' || Number(fundraising.value) <= 0)) {
+        setError('Please enter a valid fundraising value.');
+        setIsLoading(false);
+        return;
+      }
+      if (fundraising.type && (fundraising.equity === '' || Number(fundraising.equity) <= 0 || Number(fundraising.equity) > 100)) {
+        setError('Please enter a valid equity percentage (1-100).');
+        setIsLoading(false);
+        return;
+      }
     }
 
     try {
       // Call the completion handler with country data
       // The actual processing (file uploads, database operations) happens in TwoStepRegistration
-      onComplete(userData, uploadedFiles, founders, country);
+      onComplete(userData, uploadedFiles, founders, country, fundraising);
       
     } catch (err: any) {
       setError(err.message || 'An error occurred');
@@ -377,6 +428,89 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                 <Users className="h-4 w-4 mr-2" />
                 Add Another Founder
               </Button>
+            </div>
+
+            {/* Fundraising (Optional) */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-slate-900">Fundraising (Optional)</h3>
+              <div className="flex items-center gap-2">
+                <input
+                  id="fr-active"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary"
+                  checked={fundraising.active}
+                  onChange={(e) => setFundraising(prev => ({ ...prev, active: e.target.checked }))}
+                />
+                <label htmlFor="fr-active" className="text-sm text-slate-700">Activate Fundraising Round</label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Select
+                  label="Type"
+                  id="fr-type"
+                  value={fundraising.type as any}
+                  onChange={(e) => setFundraising(prev => ({ ...prev, type: e.target.value as InvestmentType }))}
+                >
+                  <option value="">Select round type</option>
+                  {Object.values(InvestmentType).map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </Select>
+                <Input
+                  label="Value"
+                  id="fr-value"
+                  type="number"
+                  value={fundraising.value as any}
+                  onChange={(e) => setFundraising(prev => ({ ...prev, value: e.target.value === '' ? '' : Number(e.target.value) }))}
+                />
+                <Input
+                  label="Equity (%)"
+                  id="fr-equity"
+                  type="number"
+                  value={fundraising.equity as any}
+                  onChange={(e) => setFundraising(prev => ({ ...prev, equity: e.target.value === '' ? '' : Number(e.target.value) }))}
+                />
+                <Select
+                  label="Domain"
+                  id="fr-domain"
+                  value={(fundraising.domain || '') as any}
+                  onChange={(e) => setFundraising(prev => ({ ...prev, domain: (e.target.value || '') as StartupDomain | '' }))}
+                >
+                  <option value="">Select domain</option>
+                  {Object.values(StartupDomain).map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </Select>
+                <Select
+                  label="Stage"
+                  id="fr-stage"
+                  value={(fundraising.stage || '') as any}
+                  onChange={(e) => setFundraising(prev => ({ ...prev, stage: (e.target.value || '') as StartupStage | '' }))}
+                >
+                  <option value="">Select stage</option>
+                  {Object.values(StartupStage).map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </Select>
+                <Input
+                  label="Pitch Video URL"
+                  id="fr-video"
+                  type="url"
+                  value={fundraising.pitchVideoUrl}
+                  onChange={(e) => setFundraising(prev => ({ ...prev, pitchVideoUrl: e.target.value }))}
+                />
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
+                  <input
+                    id="fr-deck"
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFundraisingDeckChange}
+                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Max 10MB</p>
+                </div>
+              </div>
+              {/* Startup Nation validation removed as per requirement */}
             </div>
           </div>
         )}

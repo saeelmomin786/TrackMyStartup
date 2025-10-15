@@ -2729,11 +2729,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                          value={fundraising.pitchVideoUrl || ''}
                                          onChange={e => setFundraising({...fundraising, pitchVideoUrl: e.target.value})}
                                      />
-                                    {/* Startup Nation Validation disabled */}
-                                    <div className="flex items-center opacity-60">
-                                        <input type="checkbox" id="fr-validation" className="h-4 w-4 rounded border-gray-300" checked={false} disabled />
-                                        <label htmlFor="fr-validation" className="ml-2 block text-sm text-gray-900">Startup Nation Validation (disabled)</label>
-                                    </div>
+                                    {/* Startup Nation validation removed as per requirement */}
                                  </div>
                              </fieldset>
                          )}

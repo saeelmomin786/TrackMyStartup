@@ -23,12 +23,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invalid payload' });
     }
 
+    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL } = process.env as Record<string, string | undefined>;
+    if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
+      console.error('api/send-invite missing SMTP env', { SMTP_HOST: !!SMTP_HOST, SMTP_PORT: !!SMTP_PORT, SMTP_USER: !!SMTP_USER, SMTP_PASS: !!SMTP_PASS });
+      return res.status(500).json({ success: false, error: 'Email not configured' });
+    }
+
+    const portNum = Number(SMTP_PORT || '465');
+    const secure = String(portNum) === '465';
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 465),
-      secure: (process.env.SMTP_PORT || '465') === '465',
-      auth: { user: process.env.SMTP_USER as string, pass: process.env.SMTP_PASS as string }
-    });
+      host: SMTP_HOST,
+      port: portNum,
+      secure,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+      tls: { ciphers: 'TLSv1.2', rejectUnauthorized: false }
+    } as any);
+
+    try {
+      await transporter.verify();
+    } catch (verifyErr: any) {
+      console.error('api/send-invite transporter.verify failed:', verifyErr?.message || verifyErr);
+      // continue; some providers reject verify() but still allow send
+    }
 
     const roleLine = kind === 'center' ? 'Incubation Center / Accelerator' : 'Investor';
     const subject = kind === 'center'
@@ -53,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ].filter(Boolean).join('\n');
 
     await transporter.sendMail({
-      from: process.env.FROM_EMAIL || `TrackMyStartup Support <${process.env.SMTP_USER}>`,
+      from: FROM_EMAIL || `TrackMyStartup Support <${SMTP_USER}>`,
       to: email,
       subject,
       text

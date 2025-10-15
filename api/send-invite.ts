@@ -30,13 +30,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const portNum = Number(SMTP_PORT || '465');
-    const secure = String(portNum) === '465';
+    const is465 = String(portNum) === '465';
     const transporter = nodemailer.createTransport({
       host: SMTP_HOST,
       port: portNum,
-      secure,
+      secure: is465, // true for 465, false for 587
+      requireTLS: !is465,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
-      tls: { ciphers: 'TLSv1.2', rejectUnauthorized: false }
+      authMethod: 'LOGIN',
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+      tls: {
+        ciphers: 'TLSv1.2',
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: false
+      }
     } as any);
 
     try {
@@ -68,12 +77,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'TrackMyStartup Support'
     ].filter(Boolean).join('\n');
 
-    await transporter.sendMail({
-      from: FROM_EMAIL || `TrackMyStartup Support <${SMTP_USER}>`,
-      to: email,
-      subject,
-      text
-    });
+    try {
+      await transporter.sendMail({
+        from: FROM_EMAIL || `TrackMyStartup Support <${SMTP_USER}>`,
+        to: email,
+        subject,
+        text
+      });
+    } catch (sendErr: any) {
+      console.error('api/send-invite sendMail failed:', sendErr?.code || sendErr?.message || sendErr);
+      return res.status(500).json({ success: false, error: sendErr?.code || sendErr?.message || 'Email send failed' });
+    }
 
     return res.status(200).json({ success: true });
   } catch (e: any) {

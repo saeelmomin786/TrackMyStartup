@@ -10,8 +10,10 @@ import { TrendingUp, DollarSign, CheckSquare, Eye, PlusCircle, Activity, FileTex
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { investmentService } from '../lib/database';
+import { currencyRates } from '../lib/currencyUtils';
 import ProfilePage from './ProfilePage';
 import AdvisorAwareLogo from './AdvisorAwareLogo';
+import { supabase } from '../lib/supabase';
 
 interface InvestorViewProps {
   startups: Startup[];
@@ -21,9 +23,10 @@ interface InvestorViewProps {
   currentUser?: { id: string; email: string; investorCode?: string; investor_code?: string };
   onViewStartup: (startup: Startup) => void;
   onAcceptRequest: (id: number) => void;
-  onMakeOffer: (opportunity: NewInvestment, offerAmount: number, equityPercentage: number) => void;
+  onMakeOffer: (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string) => void;
   onUpdateOffer?: (offerId: number, offerAmount: number, equityPercentage: number) => void;
   onCancelOffer?: (offerId: number) => void;
+  isViewOnly?: boolean;
 }
 
 const SummaryCard: React.FC<{ title: string; value: string; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -50,9 +53,19 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     onAcceptRequest, 
     onMakeOffer,
     onUpdateOffer,
-    onCancelOffer 
+    onCancelOffer,
+    isViewOnly = false
 }) => {
-    const formatCurrency = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact' }).format(value);
+    const formatCurrency = (value: number, currency: string = 'USD') => {
+      try {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency, notation: 'compact' }).format(value);
+      } catch (error) {
+        // Fallback to USD if currency is invalid
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact' }).format(value);
+      }
+    };
+    
+    
 
     const handleShare = async (startup: ActiveFundraisingStartup) => {
         console.log('Share button clicked for startup:', startup.name);
@@ -96,6 +109,40 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     
     const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
     const [selectedOpportunity, setSelectedOpportunity] = useState<ActiveFundraisingStartup | null>(null);
+    const [selectedCurrency, setSelectedCurrency] = useState<string>('USD');
+    
+    // Get available currencies from the currency rates
+    const getAvailableCurrencies = () => {
+        return Object.keys(currencyRates).map(code => ({
+            code,
+            name: getCurrencyName(code)
+        }));
+    };
+    
+    // Get currency display name
+    const getCurrencyName = (code: string): string => {
+        const currencyNames: { [key: string]: string } = {
+            'EUR': 'Euro',
+            'USD': 'US Dollar',
+            'INR': 'Indian Rupee',
+            'GBP': 'British Pound',
+            'CAD': 'Canadian Dollar',
+            'AUD': 'Australian Dollar',
+            'SGD': 'Singapore Dollar',
+            'JPY': 'Japanese Yen',
+            'CNY': 'Chinese Yuan',
+            'BRL': 'Brazilian Real',
+            'MXN': 'Mexican Peso',
+            'ZAR': 'South African Rand',
+            'NGN': 'Nigerian Naira',
+            'KES': 'Kenyan Shilling',
+            'EGP': 'Egyptian Pound',
+            'AED': 'UAE Dirham',
+            'SAR': 'Saudi Riyal',
+            'ILS': 'Israeli Shekel'
+        };
+        return currencyNames[code] || code;
+    };
     const [selectedPitchId, setSelectedPitchId] = useState<number | null>(() => {
       const fromUrl = getQueryParam('pitchId');
       return fromUrl ? Number(fromUrl) : null;
@@ -139,6 +186,33 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     
     // Co-investment state management
     const [coInvestmentListings, setCoInvestmentListings] = useState<Set<number>>(new Set());
+
+    // Recommendations state
+    const [recommendations, setRecommendations] = useState<any[]>([]);
+    const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
+
+    // Fetch recommendations for the current investor
+    const fetchRecommendations = async () => {
+      if (!currentUser?.id) return;
+      
+      try {
+        setIsLoadingRecommendations(true);
+        const { data, error } = await supabase.rpc('get_investor_recommendations', {
+          p_investor_id: currentUser.id
+        });
+        
+        if (error) {
+          console.error('Error fetching recommendations:', error);
+          return;
+        }
+        
+        setRecommendations(data || []);
+      } catch (error) {
+        console.error('Error fetching recommendations:', error);
+      } finally {
+        setIsLoadingRecommendations(false);
+      }
+    };
 
     // Logout handler
     const handleLogout = () => {
@@ -238,6 +312,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         }
     }, [activeFundraisingStartups, activeTab]);
 
+    // Fetch recommendations when recommendations tab is active
+    useEffect(() => {
+        if (activeTab === 'recommendations') {
+            fetchRecommendations();
+        }
+    }, [activeTab, currentUser?.id]);
+
     const totalFunding = startups.reduce((acc, s) => acc + s.totalFunding, 0);
     const totalRevenue = startups.reduce((acc, s) => acc + s.totalRevenue, 0);
     const compliantCount = startups.filter(s => s.complianceStatus === ComplianceStatus.Compliant).length;
@@ -248,6 +329,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         setIsOfferModalOpen(true);
     };
     
+    const handleDueDiligenceClick = (startup: ActiveFundraisingStartup) => {
+        // For investors, this could open a modal or redirect to due diligence service
+        alert(`Due Diligence service for ${startup.name} - This feature can be implemented for investors`);
+    };
+    
     const handleOfferSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedOpportunity) return;
@@ -255,11 +341,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         const form = e.currentTarget as HTMLFormElement;
         const offerAmountInput = form.elements.namedItem('offer-amount') as HTMLInputElement;
         const offerEquityInput = form.elements.namedItem('offer-equity') as HTMLInputElement;
-        const countryInput = form.elements.namedItem('country') as HTMLSelectElement;
         
         const offerAmount = Number(offerAmountInput.value);
         const equityPercentage = Number(offerEquityInput.value);
-        const country = countryInput.value;
 
         // Convert ActiveFundraisingStartup to NewInvestment format for compatibility
         const newInvestment: NewInvestment = {
@@ -277,12 +361,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             pitchVideoUrl: selectedOpportunity.pitchVideoUrl
         };
 
-        onMakeOffer(newInvestment, offerAmount, equityPercentage, country, selectedOpportunity.totalFunding || 0);
+        onMakeOffer(newInvestment, offerAmount, equityPercentage, selectedCurrency);
         // After submitting, switch to Offers tab
         setActiveTab('offers');
         
         setIsOfferModalOpen(false);
         setSelectedOpportunity(null);
+        setSelectedCurrency('USD');
     };
     
     const handleFavoriteToggle = (pitchId: number) => {
@@ -365,6 +450,63 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             default:
                 return 'bg-gray-100 text-gray-800';
         }
+    };
+    
+    const getStageStatusDisplay = (offer: any) => {
+        // Get offer stage (default to 1 if not set)
+        const offerStage = offer.stage || 1;
+        
+        // Determine the approval status to display based on stage
+        if (offerStage === 1) {
+            return {
+                color: 'bg-blue-100 text-blue-800',
+                text: '🔵 Stage 1: Investor Advisor Approval',
+                icon: '🔵'
+            };
+        }
+        if (offerStage === 2) {
+            return {
+                color: 'bg-purple-100 text-purple-800',
+                text: '🟣 Stage 2: Startup Advisor Approval',
+                icon: '🟣'
+            };
+        }
+        if (offerStage === 3) {
+            return {
+                color: 'bg-green-100 text-green-800',
+                text: '✅ Stage 3: Ready for Startup Review',
+                icon: '✅'
+            };
+        }
+        if (offerStage === 4) {
+            return {
+                color: 'bg-green-100 text-green-800',
+                text: '🎉 Stage 4: Accepted by Startup',
+                icon: '🎉'
+            };
+        }
+        
+        // Handle rejection cases
+        if (offer.investor_advisor_approval_status === 'rejected') {
+            return {
+                color: 'bg-red-100 text-red-800',
+                text: '❌ Rejected by Investor Advisor',
+                icon: '❌'
+            };
+        }
+        if (offer.startup_advisor_approval_status === 'rejected') {
+            return {
+                color: 'bg-red-100 text-red-800',
+                text: '❌ Rejected by Startup Advisor',
+                icon: '❌'
+            };
+        }
+        
+        return {
+            color: 'bg-gray-100 text-gray-800',
+            text: '❓ Unknown Status',
+            icon: '❓'
+        };
     };
     
 
@@ -525,9 +667,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatCurrency(req.investmentValue)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{req.equityAllocation}%</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                            {!isViewOnly && (
                                             <Button size="sm" onClick={() => onAcceptRequest(req.id)}>
                                                 <PlusCircle className="mr-2 h-4 w-4"/> Approve
                                             </Button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
@@ -571,6 +715,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatCurrency(startup.currentValuation)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                            {!isViewOnly && (
                                             <div className="flex items-center justify-end gap-2">
                                                 <Button size="sm" variant="outline" onClick={() => onViewStartup(startup)}><Eye className="mr-2 h-4 w-4" /> View</Button>
                                                 <button
@@ -584,6 +729,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                                     {coInvestmentListings.has(startup.id) ? 'Co-investment Listed' : 'Seek Co-Investors'}
                                                 </button>
                                             </div>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
@@ -882,7 +1028,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           </a>
                         )}
 
-                        {/* Due diligence payment removed */}
+                        <button
+                          onClick={() => handleDueDiligenceClick(inv)}
+                          className="flex-1 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 transition-all duration-200 border border-slate-200 bg-white px-3 py-2 rounded-lg text-sm font-medium"
+                        >
+                          <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                          Due Diligence (€150)
+                        </button>
 
                         {(() => {
                           // Check if user has already submitted an offer for this startup
@@ -909,7 +1063,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                               </div>
                             );
                           } else {
-                            return (
+                            return !isViewOnly ? (
                               <Button
                                 size="sm"
                                 variant="primary"
@@ -918,7 +1072,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                               >
                                 <DollarSign className="h-4 w-4 mr-2" /> Make Offer
                               </Button>
-                            );
+                            ) : null;
                           }
                         })()}
                       </div>
@@ -956,27 +1110,57 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               </h3>
             <div className="space-y-4">
               {investmentOffers.length > 0 ? (
-                investmentOffers.map(offer => (
+                investmentOffers.map(offer => {
+                  // Debug logging
+            console.log('🔍 Offer data:', {
+              id: offer.id,
+              offerAmount: offer.offerAmount,
+              equityPercentage: offer.equityPercentage,
+              currency: (offer as any).currency,
+              createdAt: offer.createdAt,
+              startupName: offer.startupName,
+              status: offer.status
+            });
+                  
+                  return (
                   <div key={offer.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        {getStatusIcon(offer.status)}
+                        <span className="text-lg">{getStageStatusDisplay(offer).icon}</span>
                         <div>
                           <div className="font-medium text-slate-900 truncate">Offer for {offer.startupName}</div>
                           <div className="text-sm text-slate-500">
-                            {formatCurrency(offer.offerAmount)} • {offer.equityPercentage}% equity
+                            {(() => {
+                              const amount = Number(offer.offerAmount) || 0;
+                              const equity = Number(offer.equityPercentage) || 0;
+                              const currency = (offer as any).currency || 'USD';
+                              return `${formatCurrency(amount, currency)} • ${equity}% equity`;
+                            })()}
                           </div>
-                          <div className="text-xs text-slate-400">Submitted on {new Date(offer.createdAt).toLocaleDateString()}</div>
-                          {offer.status === 'approved' && (
-                            <div className="text-xs text-blue-600 mt-1">Admin approved; awaiting startup approval</div>
+                          <div className="text-xs text-slate-400">
+                            Submitted on {(() => {
+                              try {
+                                const date = new Date(offer.createdAt);
+                                return isNaN(date.getTime()) ? 'Unknown date' : date.toLocaleDateString();
+                              } catch (error) {
+                                return 'Unknown date';
+                              }
+                            })()}
+                          </div>
+                          {((offer as any).stage || 1) >= 2 && (
+                            <div className="text-xs text-blue-600 mt-1">
+                              {((offer as any).stage || 1) === 2 && "Investor advisor approved; awaiting startup advisor approval"}
+                              {((offer as any).stage || 1) === 3 && "Startup advisor approved; awaiting startup review"}
+                              {((offer as any).stage || 1) >= 4 && "Approved by startup"}
+                            </div>
                           )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(offer.status)}`}>
-                          {offer.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStageStatusDisplay(offer).color}`}>
+                          {getStageStatusDisplay(offer).text}
                         </span>
-                        {offer.status === 'pending' && (
+                        {((offer as any).stage || 1) === 1 && (
                           <>
                             <Button 
                               size="sm" 
@@ -996,7 +1180,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             </Button>
                           </>
                         )}
-                        {(offer.status === 'accepted' || offer.status === 'completed') && (
+                        {((offer as any).stage || 1) >= 4 && (
                           <div className="flex gap-2">
                             {offer.contact_details_revealed ? (
                               <Button 
@@ -1073,7 +1257,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                       );
                     })()}
                   </div>
-                                   ))
+                  );
+                })
                ) : (
                  <div className="text-sm text-slate-500 text-center py-10">
                    You have not submitted any offers yet.
@@ -1095,7 +1280,88 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               </span>
             </h3>
             <div className="space-y-4">
-              {/* This would be populated with recommendations from Investment Advisors */}
+              {isLoadingRecommendations ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                  <p className="text-slate-500">Loading recommendations...</p>
+                </div>
+              ) : recommendations.length > 0 ? (
+                <div className="space-y-4">
+                  {recommendations.map((rec) => (
+                    <div key={rec.id} className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h4 className="text-lg font-semibold text-slate-800">{rec.startup_name}</h4>
+                            <Badge variant="secondary" className="bg-purple-100 text-purple-800">
+                              {rec.startup_sector}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-slate-600 mb-2">
+                            <strong>Recommended by:</strong> {rec.advisor_name}
+                          </p>
+                          <p className="text-sm text-slate-600 mb-2">
+                            <strong>Valuation:</strong> {formatCurrency(rec.startup_valuation || 0)}
+                          </p>
+                          {rec.recommended_deal_value > 0 && (
+                            <p className="text-sm text-slate-600 mb-2">
+                              <strong>Recommended Investment:</strong> {formatCurrency(rec.recommended_deal_value)}
+                            </p>
+                          )}
+                          {rec.recommendation_notes && (
+                            <p className="text-sm text-slate-600 mb-3">
+                              <strong>Notes:</strong> {rec.recommendation_notes}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-4 text-xs text-slate-500">
+                            <span>Status: {rec.status}</span>
+                            <span>Recommended: {new Date(rec.created_at).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const startup = startups.find(s => s.name === rec.startup_name);
+                              if (startup) onViewStartup(startup);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => {
+                              const startup = startups.find(s => s.name === rec.startup_name);
+                              if (startup) {
+                                const activeStartup: ActiveFundraisingStartup = {
+                                  id: startup.id,
+                                  name: startup.name,
+                                  sector: startup.sector,
+                                  investmentValue: rec.recommended_deal_value || 0,
+                                  equityAllocation: 0,
+                                  complianceStatus: startup.complianceStatus,
+                                  videoUrl: startup.videoUrl,
+                                  logoUrl: startup.logoUrl,
+                                  description: startup.description,
+                                  currentValuation: rec.startup_valuation || 0
+                                };
+                                setSelectedOpportunity(activeStartup);
+                                setIsOfferModalOpen(true);
+                              }
+                            }}
+                          >
+                            <PlusCircle className="h-4 w-4 mr-1" />
+                            Make Offer
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
               <div className="text-center py-12">
                 <Star className="h-16 w-16 text-slate-400 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-slate-800 mb-2">No Recommendations Yet</h3>
@@ -1103,6 +1369,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                   When your Investment Advisor recommends startups to you, they will appear here.
                 </p>
               </div>
+              )}
             </div>
           </Card>
           
@@ -1199,7 +1466,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
 
        <Modal 
             isOpen={isOfferModalOpen} 
-            onClose={() => setIsOfferModalOpen(false)} 
+            onClose={() => {
+                setIsOfferModalOpen(false);
+                setSelectedCurrency('USD');
+            }} 
             title={`Make an Offer for ${selectedOpportunity?.name}`}
         >
             <form onSubmit={handleOfferSubmit} className="space-y-4">
@@ -1208,36 +1478,42 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     The current ask is <span className="font-semibold">{investorService.formatCurrency(selectedOpportunity?.investmentValue || 0)}</span> for <span className="font-semibold">{selectedOpportunity?.equityAllocation}%</span> equity.
                 </p>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Input label="Your Investment Offer (USD)" id="offer-amount" name="offer-amount" type="number" required />
-                    <Input label="Equity Requested (%)" id="offer-equity" name="offer-equity" type="number" step="0.1" required />
-                </div>
-                
                 <div>
-                    <label htmlFor="country" className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+                    <label htmlFor="currency" className="block text-sm font-medium text-slate-700 mb-1">Currency</label>
                     <select
-                        id="country"
-                        name="country"
+                        id="currency"
+                        name="currency"
+                        value={selectedCurrency}
+                        onChange={(e) => setSelectedCurrency(e.target.value)}
                         required
                         className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                        <option value="">Select Country</option>
-                        <option value="United States">United States</option>
-                        <option value="United Kingdom">United Kingdom</option>
-                        <option value="India">India</option>
-                        <option value="Canada">Canada</option>
-                        <option value="Australia">Australia</option>
-                        <option value="Germany">Germany</option>
-                        <option value="France">France</option>
-                        <option value="Singapore">Singapore</option>
-                        <option value="Other">Other</option>
+                        {getAvailableCurrencies().map(currency => (
+                            <option key={currency.code} value={currency.code}>
+                                {currency.code} - {currency.name}
+                            </option>
+                        ))}
                     </select>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input 
+                        label={`Your Investment Offer (${selectedCurrency})`} 
+                        id="offer-amount" 
+                        name="offer-amount" 
+                        type="number" 
+                        required 
+                    />
+                    <Input label="Equity Requested (%)" id="offer-equity" name="offer-equity" type="number" step="0.1" required />
                 </div>
                 
                 {/* Scouting fee information removed */}
                 
                 <div className="flex justify-end gap-3 pt-4">
-                    <Button type="button" variant="secondary" onClick={() => setIsOfferModalOpen(false)}>Cancel</Button>
+                    <Button type="button" variant="secondary" onClick={() => {
+                        setIsOfferModalOpen(false);
+                        setSelectedCurrency('USD');
+                    }}>Cancel</Button>
                     <Button type="submit">Submit Offer</Button>
                 </div>
             </form>

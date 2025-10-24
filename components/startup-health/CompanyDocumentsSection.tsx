@@ -22,6 +22,7 @@ import {
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
+import CloudDriveInput from '../ui/CloudDriveInput';
 
 type CurrentUserLike = { role: UserRole; email?: string; serviceCode?: string };
 
@@ -49,6 +50,8 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
         documentUrl: '',
         documentType: ''
     });
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [uploading, setUploading] = useState(false);
 
     // Load company documents
     useEffect(() => {
@@ -77,13 +80,26 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
     };
 
     const handleAdd = async () => {
-        if (!formData.documentName || !formData.documentUrl) return;
+        if (!formData.documentName) return;
 
         try {
+            setUploading(true);
+            let documentUrl = formData.documentUrl;
+
+            // If no cloud drive URL but file is selected, upload the file
+            if (!documentUrl && selectedFile) {
+                documentUrl = await companyDocumentsService.uploadFile(selectedFile, startupId);
+            }
+
+            if (!documentUrl) {
+                alert('Please provide either a cloud drive URL or upload a file');
+                return;
+            }
+
             const documentData: CreateCompanyDocumentData = {
                 documentName: formData.documentName,
                 description: formData.description,
-                documentUrl: formData.documentUrl,
+                documentUrl: documentUrl,
                 documentType: formData.documentType
             };
 
@@ -95,9 +111,12 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
                 documentUrl: '',
                 documentType: ''
             });
+            setSelectedFile(null);
             loadDocuments();
         } catch (error) {
             console.error('Error adding document:', error);
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -319,12 +338,12 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
 
             {/* Add Document Modal */}
             <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)}>
-                <div className="p-6">
+                <div className="p-6 max-h-[90vh] overflow-y-auto">
                     <div className="flex items-center gap-3 mb-6">
                         <div className="p-2 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-lg">
                             <Link className="w-5 h-5 text-blue-600" />
                         </div>
-                        <h3 className="text-xl font-semibold text-slate-900">Add Document Link</h3>
+                        <h3 className="text-xl font-semibold text-slate-900">Add Document</h3>
                     </div>
                     <div className="space-y-4">
                         <div>
@@ -338,21 +357,31 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Document URL *</label>
-                            <div className="relative">
-                                <Globe className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                <input
-                                    type="url"
-                                    value={formData.documentUrl}
-                                    onChange={(e) => handleUrlChange(e.target.value)}
-                                    className="w-full border border-gray-300 rounded-lg px-10 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                                    placeholder="https://docs.google.com/document/..."
-                                />
-                            </div>
+                            <CloudDriveInput
+                                value={formData.documentUrl}
+                                onChange={(url) => handleUrlChange(url)}
+                                onFileSelect={(file) => setSelectedFile(file)}
+                                placeholder="Paste your cloud drive link here..."
+                                label="Document"
+                                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.txt"
+                                maxSize={50}
+                                documentType="company document"
+                                showPrivacyMessage={false}
+                            />
                             {formData.documentType && (
                                 <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
                                     <span className="text-lg">{companyDocumentsService.getDocumentIcon(formData.documentType)}</span>
                                     <span className="font-medium">{formData.documentType}</span>
+                                </div>
+                            )}
+                            {selectedFile && (
+                                <div className="mt-2 p-3 bg-gray-50 rounded-md">
+                                    <p className="text-sm text-gray-700">
+                                        <strong>File:</strong> {selectedFile.name}
+                                    </p>
+                                    <p className="text-sm text-gray-500">
+                                        Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                                    </p>
                                 </div>
                             )}
                         </div>
@@ -376,11 +405,11 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
                             </Button>
                             <Button 
                                 onClick={handleAdd}
-                                disabled={!formData.documentName || !formData.documentUrl}
+                                disabled={!formData.documentName || (!formData.documentUrl && !selectedFile) || uploading}
                                 className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6"
                             >
                                 <Plus className="w-4 h-4 mr-2" />
-                                Add Document
+                                {uploading ? 'Adding...' : 'Add Document'}
                             </Button>
                         </div>
                     </div>
@@ -389,7 +418,7 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
 
             {/* Edit Document Modal */}
             <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)}>
-                <div className="p-6">
+                <div className="p-6 max-h-[90vh] overflow-y-auto">
                     <div className="flex items-center gap-3 mb-6">
                         <div className="p-2 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-lg">
                             <Edit className="w-5 h-5 text-blue-600" />

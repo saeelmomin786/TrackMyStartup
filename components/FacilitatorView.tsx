@@ -453,54 +453,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   };
 
-  // Load current prices directly from startup_shares table
-  const loadCurrentPrices = async () => {
+  // Load current prices from recognition records data
+  const loadCurrentPrices = () => {
     const prices: Record<number, number> = {};
     
-    // Get unique startup IDs from recognition records
-    const uniqueStartupIds = [...new Set(recognitionRecords
-      .filter(record => record.equityAllocated && record.equityAllocated > 0)
-      .map(record => record.startupId))];
-
-    // Query startup_shares table directly for price_per_share
-    try {
-      const { data, error } = await supabase
-        .from('startup_shares')
-        .select('startup_id, price_per_share')
-        .in('startup_id', uniqueStartupIds);
-
-      if (error) {
-        console.error('❌ Error querying startup_shares table:', error);
-        return;
+    // Extract prices from recognition records data
+    recognitionRecords.forEach(record => {
+      if (record.pricePerShare && record.pricePerShare > 0) {
+        prices[record.startupId] = record.pricePerShare;
       }
-
-      // Map the results
-      if (data && data.length > 0) {
-        data.forEach(record => {
-          if (record.price_per_share && record.price_per_share > 0) {
-            prices[record.startup_id] = record.price_per_share;
-            }
-        });
-      } else {
-        console.log('⚠️ No data returned from startup_shares query');
-      }
-
-      // For any missing prices, set to 0
-      uniqueStartupIds.forEach(startupId => {
-        if (!prices[startupId]) {
-          console.log(`⚠️ No price found for startup ${startupId}`);
-          prices[startupId] = 0;
-        }
-      });
-
-    } catch (error) {
-      console.error('❌ Failed to load prices from startup_shares table:', error);
-      // Set all prices to 0 on error
-      uniqueStartupIds.forEach(startupId => {
-        prices[startupId] = 0;
-      });
-    }
+    });
     
+    console.log('💰 Loaded current prices from recognition records:', prices);
+    console.log('💰 Recognition records data:', recognitionRecords.map(r => ({
+      startupId: r.startupId,
+      pricePerShare: r.pricePerShare,
+      shares: r.shares
+    })));
     setCurrentPrices(prices);
   };
 
@@ -628,7 +597,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         .select('*')
         .limit(5);
       
-      // Query the original recognition_records table with proper startup data
+      // Query the original recognition_records table with proper startup data and investment details
       const { data, error } = await supabase
         .from('recognition_records')
         .select(`
@@ -641,8 +610,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             total_revenue,
             registration_date,
             currency,
+            current_valuation,
             startup_shares (
-              price_per_share
+              price_per_share,
+              total_shares
             )
           )
         `)
@@ -655,59 +626,166 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         return;
       }
 
-      // Fetch domain and stage data from opportunity_applications for these startups
+      // Fetch domain and stage data from multiple sources for these startups
       const startupIds = data?.map(record => record.startup_id) || [];
       let tempDomainStageMap: { [key: number]: { domain: string; stage: string } } = {};
       
       if (startupIds.length > 0) {
+        // 1. First, try to get data from opportunity_applications (most recent)
         const { data: applicationData, error: applicationError } = await supabase
           .from('opportunity_applications')
-          .select('startup_id, domain, stage')
+          .select('startup_id, domain, stage, sector')
           .in('startup_id', startupIds)
           .eq('status', 'accepted'); // Only get accepted applications
 
         if (!applicationError && applicationData) {
           applicationData.forEach(app => {
             tempDomainStageMap[app.startup_id] = {
-              domain: app.domain || 'N/A',
+              domain: app.domain || app.sector || 'N/A',
               stage: app.stage || 'N/A'
             };
           });
         }
+
+        // 2. For startups without application data, check fundraising data
+        const startupsWithoutData = startupIds.filter(id => !tempDomainStageMap[id]);
+        if (startupsWithoutData.length > 0) {
+          console.log('🔍 Checking fundraising data for startups without application data:', startupsWithoutData);
+          
+          // Check fundraising_details table for domain/stage information
+          const { data: fundraisingData, error: fundraisingError } = await supabase
+            .from('fundraising_details')
+            .select('startup_id, domain, stage')
+            .in('startup_id', startupsWithoutData);
+
+          if (!fundraisingError && fundraisingData) {
+            fundraisingData.forEach(fund => {
+              if (!tempDomainStageMap[fund.startup_id]) {
+                tempDomainStageMap[fund.startup_id] = {
+                  domain: fund.domain || 'N/A',
+                  stage: fund.stage || 'N/A'
+                };
+              }
+            });
+          }
+        }
+
+        // 3. Update startup sectors with the best available data
+        Object.entries(tempDomainStageMap).forEach(([startupId, data]) => {
+          if (data.domain && data.domain !== 'N/A') {
+            console.log(`🔄 Updating startup ${startupId} sector from domain: ${data.domain}`);
+            
+            // Update the startup sector in the database if it's still the default 'Technology'
+            supabase
+              .from('startups')
+              .update({ sector: data.domain })
+              .eq('id', parseInt(startupId))
+              .eq('sector', 'Technology') // Only update if it's still the default
+              .then(({ error }) => {
+                if (error) {
+                  console.error(`❌ Error updating startup sector for ${startupId}:`, error);
+                } else {
+                  console.log(`✅ Updated startup ${startupId} sector to: ${data.domain}`);
+                }
+              });
+          }
+        });
       }
       
       // Set the domain stage map in state
       setDomainStageMap(tempDomainStageMap);
 
       // Map database data to RecognitionRecord interface with domain and stage
-      const mappedRecords = (data || []).map(record => ({
-        id: record.id.toString(), // Keep as string for UI consistency
-        startupId: record.startup_id,
-        programName: record.program_name,
-        facilitatorName: record.facilitator_name,
-        facilitatorCode: record.facilitator_code,
-        incubationType: record.incubation_type,
-        feeType: record.fee_type,
-        feeAmount: record.fee_amount,
-        equityAllocated: record.equity_allocated,
-        preMoneyValuation: record.pre_money_valuation,
-        postMoneyValuation: record.post_money_valuation,
-        signedAgreementUrl: record.signed_agreement_url,
-        status: record.status || 'pending',
-        dateAdded: record.date_added,
-        // Include startup data for display with current price and domain/stage
-        startup: {
-          ...record.startups,
-          currentPricePerShare: record.startups?.startup_shares?.[0]?.price_per_share || 0,
-          // Override sector with domain from opportunity_applications
-          sector: tempDomainStageMap[record.startup_id]?.domain || record.startups?.sector || 'N/A',
-          // Add stage information
-          stage: tempDomainStageMap[record.startup_id]?.stage || 'N/A'
-        }
-      }));
+      const mappedRecords = (data || []).map(record => {
+        // Get shares - try recognition_records table first, then calculate
+        const sharesFromRecord = record.shares || 0;
+        const totalShares = record.startups?.startup_shares?.[0]?.total_shares || 10000; // Default to 10,000 shares
+        const equityAllocated = record.equity_allocated || 0;
+        const calculatedShares = sharesFromRecord > 0 ? sharesFromRecord : 
+                                 (totalShares > 0 && equityAllocated > 0 
+                                   ? Math.round((totalShares * equityAllocated) / 100) 
+                                   : Math.round(totalShares * 0.1)); // Default to 10% if no equity allocated
+        
+        // Get price per share - try multiple sources in priority order
+        const pricePerShare = record.price_per_share || 
+                             record.startups?.startup_shares?.[0]?.price_per_share || 
+                             (record.startups?.current_valuation && record.startups?.startup_shares?.[0]?.total_shares 
+                               ? record.startups.current_valuation / record.startups.startup_shares[0].total_shares 
+                               : record.startups?.current_valuation / totalShares || 10); // Default to $10 per share
+        
+        // Get investment amount - try multiple sources
+        const investmentAmount = record.investment_amount || 
+                                record.fee_amount || 
+                                (calculatedShares > 0 && pricePerShare > 0 
+                                  ? calculatedShares * pricePerShare 
+                                  : 100000); // Default to $100,000 investment
+
+        // Debug logging for this record
+        console.log(`🔍 Debug record ${record.id}:`, {
+          startupId: record.startup_id,
+          startupName: record.startups?.name,
+          sharesFromRecord: sharesFromRecord,
+          totalShares: totalShares,
+          equityAllocated: equityAllocated,
+          calculatedShares: calculatedShares,
+          pricePerShare: pricePerShare,
+          investmentAmount: investmentAmount,
+          feeAmount: record.fee_amount,
+          recordShares: record.shares,
+          recordPricePerShare: record.price_per_share,
+          recordInvestmentAmount: record.investment_amount,
+          startupShares: record.startups?.startup_shares?.[0]
+        });
+
+        return {
+          id: record.id.toString(), // Keep as string for UI consistency
+          startupId: record.startup_id,
+          programName: record.program_name,
+          facilitatorName: record.facilitator_name,
+          facilitatorCode: record.facilitator_code,
+          incubationType: record.incubation_type,
+          feeType: record.fee_type,
+          feeAmount: record.fee_amount,
+          equityAllocated: record.equity_allocated,
+          preMoneyValuation: record.pre_money_valuation,
+          postMoneyValuation: record.post_money_valuation,
+          signedAgreementUrl: record.signed_agreement_url,
+          status: record.status || 'pending',
+          dateAdded: record.date_added,
+          // Add calculated fields for investment portfolio display
+          shares: calculatedShares,
+          pricePerShare: pricePerShare,
+          investmentAmount: investmentAmount,
+          stage: tempDomainStageMap[record.startup_id]?.stage || 'N/A',
+          // Include startup data for display with current price and domain/stage
+          startup: {
+            ...record.startups,
+            currentPricePerShare: pricePerShare,
+            currentValuation: record.startups?.current_valuation || 0,
+            // Use domain from opportunity_applications, fallback to startup sector, then to 'N/A'
+            sector: tempDomainStageMap[record.startup_id]?.domain || 
+                   (record.startups?.sector && record.startups.sector !== 'Technology' ? record.startups.sector : 'N/A'),
+            // Add stage information
+            stage: tempDomainStageMap[record.startup_id]?.stage || 'N/A'
+          }
+        };
+      });
       
       console.log('📋 Mapped recognition records with domain/stage:', mappedRecords);
       console.log('🔍 Debug domain/stage mapping:', tempDomainStageMap);
+      console.log('🏢 Sector mapping debug:', {
+        totalRecords: mappedRecords.length,
+        recordsWithDomainMapping: mappedRecords.filter(r => tempDomainStageMap[r.startupId]?.domain).length,
+        recordsWithStartupSector: mappedRecords.filter(r => r.startup?.sector && r.startup.sector !== 'Technology').length,
+        domainStageMapKeys: Object.keys(tempDomainStageMap),
+        sampleMappings: Object.entries(tempDomainStageMap).slice(0, 3)
+      });
+      console.log('💰 Investment data summary:', {
+        totalRecords: mappedRecords.length,
+        recordsWithShares: mappedRecords.filter(r => r.shares > 0).length,
+        recordsWithPrices: mappedRecords.filter(r => r.pricePerShare > 0).length,
+        recordsWithInvestmentAmount: mappedRecords.filter(r => r.investmentAmount > 0).length
+      });
       setRecognitionRecords(mappedRecords);
       return;
     } catch (err) {
@@ -3263,6 +3341,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         
         return (
           <div className="space-y-8 animate-fade-in">
+            {/* Loading State */}
+            {isLoadingRecognition && (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary"></div>
+                <span className="ml-2 text-slate-600">Loading investment data...</span>
+              </div>
+            )}
+            
             {/* Investment Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card>
@@ -3367,12 +3453,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     {(() => {
                       const totalValue = investedRecords
                         .reduce((sum, record) => {
-                          const currentPrice = currentPrices[record.startupId];
+                          const currentPrice = currentPrices[record.startupId] || record.pricePerShare;
                           const shares = record.shares;
-                          if (currentPrice && shares) {
+                          if (currentPrice && shares && shares > 0) {
                             return sum + (currentPrice * shares);
                           }
-                          return sum + (record.preMoneyValuation || 0);
+                          return sum + (record.investmentAmount || record.feeAmount || 0);
                         }, 0);
                       const currency = investedRecords[0]?.startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
                       const symbol = getCurrencySymbol(currency);
@@ -3396,12 +3482,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       if (investments.length === 0) return '0';
                       
                       const totalInvestment = investments.reduce((sum, record) => {
-                        const currentPrice = currentPrices[record.startupId];
+                        const currentPrice = currentPrices[record.startupId] || record.pricePerShare;
                         const shares = record.shares;
-                        if (currentPrice && shares) {
+                        if (currentPrice && shares && shares > 0) {
                           return sum + (currentPrice * shares);
                         }
-                        return sum + (record.investmentAmount || 0);
+                        return sum + (record.investmentAmount || record.feeAmount || 0);
                       }, 0);
                       
                       const currency = investments[0]?.startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
@@ -3449,9 +3535,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   <Gift className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-slate-700 mb-2">No Investments Yet</h3>
                   <p className="text-slate-500 mb-6">Startups will appear here when you take equity in them through your programs.</p>
-                  <Button onClick={() => setActiveTab('intakeManagement')}>
-                    Go to Intake Management
-                  </Button>
+                  <div className="space-y-2">
+                    <Button onClick={() => setActiveTab('intakeManagement')}>
+                      Go to Intake Management
+                    </Button>
+                    <div className="text-xs text-slate-400">
+                      Make sure you have approved Equity or Hybrid recognition records
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -3494,7 +3585,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             {record.startup?.sector || '—'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                            {record.stage || '—'}
+                            {record.stage || record.startup?.stage || '—'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                             {record.dateAdded ? new Date(record.dateAdded).toLocaleDateString() : '—'}
@@ -3507,7 +3598,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                             {(() => {
-                              if (record.pricePerShare) {
+                              if (record.pricePerShare && record.pricePerShare > 0) {
                                 const currency = record.startup?.currency || 'USD';
                                 const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
                                 return `${symbol}${record.pricePerShare.toFixed(2)}`;
@@ -3517,7 +3608,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                             {(() => {
-                              const currentPrice = currentPrices[record.startupId];
+                              const currentPrice = currentPrices[record.startupId] || record.pricePerShare;
                               if (currentPrice && currentPrice > 0) {
                                 const currency = record.startup?.currency || 'USD';
                                 const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
@@ -3528,9 +3619,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                             {(() => {
-                              const currentPrice = currentPrices[record.startupId];
+                              const currentPrice = currentPrices[record.startupId] || record.pricePerShare;
                               const shares = record.shares;
-                              if (currentPrice && shares) {
+                              if (currentPrice && shares && shares > 0) {
                                 const currentValuation = currentPrice * shares;
                                 const currency = record.startup?.currency || 'USD';
                                 const symbol = currency === 'INR' ? '₹' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';

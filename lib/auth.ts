@@ -61,6 +61,32 @@ export interface PasswordResetData {
 export const authService = {
   // Export supabase client for direct access
   supabase,
+  
+  // Refresh session utility
+  async refreshSession(): Promise<boolean> {
+    try {
+      const { error } = await supabase.auth.refreshSession();
+      if (error) {
+        console.error('Failed to refresh session:', error);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Error refreshing session:', error);
+      return false;
+    }
+  },
+  
+  // Check if user is authenticated
+  async isAuthenticated(): Promise<boolean> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      return !!session;
+    } catch (error) {
+      console.error('Error checking authentication:', error);
+      return false;
+    }
+  },
 
   // Test function to check if Supabase auth is working
   async testAuthConnection(): Promise<{ success: boolean; error?: string }> {
@@ -202,6 +228,19 @@ export const authService = {
   // Get current user profile
   async getCurrentUser(): Promise<AuthUser | null> {
     try {
+      // First, try to refresh the session if needed
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.error('Session error:', sessionError);
+        // Try to refresh the session
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          console.error('Failed to refresh session:', refreshError);
+          return null;
+        }
+      }
+      
       const { data: { user }, error } = await supabase.auth.getUser()
       
       if (error || !user) {
@@ -211,18 +250,42 @@ export const authService = {
 
       console.log('Found user in Supabase auth:', user.email);
 
-      // Get user profile from our users table with timeout
-      const profilePromise = supabase
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
+      // Get user profile from our users table with timeout and retry logic
+      let profile = null;
+      let profileError = null;
+      
+      // Retry logic for database queries
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const profilePromise = supabase
+            .from('users')
+            .select('*')
+            .eq('id', user.id)
+            .maybeSingle();
 
-      const profileTimeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Profile check timeout after 5 seconds')), 5000);
-      });
+          const profileTimeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Profile check timeout after 5 seconds')), 5000);
+          });
 
-      const { data: profile, error: profileError } = await Promise.race([profilePromise, profileTimeoutPromise]) as any;
+          const result = await Promise.race([profilePromise, profileTimeoutPromise]) as any;
+          profile = result.data;
+          profileError = result.error;
+          
+          if (!profileError) {
+            break; // Success, exit retry loop
+          }
+          
+          if (attempt < 3) {
+            console.log(`Profile query attempt ${attempt} failed, retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+          }
+        } catch (retryError) {
+          console.error(`Profile query attempt ${attempt} error:`, retryError);
+          if (attempt === 3) {
+            profileError = retryError;
+          }
+        }
+      }
 
       if (profileError || !profile) {
         console.log('No profile found for user:', user.email);

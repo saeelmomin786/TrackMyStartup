@@ -6,6 +6,7 @@ import Card from './ui/Card';
 import Input from './ui/Input';
 import Select from './ui/Select';
 import Button from './ui/Button';
+import CloudDriveInput from './ui/CloudDriveInput';
 import { Briefcase, UserPlus, Trash2, Loader2, CheckCircle, Upload } from 'lucide-react';
 
 interface RegistrationPageProps {
@@ -215,17 +216,32 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
     const fileInputClassName = "block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-brand-light file:text-brand-primary hover:file:bg-blue-200 cursor-pointer";
 
     const renderRoleSpecificDocs = () => {
+        const commonProps = {
+            value: "",
+            onChange: (url: string) => {
+                const hiddenInput = document.getElementById('role-specific-url') as HTMLInputElement;
+                if (hiddenInput) hiddenInput.value = url;
+            },
+            onFileSelect: (file: File) => {
+                handleFileChange({ target: { files: [file] } } as any, 'roleSpecific');
+            },
+            placeholder: "Paste your cloud drive link here...",
+            accept: ".pdf,.jpg,.jpeg,.png",
+            maxSize: 10,
+            showPrivacyMessage: true
+        };
+
         switch(role) {
             case 'Investor':
-                return <Input label="PAN Card" id="role-specific" name="role-specific" type="file" required className={fileInputClassName} onChange={(e) => handleFileChange(e, 'roleSpecific')} />;
+                return <CloudDriveInput {...commonProps} label="PAN Card" documentType="PAN card" />;
             case 'Startup':
-                return <Input label="Proof of Company Registration" id="role-specific" name="role-specific" type="file" required className={fileInputClassName} onChange={(e) => handleFileChange(e, 'roleSpecific')} />;
+                return <CloudDriveInput {...commonProps} label="Proof of Company Registration" documentType="company registration proof" />;
             case 'CA':
-                return <Input label="Copy of CA License" id="role-specific" name="role-specific" type="file" required className={fileInputClassName} onChange={(e) => handleFileChange(e, 'roleSpecific')} />;
+                return <CloudDriveInput {...commonProps} label="Copy of CA License" documentType="CA license" />;
             case 'CS':
-                return <Input label="Copy of CS License" id="role-specific" name="role-specific" type="file" required className={fileInputClassName} onChange={(e) => handleFileChange(e, 'roleSpecific')} />;
+                return <CloudDriveInput {...commonProps} label="Copy of CS License" documentType="CS license" />;
             case 'Startup Facilitation Center':
-                return <Input label="Proof of Organization Registration" id="role-specific" name="role-specific" type="file" required className={fileInputClassName} onChange={(e) => handleFileChange(e, 'roleSpecific')} />;
+                return <CloudDriveInput {...commonProps} label="Proof of Organization Registration" documentType="organization registration proof" />;
             default:
                 return null;
         }
@@ -348,15 +364,25 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
                         </p>
                         
                         <div className="space-y-4">
-                            <Input 
-                                label="Government ID (Passport, Driver's License, etc.)" 
-                                id="gov-id" 
-                                name="gov-id"
-                                type="file" 
-                                className={fileInputClassName} 
-                                onChange={(e) => handleFileChange(e, 'govId')}
+                            <CloudDriveInput
+                                value=""
+                                onChange={(url) => {
+                                    const hiddenInput = document.getElementById('gov-id-url') as HTMLInputElement;
+                                    if (hiddenInput) hiddenInput.value = url;
+                                }}
+                                onFileSelect={(file) => {
+                                    handleFileChange({ target: { files: [file] } } as any, 'govId');
+                                }}
+                                placeholder="Paste your cloud drive link here..."
+                                label="Government ID (Passport, Driver's License, etc.)"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                maxSize={10}
+                                documentType="government ID"
+                                showPrivacyMessage={false}
                             />
+                            <input type="hidden" id="gov-id-url" name="gov-id-url" />
                             {renderRoleSpecificDocs()}
+                            <input type="hidden" id="role-specific-url" name="role-specific-url" />
                         </div>
                     </div>
                 </div>

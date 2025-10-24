@@ -6,6 +6,7 @@ import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import DateInput from '../DateInput';
+import CloudDriveInput from '../ui/CloudDriveInput';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Plus, Trash2, Edit3, Save, X, Download } from 'lucide-react';
 import { employeesService } from '../../lib/employeesService';
@@ -1206,7 +1207,30 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             readOnly
                             placeholder="Auto-calculated"
                         />
-                        <Input id="employee-contract" label="Employee Contract" name="contract" type="file" accept=".pdf,.doc,.docx" />
+                        <CloudDriveInput
+                            value=""
+                            onChange={(url) => {
+                                // Store cloud drive URL in a hidden input for form submission
+                                const hiddenInput = document.getElementById('contract-url') as HTMLInputElement;
+                                if (hiddenInput) hiddenInput.value = url;
+                            }}
+                            onFileSelect={(file) => {
+                                // Handle file selection for form submission
+                                const fileInput = document.getElementById('employee-contract') as HTMLInputElement;
+                                if (fileInput) {
+                                    const dataTransfer = new DataTransfer();
+                                    dataTransfer.items.add(file);
+                                    fileInput.files = dataTransfer.files;
+                                }
+                            }}
+                            placeholder="Paste your cloud drive link here..."
+                            label="Employee Contract"
+                            accept=".pdf,.doc,.docx"
+                            maxSize={10}
+                            documentType="employee contract"
+                            showPrivacyMessage={false}
+                        />
+                        <input type="hidden" id="contract-url" name="contract-url" />
                         <div className="flex items-end pt-5 col-span-1 md:col-span-2 justify-end">
                             <Button type="submit" className="bg-blue-600 text-white">Save</Button>
                         </div>
@@ -1582,7 +1606,30 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             readOnly
                             placeholder="Auto-calculated"
                         />
-                        <Input id="edit-employee-contract" label="Employee Contract" name="contract" type="file" accept=".pdf,.doc,.docx" />
+                        <CloudDriveInput
+                            value=""
+                            onChange={(url) => {
+                                // Store cloud drive URL for edit form
+                                const hiddenInput = document.getElementById('edit-contract-url') as HTMLInputElement;
+                                if (hiddenInput) hiddenInput.value = url;
+                            }}
+                            onFileSelect={(file) => {
+                                // Handle file selection for edit form
+                                const fileInput = document.getElementById('edit-employee-contract') as HTMLInputElement;
+                                if (fileInput) {
+                                    const dataTransfer = new DataTransfer();
+                                    dataTransfer.items.add(file);
+                                    fileInput.files = dataTransfer.files;
+                                }
+                            }}
+                            placeholder="Paste your cloud drive link here..."
+                            label="Employee Contract"
+                            accept=".pdf,.doc,.docx"
+                            maxSize={10}
+                            documentType="employee contract"
+                            showPrivacyMessage={false}
+                        />
+                        <input type="hidden" id="edit-contract-url" name="edit-contract-url" />
                         <div className="flex justify-end gap-2 pt-2 md:col-span-2">
                             <Button variant="outline" onClick={() => setEditingEmployee(null)}>Cancel</Button>
                             <Button onClick={saveEditEmployee}>Save</Button>

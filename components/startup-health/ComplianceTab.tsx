@@ -9,6 +9,7 @@ import { UploadCloud, Download, Trash2, Eye, X, CheckCircle, AlertCircle, Clock,
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
+import CloudDriveInput from '../ui/CloudDriveInput';
 import ComplianceSubmissionButton from '../ComplianceSubmissionButton';
 import CompanyDocumentsSection from './CompanyDocumentsSection';
 import IPTrademarkSection from './IPTrademarkSection';
@@ -75,6 +76,8 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
     const [uploadSuccess, setUploadSuccess] = useState(false);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+    const [cloudDriveUrl, setCloudDriveUrl] = useState('');
+    const [useCloudDrive, setUseCloudDrive] = useState(false);
     const [filters, setFilters] = useState({
         entity: 'all',
         year: 'all'
@@ -527,6 +530,49 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
         }
     };
 
+    const handleCloudDriveUpload = async () => {
+        if (!selectedTask || !currentUser || !cloudDriveUrl.trim()) return;
+
+        try {
+            setUploading(true);
+            // Use the existing compliance service to save the cloud drive URL
+            // We'll create a mock file object with the cloud drive URL
+            const mockFile = new File([], 'cloud-drive-document.pdf', { type: 'application/pdf' });
+            
+            // Store the cloud drive URL in the file object for the service to use
+            (mockFile as any).cloudDriveUrl = cloudDriveUrl;
+            
+            const result = await complianceRulesIntegrationService.uploadComplianceDocument(
+                startup.id,
+                selectedTask.taskId,
+                mockFile,
+                currentUser.email || 'unknown'
+            );
+            
+            if (result) {
+                console.log('Cloud drive URL saved successfully:', result);
+                setUploadSuccess(true);
+                setCloudDriveUrl('');
+                setUseCloudDrive(false);
+                loadComplianceData(); // Refresh data
+                
+                // Close modal after 2 seconds
+                setTimeout(() => {
+                    setUploadModalOpen(false);
+                    setSelectedTask(null);
+                    setUploadSuccess(false);
+                }, 2000);
+            } else {
+                throw new Error('Failed to save cloud drive URL');
+            }
+        } catch (error) {
+            console.error('Cloud drive URL save failed:', error);
+            messageService.error('Save Failed', 'Failed to save cloud drive URL. Please try again.');
+        } finally {
+            setUploading(false);
+        }
+    };
+
     const handleDeleteUpload = async (uploadId: string) => {
         if (!currentUser) return;
 
@@ -900,58 +946,19 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".pdf"
-                                    onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) {
-                                            // Check if file is PDF
-                                            if (file.type !== 'application/pdf') {
-                                                messageService.warning(
-                                                  'Invalid File Type',
-                                                  'Please select a PDF file only.'
-                                                );
-                                                return;
-                                            }
-                                            handleFileSelect(file);
-                                        }
-                                    }}
-                                    className="hidden"
-                                />
-                                
-                                {selectedFile ? (
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-center gap-2 text-sm">
-                                            <UploadCloud className="w-5 h-5 text-blue-600" />
-                                            <span className="font-medium">{selectedFile.name}</span>
-                                        </div>
-                                        <p className="text-xs text-gray-500">
-                                            Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                                        </p>
-                                        <button
-                                            onClick={() => handleFileSelect(null)}
-                                            className="text-red-600 text-xs hover:text-red-800"
-                                        >
-                                            Remove file
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        <UploadCloud className="w-8 h-8 text-gray-400 mx-auto" />
-                                        <p className="text-sm text-gray-600">Click to select a PDF file</p>
-                                        <p className="text-xs text-gray-500">Only PDF files are accepted</p>
-                                        <button
-                                            onClick={() => fileInputRef.current?.click()}
-                                            className="bg-blue-100 text-blue-700 px-4 py-2 rounded-md text-sm hover:bg-blue-200 transition-colors"
-                                        >
-                                            Choose File
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
+                            {/* Cloud Drive URL Option */}
+                            <CloudDriveInput
+                                value={cloudDriveUrl}
+                                onChange={setCloudDriveUrl}
+                                onFileSelect={handleFileSelect}
+                                placeholder="Paste your cloud drive link here..."
+                                label="Compliance Document"
+                                required={true}
+                                accept=".pdf"
+                                maxSize={10}
+                                documentType="compliance document"
+                                showPrivacyMessage={false}
+                            />
                             
                             <div className="flex justify-end gap-3">
                                 <Button 
@@ -959,6 +966,8 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                                     onClick={() => {
                                         setUploadModalOpen(false);
                                         setSelectedFile(null);
+                                        setCloudDriveUrl('');
+                                        setUseCloudDrive(false);
                                         setUploadSuccess(false);
                                     }}
                                     disabled={uploading}
@@ -966,11 +975,11 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                                     Cancel
                                 </Button>
                                 <Button 
-                                    onClick={handleFileUpload}
-                                    disabled={uploading || !selectedFile}
-                                    className={!selectedFile ? 'opacity-50 cursor-not-allowed' : ''}
+                                    onClick={cloudDriveUrl.trim() ? handleCloudDriveUpload : handleFileUpload}
+                                    disabled={uploading || (!selectedFile && !cloudDriveUrl.trim())}
+                                    className={(!selectedFile && !cloudDriveUrl.trim()) ? 'opacity-50 cursor-not-allowed' : ''}
                                 >
-                                    {uploading ? 'Uploading...' : 'Upload Document'}
+                                    {uploading ? 'Saving...' : (cloudDriveUrl.trim() ? 'Save Cloud Drive Link' : 'Upload Document')}
                                 </Button>
                             </div>
                         </div>

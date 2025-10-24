@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
+import CloudDriveInput from './ui/CloudDriveInput';
 import Select from './ui/Select';
 import { UserRole, InvestmentType, StartupDomain, StartupStage } from '../types';
 import { Upload, FileText, Users, CheckCircle } from 'lucide-react';
@@ -264,12 +265,22 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 Government ID (Passport, Driver's License, etc.)
               </label>
-              <Input
-                type="file"
+              <CloudDriveInput
+                value=""
+                onChange={(url) => {
+                  const hiddenInput = document.getElementById('gov-id-url') as HTMLInputElement;
+                  if (hiddenInput) hiddenInput.value = url;
+                }}
+                onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'govId')}
+                placeholder="Paste your cloud drive link here..."
+                label=""
                 accept=".pdf,.jpg,.jpeg,.png"
-                onChange={(e) => handleFileChange(e, 'govId')}
+                maxSize={10}
+                documentType="government ID"
+                showPrivacyMessage={false}
                 required
               />
+              <input type="hidden" id="gov-id-url" name="gov-id-url" />
               {uploadedFiles.govId && (
                 <p className="text-sm text-green-600 mt-1">
                   ✓ {uploadedFiles.govId.name} selected
@@ -281,12 +292,22 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 {getRoleSpecificDocumentType(userData.role)}
               </label>
-              <Input
-                type="file"
+              <CloudDriveInput
+                value=""
+                onChange={(url) => {
+                  const hiddenInput = document.getElementById('role-specific-url') as HTMLInputElement;
+                  if (hiddenInput) hiddenInput.value = url;
+                }}
+                onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'roleSpecific')}
+                placeholder="Paste your cloud drive link here..."
+                label=""
                 accept=".pdf,.jpg,.jpeg,.png"
-                onChange={(e) => handleFileChange(e, 'roleSpecific')}
+                maxSize={10}
+                documentType="role-specific document"
+                showPrivacyMessage={false}
                 required
               />
+              <input type="hidden" id="role-specific-url" name="role-specific-url" />
               {uploadedFiles.roleSpecific && (
                 <p className="text-sm text-green-600 mt-1">
                   ✓ {uploadedFiles.roleSpecific.name} selected
@@ -300,12 +321,22 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   License (As per country regulations)
                 </label>
-                <Input
-                  type="file"
+                <CloudDriveInput
+                  value=""
+                  onChange={(url) => {
+                    const hiddenInput = document.getElementById('license-url') as HTMLInputElement;
+                    if (hiddenInput) hiddenInput.value = url;
+                  }}
+                  onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'license')}
+                  placeholder="Paste your cloud drive link here..."
+                  label=""
                   accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => handleFileChange(e, 'license')}
+                  maxSize={10}
+                  documentType="license"
+                  showPrivacyMessage={true}
                   required
                 />
+                <input type="hidden" id="license-url" name="license-url" />
                 {uploadedFiles.license && (
                   <p className="text-sm text-green-600 mt-1">
                     ✓ {uploadedFiles.license.name} selected
@@ -335,12 +366,22 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Upload Logo
                 </label>
-                <Input
-                  type="file"
+                <CloudDriveInput
+                  value=""
+                  onChange={(url) => {
+                    const hiddenInput = document.getElementById('logo-url') as HTMLInputElement;
+                    if (hiddenInput) hiddenInput.value = url;
+                  }}
+                  onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'logo')}
+                  placeholder="Paste your cloud drive link here..."
+                  label=""
                   accept=".jpg,.jpeg,.png,.svg"
-                  onChange={(e) => handleFileChange(e, 'logo')}
+                  maxSize={5}
+                  documentType="company logo"
+                  showPrivacyMessage={true}
                   required
                 />
+                <input type="hidden" id="logo-url" name="logo-url" />
                 {uploadedFiles.logo && (
                   <p className="text-sm text-green-600 mt-1">
                     ✓ {uploadedFiles.logo.name} selected
@@ -500,13 +541,22 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                 />
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
-                  <input
-                    id="fr-deck"
-                    type="file"
+                  <CloudDriveInput
+                    value=""
+                    onChange={(url) => {
+                      const hiddenInput = document.getElementById('pitch-deck-url') as HTMLInputElement;
+                      if (hiddenInput) hiddenInput.value = url;
+                    }}
+                    onFileSelect={(file) => handleFundraisingDeckChange({ target: { files: [file] } } as any)}
+                    placeholder="Paste your cloud drive link here..."
+                    label=""
                     accept=".pdf"
-                    onChange={handleFundraisingDeckChange}
-                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                    maxSize={10}
+                    documentType="pitch deck"
+                  showPrivacyMessage={false}
+                  className="w-full text-sm"
                   />
+                  <input type="hidden" id="pitch-deck-url" name="pitch-deck-url" />
                   <p className="text-xs text-slate-500 mt-1">Max 10MB</p>
                 </div>
               </div>

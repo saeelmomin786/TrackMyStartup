@@ -8,6 +8,7 @@ import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import DateInput from '../DateInput';
+import CloudDriveInput from '../ui/CloudDriveInput';
 import { Edit, Plus, Upload, Download, Trash2 } from 'lucide-react';
 
 interface FinancialsTabProps {
@@ -70,7 +71,8 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
     amount: '',
     cogs: '',
     fundingSource: 'Revenue',
-    attachment: null as File | null
+    attachment: null as File | null,
+    cloudDriveUrl: ''
   });
   const [formType, setFormType] = useState<'revenue' | 'expense'>('expense');
   const [otherExpenseLabel, setOtherExpenseLabel] = useState<string>('');
@@ -288,6 +290,9 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
           setError('Failed to upload attachment. Please try again.');
           return;
         }
+      } else if (formState.cloudDriveUrl.trim()) {
+        console.log('☁️ Using cloud drive URL:', formState.cloudDriveUrl);
+        attachmentUrl = formState.cloudDriveUrl;
       }
 
       const recordData = {
@@ -321,7 +326,8 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         amount: '',
         cogs: '',
         fundingSource: 'Revenue',
-        attachment: null
+        attachment: null,
+        cloudDriveUrl: ''
       });
       setOtherExpenseLabel('');
       setOtherIncomeLabel('');
@@ -700,13 +706,14 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       )}
 
       {isAddModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-3xl w-full mx-4">
-            <div className="flex justify-between items-center mb-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center p-6 border-b border-gray-200">
               <h3 className="text-lg font-semibold text-slate-900">Add Financial Record</h3>
               <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>Close</Button>
             </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="flex-1 overflow-y-auto p-6">
+              <form id="financial-form" onSubmit={handleSubmit} className="space-y-4">
             {/* Toggle Buttons */}
             <div className="flex gap-4 mb-4">
               <button 
@@ -865,15 +872,16 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                     )}
                   </Select>
                   <div>
-                    <label htmlFor="attachment" className="block text-sm font-medium text-slate-700 mb-2">
-                      Attach Invoice
-                    </label>
-                    <input
-                      id="attachment"
-                      type="file"
+                    <CloudDriveInput
+                      value={formState.cloudDriveUrl}
+                      onChange={(url) => setFormState({ ...formState, cloudDriveUrl: url })}
+                      onFileSelect={(file) => setFormState({ ...formState, attachment: file })}
+                      placeholder="Paste your cloud drive link here..."
+                      label="Attach Invoice"
                       accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                      onChange={e => setFormState({ ...formState, attachment: e.target.files?.[0] || null })}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      maxSize={10}
+                      documentType="financial attachment"
+                      showPrivacyMessage={false}
                     />
                   </div>
                 </>
@@ -881,15 +889,16 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
               {formType === 'revenue' && (
                 <>
                   <div>
-                    <label htmlFor="attachment" className="block text-sm font-medium text-slate-700 mb-2">
-                      Attach Invoice
-                    </label>
-                    <input
-                      id="attachment"
-                      type="file"
+                    <CloudDriveInput
+                      value={formState.cloudDriveUrl}
+                      onChange={(url) => setFormState({ ...formState, cloudDriveUrl: url })}
+                      onFileSelect={(file) => setFormState({ ...formState, attachment: file })}
+                      placeholder="Paste your cloud drive link here..."
+                      label="Attach Invoice"
                       accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                      onChange={e => setFormState({ ...formState, attachment: e.target.files?.[0] || null })}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      maxSize={10}
+                      documentType="financial attachment"
+                      showPrivacyMessage={false}
                     />
                   </div>
                   <div></div> {/* Empty div to maintain grid layout */}
@@ -897,13 +906,18 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
               )}
             </div>
             
-            {/* Submit Button */}
-            <div className="flex justify-end">
-              <Button type="submit" disabled={isSubmitting} className="bg-blue-600 text-white px-4 py-2 rounded-md font-semibold hover:bg-blue-700 flex items-center gap-2">
-                {isSubmitting ? 'Adding...' : 'Add Record'}
-              </Button>
+              </form>
             </div>
-          </form>
+            <div className="border-t border-gray-200 p-6 bg-gray-50">
+              <div className="flex justify-end gap-3">
+                <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" form="financial-form" disabled={isSubmitting} className="bg-blue-600 text-white px-6 py-2 rounded-md font-semibold hover:bg-blue-700">
+                  {isSubmitting ? 'Adding...' : 'Add Record'}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}

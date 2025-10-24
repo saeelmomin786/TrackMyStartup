@@ -17,7 +17,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
       onClick={onClose}
     >
       <div 
-        className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg relative animate-fade-in-up"
+        className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto relative animate-fade-in-up"
         onClick={e => e.stopPropagation()} // Prevent closing when clicking inside modal
       >
         <div className="flex justify-between items-center mb-4 border-b pb-3">

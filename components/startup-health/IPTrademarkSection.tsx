@@ -28,6 +28,7 @@ import {
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
+import CloudDriveInput from '../ui/CloudDriveInput';
 
 type CurrentUserLike = { role: UserRole; email?: string; serviceCode?: string };
 
@@ -121,16 +122,36 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
     };
 
     const handleFileUpload = async () => {
-        if (!selectedFile || !selectedRecord) return;
+        if (!selectedRecord) return;
         
         try {
             setUploading(true);
-            await ipTrademarkService.uploadIPTrademarkDocument(
-                selectedRecord.id,
-                selectedFile,
-                documentType,
-                currentUser?.email || 'Unknown'
-            );
+            
+            // Check for cloud drive URL first
+            const cloudDriveUrl = (document.getElementById('ip-document-url') as HTMLInputElement)?.value;
+            
+            if (cloudDriveUrl) {
+                // Use cloud drive URL directly
+                await ipTrademarkService.uploadIPTrademarkDocument(
+                    selectedRecord.id,
+                    null, // No file
+                    documentType,
+                    currentUser?.email || 'Unknown',
+                    cloudDriveUrl
+                );
+            } else if (selectedFile) {
+                // Upload file
+                await ipTrademarkService.uploadIPTrademarkDocument(
+                    selectedRecord.id,
+                    selectedFile,
+                    documentType,
+                    currentUser?.email || 'Unknown'
+                );
+            } else {
+                alert('Please provide either a cloud drive URL or upload a file');
+                return;
+            }
+            
             setShowUploadModal(false);
             setSelectedFile(null);
             setSelectedRecord(null);
@@ -677,16 +698,24 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
                                 ))}
                             </select>
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Select File</label>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                                className="w-full border border-gray-300 rounded-md px-3 py-2"
-                                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                            />
-                        </div>
+                        <CloudDriveInput
+                            value=""
+                            onChange={(url) => {
+                                // Store cloud drive URL for IP document
+                                const hiddenInput = document.getElementById('ip-document-url') as HTMLInputElement;
+                                if (hiddenInput) hiddenInput.value = url;
+                            }}
+                            onFileSelect={(file) => {
+                                setSelectedFile(file);
+                            }}
+                            placeholder="Paste your cloud drive link here..."
+                            label="IP/Trademark Document"
+                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                            maxSize={10}
+                            documentType="IP/trademark document"
+                            showPrivacyMessage={false}
+                        />
+                        <input type="hidden" id="ip-document-url" name="ip-document-url" />
                         {selectedFile && (
                             <div className="p-3 bg-gray-50 rounded-md">
                                 <p className="text-sm text-gray-700">
@@ -704,7 +733,7 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
                         </Button>
                         <Button 
                             onClick={handleFileUpload}
-                            disabled={uploading || !selectedFile}
+                            disabled={uploading || (!selectedFile && !(document.getElementById('ip-document-url') as HTMLInputElement)?.value)}
                         >
                             {uploading ? 'Uploading...' : 'Upload Document'}
                         </Button>

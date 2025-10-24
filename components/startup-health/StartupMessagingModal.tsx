@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { X, Send, Paperclip, FileText, Download, CheckCircle, MessageCircle } from 'lucide-react';
+import CloudDriveInput from '../ui/CloudDriveInput';
 // Payment service removed; define local message type and use Supabase
 type IncubationMessage = {
   id: string;
@@ -34,6 +35,7 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
   const [messages, setMessages] = useState<IncubationMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [cloudDriveUrl, setCloudDriveUrl] = useState<string>('');
   const [isSending, setIsSending] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -128,13 +130,16 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
   };
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim() && !selectedFile) return;
+    if (!newMessage.trim() && !selectedFile && !cloudDriveUrl) return;
 
     setIsSending(true);
     try {
       let attachmentUrl = '';
       
-      if (selectedFile) {
+      if (cloudDriveUrl) {
+        // Use cloud drive URL directly
+        attachmentUrl = cloudDriveUrl;
+      } else if (selectedFile) {
         const uploadResult = await storageService.uploadFile(
           selectedFile,
           `incubation-attachments/${applicationId}/${Date.now()}_${selectedFile.name}`
@@ -199,6 +204,7 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
       // Clear input after adding to state
       setNewMessage('');
       setSelectedFile(null);
+      setCloudDriveUrl('');
       
       // Real-time subscription will also trigger, but this ensures immediate visibility
     } catch (error) {
@@ -379,19 +385,18 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
           )}
           
           <div className="flex space-x-2">
-            <input
-              type="file"
-              id="file-input"
-              className="hidden"
-              onChange={handleFileSelect}
+            <CloudDriveInput
+              value={cloudDriveUrl}
+              onChange={setCloudDriveUrl}
+              onFileSelect={setSelectedFile}
+              placeholder="Paste your cloud drive link here..."
+              label=""
               accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png"
+              maxSize={10}
+              documentType="message attachment"
+              showPrivacyMessage={false}
+              className="flex-1 text-sm"
             />
-            <label
-              htmlFor="file-input"
-              className="flex items-center justify-center w-10 h-10 text-slate-500 hover:text-slate-700 cursor-pointer"
-            >
-              <Paperclip className="w-5 h-5" />
-            </label>
             
             <input
               type="text"
@@ -405,7 +410,7 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
             
             <button
               onClick={handleSendMessage}
-              disabled={isSending || (!newMessage.trim() && !selectedFile)}
+              disabled={isSending || (!newMessage.trim() && !selectedFile && !cloudDriveUrl)}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
             >
               {isSending ? (

@@ -96,16 +96,41 @@ export const userService = {
   // Accept investment advisor request
   async acceptInvestmentAdvisorRequest(userId: string, financialMatrix: any) {
     console.log('Accepting investment advisor request for user:', userId);
+    console.log('🔍 Financial matrix:', financialMatrix);
     try {
+      // Validate and clean financial matrix data
+      const cleanFinancialMatrix = {
+        minimum_investment: financialMatrix.minimumInvestment ? parseFloat(financialMatrix.minimumInvestment) : null,
+        maximum_investment: financialMatrix.maximumInvestment ? parseFloat(financialMatrix.maximumInvestment) : null,
+        success_fee: financialMatrix.successFee ? parseFloat(financialMatrix.successFee) : null,
+        success_fee_type: financialMatrix.successFeeType || 'percentage',
+        scouting_fee: financialMatrix.scoutingFee ? parseFloat(financialMatrix.scoutingFee) : null
+      };
+
+      // Validate success fee based on type
+      if (cleanFinancialMatrix.success_fee !== null) {
+        if (cleanFinancialMatrix.success_fee_type === 'percentage') {
+          if (cleanFinancialMatrix.success_fee < 0 || cleanFinancialMatrix.success_fee > 100) {
+            throw new Error('Success fee percentage must be between 0 and 100');
+          }
+        } else if (cleanFinancialMatrix.success_fee_type === 'fixed') {
+          if (cleanFinancialMatrix.success_fee < 0) {
+            throw new Error('Success fee amount must be positive');
+          }
+        }
+      }
+
+      console.log('🔍 Cleaned financial matrix:', cleanFinancialMatrix);
+
       const { data, error } = await supabase
         .from('users')
         .update({
           advisor_accepted: true,
-          minimum_investment: financialMatrix.minimumInvestment,
-          maximum_investment: financialMatrix.maximumInvestment,
-          success_fee: financialMatrix.successFee,
-          success_fee_type: financialMatrix.successFeeType,
-          scouting_fee: financialMatrix.scoutingFee,
+          minimum_investment: cleanFinancialMatrix.minimum_investment,
+          maximum_investment: cleanFinancialMatrix.maximum_investment,
+          success_fee: cleanFinancialMatrix.success_fee,
+          success_fee_type: cleanFinancialMatrix.success_fee_type,
+          scouting_fee: cleanFinancialMatrix.scouting_fee,
           updated_at: new Date().toISOString()
         })
         .eq('id', userId)
@@ -113,15 +138,23 @@ export const userService = {
         .single()
 
       if (error) {
-        console.error('Error accepting investment advisor request:', error)
-        throw error
+        console.error('Error accepting investment advisor request:', error);
+        // Provide more specific error information
+        const errorMessage = error.message || 'Unknown database error';
+        const errorCode = error.code || 'UNKNOWN_ERROR';
+        throw new Error(`Database error (${errorCode}): ${errorMessage}`);
       }
       
       console.log('Investment advisor request accepted successfully:', data);
       return data
     } catch (error) {
-      console.error('Error in acceptInvestmentAdvisorRequest:', error)
-      throw error
+      console.error('Error in acceptInvestmentAdvisorRequest:', error);
+      // Re-throw with better error context
+      if (error instanceof Error) {
+        throw new Error(`Failed to accept investment advisor request: ${error.message}`);
+      } else {
+        throw new Error('Failed to accept investment advisor request: Unknown error occurred');
+      }
     }
   },
 
@@ -619,15 +652,14 @@ export const investmentService = {
     }
   },
 
-  // Create investment offer with scouting fee
+  // Create investment offer
   async createInvestmentOffer(offerData: {
     investor_email: string
     startup_name: string
     startup_id: number
     offer_amount: number
     equity_percentage: number
-    country?: string
-    startup_amount_raised?: number
+    currency?: string
   }) {
     console.log('Creating investment offer with data:', offerData);
     
@@ -656,22 +688,44 @@ export const investmentService = {
     console.log('Existing offers for this user and investment:', existingOffers);
     
     if (existingOffers && existingOffers.length > 0) {
-      const pendingOffer = existingOffers.find(offer => offer.status === 'pending');
+      const pendingOffer = existingOffers.find(offer => 
+        offer.status === 'pending' || 
+        offer.status === 'pending_investor_advisor_approval' ||
+        offer.status === 'pending_startup_advisor_approval' ||
+        offer.status === 'investor_advisor_approved' ||
+        offer.status === 'startup_advisor_approved'
+      );
       if (pendingOffer) {
         console.error('User already has a pending offer for this startup');
         throw new Error('You already have a pending offer for this startup');
       }
+      
+      // If there are rejected offers, delete them to allow new offers
+      const rejectedOffers = existingOffers.filter(offer => 
+        offer.status === 'rejected' || 
+        offer.status === 'investor_advisor_rejected' ||
+        offer.status === 'startup_advisor_rejected'
+      );
+      
+      if (rejectedOffers.length > 0) {
+        console.log('Deleting rejected offers to allow new offer:', rejectedOffers);
+        for (const rejectedOffer of rejectedOffers) {
+          await supabase
+            .from('investment_offers')
+            .delete()
+            .eq('id', rejectedOffer.id);
+        }
+      }
     }
     
-    // Use the new function to create offer with scouting fee
+    // Use the simple function to create offer without scouting fees
     const { data, error } = await supabase.rpc('create_investment_offer_with_fee', {
       p_investor_email: offerData.investor_email,
       p_startup_name: offerData.startup_name,
       p_startup_id: offerData.startup_id,
       p_offer_amount: offerData.offer_amount,
       p_equity_percentage: offerData.equity_percentage,
-      p_country: offerData.country || 'United States',
-      p_startup_amount_raised: offerData.startup_amount_raised || 0
+      p_currency: offerData.currency || 'USD'
     });
 
     if (error) {
@@ -697,8 +751,33 @@ export const investmentService = {
       throw fetchError;
     }
     
-    console.log('Investment offer created successfully with scouting fee:', createdOffer);
-    return createdOffer;
+    console.log('Investment offer created successfully:', createdOffer);
+    console.log('🔍 Created offer details:', {
+      id: createdOffer?.id,
+      offer_amount: createdOffer?.offer_amount,
+      equity_percentage: createdOffer?.equity_percentage,
+      currency: createdOffer?.currency,
+      created_at: createdOffer?.created_at,
+      startup_name: createdOffer?.startup_name,
+      investor_email: createdOffer?.investor_email
+    });
+    
+    // Ensure the returned data has proper formatting
+    const formattedOffer = {
+      ...createdOffer,
+      offer_amount: Number(createdOffer?.offer_amount) || 0,
+      equity_percentage: Number(createdOffer?.equity_percentage) || 0,
+      created_at: createdOffer?.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString()
+    };
+    
+    console.log('🔍 Formatted offer for return:', formattedOffer);
+    
+    // Handle investment flow logic after creating the offer
+    if (createdOffer && createdOffer.id) {
+      await this.handleInvestmentFlow(createdOffer.id);
+    }
+    
+    return formattedOffer;
   },
 
   // Get user's investment offers
@@ -746,13 +825,28 @@ export const investmentService = {
 
   // Delete investment offer
   async deleteInvestmentOffer(offerId: number) {
-    const { error } = await supabase
+    console.log('🗑️ Attempting to delete investment offer with ID:', offerId);
+    
+    try {
+      const { data, error } = await supabase
       .from('investment_offers')
       .delete()
       .eq('id', offerId)
+        .select();
 
-    if (error) throw error
-    return true
+      console.log('🗑️ Delete operation result:', { data, error });
+
+      if (error) {
+        console.error('🗑️ Error deleting investment offer:', error);
+        throw new Error(`Failed to delete investment offer: ${error.message}`);
+      }
+
+      console.log('✅ Investment offer deleted successfully');
+      return true;
+    } catch (err) {
+      console.error('🗑️ Exception in deleteInvestmentOffer:', err);
+      throw err;
+    }
   },
 
   // Get all investment offers (admin)
@@ -777,14 +871,16 @@ export const investmentService = {
       // Get unique investor emails to fetch their names
       const investorEmails = [...new Set((data || []).map(offer => offer.investor_email))];
       let investorNames: { [email: string]: string } = {};
+      let users: any[] = [];
       
       if (investorEmails.length > 0) {
-        const { data: users, error: usersError } = await supabase
+        const { data: usersData, error: usersError } = await supabase
           .from('users')
           .select('email, name')
           .in('email', investorEmails);
         
-        if (!usersError && users) {
+        if (!usersError && usersData) {
+          users = usersData;
           investorNames = users.reduce((acc, user) => {
             acc[user.email] = user.name;
             return acc;
@@ -808,10 +904,11 @@ export const investmentService = {
           validationDate: offer.startup.validation_date,
           createdAt: offer.startup.created_at
         } : null,
-        offerAmount: offer.offer_amount,
-        equityPercentage: offer.equity_percentage,
+        offerAmount: Number(offer.offer_amount) || 0,
+        equityPercentage: Number(offer.equity_percentage) || 0,
         status: offer.status,
-        createdAt: offer.created_at,
+        currency: offer.currency || 'USD',
+        createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : new Date().toISOString(),
         // New scouting fee fields
         startup_scouting_fee_amount: offer.startup_scouting_fee_amount || 0,
         investor_scouting_fee_amount: offer.investor_scouting_fee_amount || 0,
@@ -823,7 +920,9 @@ export const investmentService = {
         investor_advisor_approval_status: offer.investor_advisor_approval_status || 'not_required',
         investor_advisor_approval_at: offer.investor_advisor_approval_at,
         startup_advisor_approval_status: offer.startup_advisor_approval_status || 'not_required',
-        startup_advisor_approval_at: offer.startup_advisor_approval_at
+        startup_advisor_approval_at: offer.startup_advisor_approval_at,
+        // Stage field
+        stage: offer.stage || 1
       }));
       
       return mappedData;
@@ -1047,9 +1146,102 @@ export const investmentService = {
     }
   },
 
+  // Update investment offer stage
+  async updateInvestmentOfferStage(offerId: number, newStage: number) {
+    try {
+      const { error } = await supabase
+        .from('investment_offers')
+        .update({ stage: newStage })
+        .eq('id', offerId);
+
+      if (error) {
+        console.error('Error updating investment offer stage:', error);
+        throw error;
+      }
+
+      console.log(`✅ Investment offer ${offerId} stage updated to ${newStage}`);
+    } catch (error) {
+      console.error('Error in updateInvestmentOfferStage:', error);
+      throw error;
+    }
+  },
+
+  // Handle investment flow logic based on stages
+  async handleInvestmentFlow(offerId: number) {
+    try {
+      // Get the offer details
+      const { data: offer, error: offerError } = await supabase
+        .from('investment_offers')
+        .select(`
+          *,
+          investor:users!investment_offers_investor_email_fkey(
+            id,
+            email,
+            name,
+            investor_code,
+            investment_advisor_code
+          ),
+          startup:startups!investment_offers_startup_id_fkey(
+            id,
+            name,
+            investment_advisor_code
+          )
+        `)
+        .eq('id', offerId)
+        .single();
+
+      if (offerError || !offer) {
+        console.error('Error fetching offer for flow logic:', offerError);
+        return;
+      }
+
+      const currentStage = offer.stage || 1;
+      console.log(`🔄 Processing investment flow for offer ${offerId}, current stage: ${currentStage}`);
+
+      // Stage 1: Check if investor has investment advisor code
+      if (currentStage === 1) {
+        const investorAdvisorCode = offer.investor?.investment_advisor_code;
+        if (investorAdvisorCode) {
+          console.log(`✅ Investor has advisor code: ${investorAdvisorCode}, keeping at stage 1 for advisor approval`);
+          // Keep at stage 1 - will be displayed in investor's advisor dashboard
+          return;
+        } else {
+          console.log(`❌ Investor has no advisor code, moving to stage 2`);
+          // Move to stage 2
+          await this.updateInvestmentOfferStage(offerId, 2);
+        }
+      }
+
+      // Stage 2: Check if startup has investment advisor code
+      if (currentStage === 2) {
+        const startupAdvisorCode = offer.startup?.investment_advisor_code;
+        if (startupAdvisorCode) {
+          console.log(`✅ Startup has advisor code: ${startupAdvisorCode}, keeping at stage 2 for advisor approval`);
+          // Keep at stage 2 - will be displayed in startup's advisor dashboard
+          return;
+        } else {
+          console.log(`❌ Startup has no advisor code, moving to stage 3`);
+          // Move to stage 3
+          await this.updateInvestmentOfferStage(offerId, 3);
+        }
+      }
+
+      // Stage 3: Display to startup (no further automatic progression)
+      if (currentStage === 3) {
+        console.log(`✅ Offer is at stage 3, ready for startup review`);
+        // This will be displayed in startup's "Offers Received" table
+        return;
+      }
+
+    } catch (error) {
+      console.error('Error in handleInvestmentFlow:', error);
+    }
+  },
+
   // Get offers for a specific startup (by startup_id)
   async getOffersForStartup(startupId: number) {
     try {
+      console.log('🔍 Fetching offers for startup:', startupId);
       const { data, error } = await supabase
         .from('investment_offers')
         .select(`
@@ -1057,6 +1249,7 @@ export const investmentService = {
           startup:startups(*)
         `)
         .eq('startup_id', startupId)
+        .in('stage', [3, 4]) // Show offers at stage 3 (ready for startup review) and stage 4 (approved)
         .order('created_at', { ascending: false })
 
       if (error) {
@@ -1067,14 +1260,16 @@ export const investmentService = {
       // Get unique investor emails to fetch their names
       const investorEmails = [...new Set((data || []).map(offer => offer.investor_email))];
       let investorNames: { [email: string]: string } = {};
+      let users: any[] = [];
       
       if (investorEmails.length > 0) {
-        const { data: users, error: usersError } = await supabase
+        const { data: usersData, error: usersError } = await supabase
           .from('users')
           .select('email, name')
           .in('email', investorEmails);
         
-        if (!usersError && users) {
+        if (!usersError && usersData) {
+          users = usersData;
           investorNames = users.reduce((acc, user) => {
             acc[user.email] = user.name;
             return acc;
@@ -1082,21 +1277,59 @@ export const investmentService = {
         }
       }
 
-      const mapped = (data || []).map((offer: any) => ({
+      // Debug: Log raw data from database
+      if (data && data.length > 0) {
+        console.log('🔍 Raw startup offers data from database:', data[0]);
+        console.log('🔍 Raw offer amount:', data[0].offer_amount);
+        console.log('🔍 Raw equity percentage:', data[0].equity_percentage);
+        console.log('🔍 Raw investor email:', data[0].investor_email);
+        console.log('🔍 Raw investor name:', data[0].investor_name);
+        console.log('🔍 Raw stage:', data[0].stage);
+        console.log('🔍 Raw currency:', data[0].currency);
+        console.log('🔍 Raw status:', data[0].status);
+        console.log('🔍 Raw created_at:', data[0].created_at);
+        console.log('🔍 Investor emails to fetch:', investorEmails);
+        console.log('🔍 Investor names mapping:', investorNames);
+        console.log('🔍 Users query result:', users);
+      }
+
+      const mapped = (data || []).map((offer: any) => {
+        // Use stored investor name from database
+        const investorName = offer.investor_name || investorNames[offer.investor_email] || 'Unknown Investor';
+        
+        const mappedOffer = {
         id: offer.id,
         investorEmail: offer.investor_email,
-        investorName: offer.investor_name || investorNames[offer.investor_email] || undefined,
+          investorName: investorName,
         startupName: offer.startup_name,
         startupId: offer.startup_id,
         startup: offer.startup ? {
           id: offer.startup.id,
           name: offer.startup.name
         } : null,
-        offerAmount: offer.offer_amount,
-        equityPercentage: offer.equity_percentage,
+          offerAmount: Number(offer.offer_amount) || 0,
+          equityPercentage: Number(offer.equity_percentage) || 0,
         status: offer.status,
-        createdAt: offer.created_at
-      }));
+          currency: offer.currency || 'USD',
+          stage: offer.stage || 1,
+          createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : new Date().toISOString()
+        };
+        
+        // Debug: Log mapped offer
+        console.log('🔍 Mapped startup offer:', {
+          id: mappedOffer.id,
+          investorName: mappedOffer.investorName,
+          investorEmail: mappedOffer.investorEmail,
+          offerAmount: mappedOffer.offerAmount,
+          equityPercentage: mappedOffer.equityPercentage,
+          currency: mappedOffer.currency,
+          stage: mappedOffer.stage,
+          status: mappedOffer.status,
+          createdAt: mappedOffer.createdAt
+        });
+        
+        return mappedOffer;
+      });
 
       return mapped;
     } catch (e) {
@@ -1371,6 +1604,15 @@ export const investmentService = {
       
       console.log('User investment offers fetched successfully:', data?.length || 0);
       
+      // Debug: Log raw data from database
+      if (data && data.length > 0) {
+        console.log('🔍 Raw offer data from database:', data[0]);
+        console.log('🔍 Raw offer amount:', data[0].offer_amount);
+        console.log('🔍 Raw equity percentage:', data[0].equity_percentage);
+        console.log('🔍 Raw currency:', data[0].currency);
+        console.log('🔍 Raw created_at:', data[0].created_at);
+      }
+      
       // Map database fields to frontend expected format
       const mappedData = (data || []).map(offer => ({
         id: offer.id,
@@ -1387,10 +1629,11 @@ export const investmentService = {
           validationDate: offer.startup.validation_date,
           createdAt: offer.startup.created_at
         } : null,
-        offerAmount: offer.offer_amount,
-        equityPercentage: offer.equity_percentage,
+        offerAmount: Number(offer.offer_amount) || 0,
+        equityPercentage: Number(offer.equity_percentage) || 0,
         status: offer.status,
-        createdAt: offer.created_at,
+        currency: offer.currency || 'USD',
+        createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : new Date().toISOString(),
         // New scouting fee fields
         startup_scouting_fee_amount: offer.startup_scouting_fee_amount || 0,
         investor_scouting_fee_amount: offer.investor_scouting_fee_amount || 0,
@@ -1402,8 +1645,19 @@ export const investmentService = {
         investor_advisor_approval_status: offer.investor_advisor_approval_status || 'not_required',
         investor_advisor_approval_at: offer.investor_advisor_approval_at,
         startup_advisor_approval_status: offer.startup_advisor_approval_status || 'not_required',
-        startup_advisor_approval_at: offer.startup_advisor_approval_at
+        startup_advisor_approval_at: offer.startup_advisor_approval_at,
+        // Stage field
+        stage: offer.stage || 1
       }));
+      
+      // Debug: Log mapped data
+      if (mappedData && mappedData.length > 0) {
+        console.log('🔍 Mapped offer data:', mappedData[0]);
+        console.log('🔍 Mapped offer amount:', mappedData[0].offerAmount);
+        console.log('🔍 Mapped equity percentage:', mappedData[0].equityPercentage);
+        console.log('🔍 Mapped currency:', mappedData[0].currency);
+        console.log('🔍 Mapped created at:', mappedData[0].createdAt);
+      }
       
       return mappedData;
     } catch (error) {

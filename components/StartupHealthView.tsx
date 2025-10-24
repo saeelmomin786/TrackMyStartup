@@ -80,16 +80,33 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     }, [startup]);
     
     const offersForStartup = (localOffers || investmentOffers || []).filter((o: any) => {
-        return (
+        const matches = (
             o.startupId === currentStartup.id ||
             (o.startup && o.startup.id === currentStartup.id) ||
             o.startupName === currentStartup.name
         );
+        
+        // Debug logging
+        if (process.env.NODE_ENV === 'development') {
+            console.log('🔍 StartupHealthView - Filtering offer:', {
+                offerId: o.id,
+                offerStartupId: o.startupId,
+                offerStartupName: o.startupName,
+                currentStartupId: currentStartup.id,
+                currentStartupName: currentStartup.name,
+                matches: matches,
+                stage: (o as any).stage
+            });
+        }
+        
+        return matches;
     });
 
     // Keep local offers in sync when props change
     useEffect(() => {
         if (investmentOffers && investmentOffers.length > 0) {
+            console.log('🔍 StartupHealthView - Investment offers prop changed:', investmentOffers);
+            console.log('🔍 StartupHealthView - Offers count:', investmentOffers.length);
             setLocalOffers(investmentOffers);
         }
     }, [investmentOffers]);
@@ -98,10 +115,21 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     useEffect(() => {
         let cancelled = false;
         const shouldFetch = (investmentOffers?.length || 0) === 0 && currentStartup?.id;
+        
+        console.log('🔍 StartupHealthView - Fallback fetch check:', {
+            investmentOffersLength: investmentOffers?.length || 0,
+            currentStartupId: currentStartup?.id,
+            shouldFetch: shouldFetch
+        });
+        
         if (shouldFetch) {
+            console.log('🔍 StartupHealthView - Fetching offers for startup:', currentStartup.id);
             investmentService.getOffersForStartup(currentStartup.id).then(rows => {
+                console.log('🔍 StartupHealthView - Fetched offers:', rows);
                 if (!cancelled) setLocalOffers(rows as any);
-            }).catch(() => {});
+            }).catch((error) => {
+                console.error('🔍 StartupHealthView - Error fetching offers:', error);
+            });
         }
         return () => { cancelled = true; };
     }, [currentStartup?.id]);

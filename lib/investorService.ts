@@ -16,6 +16,7 @@ export interface ActiveFundraisingStartup {
   fundraisingId: string; // UUID of the fundraising_details record
   isStartupNationValidated: boolean;
   validationDate?: string;
+  currency?: string;
 }
 
 class InvestorService {
@@ -32,6 +33,7 @@ class InvestorService {
             id,
             name,
             sector,
+            currency,
             compliance_status,
             startup_nation_validated,
             validation_date,
@@ -79,7 +81,8 @@ class InvestorService {
         createdAt: item.startups.created_at,
         fundraisingId: item.id,
         isStartupNationValidated: item.startups.startup_nation_validated || false,
-        validationDate: item.startups.validation_date
+        validationDate: item.startups.validation_date,
+        currency: item.startups.currency || 'USD'
       }));
     } catch (error) {
       console.error('Error in getActiveFundraisingStartups:', error);
@@ -98,6 +101,7 @@ class InvestorService {
             id,
             name,
             sector,
+            currency,
             compliance_status,
             created_at
           )
@@ -125,7 +129,8 @@ class InvestorService {
         createdAt: data.startups.created_at,
         fundraisingId: data.id,
         isStartupNationValidated: data.startups.startup_nation_validated || false,
-        validationDate: data.startups.validation_date
+        validationDate: data.startups.validation_date,
+        currency: data.startups.currency || 'USD'
       };
     } catch (error) {
       console.error('Error in getStartupDetails:', error);
@@ -160,13 +165,7 @@ class InvestorService {
   // Format currency for display
   formatCurrency(amount: number, currency: string = 'USD'): string {
     const symbol = this.getCurrencySymbol(currency);
-    if (amount >= 1000000) {
-      return `${symbol}${(amount / 1000000).toFixed(1)}M`;
-    } else if (amount >= 1000) {
-      return `${symbol}${(amount / 1000).toFixed(1)}K`;
-    } else {
-      return `${symbol}${amount.toLocaleString()}`;
-    }
+    return `${symbol}${amount.toLocaleString()}`;
   }
 
   // Get currency symbol

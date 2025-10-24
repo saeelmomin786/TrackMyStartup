@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
+import CloudDriveInput from './ui/CloudDriveInput';
 import { UserRole } from '../types';
 import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2, LogOut } from 'lucide-react';
 import Select from './ui/Select';
@@ -60,6 +61,21 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     roleSpecific: null,
     license: null,
     logo: null
+  });
+
+  // Cloud drive URLs state
+  const [cloudDriveUrls, setCloudDriveUrls] = useState<{
+    govId: string;
+    roleSpecific: string;
+    license: string;
+    logo: string;
+    pitchDeck: string;
+  }>({
+    govId: '',
+    roleSpecific: '',
+    license: '',
+    logo: '',
+    pitchDeck: ''
   });
 
   const [founders, setFounders] = useState<Founder[]>([
@@ -432,6 +448,16 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     const file = event.target.files?.[0];
     if (file) {
       setUploadedFiles(prev => ({ ...prev, [documentType]: file }));
+      // Clear cloud drive URL when file is selected
+      setCloudDriveUrls(prev => ({ ...prev, [documentType]: '' }));
+    }
+  };
+
+  const handleCloudDriveUrlChange = (documentType: string, url: string) => {
+    setCloudDriveUrls(prev => ({ ...prev, [documentType]: url }));
+    // Clear uploaded file when cloud drive URL is provided
+    if (url) {
+      setUploadedFiles(prev => ({ ...prev, [documentType]: null }));
     }
   };
   const handleFundraisingDeckChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -690,13 +716,13 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       return;
     }
 
-    if (!uploadedFiles.govId) {
+    if (!uploadedFiles.govId && !cloudDriveUrls.govId) {
       setError('Government ID is required');
       setIsLoading(false);
       return;
     }
 
-    if (!uploadedFiles.roleSpecific) {
+    if (!uploadedFiles.roleSpecific && !cloudDriveUrls.roleSpecific) {
       setError(`${getRoleSpecificDocumentType(userData.role)} is required`);
       setIsLoading(false);
       return;
@@ -704,12 +730,12 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
     // For Investment Advisors, license and logo are required
     if (userData.role === 'Investment Advisor') {
-      if (!uploadedFiles.license) {
+      if (!uploadedFiles.license && !cloudDriveUrls.license) {
         setError('License (As per country regulations) is required for Investment Advisors');
         setIsLoading(false);
         return;
       }
-      if (!uploadedFiles.logo) {
+      if (!uploadedFiles.logo && !cloudDriveUrls.logo) {
         setError('Company logo is required for Investment Advisors');
         setIsLoading(false);
         return;
@@ -794,9 +820,18 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       let governmentIdUrl = '';
       let roleSpecificUrl = '';
 
-      console.log('📁 Starting file uploads...', { govId: uploadedFiles.govId, roleSpecific: uploadedFiles.roleSpecific });
+      console.log('📁 Starting file uploads...', { 
+        govId: uploadedFiles.govId, 
+        roleSpecific: uploadedFiles.roleSpecific,
+        govIdUrl: cloudDriveUrls.govId,
+        roleSpecificUrl: cloudDriveUrls.roleSpecific
+      });
 
-      if (uploadedFiles.govId) {
+      // Handle Government ID - either uploaded file or cloud drive URL
+      if (cloudDriveUrls.govId) {
+        governmentIdUrl = cloudDriveUrls.govId;
+        console.log('✅ Government ID cloud drive URL provided:', governmentIdUrl);
+      } else if (uploadedFiles.govId) {
         console.log('📤 Uploading government ID...');
         const result = await storageService.uploadVerificationDocument(
           uploadedFiles.govId, 
@@ -811,7 +846,11 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         }
       }
 
-      if (uploadedFiles.roleSpecific) {
+      // Handle Role-specific document - either uploaded file or cloud drive URL
+      if (cloudDriveUrls.roleSpecific) {
+        roleSpecificUrl = cloudDriveUrls.roleSpecific;
+        console.log('✅ Role-specific document cloud drive URL provided:', roleSpecificUrl);
+      } else if (uploadedFiles.roleSpecific) {
         const roleDocType = getRoleSpecificDocumentType(userData.role);
         console.log('📤 Uploading role-specific document:', roleDocType);
         const result = await storageService.uploadVerificationDocument(
@@ -832,7 +871,11 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       let logoUrl = '';
 
       if (userData.role === 'Investment Advisor') {
-        if (uploadedFiles.license) {
+        // Handle License - either uploaded file or cloud drive URL
+        if (cloudDriveUrls.license) {
+          licenseUrl = cloudDriveUrls.license;
+          console.log('✅ License cloud drive URL provided:', licenseUrl);
+        } else if (uploadedFiles.license) {
           console.log('📤 Uploading license document...');
           const result = await storageService.uploadVerificationDocument(
             uploadedFiles.license, 
@@ -847,7 +890,11 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           }
         }
 
-        if (uploadedFiles.logo) {
+        // Handle Logo - either uploaded file or cloud drive URL
+        if (cloudDriveUrls.logo) {
+          logoUrl = cloudDriveUrls.logo;
+          console.log('✅ Logo cloud drive URL provided:', logoUrl);
+        } else if (uploadedFiles.logo) {
           console.log('📤 Uploading company logo...');
           const result = await storageService.uploadVerificationDocument(
             uploadedFiles.logo, 
@@ -1186,15 +1233,22 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Government ID (Passport, Driver's License, etc.)
                 </label>
-                <Input
-                  type="file"
+                <CloudDriveInput
+                  value={cloudDriveUrls.govId}
+                  onChange={(url) => handleCloudDriveUrlChange('govId', url)}
+                  onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'govId')}
+                  placeholder="Paste your cloud drive link here..."
+                  label=""
                   accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => handleFileChange(e, 'govId')}
+                  maxSize={10}
+                  documentType="government ID"
+                  showPrivacyMessage={false}
                   required
                 />
-                {uploadedFiles.govId && (
+                <input type="hidden" id="gov-id-url" name="gov-id-url" />
+                {(uploadedFiles.govId || cloudDriveUrls.govId) && (
                   <p className="text-sm text-green-600 mt-1">
-                    ✓ {uploadedFiles.govId.name} selected
+                    ✓ {uploadedFiles.govId ? uploadedFiles.govId.name + ' selected' : 'Cloud drive link provided'}
                   </p>
                 )}
               </div>
@@ -1203,15 +1257,22 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   {getRoleSpecificDocumentType(userData.role)}
                 </label>
-                <Input
-                  type="file"
+                <CloudDriveInput
+                  value={cloudDriveUrls.roleSpecific}
+                  onChange={(url) => handleCloudDriveUrlChange('roleSpecific', url)}
+                  onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'roleSpecific')}
+                  placeholder="Paste your cloud drive link here..."
+                  label=""
                   accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => handleFileChange(e, 'roleSpecific')}
+                  maxSize={10}
+                  documentType="role-specific document"
+                  showPrivacyMessage={false}
                   required
                 />
-                {uploadedFiles.roleSpecific && (
+                <input type="hidden" id="role-specific-url" name="role-specific-url" />
+                {(uploadedFiles.roleSpecific || cloudDriveUrls.roleSpecific) && (
                   <p className="text-sm text-green-600 mt-1">
-                    ✓ {uploadedFiles.roleSpecific.name} selected
+                    ✓ {uploadedFiles.roleSpecific ? uploadedFiles.roleSpecific.name + ' selected' : 'Cloud drive link provided'}
                   </p>
                 )}
               </div>
@@ -1223,15 +1284,22 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                     <label className="block text-sm font-medium text-slate-700 mb-2">
                       License (As per country regulations)
                     </label>
-                    <Input
-                      type="file"
+                    <CloudDriveInput
+                      value={cloudDriveUrls.license}
+                      onChange={(url) => handleCloudDriveUrlChange('license', url)}
+                      onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'license')}
+                      placeholder="Paste your cloud drive link here..."
+                      label=""
                       accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) => handleFileChange(e, 'license')}
+                      maxSize={10}
+                      documentType="license"
+                      showPrivacyMessage={false}
                       required
                     />
-                    {uploadedFiles.license && (
+                    <input type="hidden" id="license-url" name="license-url" />
+                    {(uploadedFiles.license || cloudDriveUrls.license) && (
                       <p className="text-sm text-green-600 mt-1">
-                        ✓ {uploadedFiles.license.name} selected
+                        ✓ {uploadedFiles.license ? uploadedFiles.license.name + ' selected' : 'Cloud drive link provided'}
                       </p>
                     )}
                     <p className="text-xs text-slate-500 mt-1">
@@ -1243,15 +1311,22 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                     <label className="block text-sm font-medium text-slate-700 mb-2">
                       Company Logo
                     </label>
-                    <Input
-                      type="file"
+                    <CloudDriveInput
+                      value={cloudDriveUrls.logo}
+                      onChange={(url) => handleCloudDriveUrlChange('logo', url)}
+                      onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'logo')}
+                      placeholder="Paste your cloud drive link here..."
+                      label=""
                       accept=".jpg,.jpeg,.png,.svg"
-                      onChange={(e) => handleFileChange(e, 'logo')}
+                      maxSize={5}
+                      documentType="company logo"
+                      showPrivacyMessage={false}
                       required
                     />
-                    {uploadedFiles.logo && (
+                    <input type="hidden" id="logo-url" name="logo-url" />
+                    {(uploadedFiles.logo || cloudDriveUrls.logo) && (
                       <p className="text-sm text-green-600 mt-1">
-                        ✓ {uploadedFiles.logo.name} selected
+                        ✓ {uploadedFiles.logo ? uploadedFiles.logo.name + ' selected' : 'Cloud drive link provided'}
                       </p>
                     )}
                     <div className="text-xs text-slate-500 mt-1 space-y-1">
@@ -1824,13 +1899,24 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               />
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
-                <input
-                  id="fr-deck"
-                  type="file"
+                <CloudDriveInput
+                  value={cloudDriveUrls.pitchDeck}
+                  onChange={(url) => {
+                    setCloudDriveUrls(prev => ({ ...prev, pitchDeck: url }));
+                    if (url) {
+                      setFundraising(prev => ({ ...prev, pitchDeckFile: null }));
+                    }
+                  }}
+                  onFileSelect={(file) => handleFundraisingDeckChange({ target: { files: [file] } } as any)}
+                  placeholder="Paste your cloud drive link here..."
+                  label=""
                   accept=".pdf"
-                  onChange={handleFundraisingDeckChange}
-                  className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                  maxSize={10}
+                  documentType="pitch deck"
+                  showPrivacyMessage={false}
+                  className="w-full text-sm"
                 />
+                <input type="hidden" id="pitch-deck-url" name="pitch-deck-url" />
                 <p className="text-xs text-slate-500 mt-1">Max 10MB</p>
               </div>
             </div>

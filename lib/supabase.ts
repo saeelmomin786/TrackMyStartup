@@ -45,7 +45,7 @@ if (!globalAny.__supabaseClient) {
     auth: {
       persistSession: true,
       storageKey: 'supabase-auth',
-      autoRefreshToken: false, // Disable automatic token refresh to prevent window focus triggers
+      autoRefreshToken: true, // Enable automatic token refresh for proper authentication
       detectSessionInUrl: true,
       flowType: 'pkce',
       // Use custom storage to prevent window focus triggers

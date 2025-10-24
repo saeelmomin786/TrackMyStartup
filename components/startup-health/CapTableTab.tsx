@@ -7,6 +7,7 @@ import SimpleModal from '../ui/SimpleModal';
 import Select from '../ui/Select';
 import Modal from '../ui/Modal';
 import DateInput from '../DateInput';
+import CloudDriveInput from '../ui/CloudDriveInput';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Plus, Trash2, Edit, Edit3, Save, X, TrendingUp, Users, DollarSign, PieChart as PieChartIcon, UserPlus, Download, Upload, Check, Eye, RefreshCw } from 'lucide-react';
 import PricePerShareInput from './PricePerShareInput';
@@ -2720,7 +2721,28 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     <Select label="Stage" id="fr-stage" value={(fundraising as any).stage || ''} onChange={e => setFundraising({ ...fundraising, stage: e.target.value as any })}>
                                         {Object.values(StartupStage).map(s => <option key={s} value={s}>{s}</option>)}
                                     </Select>
-                                     <Input label="Pitch Deck" id="fr-deck" type="file" />
+                                     <CloudDriveInput
+                                         value=""
+                                         onChange={(url) => {
+                                             const hiddenInput = document.getElementById('pitch-deck-url') as HTMLInputElement;
+                                             if (hiddenInput) hiddenInput.value = url;
+                                         }}
+                                         onFileSelect={(file) => {
+                                             const fileInput = document.getElementById('fr-deck') as HTMLInputElement;
+                                             if (fileInput) {
+                                                 const dataTransfer = new DataTransfer();
+                                                 dataTransfer.items.add(file);
+                                                 fileInput.files = dataTransfer.files;
+                                             }
+                                         }}
+                                         placeholder="Paste your cloud drive link here..."
+                                         label="Pitch Deck"
+                                         accept=".pdf"
+                                         maxSize={10}
+                                         documentType="pitch deck"
+                                         showPrivacyMessage={false}
+                                     />
+                                     <input type="hidden" id="pitch-deck-url" name="pitch-deck-url" />
                                      <Input 
                                          label="Pitch Video (YouTube Link)" 
                                          id="fr-video" 
@@ -2963,13 +2985,29 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 value={editRecPostMoneyDraft || editingRecognition?.postMoneyValuation || ''}
                                 readOnly 
                             />
-                            <Input 
-                                label="Upload Signed Agreement" 
-                            name="rec-agreement"
-                                id="rec-agreement" 
-                                type="file" 
-                                containerClassName="md:col-span-2"
-                        />
+                            <CloudDriveInput
+                                value=""
+                                onChange={(url) => {
+                                    const hiddenInput = document.getElementById('rec-agreement-url') as HTMLInputElement;
+                                    if (hiddenInput) hiddenInput.value = url;
+                                }}
+                                onFileSelect={(file) => {
+                                    const fileInput = document.getElementById('rec-agreement') as HTMLInputElement;
+                                    if (fileInput) {
+                                        const dataTransfer = new DataTransfer();
+                                        dataTransfer.items.add(file);
+                                        fileInput.files = dataTransfer.files;
+                                    }
+                                }}
+                                placeholder="Paste your cloud drive link here..."
+                                label="Upload Signed Agreement"
+                                accept=".pdf,.doc,.docx"
+                                maxSize={10}
+                                documentType="signed agreement"
+                                showPrivacyMessage={false}
+                                className="md:col-span-2"
+                            />
+                            <input type="hidden" id="rec-agreement-url" name="rec-agreement-url" />
                         {editingRecognition?.signedAgreementUrl && (
                                 <div className="md:col-span-2">
                             <p className="text-sm text-slate-500 mt-1">
@@ -3337,7 +3375,28 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 <Input label="Investment Amount (auto)" name="inv-amount" id="inv-amount" type="number" readOnly value={invAmountDraft} />
                                 <Input label="Equity Allocated (%) (auto)" name="inv-equity" id="inv-equity" type="number" readOnly value={invEquityDraft} />
                                 <Input label="Post-Money Valuation (auto)" name="inv-postmoney" id="inv-postmoney" type="number" readOnly value={invPostMoneyDraft} />
-                                <Input label="Proof of Investment" name="inv-proof" id="inv-proof" type="file" />
+                                <CloudDriveInput
+                                    value=""
+                                    onChange={(url) => {
+                                        const hiddenInput = document.getElementById('inv-proof-url') as HTMLInputElement;
+                                        if (hiddenInput) hiddenInput.value = url;
+                                    }}
+                                    onFileSelect={(file) => {
+                                        const fileInput = document.getElementById('inv-proof') as HTMLInputElement;
+                                        if (fileInput) {
+                                            const dataTransfer = new DataTransfer();
+                                            dataTransfer.items.add(file);
+                                            fileInput.files = dataTransfer.files;
+                                        }
+                                    }}
+                                    placeholder="Paste your cloud drive link here..."
+                                    label="Proof of Investment"
+                                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                    maxSize={10}
+                                    documentType="investment proof"
+                                    showPrivacyMessage={false}
+                                />
+                                <input type="hidden" id="inv-proof-url" name="inv-proof-url" />
                                 </div>
                             </div>
                         )}
@@ -3405,7 +3464,29 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                         />
                                     </>
                                 )}
-                                <Input label="Upload Signed Agreement" name="rec-agreement" id="rec-agreement" type="file" required containerClassName="md:col-span-2" />
+                                <CloudDriveInput
+                                    value=""
+                                    onChange={(url) => {
+                                        const hiddenInput = document.getElementById('rec-agreement-url-new') as HTMLInputElement;
+                                        if (hiddenInput) hiddenInput.value = url;
+                                    }}
+                                    onFileSelect={(file) => {
+                                        const fileInput = document.getElementById('rec-agreement-new') as HTMLInputElement;
+                                        if (fileInput) {
+                                            const dataTransfer = new DataTransfer();
+                                            dataTransfer.items.add(file);
+                                            fileInput.files = dataTransfer.files;
+                                        }
+                                    }}
+                                    placeholder="Paste your cloud drive link here..."
+                                    label="Upload Signed Agreement"
+                                    accept=".pdf,.doc,.docx"
+                                    maxSize={10}
+                                    documentType="signed agreement"
+                                    showPrivacyMessage={false}
+                                    className="md:col-span-2"
+                                />
+                                <input type="hidden" id="rec-agreement-url-new" name="rec-agreement-url-new" />
                             </div>
                         )}
                         

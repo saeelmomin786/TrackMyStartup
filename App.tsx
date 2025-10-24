@@ -1278,6 +1278,15 @@ const App: React.FC = () => {
        setUsers(usersData.status === 'fulfilled' ? usersData.value : []);
        setVerificationRequests(verificationData.status === 'fulfilled' ? verificationData.value : []);
        setInvestmentOffers(offersData.status === 'fulfilled' ? offersData.value : []);
+       
+       // Debug: Log investment offers data
+       if (process.env.NODE_ENV === 'development') {
+         console.log('🔍 Investment Offers Debug:', {
+           status: offersData.status,
+           count: offersData.status === 'fulfilled' ? offersData.value?.length : 0,
+           sample: offersData.status === 'fulfilled' ? offersData.value?.slice(0, 3) : []
+         });
+       }
        setValidationRequests(validationData.status === 'fulfilled' ? validationData.value : []);
 
        // Fetch pending relationships for Investment Advisors
@@ -1914,7 +1923,7 @@ const App: React.FC = () => {
     );
   }, []);
 
-  const handleSubmitOffer = useCallback(async (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, country?: string, startupAmountRaised?: number) => {
+  const handleSubmitOffer = useCallback(async (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string) => {
     if (!currentUserRef.current) return;
     
     try {
@@ -1926,8 +1935,7 @@ const App: React.FC = () => {
         startup_id: opportunity.id, // This is the startup ID from the startups table
         offer_amount: offerAmount,
         equity_percentage: equityPercentage,
-        country: country || 'United States',
-        startup_amount_raised: startupAmountRaised || opportunity.totalFunding
+        currency: currency || 'USD'
       });
       
       // Update local state
@@ -2789,7 +2797,7 @@ const App: React.FC = () => {
                           e.currentTarget.nextElementSibling?.classList.remove('hidden');
                         }}
                       />
-                      <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left hidden" />
+                      <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 object-contain hidden" />
                     </>
                   ) : (
                     <div className="h-8 w-8 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
@@ -2806,7 +2814,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 scale-[5] md:scale-[4] lg:scale-[5] xl:scale-[6] origin-left" />
+                <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 object-contain" />
               )}
             </div>
              <div className="flex items-center gap-6">

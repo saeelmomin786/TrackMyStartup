@@ -24,6 +24,8 @@ const baseModalStyle: React.CSSProperties = {
     borderRadius: 8,
     width: '90%',
     maxWidth: 480,
+    maxHeight: '90vh',
+    overflowY: 'auto',
     boxShadow: '0 10px 25px rgba(0,0,0,0.15)'
 };
 

@@ -3,6 +3,7 @@ import { uploadWithAutoVerification } from '../lib/uploadWithAutoVerification';
 import { DocumentVerificationStatus } from '../types';
 import { Upload, CheckCircle, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import Button from './ui/Button';
+import CloudDriveInput from './ui/CloudDriveInput';
 
 interface AutoVerificationUploadProps {
     startupId: number;
@@ -28,8 +29,7 @@ const AutoVerificationUpload: React.FC<AutoVerificationUploadProps> = ({
     const [message, setMessage] = useState('');
     const [file, setFile] = useState<File | null>(null);
 
-    const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const selectedFile = event.target.files?.[0];
+    const handleFileSelect = (selectedFile: File) => {
         if (selectedFile) {
             setFile(selectedFile);
             setUploadStatus('idle');
@@ -38,25 +38,40 @@ const AutoVerificationUpload: React.FC<AutoVerificationUploadProps> = ({
     };
 
     const handleUpload = async () => {
-        if (!file) {
-            setMessage('❌ Please select a file first');
+        const cloudDriveUrl = (document.getElementById('verification-document-url') as HTMLInputElement)?.value;
+        
+        if (!file && !cloudDriveUrl) {
+            setMessage('❌ Please select a file or provide a cloud drive URL');
             setUploadStatus('error');
             return;
         }
 
         setIsUploading(true);
         setUploadStatus('uploading');
-        setMessage('📤 Uploading file...');
+        setMessage('📤 Processing document...');
 
         try {
-            // Upload with automatic verification
-            const result = await uploadWithAutoVerification.uploadAndVerify(
-                startupId,
-                taskId,
-                file,
-                uploadedBy,
-                documentType
-            );
+            let result;
+            
+            if (cloudDriveUrl) {
+                // Use cloud drive URL directly
+                result = await uploadWithAutoVerification.uploadAndVerifyWithUrl(
+                    startupId,
+                    taskId,
+                    cloudDriveUrl,
+                    uploadedBy,
+                    documentType
+                );
+            } else if (file) {
+                // Upload file
+                result = await uploadWithAutoVerification.uploadAndVerify(
+                    startupId,
+                    taskId,
+                    file,
+                    uploadedBy,
+                    documentType
+                );
+            }
 
             if (result.success) {
                 if (result.autoVerified) {
@@ -121,19 +136,28 @@ const AutoVerificationUpload: React.FC<AutoVerificationUploadProps> = ({
                 <label className="block text-sm font-medium text-gray-700">
                     Select Document
                 </label>
-                <input
-                    type="file"
-                    onChange={handleFileSelect}
+                <CloudDriveInput
+                    value=""
+                    onChange={(url) => {
+                        const hiddenInput = document.getElementById('verification-document-url') as HTMLInputElement;
+                        if (hiddenInput) hiddenInput.value = url;
+                    }}
+                    onFileSelect={handleFileSelect}
+                    placeholder="Paste your cloud drive link here..."
+                    label=""
                     accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif"
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                    disabled={isUploading}
+                    maxSize={10}
+                    documentType="verification document"
+                    showPrivacyMessage={false}
+                    className="w-full text-sm"
                 />
+                <input type="hidden" id="verification-document-url" name="verification-document-url" />
             </div>
 
             {/* Upload Button */}
             <Button
                 onClick={handleUpload}
-                disabled={!file || isUploading}
+                disabled={(!file && !(document.getElementById('verification-document-url') as HTMLInputElement)?.value) || isUploading}
                 className="w-full"
             >
                 {isUploading ? (

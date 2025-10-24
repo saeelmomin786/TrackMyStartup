@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
+import CloudDriveInput from '../ui/CloudDriveInput';
 import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText, Share2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { messageService } from '../../lib/messageService';
@@ -536,12 +537,21 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                      </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
-                        <input
-                            type="file"
+                        <CloudDriveInput
+                            value=""
+                            onChange={(url) => {
+                                const hiddenInput = document.getElementById('apply-deck-url') as HTMLInputElement;
+                                if (hiddenInput) hiddenInput.value = url;
+                            }}
+                            onFileSelect={(file) => handleApplyDeckChange({ target: { files: [file] } } as any)}
+                            placeholder="Paste your cloud drive link here..."
+                            label=""
                             accept=".pdf"
-                            onChange={handleApplyDeckChange}
-                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                            maxSize={10}
+                            documentType="pitch deck"
+                            showPrivacyMessage={false}
                         />
+                        <input type="hidden" id="apply-deck-url" name="apply-deck-url" />
                         <p className="text-xs text-slate-500 mt-1">Max 10MB</p>
                     </div>
                     <div>

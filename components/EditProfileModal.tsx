@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { X, Camera, User, Mail, Phone, MapPin, Calendar, Building, Shield, Save, Edit3, Trash2 } from 'lucide-react';
 import Button from './ui/Button';
+import CloudDriveInput from './ui/CloudDriveInput';
 import { authService } from '../lib/auth';
 import { AuthUser } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -282,7 +283,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
           if (startupError) {
             console.error('Error finding startup for user:', startupError);
-          } else if (startupData) {
+          } else if (startupData && startupData.id) {
             // Prepare startup profile data
             const startupProfileData: any = {};
             
@@ -344,9 +345,9 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4 lg:p-6">
-      <div className="bg-white rounded-lg w-full max-w-xs sm:max-w-lg md:max-w-2xl lg:max-w-4xl xl:max-w-5xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg w-full max-w-xs sm:max-w-lg md:max-w-2xl lg:max-w-4xl xl:max-w-5xl max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-3 sm:p-4 md:p-6 border-b border-slate-200">
+        <div className="flex items-center justify-between p-3 sm:p-4 md:p-6 border-b border-slate-200 flex-shrink-0">
           <h2 className="text-base sm:text-lg md:text-xl lg:text-2xl font-semibold text-slate-900">Edit Profile</h2>
           <button
             onClick={onClose}
@@ -356,8 +357,8 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-3 sm:p-4 md:p-6 space-y-3 sm:space-y-4 md:space-y-6">
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 space-y-3 sm:space-y-4 md:space-y-6">
           {/* Profile Photo Section */}
           <div className="flex flex-col items-center space-y-2 sm:space-y-3 md:space-y-4">
             <div className="relative">
@@ -380,13 +381,30 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 <Camera className="h-2.5 w-2.5 sm:h-3 sm:w-3 md:h-4 md:w-4 lg:h-5 lg:w-5" />
               </button>
             </div>
-            <input
-              ref={fileInputRef}
-              type="file"
+            <CloudDriveInput
+              value=""
+              onChange={(url) => {
+                const hiddenInput = document.getElementById('profile-photo-url') as HTMLInputElement;
+                if (hiddenInput) hiddenInput.value = url;
+              }}
+              onFileSelect={(file) => {
+                const fileInput = fileInputRef.current;
+                if (fileInput) {
+                  const dataTransfer = new DataTransfer();
+                  dataTransfer.items.add(file);
+                  fileInput.files = dataTransfer.files;
+                  handlePhotoUpload({ target: { files: [file] } } as any);
+                }
+              }}
+              placeholder="Paste your cloud drive link here..."
+              label=""
               accept="image/*"
-              onChange={handlePhotoUpload}
-              className="hidden"
+              maxSize={5}
+              documentType="profile photo"
+              showPrivacyMessage={false}
+              className="w-full text-sm"
             />
+            <input type="hidden" id="profile-photo-url" name="profile-photo-url" />
             <p className="text-xs sm:text-sm text-slate-500 text-center px-2">
               Click the camera icon to upload a new photo
             </p>
@@ -598,13 +616,30 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   
                   {/* Upload new document */}
                   <div className="flex items-center gap-2 sm:gap-3">
-                    <input
-                      ref={govIdRef}
-                      type="file"
+                    <CloudDriveInput
+                      value=""
+                      onChange={(url) => {
+                        const hiddenInput = document.getElementById('gov-id-url') as HTMLInputElement;
+                        if (hiddenInput) hiddenInput.value = url;
+                      }}
+                      onFileSelect={(file) => {
+                        const fileInput = govIdRef.current;
+                        if (fileInput) {
+                          const dataTransfer = new DataTransfer();
+                          dataTransfer.items.add(file);
+                          fileInput.files = dataTransfer.files;
+                          handleGovernmentIdUpload({ target: { files: [file] } } as any);
+                        }
+                      }}
+                      placeholder="Paste your cloud drive link here..."
+                      label=""
                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={handleGovernmentIdUpload}
-                      className="hidden"
+                      maxSize={10}
+                      documentType="government ID"
+                      showPrivacyMessage={false}
+                      className="w-full text-sm"
                     />
+                    <input type="hidden" id="gov-id-url" name="gov-id-url" />
                     <button
                       onClick={() => govIdRef.current?.click()}
                       className="px-3 sm:px-4 py-1.5 sm:py-2 border border-slate-300 rounded-md text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
@@ -658,13 +693,30 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     
                     {/* Upload new document */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                      <input
-                        ref={caLicenseRef}
-                        type="file"
+                      <CloudDriveInput
+                        value=""
+                        onChange={(url) => {
+                          const hiddenInput = document.getElementById('ca-license-url') as HTMLInputElement;
+                          if (hiddenInput) hiddenInput.value = url;
+                        }}
+                        onFileSelect={(file) => {
+                          const fileInput = caLicenseRef.current;
+                          if (fileInput) {
+                            const dataTransfer = new DataTransfer();
+                            dataTransfer.items.add(file);
+                            fileInput.files = dataTransfer.files;
+                            handleCALicenseUpload({ target: { files: [file] } } as any);
+                          }
+                        }}
+                        placeholder="Paste your cloud drive link here..."
+                        label=""
                         accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                        onChange={handleCALicenseUpload}
-                        className="hidden"
+                        maxSize={10}
+                        documentType="CA license"
+                        showPrivacyMessage={true}
+                        className="w-full"
                       />
+                      <input type="hidden" id="ca-license-url" name="ca-license-url" />
                       <button
                         onClick={() => caLicenseRef.current?.click()}
                         className="px-3 sm:px-4 py-1.5 sm:py-2 border border-slate-300 rounded-md text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
@@ -719,13 +771,30 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     
                     {/* Upload new document */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                      <input
-                        ref={csLicenseRef}
-                        type="file"
+                      <CloudDriveInput
+                        value=""
+                        onChange={(url) => {
+                          const hiddenInput = document.getElementById('cs-license-url') as HTMLInputElement;
+                          if (hiddenInput) hiddenInput.value = url;
+                        }}
+                        onFileSelect={(file) => {
+                          const fileInput = csLicenseRef.current;
+                          if (fileInput) {
+                            const dataTransfer = new DataTransfer();
+                            dataTransfer.items.add(file);
+                            fileInput.files = dataTransfer.files;
+                            handleCSLicenseUpload({ target: { files: [file] } } as any);
+                          }
+                        }}
+                        placeholder="Paste your cloud drive link here..."
+                        label=""
                         accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                        onChange={handleCSLicenseUpload}
-                        className="hidden"
+                        maxSize={10}
+                        documentType="CS license"
+                        showPrivacyMessage={true}
+                        className="w-full"
                       />
+                      <input type="hidden" id="cs-license-url" name="cs-license-url" />
                       <button
                         onClick={() => csLicenseRef.current?.click()}
                         className="px-3 sm:px-4 py-1.5 sm:py-2 border border-slate-300 rounded-md text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
@@ -835,13 +904,30 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     
                     {/* Upload new logo */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                      <input
-                        ref={logoRef}
-                        type="file"
+                      <CloudDriveInput
+                        value=""
+                        onChange={(url) => {
+                          const hiddenInput = document.getElementById('logo-url') as HTMLInputElement;
+                          if (hiddenInput) hiddenInput.value = url;
+                        }}
+                        onFileSelect={(file) => {
+                          const fileInput = logoRef.current;
+                          if (fileInput) {
+                            const dataTransfer = new DataTransfer();
+                            dataTransfer.items.add(file);
+                            fileInput.files = dataTransfer.files;
+                            handleLogoUpload({ target: { files: [file] } } as any);
+                          }
+                        }}
+                        placeholder="Paste your cloud drive link here..."
+                        label=""
                         accept=".jpg,.jpeg,.png,.svg"
-                        onChange={handleLogoUpload}
-                        className="hidden"
+                        maxSize={5}
+                        documentType="company logo"
+                        showPrivacyMessage={true}
+                        className="w-full"
                       />
+                      <input type="hidden" id="logo-url" name="logo-url" />
                       <button
                         onClick={() => logoRef.current?.click()}
                         className="px-3 sm:px-4 py-1.5 sm:py-2 border border-slate-300 rounded-md text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
@@ -904,13 +990,30 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     
                     {/* Upload new document */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                      <input
-                        ref={financialLicenseRef}
-                        type="file"
+                      <CloudDriveInput
+                        value=""
+                        onChange={(url) => {
+                          const hiddenInput = document.getElementById('financial-license-url') as HTMLInputElement;
+                          if (hiddenInput) hiddenInput.value = url;
+                        }}
+                        onFileSelect={(file) => {
+                          const fileInput = financialLicenseRef.current;
+                          if (fileInput) {
+                            const dataTransfer = new DataTransfer();
+                            dataTransfer.items.add(file);
+                            fileInput.files = dataTransfer.files;
+                            handleFinancialLicenseUpload({ target: { files: [file] } } as any);
+                          }
+                        }}
+                        placeholder="Paste your cloud drive link here..."
+                        label=""
                         accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                        onChange={handleFinancialLicenseUpload}
-                        className="hidden"
+                        maxSize={10}
+                        documentType="financial license"
+                        showPrivacyMessage={true}
+                        className="w-full"
                       />
+                      <input type="hidden" id="financial-license-url" name="financial-license-url" />
                       <button
                         onClick={() => financialLicenseRef.current?.click()}
                         className="px-3 sm:px-4 py-1.5 sm:py-2 border border-slate-300 rounded-md text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
@@ -931,8 +1034,8 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex flex-col sm:flex-row items-center justify-end gap-2 sm:gap-3 p-3 sm:p-4 md:p-6 border-t border-slate-200">
+        {/* Sticky Footer */}
+        <div className="flex flex-col sm:flex-row items-center justify-end gap-2 sm:gap-3 p-3 sm:p-4 md:p-6 border-t border-slate-200 bg-white flex-shrink-0">
           <Button
             variant="outline"
             onClick={onClose}

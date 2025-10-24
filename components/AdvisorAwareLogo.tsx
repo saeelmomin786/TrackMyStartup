@@ -13,7 +13,7 @@ interface AdvisorAwareLogoProps {
 
 const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({ 
   currentUser, 
-  className = "h-7 w-7 sm:h-8 sm:w-8 scale-[5] sm:scale-[5] origin-left cursor-pointer hover:opacity-80 transition-opacity",
+  className = "h-8 w-8 sm:h-10 sm:w-10 object-contain cursor-pointer hover:opacity-80 transition-opacity",
   alt = "TrackMyStartup",
   onClick,
   showText = true,
@@ -41,19 +41,23 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
           setAdvisorInfo(advisor);
         } catch (error) {
           console.error('Error fetching advisor info:', error);
+          setAdvisorInfo(null);
         } finally {
           setLoading(false);
         }
       } else {
         console.log('🔍 AdvisorAwareLogo: No advisor code or wrong role, using default logo');
+        setAdvisorInfo(null);
       }
     };
 
     fetchAdvisorInfo();
   }, [currentUser?.investment_advisor_code_entered, currentUser?.role]);
 
-  // If user has an advisor with a logo, show advisor logo
-  if (advisorInfo?.logo_url) {
+  // Simple swapping logic: If advisor has logo, show it. Otherwise, show default.
+  const shouldShowAdvisorLogo = advisorInfo?.logo_url && !loading;
+  
+  if (shouldShowAdvisorLogo) {
     return (
       <div className="flex items-center gap-2 sm:gap-3">
         <img 
@@ -61,21 +65,10 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
           alt={advisorInfo.name || 'Advisor Logo'} 
           className={className}
           onClick={onClick}
-          onError={(e) => {
-            // Fallback to TrackMyStartup logo if advisor logo fails to load
-            e.currentTarget.style.display = 'none';
-            const fallbackImg = e.currentTarget.nextElementSibling as HTMLImageElement;
-            if (fallbackImg) {
-              fallbackImg.style.display = 'block';
-            }
+          onError={() => {
+            console.log('🔍 AdvisorAwareLogo: Advisor logo failed to load, falling back to TrackMyStartup');
+            setAdvisorInfo(null);
           }}
-        />
-        <img 
-          src={LogoTMS} 
-          alt={alt} 
-          className={className}
-          onClick={onClick}
-          style={{ display: 'none' }}
         />
         {showText && (
           <div>
@@ -98,11 +91,7 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
         className={className}
         onClick={onClick}
       />
-      {showText && (
-        <h1 className={textClassName}>
-          TrackMyStartup
-        </h1>
-      )}
+      {/* Note: LogoTMS.svg already contains the "Track My Startup" text, so no additional text needed */}
     </div>
   );
 };

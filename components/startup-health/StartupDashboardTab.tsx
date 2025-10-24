@@ -7,10 +7,12 @@ import { formatCurrency, formatCurrencyCompact } from '../../lib/utils';
 import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
+import CloudDriveInput from '../ui/CloudDriveInput';
 import ComplianceSubmissionButton from '../ComplianceSubmissionButton';
-import { DollarSign, Zap, TrendingUp, Download, Check, X, FileText, MessageCircle, Calendar, ChevronDown, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { DollarSign, Zap, TrendingUp, Download, Check, X, FileText, MessageCircle, Calendar, ChevronDown, CheckCircle, Clock, XCircle, Trash2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { investmentService } from '../../lib/investmentService';
+import { investmentService as databaseInvestmentService } from '../../lib/database';
 import StartupMessagingModal from './StartupMessagingModal';
 import StartupContractModal from './StartupContractModal';
 import Modal from '../ui/Modal';
@@ -19,6 +21,7 @@ import Select from '../ui/Select';
 import { capTableService } from '../../lib/capTableService';
 import { IncubationType, FeeType } from '../../types';
 import { messageService } from '../../lib/messageService';
+import { complianceRulesIntegrationService } from '../../lib/complianceRulesIntegrationService';
 
 // Types for offers received
 interface OfferReceived {
@@ -90,6 +93,35 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [recEquity, setRecEquity] = useState<string>('');
   const [recPostMoney, setRecPostMoney] = useState<string>('');
   const [totalSharesForCalc, setTotalSharesForCalc] = useState<number>(0);
+  
+  // Compliance data state
+  const [complianceData, setComplianceData] = useState<{
+    totalTasks: number;
+    completedTasks: number;
+    percentage: number;
+  }>({ totalTasks: 0, completedTasks: 0, percentage: 0 });
+
+  // Load compliance data
+  const loadComplianceData = async () => {
+    try {
+      const complianceTasks = await complianceRulesIntegrationService.getComplianceTasksForStartup(startup.id);
+      
+      const totalTasks = complianceTasks.length;
+      const completedTasks = complianceTasks.filter(task => 
+        task.caStatus === 'Compliant' && task.csStatus === 'Compliant'
+      ).length;
+      const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+      
+      setComplianceData({
+        totalTasks,
+        completedTasks,
+        percentage
+      });
+    } catch (error) {
+      console.error('Error loading compliance data:', error);
+      setComplianceData({ totalTasks: 0, completedTasks: 0, percentage: 0 });
+    }
+  };
 
 
   useEffect(() => {
@@ -115,6 +147,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         // Load data for selected year
         await loadFinancialDataForYear(selectedYear);
         
+        // Load compliance data
+        await loadComplianceData();
+        
       } catch (error) {
         console.error('Error loading dashboard data:', error);
       } finally {
@@ -125,6 +160,55 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     loadDashboardData();
     loadOffersReceived();
   }, [startup, selectedYear]);
+
+  // Refresh offers when offers prop changes
+  useEffect(() => {
+    if (offers && offers.length > 0) {
+      console.log('🔄 Startup Dashboard: Offers prop changed, refreshing offers received');
+      loadOffersReceived();
+    }
+  }, [offers]);
+
+  // Force refresh offers when component becomes visible
+  useEffect(() => {
+    console.log('🔄 Startup Dashboard: Component mounted/updated, refreshing offers received');
+    loadOffersReceived();
+  }, [startup.id]);
+
+  // Add a global refresh mechanism
+  useEffect(() => {
+    const handleOfferUpdate = () => {
+      console.log('🔄 Startup Dashboard: Global offer update detected, refreshing offers received');
+      loadOffersReceived();
+    };
+
+    // Listen for custom events that indicate offers have been updated
+    window.addEventListener('offerUpdated', handleOfferUpdate);
+    window.addEventListener('offerStageUpdated', handleOfferUpdate);
+
+    return () => {
+      window.removeEventListener('offerUpdated', handleOfferUpdate);
+      window.removeEventListener('offerStageUpdated', handleOfferUpdate);
+    };
+  }, []);
+
+  // Add debugging for offers filtering
+  useEffect(() => {
+    console.log('🔍 Startup Dashboard: Offers prop changed, debugging filtering');
+    console.log('🔍 Total offers received:', offers?.length || 0);
+    console.log('🔍 Current startup ID:', startup?.id);
+    console.log('🔍 Startup name:', startup?.name);
+    
+    if (offers && offers.length > 0) {
+      console.log('🔍 Sample offer data:', {
+        id: offers[0].id,
+        startupId: offers[0].startupId,
+        startupName: offers[0].startupName,
+        investorName: offers[0].investorName,
+        stage: (offers[0] as any).stage
+      });
+    }
+  }, [offers, startup?.id]);
 
   const loadFinancialDataForYear = async (year: number) => {
     try {
@@ -246,9 +330,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     try {
       // console.log('🔍 Loading offers for startup ID:', startup.id);
       
-      // Fetch investment offers for this startup
-      const investmentOffers = await investmentService.getOffersForStartup(startup.id);
-      console.log('💰 Investment offers fetched:', investmentOffers);
+      // Use offers prop instead of making separate API call
+      const investmentOffers = offers || [];
+      console.log('💰 Investment offers from props:', investmentOffers);
       console.log('💰 Investment offers count:', investmentOffers?.length || 0);
       
       // Fetch all opportunity applications for this startup with proper joins
@@ -517,12 +601,34 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         };
       });
       
+      // Debug: Log investment offers data
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔍 StartupDashboardTab - Investment offers received:', investmentOffers);
+        console.log('🔍 StartupDashboardTab - Current startup ID:', startup.id);
+        console.log('🔍 StartupDashboardTab - Current startup name:', startup.name);
+        if (investmentOffers && investmentOffers.length > 0) {
+          console.log('🔍 First offer details:', {
+            id: investmentOffers[0].id,
+            startupId: investmentOffers[0].startupId,
+            startupName: investmentOffers[0].startupName,
+            investorName: investmentOffers[0].investorName,
+            investorEmail: investmentOffers[0].investorEmail,
+            offerAmount: investmentOffers[0].offerAmount,
+            equityPercentage: investmentOffers[0].equityPercentage,
+            currency: (investmentOffers[0] as any).currency,
+            stage: (investmentOffers[0] as any).stage,
+            status: investmentOffers[0].status,
+            createdAt: investmentOffers[0].createdAt
+          });
+        }
+      }
+
       // Transform investment offers into OfferReceived format
       const investmentOffersFormatted: OfferReceived[] = (investmentOffers || []).map((offer: any) => {
-        // Get investor name from the joined investor data
-        const investorName = offer.investor?.name || 
+        // Get investor name from the offer data
+        const investorName = offer.investorName || 
+                           offer.investor?.name || 
                            offer.investor?.company_name || 
-                           offer.investorName || 
                            offer.investorEmail || 
                            'Unknown Investor';
         
@@ -530,12 +636,39 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         const amount = Number(offer.offerAmount || offer.amount) || 0;
         const equityPercentage = Number(offer.equityPercentage || offer.equity_percentage) || 0;
         
+        console.log('🔍 Processing investment offer:', {
+          id: offer.id,
+          investorName,
+          investorEmail: offer.investorEmail,
+          amount,
+          equityPercentage,
+          currency: (offer as any).currency,
+          stage: (offer as any).stage,
+          status: offer.status,
+          rawOffer: offer
+        });
+        
+        // Get currency from offer or use startup currency
+        const offerCurrency = (offer as any).currency || startupCurrency || 'USD';
+        
+        // Map stage to status
+        let mappedStatus: 'pending' | 'accepted' | 'rejected' = 'pending';
+        const offerStage = (offer as any).stage || 1;
+        
+        if (offerStage === 4) {
+          mappedStatus = 'accepted';
+        } else if (offerStage === 1 || offerStage === 2 || offerStage === 3) {
+          mappedStatus = 'pending';
+        } else {
+          mappedStatus = offer.status as 'pending' | 'accepted' | 'rejected' || 'pending';
+        }
+        
         return {
           id: `investment_${offer.id}`,
           from: investorName,
           type: 'Investment' as const,
-          offerDetails: `${formatCurrency(amount, startupCurrency)} for ${equityPercentage}% equity`,
-          status: offer.status as 'pending' | 'accepted' | 'rejected',
+          offerDetails: `${formatCurrency(amount, offerCurrency)} for ${equityPercentage}% equity`,
+          status: mappedStatus,
           code: offer.id.toString(),
           createdAt: offer.createdAt,
           isInvestmentOffer: true,
@@ -675,6 +808,40 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     }
   };
 
+  const handleDeleteInvestmentOffer = async (offer: OfferReceived) => {
+    if (!offer.investmentOfferId) return;
+    
+    // Add confirmation dialog
+    const confirmed = window.confirm('Are you sure you want to delete this investment offer? This action cannot be undone.');
+    if (!confirmed) return;
+    
+    try {
+      console.log('🗑️ Deleting investment offer:', offer.investmentOfferId);
+      await databaseInvestmentService.deleteInvestmentOffer(offer.investmentOfferId);
+      
+      await loadOffersReceived();
+      
+      console.log('✅ Investment offer deleted successfully');
+      messageService.success(
+        'Offer Deleted',
+        'Investment offer deleted successfully.',
+        3000
+      );
+    } catch (err) {
+      console.error('Error deleting investment offer:', err);
+      console.error('Full error details:', err);
+      
+      // Use alert for better visibility of error messages
+      alert(`Failed to delete investment offer: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      
+      // Also show the message service notification
+      messageService.error(
+        'Deletion Failed',
+        `Failed to delete investment offer: ${err instanceof Error ? err.message : 'Unknown error'}`
+      );
+    }
+  };
+
   // Filter offers based on selected filter
   const getFilteredOffers = () => {
     const base = offerFilter === 'all'
@@ -750,6 +917,48 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       setTotalSharesForCalc(shares || 0);
     }).catch(() => setTotalSharesForCalc(0));
     setIsRecognitionModalOpen(true);
+  };
+
+  // Handle viewing contact details for Stage 4 offers
+  const handleViewContactDetails = (offer: OfferReceived) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔍 Viewing Contact Details for offer:', {
+        offer: offer,
+        offerId: offer?.investmentOfferId,
+        from: offer?.from,
+        status: offer?.status,
+        contactDetailsRevealed: offer?.contactDetailsRevealed
+      });
+    }
+    
+    // Get the original investment offer data
+    const originalOffer = offers.find(o => o.id === offer.investmentOfferId);
+    
+    if (!originalOffer) {
+      alert('Offer details not found. Please refresh the page and try again.');
+      return;
+    }
+    
+    // Create contact details display
+    const contactDetails = `
+🎯 INVESTMENT OFFER CONTACT INFORMATION
+
+📊 OFFER DETAILS:
+• Offer ID: ${originalOffer.id}
+• Amount: ${formatCurrency(Number(originalOffer.offerAmount) || 0, (originalOffer as any).currency || 'USD')}
+• Equity: ${Number(originalOffer.equityPercentage) || 0}%
+• Status: Stage 4 - Accepted by Startup
+• Date: ${new Date(originalOffer.createdAt).toLocaleDateString()}
+
+📧 CONTACT DETAILS:
+• Investor: ${originalOffer.investorName || originalOffer.investorEmail || 'Not Available'}
+• Investor Email: ${originalOffer.investorEmail || 'Not Available'}
+
+💡 NEXT STEPS:
+Contact the investor directly to proceed with the investment process.
+    `;
+    
+    alert(contactDetails);
   };
 
   const handleSubmitRecognition = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -1237,37 +1446,39 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           <div className="flex items-center justify-between">
             <div className="flex-1 min-w-0">
               <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Compliance Status</p>
-              <p className={`text-lg sm:text-xl lg:text-2xl font-bold ${
-                startup.complianceStatus === 'Compliant' 
-                  ? 'text-green-600' 
-                  : startup.complianceStatus === 'Pending' 
-                    ? 'text-yellow-600' 
-                    : 'text-red-600'
-              }`}>
-                {startup.complianceStatus === 'Compliant' 
-                  ? 'Compliant' 
-                  : startup.complianceStatus === 'Pending' 
-                    ? 'Pending' 
-                    : 'Not Compliant'}
-              </p>
-              <p className="text-xs text-slate-400 mt-1 truncate">
-                {startup.complianceStatus === 'Compliant' 
-                  ? 'All requirements met' 
-                  : startup.complianceStatus === 'Pending' 
-                    ? 'Under review' 
-                    : 'Action required'}
-              </p>
+              {(() => {
+                const { totalTasks, completedTasks, percentage } = complianceData;
+                
+                return (
+                  <>
+                    <p className={`text-lg sm:text-xl lg:text-2xl font-bold ${
+                      percentage >= 100 
+                        ? 'text-green-600' 
+                        : percentage >= 50 
+                          ? 'text-yellow-600' 
+                          : 'text-red-600'
+                    }`}>
+                      {percentage}%
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1 truncate">
+                      {percentage >= 100 
+                        ? 'All requirements met' 
+                        : `${completedTasks}/${totalTasks} tasks completed`}
+                    </p>
+                  </>
+                );
+              })()}
             </div>
             <div className={`flex-shrink-0 ml-2 ${
-              startup.complianceStatus === 'Compliant' 
+              complianceData.percentage >= 100 
                 ? 'text-green-600' 
-                : startup.complianceStatus === 'Pending' 
+                : complianceData.percentage >= 50 
                   ? 'text-yellow-600' 
                   : 'text-red-600'
             }`}>
-              {startup.complianceStatus === 'Compliant' ? (
+              {complianceData.percentage >= 100 ? (
                 <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6" />
-              ) : startup.complianceStatus === 'Pending' ? (
+              ) : complianceData.percentage >= 50 ? (
                 <Clock className="h-5 w-5 sm:h-6 sm:w-6" />
               ) : (
                 <XCircle className="h-5 w-5 sm:h-6 sm:w-6" />
@@ -1571,17 +1782,48 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                         </div>
                       )}
                       {offer.type === 'Investment' && offer.status === 'accepted' && (
-                        <span className="text-green-600 flex items-center gap-1">
-                          <Check className="h-4 w-4" />
-                          Accepted
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-600 flex items-center gap-1">
+                            <Check className="h-4 w-4" />
+                            Accepted
                           </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleViewContactDetails(offer)}
+                            className="border-blue-300 text-blue-600 hover:bg-blue-50"
+                          >
+                            <MessageCircle className="h-4 w-4 mr-1" />
+                            View Contact Details
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDeleteInvestmentOffer(offer)}
+                            className="border-red-300 text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Delete
+                          </Button>
+                        </div>
                       )}
                       {offer.type === 'Investment' && offer.status === 'rejected' && (
-                        <span className="text-red-600 flex items-center gap-1">
-                          <X className="h-4 w-4" />
-                          Rejected
-                              </span>
-                            )}
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-600 flex items-center gap-1">
+                            <X className="h-4 w-4" />
+                            Rejected
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDeleteInvestmentOffer(offer)}
+                            className="border-red-300 text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Delete
+                          </Button>
+                        </div>
+                      )}
                         </td>
                       </tr>
                     ))}
@@ -1668,7 +1910,24 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                 <Input label="Post-Money Valuation (auto)" name="rec-postmoney" id="rec-postmoney" type="number" readOnly value={recPostMoney} />
               </>
             )}
-            <Input label="Upload Signed Agreement" name="rec-agreement" id="rec-agreement" type="file" required />
+            <CloudDriveInput
+              value=""
+              onChange={(url) => {
+                const hiddenInput = document.getElementById('rec-agreement-url') as HTMLInputElement;
+                if (hiddenInput) hiddenInput.value = url;
+              }}
+              onFileSelect={(file) => {
+                const fileInput = document.getElementById('rec-agreement') as HTMLInputElement;
+                if (fileInput) fileInput.files = [file];
+              }}
+              placeholder="Paste your cloud drive link here..."
+              label="Upload Signed Agreement"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              maxSize={10}
+              documentType="signed agreement"
+              showPrivacyMessage={false}
+            />
+            <input type="hidden" id="rec-agreement-url" name="rec-agreement-url" />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => setIsRecognitionModalOpen(false)}>Cancel</Button>

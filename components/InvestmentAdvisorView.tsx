@@ -7,7 +7,6 @@ import { useInvestmentAdvisorCurrency } from '../lib/hooks/useInvestmentAdvisorC
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { AuthUser, authService } from '../lib/auth';
 import ProfilePage from './ProfilePage';
-import { fixCurrentUser } from '../lib/fixCurrentUser';
 import UserDataManager from './UserDataManager';
 import InvestorView from './InvestorView';
 import StartupHealthView from './StartupHealthView';
@@ -31,29 +30,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   interests,
   pendingRelationships = []
 }) => {
-  // Debug: Log the data being received
-  if (process.env.NODE_ENV === 'development') {
-    console.log('🔍 InvestmentAdvisorView Data Debug:', {
-      currentUser: currentUser?.id,
-      currentUserRole: currentUser?.role,
-      currentUserAdvisorCode: currentUser?.investment_advisor_code,
-      usersCount: users?.length || 0,
-      startupsCount: startups?.length || 0,
-      investmentsCount: investments?.length || 0,
-      offersCount: offers?.length || 0,
-      allOffers: offers?.map(offer => ({
-        id: offer.id,
-        investorEmail: offer.investorEmail,
-        startupName: offer.startupName,
-        offerAmount: offer.offerAmount,
-        equityPercentage: offer.equityPercentage,
-        status: offer.status,
-        currency: (offer as any).currency
-      })),
-      usersWithAdvisorCode: users?.filter(user => (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code).length || 0,
-      startupsWithAdvisorCode: startups?.filter(startup => (startup as any).investment_advisor_code === currentUser?.investment_advisor_code).length || 0
-    });
-  }
   const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'system'>('dashboard');
   const [showProfilePage, setShowProfilePage] = useState(false);
   const [isAcceptRequestModalOpen, setIsAcceptRequestModalOpen] = useState(false);
@@ -97,14 +73,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Get the investment advisor's currency
   const advisorCurrency = useInvestmentAdvisorCurrency(currentUser);
 
-  // Debug: Log all users data when component mounts or data changes (only in development)
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-    console.log('🔍 InvestmentAdvisorView - All users data:', users);
-    console.log('🔍 InvestmentAdvisorView - Current user data:', currentUser);
-    console.log('🔍 InvestmentAdvisorView - All startups data:', startups);
-    }
-  }, [users, currentUser, startups]);
 
   // Check authentication health on component mount
   useEffect(() => {
@@ -180,19 +148,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Get pending startup requests - FIXED VERSION
   const pendingStartupRequests = useMemo(() => {
     if (!startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
-      if (process.env.NODE_ENV === 'development') {
-      console.log('🔍 Pending Startup Requests: Missing data', { startups: !!startups, users: !!users });
-      }
       return [];
-    }
-
-    if (process.env.NODE_ENV === 'development') {
-    console.log('🔍 Pending Startup Requests Debug:', {
-      totalStartups: startups.length,
-      totalUsers: users.length,
-      currentAdvisorCode: currentUser?.investment_advisor_code,
-      currentUserId: currentUser?.id
-    });
     }
 
     // Find startups whose users have entered the investment advisor code but haven't been accepted
@@ -204,7 +160,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       );
       
       if (!startupUser) {
-        console.log('🔍 No startup user found for startup:', startup.id, startup.name);
         return false;
       }
 
@@ -212,35 +167,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
       const isNotAccepted = !(startupUser as any).advisor_accepted;
 
-      if (process.env.NODE_ENV === 'development') {
-      console.log('🔍 Startup user check:', {
-        startupId: startup.id,
-        startupName: startup.name,
-        userId: startupUser.id,
-        userName: startupUser.name,
-        userEmail: startupUser.email,
-        enteredCode: (startupUser as any).investment_advisor_code_entered,
-        currentAdvisorCode: currentUser?.investment_advisor_code,
-        hasEnteredCode,
-        advisorAccepted: (startupUser as any).advisor_accepted,
-        isNotAccepted,
-        shouldInclude: hasEnteredCode && isNotAccepted
-      });
-      }
-
       return hasEnteredCode && isNotAccepted;
     });
-
-    if (process.env.NODE_ENV === 'development') {
-    console.log('🔍 Pending Startup Requests Result:', {
-      totalPending: pendingStartups.length,
-      pendingStartups: pendingStartups.map(s => ({
-        id: s.id,
-        name: s.name,
-        userId: s.user_id
-      }))
-    });
-    }
 
     return pendingStartups;
   }, [startups, users, currentUser?.investment_advisor_code]);
@@ -248,14 +176,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Get pending investor requests - FIXED VERSION
   const pendingInvestorRequests = useMemo(() => {
     if (!users || !Array.isArray(users)) {
-      console.log('🔍 Pending Investor Requests: Missing users data');
       return [];
     }
-
-    console.log('🔍 Pending Investor Requests Debug:', {
-      totalUsers: users.length,
-      currentAdvisorCode: currentUser?.investment_advisor_code
-    });
 
     // Find investors who have entered the investment advisor code but haven't been accepted
     const pendingInvestors = users.filter(user => {
@@ -263,29 +185,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
       const isNotAccepted = !(user as any).advisor_accepted;
 
-      console.log('🔍 Investor check:', {
-        userId: user.id,
-        userName: user.name,
-        userEmail: user.email,
-        userRole: user.role,
-        enteredCode: (user as any).investment_advisor_code_entered,
-        currentAdvisorCode: currentUser?.investment_advisor_code,
-        hasEnteredCode,
-        advisorAccepted: (user as any).advisor_accepted,
-        isNotAccepted,
-        shouldInclude: hasEnteredCode && isNotAccepted
-      });
-
       return hasEnteredCode && isNotAccepted;
-    });
-
-    console.log('🔍 Pending Investor Requests Result:', {
-      totalPending: pendingInvestors.length,
-      pendingInvestors: pendingInvestors.map(u => ({
-        id: u.id,
-        name: u.name,
-        email: u.email
-      }))
     });
 
     return pendingInvestors;
@@ -294,15 +194,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Get accepted startups - FIXED VERSION
   const myStartups = useMemo(() => {
     if (!startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
-      console.log('🔍 My Startups: Missing data');
       return [];
     }
-
-    console.log('🔍 My Startups Debug:', {
-      totalStartups: startups.length,
-      totalUsers: users.length,
-      currentAdvisorCode: currentUser?.investment_advisor_code
-    });
 
     // Find startups whose users have entered the investment advisor code and have been accepted
     const acceptedStartups = startups.filter(startup => {
@@ -320,26 +213,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
       const isAccepted = (startupUser as any).advisor_accepted === true;
 
-      console.log('🔍 Accepted startup check:', {
-        startupId: startup.id,
-        startupName: startup.name,
-        userId: startupUser.id,
-        userName: startupUser.name,
-        hasEnteredCode,
-        isAccepted,
-        shouldInclude: hasEnteredCode && isAccepted
-      });
-
       return hasEnteredCode && isAccepted;
-    });
-
-    console.log('🔍 My Startups Result:', {
-      totalAccepted: acceptedStartups.length,
-      acceptedStartups: acceptedStartups.map(s => ({
-        id: s.id,
-        name: s.name,
-        userId: s.user_id
-      }))
     });
 
     return acceptedStartups;
@@ -348,14 +222,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Get accepted investors - FIXED VERSION
   const myInvestors = useMemo(() => {
     if (!users || !Array.isArray(users)) {
-      console.log('🔍 My Investors: Missing users data');
       return [];
     }
-
-    console.log('🔍 My Investors Debug:', {
-      totalUsers: users.length,
-      currentAdvisorCode: currentUser?.investment_advisor_code
-    });
 
     // Find investors who have entered the investment advisor code (including new ones)
     const acceptedInvestors = users.filter(user => {
@@ -363,25 +231,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
       const isAccepted = (user as any).advisor_accepted === true;
 
-      console.log('🔍 Investor check:', {
-        userId: user.id,
-        userName: user.name,
-        userEmail: user.email,
-        hasEnteredCode,
-        isAccepted,
-        shouldInclude: hasEnteredCode // Include all investors who entered the code, not just accepted ones
-      });
-
       return hasEnteredCode; // Include all investors who entered the code, regardless of acceptance status
-    });
-
-    console.log('🔍 My Investors Result:', {
-      totalAccepted: acceptedInvestors.length,
-      acceptedInvestors: acceptedInvestors.map(u => ({
-        id: u.id,
-        name: u.name,
-        email: u.email
-      }))
     });
 
     return acceptedInvestors;
@@ -410,50 +260,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
     const allRequests = [...startupRequests, ...investorRequests];
 
-    console.log('🔍 Service Requests Combined:', {
-      totalRequests: allRequests.length,
-      startupRequests: startupRequests.length,
-      investorRequests: investorRequests.length,
-      allRequests: allRequests.map(req => ({
-        id: req.id,
-        name: req.name,
-        email: req.email,
-        type: req.type
-      }))
-    });
-
     return allRequests;
   }, [pendingStartupRequests, pendingInvestorRequests, users]);
-
-  // Debug logging for the complete state
-  console.log('🔍 Investment Advisor Complete Debug:', {
-    currentUser: {
-      id: currentUser?.id,
-      name: currentUser?.name,
-      email: currentUser?.email,
-      role: currentUser?.role,
-      investment_advisor_code: currentUser?.investment_advisor_code
-    },
-    dataCounts: {
-      totalUsers: users?.length || 0,
-      totalStartups: startups?.length || 0,
-      pendingStartupRequests: pendingStartupRequests.length,
-      pendingInvestorRequests: pendingInvestorRequests.length,
-      myStartups: myStartups.length,
-      myInvestors: myInvestors.length,
-      serviceRequests: serviceRequests.length
-    },
-    pendingStartupDetails: pendingStartupRequests.map(s => ({
-      id: s.id,
-      name: s.name,
-      userId: s.user_id
-    })),
-    pendingInvestorDetails: pendingInvestorRequests.map(u => ({
-      id: u.id,
-      name: u.name,
-      email: u.email
-    }))
-  });
 
   // Offers Made - Fetch directly from database based on advisor code and stages
   const [offersMade, setOffersMade] = useState<any[]>([]);
@@ -506,11 +314,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Fetch offers made for this advisor
   const fetchOffersMade = async () => {
-    if (!currentUser?.investment_advisor_code) return;
+    if (!currentUser?.investment_advisor_code) {
+      setOffersMade([]);
+      return;
+    }
     
     setLoadingOffersMade(true);
     try {
-      console.log('🔍 Fetching offers made for advisor:', currentUser.investment_advisor_code);
       
       // First, fetch offers at stages 1, 2, and 4
       const { data: offersData, error: offersError } = await supabase
@@ -524,11 +334,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return;
       }
 
-      console.log('🔍 Raw offers from database:', offersData);
-      console.log('🔍 Current advisor code:', currentUser?.investment_advisor_code);
-
       if (!offersData || offersData.length === 0) {
-        console.log('🔍 No offers found at stages 1, 2, and 4');
         setOffersMade([]);
         return;
       }
@@ -546,8 +352,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       if (investorsError) {
         console.error('Error fetching investors:', investorsError);
       }
-      
-      console.log('🔍 Investors data:', investorsData);
 
       // Fetch startup data with investment information and currency
       const { data: startupsData, error: startupsError } = await supabase
@@ -564,15 +368,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         console.error('Error fetching startups:', startupsError);
       }
       
-      console.log('🔍 Startups data:', startupsData);
-      
       if (fundraisingError) {
         console.error('Error fetching fundraising details:', fundraisingError);
       }
-
-      console.log('🔍 Investors data:', investorsData);
-      console.log('🔍 Startups data:', startupsData);
-      console.log('🔍 Fundraising data:', fundraisingData);
 
       // Fetch all advisors data for contact information
       const { data: advisorsData, error: advisorsError } = await supabase
@@ -583,8 +381,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       if (advisorsError) {
         console.error('Error fetching advisors:', advisorsError);
       }
-      
-      console.log('🔍 Advisors data:', advisorsData);
 
       // Try to fetch startup emails by matching startup names with user names
       // This is a fallback approach since startup_id doesn't exist in users table
@@ -597,8 +393,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       if (startupUsersError) {
         console.error('Error fetching startup users:', startupUsersError);
       }
-      
-      console.log('🔍 Startup users data:', startupUsersData);
 
       // Create lookup maps
       const investorsMap = (investorsData || []).reduce((acc, investor) => {
@@ -632,34 +426,25 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         const investor = investorsMap[offer.investor_email];
         const startup = startupsMap[offer.startup_id];
         
+        // Skip offers where we don't have complete data
         if (!investor || !startup) {
-          console.log('🔍 Missing data for offer:', offer.id, { investor, startup });
           return false;
         }
 
         const investorHasThisAdvisor = investor.investment_advisor_code_entered === currentUser?.investment_advisor_code;
         const startupHasThisAdvisor = startup.investment_advisor_code === currentUser?.investment_advisor_code;
         
-        console.log('🔍 Checking offer:', offer.id, {
-          stage: offer.stage,
-          investorHasThisAdvisor,
-          startupHasThisAdvisor,
-          investorCode: investor.investment_advisor_code_entered,
-          startupCode: startup.investment_advisor_code,
-            currentAdvisorCode: currentUser?.investment_advisor_code
-          });
-        
-        // Stage 1: Show if investor has this advisor
+        // Stage 1: Show if investor has this advisor (investor advisor approval needed)
         if (offer.stage === 1 && investorHasThisAdvisor) {
           return true;
         }
         
-        // Stage 2: Show if startup has this advisor
+        // Stage 2: Show if startup has this advisor (startup advisor approval needed)
         if (offer.stage === 2 && startupHasThisAdvisor) {
           return true;
         }
         
-        // Stage 4: Show if either investor or startup has this advisor (for completed investments)
+        // Stage 4: Show if either investor or startup has this advisor (completed investments)
         if (offer.stage === 4 && (investorHasThisAdvisor || startupHasThisAdvisor)) {
           return true;
         }
@@ -675,27 +460,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         startup_advisor: advisorsMap[offer.startup_advisor_code]
       }));
 
-      console.log('🔍 Filtered offers for advisor:', filteredOffers);
-      console.log('🔍 Total offers found:', offersData.length);
-      console.log('🔍 Offers after filtering:', filteredOffers.length);
-      console.log('🔍 Current advisor code:', currentUser?.investment_advisor_code);
-      
-      // If no offers found after filtering, show all offers for debugging
-      if (filteredOffers.length === 0 && offersData.length > 0) {
-        console.log('⚠️ No offers matched advisor criteria, showing all offers for debugging');
-        const debugOffers = offersData.map(offer => ({
-          ...offer,
-          startup: startupsMap[offer.startup_id],
-          fundraising: fundraisingMap[offer.startup_id],
-          investor: investorsMap[offer.investor_email],
-          startup_user: startupUsersMap[offer.startup_name],
-          investor_advisor: advisorsMap[offer.investor_advisor_code],
-          startup_advisor: advisorsMap[offer.startup_advisor_code]
-        }));
-        setOffersMade(debugOffers);
-      } else {
-        setOffersMade(filteredOffers);
-      }
+      // Set the properly filtered offers (no debugging fallback)
+      setOffersMade(filteredOffers);
       
     } catch (error) {
       console.error('Error in fetchOffersMade:', error);
@@ -712,7 +478,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Refresh offers when offers prop changes (from App.tsx)
   useEffect(() => {
     if (offers && offers.length > 0) {
-      console.log('🔄 Investment Advisor: Offers prop changed, refreshing offers made');
       fetchOffersMade();
     }
   }, [offers]);
@@ -720,7 +485,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Force refresh offers when activeTab changes to myInvestments
   useEffect(() => {
     if (activeTab === 'myInvestments') {
-      console.log('🔄 Investment Advisor: My Investments tab activated, refreshing offers made');
       fetchOffersMade();
     }
   }, [activeTab]);
@@ -728,7 +492,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Add a global refresh mechanism
   useEffect(() => {
     const handleOfferUpdate = () => {
-      console.log('🔄 Investment Advisor: Global offer update detected, refreshing offers made');
       fetchOffersMade();
     };
 
@@ -749,8 +512,27 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Get co-investment opportunities
   const coInvestmentOpportunities = useMemo(() => {
-    if (!investments || !Array.isArray(investments)) return [];
-    return investments;
+    if (!investments || !Array.isArray(investments)) {
+      return [];
+    }
+    
+    // Filter and map investments to co-investment opportunities
+    const opportunities = investments.map(investment => ({
+      id: investment.id,
+      name: investment.name,
+      sector: investment.sector,
+      investmentValue: investment.investmentValue,
+      equityAllocation: investment.equityAllocation,
+      complianceStatus: investment.complianceStatus,
+      pitchDeckUrl: investment.pitchDeckUrl,
+      pitchVideoUrl: investment.pitchVideoUrl,
+      totalFunding: investment.totalFunding,
+      totalRevenue: investment.totalRevenue,
+      registrationDate: investment.registrationDate,
+      investmentType: investment.investmentType
+    }));
+    
+    return opportunities;
   }, [investments]);
 
   // Handle accepting service requests
@@ -799,9 +581,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         await (userService as any).acceptInvestmentAdvisorRequest(request.id, financialMatrix);
       } else {
         // For startup requests, request.id is the startup ID, we need to find the user ID
-        if (process.env.NODE_ENV === 'development') {
-        console.log('🔍 Finding user for startup:', request.id);
-        }
         const startup = startups.find(s => s.id === request.id);
         
         if (!startup) {
@@ -813,9 +592,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           throw new Error('Startup user not found');
         }
         
-        if (process.env.NODE_ENV === 'development') {
-        console.log('🔍 Found startup and user:', { startup, startupUser });
-        }
         // Pass both startup ID and user ID to the function
         await (userService as any).acceptStartupAdvisorRequest(startup.id, startupUser.id, financialMatrix);
       }
@@ -859,13 +635,23 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       setIsLoading(true);
       
       if (myInvestors.length === 0) {
-        alert('You have no assigned investors to recommend this startup to.');
+        setNotifications(prev => [...prev, {
+          id: Date.now().toString(),
+          message: 'You have no assigned investors to recommend this startup to. Please accept investor requests first.',
+          type: 'warning',
+          timestamp: new Date()
+        }]);
         return;
       }
       
       const startup = startups.find(s => s.id === startupId);
       if (!startup) {
-        alert('Startup not found.');
+        setNotifications(prev => [...prev, {
+          id: Date.now().toString(),
+          message: 'Startup not found. Please refresh the page and try again.',
+          type: 'error',
+          timestamp: new Date()
+        }]);
         return;
       }
       
@@ -881,7 +667,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             investor_id: investorId,
             recommended_deal_value: 0,
             recommended_valuation: 0,
-            recommendation_notes: `Recommended by ${currentUser?.name || 'Investment Advisor'}`,
+            recommendation_notes: `Recommended by ${currentUser?.name || 'Investment Advisor'} - Co-investment opportunity`,
             status: 'pending'
           })
       );
@@ -891,18 +677,33 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       
       if (errors.length > 0) {
         console.error('Error creating recommendations:', errors);
-        alert('Failed to recommend startup. Please try again.');
+        setNotifications(prev => [...prev, {
+          id: Date.now().toString(),
+          message: 'Failed to create some recommendations. Please try again.',
+          type: 'error',
+          timestamp: new Date()
+        }]);
         return;
       }
       
       // Add to recommended startups set to change button color
       setRecommendedStartups(prev => new Set([...prev, startupId]));
       
-      alert(`Successfully recommended "${startup.name}" to ${myInvestors.length} investors!`);
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: `Successfully recommended "${startup.name}" to ${myInvestors.length} investors!`,
+        type: 'success',
+        timestamp: new Date()
+      }]);
       
     } catch (error) {
       console.error('Error recommending startup:', error);
-      alert('Failed to recommend startup. Please try again.');
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: 'Failed to recommend startup. Please try again.',
+        type: 'error',
+        timestamp: new Date()
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -913,27 +714,23 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     try {
       setIsLoading(true);
       
+      let result;
       if (type === 'investor') {
         // Stage 1: Investor advisor approval
-        await investmentService.approveInvestorAdvisorOffer(offerId, action);
-        if (action === 'approve') {
-          // Move to stage 2 after investor advisor approval
-          await investmentService.updateInvestmentOfferStage(offerId, 2);
-        }
+        result = await investmentService.approveInvestorAdvisorOffer(offerId, action);
       } else {
         // Stage 2: Startup advisor approval
-        await investmentService.approveStartupAdvisorOffer(offerId, action);
-        if (action === 'approve') {
-          // Move to stage 3 after startup advisor approval
-          await investmentService.updateInvestmentOfferStage(offerId, 3);
-        }
+        result = await investmentService.approveStartupAdvisorOffer(offerId, action);
       }
+      
+      // Extract new stage from result
+      const newStage = result?.new_stage || null;
       
       alert(`Offer ${action}ed successfully!`);
       
       // Dispatch global event to notify other components
       window.dispatchEvent(new CustomEvent('offerStageUpdated', { 
-        detail: { offerId, action, type, newStage: action === 'approve' ? (type === 'investor' ? 2 : 3) : null }
+        detail: { offerId, action, type, newStage }
       }));
       
       // Refresh offers made after approval
@@ -977,36 +774,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle viewing investor dashboard
   const handleViewInvestorDashboard = async (investor: User) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔍 Viewing Investor Dashboard:', {
-        investor: investor,
-        investorId: investor?.id,
-        investorEmail: investor?.email,
-        investorCode: investor?.investorCode,
-        totalOffers: offers?.length || 0,
-        totalStartups: startups?.length || 0,
-        totalInvestments: investments?.length || 0
-      });
-    }
-    
     // Load investor's offers using the same logic as App.tsx
     try {
       const investorOffersData = await investmentService.getUserInvestmentOffers(investor.email);
       setInvestorOffers(investorOffersData);
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔍 Loaded Investor Offers:', {
-          investorEmail: investor.email,
-          offersCount: investorOffersData.length,
-          offers: investorOffersData.map(offer => ({
-            id: offer.id,
-            startupName: offer.startupName,
-            offerAmount: offer.offerAmount,
-            equityPercentage: offer.equityPercentage,
-            status: offer.status
-          }))
-        });
-      }
     } catch (error) {
       console.error('Error loading investor offers:', error);
       setInvestorOffers([]);
@@ -1018,36 +789,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle viewing startup dashboard
   const handleViewStartupDashboard = async (startup: Startup) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔍 Viewing Startup Dashboard:', {
-        startup: startup,
-        startupId: startup?.id,
-        startupName: startup?.name,
-        startupAdvisorCode: (startup as any)?.investment_advisor_code,
-        totalOffers: offers?.length || 0,
-        totalUsers: users?.length || 0
-      });
-    }
-    
     // Load startup's offers using the same logic as App.tsx
     try {
       const startupOffersData = await investmentService.getOffersForStartup(startup.id);
       setStartupOffers(startupOffersData);
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔍 Loaded Startup Offers:', {
-          startupId: startup.id,
-          startupName: startup.name,
-          offersCount: startupOffersData.length,
-          offers: startupOffersData.map(offer => ({
-            id: offer.id,
-            investorEmail: offer.investorEmail,
-            offerAmount: offer.offerAmount,
-            equityPercentage: offer.equityPercentage,
-            status: offer.status
-          }))
-        });
-      }
     } catch (error) {
       console.error('Error loading startup offers:', error);
       setStartupOffers([]);
@@ -1088,19 +833,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle viewing investment details
   const handleViewInvestmentDetails = (offer: any) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔍 Viewing Investment Details:', {
-        offer: offer,
-        offerId: offer?.id,
-        startupName: offer?.startup_name,
-        investorName: offer?.investor_name,
-        offerAmount: offer?.offer_amount,
-        equityPercentage: offer?.equity_percentage,
-        investor_advisor: offer?.investor_advisor,
-        startup_advisor: offer?.startup_advisor
-      });
-    }
-    
     // Get advisor info from the offer data (now included in the offer object)
     const investorAdvisor = offer.investor_advisor;
     const startupAdvisor = offer.startup_advisor;
@@ -1254,38 +986,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
           ))}
         </div>
-      )}
-      {/* Debug Panel - Only show in development */}
-      {process.env.NODE_ENV === 'development' && (
-      <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 m-4 rounded">
-        <h4 className="font-bold">🔍 Debug Information:</h4>
-        <p><strong>Current Advisor Code:</strong> {currentUser?.investment_advisor_code || 'None'}</p>
-        <p><strong>Total Users:</strong> {users?.length || 0}</p>
-        <p><strong>Investors with your code:</strong> {users?.filter(u => u.role === 'Investor' && (u as any).investment_advisor_code_entered === currentUser?.investment_advisor_code).length || 0}</p>
-        <p><strong>Pending Requests:</strong> {serviceRequests.length}</p>
-        <p><strong>Accepted Investors:</strong> {myInvestors.length}</p>
-        
-        {/* Fix Button - Only show for Investment Advisor role users */}
-        {!currentUser?.investment_advisor_code && currentUser?.role === 'Investment Advisor' && (
-          <div className="mt-3 p-3 bg-red-100 border border-red-300 rounded">
-            <p className="text-red-800 font-medium mb-2">⚠️ No Investment Advisor Code Found</p>
-            <button
-              onClick={async () => {
-                const result = await fixCurrentUser.assignInvestmentAdvisorCode();
-                if (result.success) {
-                  alert(`✅ ${result.message}\nYour new advisor code: ${result.code}`);
-                  window.location.reload();
-                } else {
-                  alert(`❌ ${result.message}`);
-                }
-              }}
-              className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
-            >
-              🔧 Fix: Assign Investment Advisor Code
-            </button>
-          </div>
-        )}
-      </div>
       )}
       {/* Header */}
       <div className="bg-white shadow">
@@ -1670,48 +1370,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </svg>
                             <h3 className="text-lg font-medium text-gray-900 mb-2">No Offers Found</h3>
                             <p className="text-sm text-gray-500 mb-4">
-                              No offers have been made by your assigned investors or received by your assigned startups yet.
+                              No investment offers are currently requiring your approval or involving your clients.
                             </p>
-                            {process.env.NODE_ENV === 'development' && (
-                              <div className="text-xs text-gray-400 bg-gray-50 p-3 rounded border">
-                                <div className="font-medium mb-2">Debug Information:</div>
-                                <div>Total offers in system: {offers?.length || 0}</div>
-                                <div>Current advisor code: {currentUser?.investment_advisor_code || 'None'}</div>
-                                <div>Users with your advisor code: {users?.filter(u => (u as any).investment_advisor_code_entered === currentUser?.investment_advisor_code).length || 0}</div>
-                                <div>Startups with your advisor code: {startups?.filter(s => (s as any).investment_advisor_code === currentUser?.investment_advisor_code).length || 0}</div>
-                                <div>Filtered offers: {offersMade.length}</div>
-                                {offers?.length > 0 && (
-                                  <div className="mt-2">
-                                    <div className="font-medium">Sample offer data:</div>
-                                    <div className="text-xs">
-                                      Investor: {offers[0]?.investorEmail} | 
-                                      Startup: {offers[0]?.startupName} | 
-                                      Amount: {offers[0]?.offerAmount}
-                            </div>
-                            </div>
-                                )}
-                                {users?.filter(u => (u as any).investment_advisor_code_entered === currentUser?.investment_advisor_code).length > 0 && (
-                                  <div className="mt-2">
-                                    <div className="font-medium">Users with your code:</div>
-                                    {users?.filter(u => (u as any).investment_advisor_code_entered === currentUser?.investment_advisor_code).map(u => (
-                                      <div key={u.id} className="text-xs">
-                                        {u.email} - {(u as any).advisor_accepted ? 'Accepted' : 'Pending'}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                {startups?.filter(s => (s as any).investment_advisor_code === currentUser?.investment_advisor_code).length > 0 && (
-                                  <div className="mt-2">
-                                    <div className="font-medium">Startups with your code:</div>
-                                    {startups?.filter(s => (s as any).investment_advisor_code === currentUser?.investment_advisor_code).map(s => (
-                                      <div key={s.id} className="text-xs">
-                                        {s.name} (ID: {s.id})
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
                           </div>
                         </td>
                       </tr>
@@ -1723,8 +1383,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       </tr>
                     ) : offersMade.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
-                          No offers requiring approval at this time.
+                        <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                          <div className="flex flex-col items-center">
+                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Offers Found</h3>
+                            <p className="text-sm text-gray-500 mb-4">
+                              No investment offers are currently requiring your approval or involving your clients.
+                            </p>
+                            <div className="text-xs text-gray-400 bg-gray-50 p-3 rounded border max-w-md">
+                              <div className="font-medium mb-2">How offers appear here:</div>
+                              <div className="text-left space-y-1">
+                                <div>• <strong>Stage 1:</strong> Offers from your investors (need your approval)</div>
+                                <div>• <strong>Stage 2:</strong> Offers to your startups (need your approval)</div>
+                                <div>• <strong>Stage 4:</strong> Completed deals involving your clients</div>
+                              </div>
+                            </div>
+                          </div>
                         </td>
                       </tr>
                     ) : (
@@ -1812,13 +1488,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                     </span>
                                   );
                                 }
-                                if (startupAdvisorStatus === 'rejected') {
+                                if ((offer as any).startup_advisor_approval_status === 'rejected') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
                                       ❌ Rejected by Startup Advisor
                                     </span>
                                   );
                                 }
+                                
                                 return (
                                   <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
                                     ❓ Unknown Status
@@ -1962,35 +1639,44 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   <tbody className="bg-white divide-y divide-gray-200">
                     {coInvestmentOpportunities.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
-                          No co-investment opportunities available
+                        <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                          <div className="flex flex-col items-center">
+                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Co-Investment Opportunities</h3>
+                            <p className="text-sm text-gray-500 mb-4">
+                              No investment opportunities are currently available for co-investment. Check back later for new opportunities.
+                            </p>
+                          </div>
                         </td>
                       </tr>
                     ) : (
                       coInvestmentOpportunities.map((investment) => (
                         <tr key={investment.id}>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {investment.name}
+                            {investment.name || 'Unknown Startup'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {investment.sector}
+                            {investment.sector || 'Not specified'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {formatCurrency(investment.investmentValue)}
+                            {investment.investmentValue ? formatCurrency(investment.investmentValue) : 'Not specified'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {investment.equityAllocation}%
+                            {investment.equityAllocation ? `${investment.equityAllocation}%` : 'Not specified'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            Lead Investor Name
+                            <span className="text-gray-400 italic">TBD</span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                              investment.complianceStatus === 'Approved' ? 'bg-green-100 text-green-800' :
+                              investment.complianceStatus === 'Compliant' ? 'bg-green-100 text-green-800' :
                               investment.complianceStatus === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-red-100 text-red-800'
+                              investment.complianceStatus === 'Non-Compliant' ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
                             }`}>
-                              {investment.complianceStatus}
+                              {investment.complianceStatus || 'Unknown'}
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -1999,16 +1685,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 onClick={() => {
                                   alert('Due diligence functionality coming soon!');
                                 }}
-                                className="px-3 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800 hover:bg-purple-200"
+                                className="px-3 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800 hover:bg-purple-200 transition-colors"
                               >
                                 Due Diligence
                               </button>
                               <button
                                 onClick={() => handleRecommendCoInvestment(investment.id)}
-                                disabled={isLoading}
-                                className="px-3 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800 hover:bg-blue-200 disabled:opacity-50"
+                                disabled={isLoading || myInvestors.length === 0}
+                                className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                                  myInvestors.length === 0 
+                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                                    : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                                }`}
+                                title={myInvestors.length === 0 ? 'No investors assigned to recommend to' : 'Recommend to your investors'}
                               >
-                                Recommend to My Investors
+                                {isLoading ? 'Recommending...' : 'Recommend to Investors'}
                               </button>
                             </div>
                           </td>

@@ -29,6 +29,7 @@ import Footer from './components/Footer';
 import PageRouter from './components/PageRouter';
 import PublicProgramView from './components/PublicProgramView';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
+import DiagnosticPage from './components/DiagnosticPage';
 
 import { Briefcase, BarChart3, LogOut } from 'lucide-react';
 import LogoTMS from './components/public/logoTMS.svg';
@@ -38,7 +39,7 @@ import { messageService } from './lib/messageService';
 
 const App: React.FC = () => {
   // Check if we're on a standalone page (footer links)
-  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products'];
+  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products', '/diagnostic'];
   const currentPath = window.location.pathname;
   
   // Check if we're on a public program view page
@@ -845,7 +846,7 @@ const App: React.FC = () => {
                           .insert({
                             name: completeUser.startup_name || 'Unnamed Startup',
                             user_id: completeUser.id,
-                            sector: 'Technology', // Default sector
+                            sector: 'Unknown', // Default sector - will be updated when domain is selected
                             current_valuation: 0,
                             total_funding: 0,
                             total_revenue: 0,
@@ -1029,7 +1030,7 @@ const App: React.FC = () => {
                                 equity_allocation: 0,
                                 current_valuation: calculatedCurrentValuation,
                                 compliance_status: 'Pending',
-                                sector: 'Technology',
+                                sector: 'Unknown',
                                 total_funding: 0,
                                 total_revenue: 0,
                                 registration_date: new Date().toISOString().split('T')[0],
@@ -1460,7 +1461,7 @@ const App: React.FC = () => {
             equityAllocation: 0,
             currentValuation: 0,
             complianceStatus: ComplianceStatus.Pending,
-            sector: "Technology",
+            sector: "Unknown",
             totalFunding: 0,
             totalRevenue: 0,
             registrationDate: new Date().toISOString().split('T')[0],

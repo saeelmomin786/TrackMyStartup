@@ -6,6 +6,9 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       plugins: [react()],
+      css: {
+        postcss: './postcss.config.js',
+      },
       base: '/', // Change this to '/your-repo-name/' if deploying to GitHub Pages subdirectory
       server: {
         proxy: {

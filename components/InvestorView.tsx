@@ -13,6 +13,7 @@ import { investmentService } from '../lib/database';
 import { currencyRates } from '../lib/currencyUtils';
 import ProfilePage from './ProfilePage';
 import AdvisorAwareLogo from './AdvisorAwareLogo';
+import ContactDetailsModal from './ContactDetailsModal';
 import { supabase } from '../lib/supabase';
 
 interface InvestorViewProps {
@@ -166,6 +167,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [recommendedOpportunities, setRecommendedOpportunities] = useState<any[]>([]);
     const [shuffledPitches, setShuffledPitches] = useState<ActiveFundraisingStartup[]>([]);
     const [playingVideoId, setPlayingVideoId] = useState<number | null>(null);
+    
+    // State for contact details modal
+    const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+    const [contactModalOffer, setContactModalOffer] = useState<InvestmentOffer | null>(null);
     const [favoritedPitches, setFavoritedPitches] = useState<Set<number>>(new Set());
     const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
     const [showOnlyValidated, setShowOnlyValidated] = useState(false);
@@ -456,20 +461,43 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         // Get offer stage (default to 1 if not set)
         const offerStage = offer.stage || 1;
         
-        // Determine the approval status to display based on stage
+        // Check if investor has advisor
+        const investorHasAdvisor = currentUser?.investment_advisor_code_entered || 
+                                 (currentUser as any)?.investment_advisor_code;
+        
+        // Check if startup has advisor (from offer data)
+        const startupHasAdvisor = offer.startup?.investment_advisor_code;
+        
+        // Determine the approval status to display based on stage AND advisor status
         if (offerStage === 1) {
-            return {
-                color: 'bg-blue-100 text-blue-800',
-                text: '🔵 Stage 1: Investor Advisor Approval',
-                icon: '🔵'
-            };
+            if (investorHasAdvisor) {
+                return {
+                    color: 'bg-blue-100 text-blue-800',
+                    text: '🔵 Stage 1: Investor Advisor Approval',
+                    icon: '🔵'
+                };
+            } else {
+                return {
+                    color: 'bg-yellow-100 text-yellow-800',
+                    text: '⚡ Stage 1: Auto-Processing (No Advisor)',
+                    icon: '⚡'
+                };
+            }
         }
         if (offerStage === 2) {
-            return {
-                color: 'bg-purple-100 text-purple-800',
-                text: '🟣 Stage 2: Startup Advisor Approval',
-                icon: '🟣'
-            };
+            if (startupHasAdvisor) {
+                return {
+                    color: 'bg-purple-100 text-purple-800',
+                    text: '🟣 Stage 2: Startup Advisor Approval',
+                    icon: '🟣'
+                };
+            } else {
+                return {
+                    color: 'bg-yellow-100 text-yellow-800',
+                    text: '⚡ Stage 2: Auto-Processing (No Startup Advisor)',
+                    icon: '⚡'
+                };
+            }
         }
         if (offerStage === 3) {
             return {
@@ -1187,8 +1215,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                 size="sm" 
                                 variant="outline"
                                 onClick={() => {
-                                  // TODO: Show contact details modal
-                                  alert('Contact details: [Startup contact information will be displayed here]');
+                                  // Set the selected offer and open the modal
+                                  setContactModalOffer(offer);
+                                  setIsContactModalOpen(true);
                                 }}
                               >
                                 View Contact Details
@@ -1554,6 +1583,18 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 </div>
             </div>
         </Modal>
+
+        {/* Contact Details Modal */}
+        {contactModalOffer && (
+          <ContactDetailsModal
+            isOpen={isContactModalOpen}
+            onClose={() => {
+              setIsContactModalOpen(false);
+              setContactModalOffer(null);
+            }}
+            offer={contactModalOffer}
+          />
+        )}
 
         <style>{`
             @keyframes fade-in {

@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "npx --yes vite build && node scripts/copy-404.js",
+    "build:isp-safe": "node scripts/build-with-css.js",
     "preview": "vite preview",
     "server": "node server.js",
     "fix-env": "node fix-env-file.js",
-    "restart-app": "node restart-app.js"
+    "restart-app": "node restart-app.js",
+    "diagnose": "npm run dev -- --open /diagnostic"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.53.0",

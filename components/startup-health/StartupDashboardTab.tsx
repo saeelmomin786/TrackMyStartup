@@ -324,15 +324,16 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
 
   // Load offers received
   const loadOffersReceived = async () => {
-    // console.log('🚀 loadOffersReceived function called!');
+    console.log('🚀 loadOffersReceived function called!');
     if (!startup?.id) return;
     
     try {
-      // console.log('🔍 Loading offers for startup ID:', startup.id);
+      console.log('🔍 Loading offers for startup ID:', startup.id);
       
-      // Use offers prop instead of making separate API call
-      const investmentOffers = offers || [];
-      console.log('💰 Investment offers from props:', investmentOffers);
+      // Fetch offers directly from database using the correct service
+      console.log('🔍 Startup ID type:', typeof startup.id, 'Value:', startup.id);
+      const investmentOffers = await databaseInvestmentService.getOffersForStartup(Number(startup.id));
+      console.log('💰 Investment offers from database:', investmentOffers);
       console.log('💰 Investment offers count:', investmentOffers?.length || 0);
       
       // Fetch all opportunity applications for this startup with proper joins
@@ -765,8 +766,10 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     try {
       console.log('💰 Accepting investment offer:', offer.investmentOfferId);
       
-        await investmentService.acceptOfferSimple(String(offer.investmentOfferId));
-      console.log('✅ Investment offer accepted');
+      // Use the proper database function that updates both status and stage
+      const result = await databaseInvestmentService.approveStartupOffer(offer.investmentOfferId, 'approve');
+      console.log('✅ Investment offer accepted:', result);
+      
       messageService.success(
         'Offer Accepted',
         'Investment offer accepted! Contact details will be revealed based on advisor assignment.',
@@ -789,11 +792,13 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     
     try {
       console.log('💰 Rejecting investment offer:', offer.investmentOfferId);
-      await investmentService.rejectOffer(String(offer.investmentOfferId));
+      
+      // Use the proper database function that updates both status and stage
+      const result = await databaseInvestmentService.approveStartupOffer(offer.investmentOfferId, 'reject');
+      console.log('✅ Investment offer rejected:', result);
       
       await loadOffersReceived();
       
-      console.log('✅ Investment offer rejected successfully');
       messageService.success(
         'Offer Rejected',
         'Investment offer rejected successfully.',

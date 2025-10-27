@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { DomainUpdateService } from './domainUpdateService';
 import { NewInvestment, InvestmentType, ComplianceStatus } from '../types';
 
 export interface ActiveFundraisingStartup {
@@ -66,24 +67,78 @@ class InvestorService {
 
       console.log('🔍 Filtered data length:', filteredData.length);
 
+      // Get startup IDs for domain lookup
+      const startupIds = filteredData?.map(item => item.startups.id) || [];
+      let domainMap: { [key: number]: string } = {};
+      
+      if (startupIds.length > 0) {
+        // 1. First, try to get domain data from opportunity_applications (most recent)
+        const { data: applicationData, error: applicationError } = await supabase
+          .from('opportunity_applications')
+          .select('startup_id, domain, sector')
+          .in('startup_id', startupIds)
+          .eq('status', 'accepted'); // Only get accepted applications
+
+        if (!applicationError && applicationData) {
+          applicationData.forEach(app => {
+            // Try domain field first, then fallback to sector field
+            const domainValue = app.domain || app.sector;
+            if (domainValue && !domainMap[app.startup_id]) {
+              domainMap[app.startup_id] = domainValue;
+            }
+          });
+        }
+
+        // 2. For startups without application data, check fundraising data
+        const startupsWithoutData = startupIds.filter(id => !domainMap[id]);
+        if (startupsWithoutData.length > 0) {
+          console.log('🔍 Checking fundraising data for startups without application data:', startupsWithoutData);
+          
+          // Check fundraising_details table for domain information
+          const { data: fundraisingData, error: fundraisingError } = await supabase
+            .from('fundraising_details')
+            .select('startup_id, domain')
+            .in('startup_id', startupsWithoutData);
+
+          if (!fundraisingError && fundraisingData) {
+            fundraisingData.forEach(fund => {
+              if (fund.domain && !domainMap[fund.startup_id]) {
+                domainMap[fund.startup_id] = fund.domain;
+              }
+            });
+          }
+        }
+      }
+
+      // Automatically update startup sectors in background if needed
+      DomainUpdateService.updateStartupSectors(startupIds).catch(error => {
+        console.error('Background sector update failed:', error);
+      });
+
       // Show ALL active fundraising startups, but mark their validation status
-      return filteredData.map(item => ({
-        id: item.startups.id,
-        name: item.startups.name,
-        sector: item.startups.sector || 'Technology',
-        investmentValue: item.value,
-        equityAllocation: item.equity,
-        complianceStatus: item.startups.compliance_status as ComplianceStatus,
-        pitchDeckUrl: item.pitch_deck_url,
-        pitchVideoUrl: item.pitch_video_url,
-        fundraisingType: item.type as InvestmentType,
-        description: item.startups.description || `${item.startups.name} - ${item.startups.sector || 'Technology'} startup`,
-        createdAt: item.startups.created_at,
-        fundraisingId: item.id,
-        isStartupNationValidated: item.startups.startup_nation_validated || false,
-        validationDate: item.startups.validation_date,
-        currency: item.startups.currency || 'USD'
-      }));
+      return filteredData.map(item => {
+        // Use domain from applications/fundraising, fallback to startup sector, then to 'Unknown'
+        const finalSector = domainMap[item.startups.id] || item.startups.sector || 'Unknown';
+        console.log(`🔍 Startup ${item.startups.name} (ID: ${item.startups.id}): original sector=${item.startups.sector}, domain=${domainMap[item.startups.id]}, final sector=${finalSector}`);
+        
+        return {
+          id: item.startups.id,
+          name: item.startups.name,
+          sector: finalSector, // Use domain from applications/fundraising, fallback to startup sector
+          investmentValue: item.value,
+          equityAllocation: item.equity,
+          complianceStatus: item.startups.compliance_status as ComplianceStatus,
+          pitchDeckUrl: item.pitch_deck_url,
+          pitchVideoUrl: item.pitch_video_url,
+          fundraisingType: item.type as InvestmentType,
+          description: item.startups.description || `${item.startups.name} - ${finalSector} startup`,
+          createdAt: item.startups.created_at,
+          fundraisingId: item.id,
+          isStartupNationValidated: item.startups.startup_nation_validated || false,
+          validationDate: item.startups.validation_date,
+          currency: item.startups.currency || 'USD'
+        };
+      });
     } catch (error) {
       console.error('Error in getActiveFundraisingStartups:', error);
       return [];
@@ -115,17 +170,37 @@ class InvestorService {
         return null;
       }
 
+      // Get domain information for this specific startup
+      let finalSector = data.startups.sector || 'Unknown';
+      
+      // Try to get domain from opportunity_applications first
+      const { data: applicationData, error: applicationError } = await supabase
+        .from('opportunity_applications')
+        .select('domain, sector')
+        .eq('startup_id', startupId)
+        .eq('status', 'accepted')
+        .single();
+
+      if (!applicationError && applicationData?.domain) {
+        finalSector = applicationData.domain;
+      } else if (data.domain) {
+        // Fallback to fundraising_details domain
+        finalSector = data.domain;
+      }
+
+      console.log(`🔍 Startup Details ${data.startups.name} (ID: ${startupId}): original sector=${data.startups.sector}, domain=${applicationData?.domain || data.domain}, final sector=${finalSector}`);
+
       return {
         id: data.startups.id,
         name: data.startups.name,
-        sector: data.startups.sector || 'Technology',
+        sector: finalSector, // Use domain from applications/fundraising, fallback to startup sector
         investmentValue: data.value,
         equityAllocation: data.equity,
         complianceStatus: data.startups.compliance_status as ComplianceStatus,
         pitchDeckUrl: data.pitch_deck_url,
         pitchVideoUrl: data.pitch_video_url,
         fundraisingType: data.type as InvestmentType,
-        description: data.startups.description || `${data.startups.name} - ${data.startups.sector || 'Technology'} startup`,
+        description: data.startups.description || `${data.startups.name} - ${finalSector} startup`,
         createdAt: data.startups.created_at,
         fundraisingId: data.id,
         isStartupNationValidated: data.startups.startup_nation_validated || false,

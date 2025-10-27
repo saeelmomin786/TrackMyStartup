@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { DomainUpdateService } from './domainUpdateService';
 
 export interface FacilitatorStartup {
   id: string;
@@ -133,7 +134,7 @@ class FacilitatorStartupService {
         .select(`
           startup_id,
           domain,
-          stage
+          sector
         `)
         .in('startup_id', startupIds)
         .eq('status', 'accepted'); // Only get accepted applications
@@ -145,16 +146,41 @@ class FacilitatorStartupService {
 
       // Create a map of startup_id to domain for quick lookup
       const domainMap: { [key: number]: string } = {};
+      
+      // 1. First, try to get domain data from opportunity_applications (most recent)
       if (applicationData) {
         console.log('🔍 Portfolio Debug - Application data fetched:', applicationData);
         applicationData.forEach(app => {
-          if (app.domain && !domainMap[app.startup_id]) {
-            domainMap[app.startup_id] = app.domain;
+          // Try domain field first, then fallback to sector field
+          const domainValue = app.domain || app.sector;
+          if (domainValue && !domainMap[app.startup_id]) {
+            domainMap[app.startup_id] = domainValue;
           }
         });
-        console.log('🔍 Portfolio Debug - Domain map created:', domainMap);
+        console.log('🔍 Portfolio Debug - Domain map from applications:', domainMap);
       } else {
         console.log('🔍 Portfolio Debug - No application data found');
+      }
+
+      // 2. For startups without application data, check fundraising data
+      const startupsWithoutData = startupIds.filter(id => !domainMap[id]);
+      if (startupsWithoutData.length > 0) {
+        console.log('🔍 Portfolio Debug - Checking fundraising data for startups without application data:', startupsWithoutData);
+        
+        // Check fundraising_details table for domain information
+        const { data: fundraisingData, error: fundraisingError } = await supabase
+          .from('fundraising_details')
+          .select('startup_id, domain')
+          .in('startup_id', startupsWithoutData);
+
+        if (!fundraisingError && fundraisingData) {
+          fundraisingData.forEach(fund => {
+            if (fund.domain && !domainMap[fund.startup_id]) {
+              domainMap[fund.startup_id] = fund.domain;
+            }
+          });
+          console.log('🔍 Portfolio Debug - Domain map after fundraising check:', domainMap);
+        }
       }
 
       // Fetch investment records for current valuation (using existing table)
@@ -273,6 +299,12 @@ class FacilitatorStartupService {
       });
       
       console.log('🔍 Portfolio Debug - Final mapped startups:', mappedStartups);
+      
+      // Automatically update startup sectors in background if needed
+      DomainUpdateService.updateStartupSectors(startupIds).catch(error => {
+        console.error('Background sector update failed:', error);
+      });
+      
       return mappedStartups;
     } catch (error) {
       console.error('Error in getFacilitatorPortfolio:', error);

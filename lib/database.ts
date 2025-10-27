@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { UserRole, InvestmentType, ComplianceStatus, InvestorType, InvestmentRoundType, EsopAllocationType, OfferStatus } from '../types'
+import { DomainUpdateService } from './domainUpdateService'
 
 // User Management
 export const userService = {
@@ -292,28 +293,83 @@ export const startupService = {
       
       // Startups fetched successfully
       
-      // Map database fields to frontend expected format
-      const mappedData = (data || []).map(startup => ({
-        id: startup.id,
-        name: startup.name,
-        investmentType: startup.investment_type || 'Unknown',
-        investmentValue: Number(startup.investment_value) || 0,
-        equityAllocation: Number(startup.equity_allocation) || 0,
-        currentValuation: Number(startup.current_valuation) || 0,
-        complianceStatus: startup.compliance_status || 'Pending',
-        sector: startup.sector || 'Unknown',
-        totalFunding: Number(startup.total_funding) || 0,
-        totalRevenue: Number(startup.total_revenue) || 0,
-        registrationDate: startup.registration_date || '',
-        currency: startup.currency || 'USD', // Include currency field
-        founders: startup.founders || [],
-        // Include shares data from startup_shares table
-        esopReservedShares: startup.startup_shares?.[0]?.esop_reserved_shares || 0,
-        totalShares: startup.startup_shares?.[0]?.total_shares || 0,
-        pricePerShare: startup.startup_shares?.[0]?.price_per_share || 0
-      }));
+      // Get startup IDs for domain lookup
+      const startupIds = (data || []).map(startup => startup.id);
+      let domainMap: { [key: number]: string } = {};
       
-      console.log('🔍 Mapped startup data with ESOP:', mappedData);
+      if (startupIds.length > 0) {
+        // 1. First, try to get domain data from opportunity_applications (most recent)
+        const { data: applicationData, error: applicationError } = await supabase
+          .from('opportunity_applications')
+          .select('startup_id, domain, sector')
+          .in('startup_id', startupIds)
+          .eq('status', 'accepted'); // Only get accepted applications
+
+        if (!applicationError && applicationData) {
+          applicationData.forEach(app => {
+            // Try domain field first, then fallback to sector field
+            const domainValue = app.domain || app.sector;
+            if (domainValue && !domainMap[app.startup_id]) {
+              domainMap[app.startup_id] = domainValue;
+            }
+          });
+        }
+
+        // 2. For startups without application data, check fundraising data
+        const startupsWithoutData = startupIds.filter(id => !domainMap[id]);
+        if (startupsWithoutData.length > 0) {
+          console.log('🔍 Checking fundraising data for startups without application data:', startupsWithoutData);
+          
+          // Check fundraising_details table for domain information
+          const { data: fundraisingData, error: fundraisingError } = await supabase
+            .from('fundraising_details')
+            .select('startup_id, domain')
+            .in('startup_id', startupsWithoutData);
+
+          if (!fundraisingError && fundraisingData) {
+            fundraisingData.forEach(fund => {
+              if (fund.domain && !domainMap[fund.startup_id]) {
+                domainMap[fund.startup_id] = fund.domain;
+              }
+            });
+          }
+        }
+      }
+      
+      // Map database fields to frontend expected format
+      const mappedData = (data || []).map(startup => {
+        // Use domain from applications/fundraising, fallback to startup sector, then to 'Unknown'
+        const finalSector = domainMap[startup.id] || startup.sector || 'Unknown';
+        console.log(`🔍 Startup ${startup.name} (ID: ${startup.id}): original sector=${startup.sector}, domain=${domainMap[startup.id]}, final sector=${finalSector}`);
+        
+        return {
+          id: startup.id,
+          name: startup.name,
+          investmentType: startup.investment_type || 'Unknown',
+          investmentValue: Number(startup.investment_value) || 0,
+          equityAllocation: Number(startup.equity_allocation) || 0,
+          currentValuation: Number(startup.current_valuation) || 0,
+          complianceStatus: startup.compliance_status || 'Pending',
+          sector: finalSector, // Use domain from applications/fundraising, fallback to startup sector
+          totalFunding: Number(startup.total_funding) || 0,
+          totalRevenue: Number(startup.total_revenue) || 0,
+          registrationDate: startup.registration_date || '',
+          currency: startup.currency || 'USD', // Include currency field
+          founders: startup.founders || [],
+          // Include shares data from startup_shares table
+          esopReservedShares: startup.startup_shares?.[0]?.esop_reserved_shares || 0,
+          totalShares: startup.startup_shares?.[0]?.total_shares || 0,
+          pricePerShare: startup.startup_shares?.[0]?.price_per_share || 0
+        };
+      });
+      
+      console.log('🔍 Mapped startup data with ESOP and domains:', mappedData);
+      
+      // Automatically update startup sectors in background if needed
+      DomainUpdateService.updateStartupSectors(startupIds).catch(error => {
+        console.error('Background sector update failed:', error);
+      });
+      
       return mappedData;
     } catch (error) {
       console.error('Error in getAllStartups:', error);
@@ -608,27 +664,6 @@ export const investmentService = {
       
       console.log('New investments fetched successfully:', data?.length || 0);
       
-      // If no data in database, populate it with mock data
-      if (!data || data.length === 0) {
-        console.log('No investments found in database, populating with mock data...');
-        const populated = await this.populateNewInvestments();
-        if (populated) {
-          // Fetch again after populating
-          const { data: newData, error: newError } = await supabase
-            .from('new_investments')
-            .select('*')
-            .order('created_at', { ascending: false })
-          
-          if (newError) {
-            console.error('Error fetching new investments after population:', newError);
-            return [];
-          }
-          
-          data = newData;
-          console.log('New investments fetched after population:', data?.length || 0);
-        }
-      }
-      
       // Map database fields to frontend expected format
       const mappedData = (data || []).map(investment => ({
         id: investment.id,
@@ -782,17 +817,94 @@ export const investmentService = {
 
   // Get user's investment offers
   async getUserOffers(userEmail: string) {
+    console.log('🔍 Fetching offers for investor:', userEmail);
+    
     const { data, error } = await supabase
       .from('investment_offers')
       .select(`
         *,
-        investment:new_investments(*)
+        investment:new_investments(*),
+        startup:startups(
+          id,
+          name,
+          sector,
+          user_id,
+          investment_advisor_code,
+          compliance_status,
+          startup_nation_validated,
+          validation_date,
+          created_at
+        )
       `)
       .eq('investor_email', userEmail)
       .order('created_at', { ascending: false })
 
-    if (error) throw error
-    return data
+    if (error) {
+      console.error('Error fetching investor offers:', error);
+      throw error;
+    }
+
+    console.log('🔍 Raw investor offers data:', data);
+
+    // Now fetch startup user information separately using user_id
+    const enhancedData = await Promise.all((data || []).map(async (offer) => {
+      console.log('🔍 Processing offer:', offer.id, 'startup:', offer.startup);
+      
+      if (offer.startup?.id) {
+        console.log('🔍 Startup found for offer:', offer.id, 'user_id:', offer.startup.user_id);
+        
+        if (offer.startup?.user_id) {
+          try {
+            // Get startup user information using user_id
+            console.log('🔍 Fetching user by user_id:', offer.startup.user_id);
+            const { data: startupUserData, error: userError } = await supabase
+              .from('users')
+              .select('id, email, name, investment_advisor_code')
+              .eq('id', offer.startup.user_id)
+              .single();
+
+            if (!userError && startupUserData) {
+              offer.startup.startup_user = startupUserData;
+              console.log('🔍 ✅ Added startup user data for offer:', offer.id, startupUserData);
+            } else {
+              console.log('🔍 ❌ No startup user found for user_id:', offer.startup.user_id, userError);
+            }
+          } catch (err) {
+            console.log('🔍 ❌ Error fetching startup user for offer:', offer.id, err);
+          }
+        } else {
+          console.log('🔍 ❌ No user_id found in startup for offer:', offer.id);
+        }
+        
+        // Always try fallback method
+        try {
+          console.log('🔍 Trying fallback method for startup_name:', offer.startup_name);
+          const { data: fallbackUserData, error: fallbackError } = await supabase
+            .from('users')
+            .select('id, email, name, investment_advisor_code')
+            .eq('startup_name', offer.startup_name)
+            .eq('role', 'Startup')
+            .single();
+
+          if (!fallbackError && fallbackUserData) {
+            offer.startup.startup_user = fallbackUserData;
+            console.log('🔍 ✅ Added startup user data via fallback for offer:', offer.id, fallbackUserData);
+          } else {
+            console.log('🔍 ❌ No startup user found via fallback for:', offer.startup_name, fallbackError);
+          }
+        } catch (err) {
+          console.log('🔍 ❌ Error in fallback method for offer:', offer.id, err);
+        }
+      } else {
+        console.log('🔍 ❌ No startup found for offer:', offer.id);
+      }
+      
+      console.log('🔍 Final offer after processing:', offer.id, 'startup_user:', offer.startup?.startup_user);
+      return offer;
+    }));
+
+    console.log('🔍 Enhanced investor offers data:', enhancedData);
+    return enhancedData;
   },
 
   // Update offer status
@@ -934,24 +1046,65 @@ export const investmentService = {
 
   // Approve/reject offer by investor advisor
   async approveInvestorAdvisorOffer(offerId: number, action: 'approve' | 'reject') {
-    const { data, error } = await supabase.rpc('approve_investor_advisor_offer', {
-      p_offer_id: offerId,
-      p_approval_action: action
-    });
+    try {
+      const { data, error } = await supabase.rpc('approve_investor_advisor_offer', {
+        p_offer_id: offerId,
+        p_approval_action: action
+      });
 
-    if (error) throw error;
-    return data;
+      if (error) {
+        console.error('Error in approveInvestorAdvisorOffer:', error);
+        throw error;
+      }
+
+      console.log('✅ Investor advisor approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error approving investor advisor offer:', error);
+      throw error;
+    }
   },
 
   // Approve/reject offer by startup advisor
   async approveStartupAdvisorOffer(offerId: number, action: 'approve' | 'reject') {
-    const { data, error } = await supabase.rpc('approve_startup_advisor_offer', {
-      p_offer_id: offerId,
-      p_approval_action: action
-    });
+    try {
+      const { data, error } = await supabase.rpc('approve_startup_advisor_offer', {
+        p_offer_id: offerId,
+        p_approval_action: action
+      });
 
-    if (error) throw error;
-    return data;
+      if (error) {
+        console.error('Error in approveStartupAdvisorOffer:', error);
+        throw error;
+      }
+
+      console.log('✅ Startup advisor approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error approving startup advisor offer:', error);
+      throw error;
+    }
+  },
+
+  // Approve/reject offer by startup (final approval)
+  async approveStartupOffer(offerId: number, action: 'approve' | 'reject') {
+    try {
+      const { data, error } = await supabase.rpc('approve_startup_offer', {
+        p_offer_id: offerId,
+        p_approval_action: action
+      });
+
+      if (error) {
+        console.error('Error in approveStartupOffer:', error);
+        throw error;
+      }
+
+      console.log('✅ Startup approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error approving startup offer:', error);
+      throw error;
+    }
   },
 
   // Recommend co-investment opportunity to investors
@@ -1246,10 +1399,17 @@ export const investmentService = {
         .from('investment_offers')
         .select(`
           *,
-          startup:startups(*)
+          startup:startups(
+            *,
+            startup_user:users!startups_user_id_fkey(
+              id,
+              email,
+              name,
+              investment_advisor_code
+            )
+          )
         `)
         .eq('startup_id', startupId)
-        .in('stage', [3, 4]) // Show offers at stage 3 (ready for startup review) and stage 4 (approved)
         .order('created_at', { ascending: false })
 
       if (error) {
@@ -1257,15 +1417,45 @@ export const investmentService = {
         return [];
       }
 
-      // Get unique investor emails to fetch their names
-      const investorEmails = [...new Set((data || []).map(offer => offer.investor_email))];
+      // Filter offers that should be visible to startup
+      const visibleOffers = (data || []).filter(offer => {
+        const stage = offer.stage || 1;
+        const startupHasAdvisor = offer.startup?.investment_advisor_code;
+        
+        // Show offers that are ready for startup review
+        if (stage >= 3) {
+          return true; // Stage 3+ are always visible
+        }
+        
+        // For stage 1: show if investor has no advisor (auto-progresses)
+        // We'll check investor advisor status separately
+        if (stage === 1) {
+          return true; // Show all stage 1 offers, we'll check advisor status later
+        }
+        
+        // For stage 2: show if startup has no advisor (auto-progresses)
+        if (stage === 2 && !startupHasAdvisor) {
+          return true;
+        }
+        
+        return false;
+      });
+
+      console.log('🔍 Total offers fetched:', data?.length || 0);
+      console.log('🔍 Visible offers after filtering:', visibleOffers.length);
+      console.log('🔍 Raw offers data:', data);
+      console.log('🔍 Filtered visible offers:', visibleOffers);
+
+      // Get unique investor emails to fetch their names and advisor status
+      const investorEmails = [...new Set((visibleOffers || []).map(offer => offer.investor_email))];
       let investorNames: { [email: string]: string } = {};
+      let investorAdvisors: { [email: string]: string | null } = {};
       let users: any[] = [];
       
       if (investorEmails.length > 0) {
         const { data: usersData, error: usersError } = await supabase
           .from('users')
-          .select('email, name')
+          .select('email, name, investment_advisor_code')
           .in('email', investorEmails);
         
         if (!usersError && usersData) {
@@ -1274,26 +1464,30 @@ export const investmentService = {
             acc[user.email] = user.name;
             return acc;
           }, {} as { [email: string]: string });
+          investorAdvisors = users.reduce((acc, user) => {
+            acc[user.email] = user.investment_advisor_code;
+            return acc;
+          }, {} as { [email: string]: string | null });
         }
       }
 
       // Debug: Log raw data from database
-      if (data && data.length > 0) {
-        console.log('🔍 Raw startup offers data from database:', data[0]);
-        console.log('🔍 Raw offer amount:', data[0].offer_amount);
-        console.log('🔍 Raw equity percentage:', data[0].equity_percentage);
-        console.log('🔍 Raw investor email:', data[0].investor_email);
-        console.log('🔍 Raw investor name:', data[0].investor_name);
-        console.log('🔍 Raw stage:', data[0].stage);
-        console.log('🔍 Raw currency:', data[0].currency);
-        console.log('🔍 Raw status:', data[0].status);
-        console.log('🔍 Raw created_at:', data[0].created_at);
+      if (visibleOffers && visibleOffers.length > 0) {
+        console.log('🔍 Raw startup offers data from database:', visibleOffers[0]);
+        console.log('🔍 Raw offer amount:', visibleOffers[0].offer_amount);
+        console.log('🔍 Raw equity percentage:', visibleOffers[0].equity_percentage);
+        console.log('🔍 Raw investor email:', visibleOffers[0].investor_email);
+        console.log('🔍 Raw investor name:', visibleOffers[0].investor_name);
+        console.log('🔍 Raw stage:', visibleOffers[0].stage);
+        console.log('🔍 Raw currency:', visibleOffers[0].currency);
+        console.log('🔍 Raw status:', visibleOffers[0].status);
+        console.log('🔍 Raw created_at:', visibleOffers[0].created_at);
         console.log('🔍 Investor emails to fetch:', investorEmails);
         console.log('🔍 Investor names mapping:', investorNames);
         console.log('🔍 Users query result:', users);
       }
 
-      const mapped = (data || []).map((offer: any) => {
+      const mapped = (visibleOffers || []).map((offer: any) => {
         // Use stored investor name from database
         const investorName = offer.investor_name || investorNames[offer.investor_email] || 'Unknown Investor';
         
@@ -1305,20 +1499,30 @@ export const investmentService = {
         startupId: offer.startup_id,
         startup: offer.startup ? {
           id: offer.startup.id,
-          name: offer.startup.name
+          name: offer.startup.name,
+          investment_advisor_code: offer.startup.investment_advisor_code,
+          user_id: offer.startup.user_id,
+          startup_user: offer.startup.startup_user ? {
+            id: offer.startup.startup_user.id,
+            email: offer.startup.startup_user.email,
+            name: offer.startup.startup_user.name,
+            investment_advisor_code: offer.startup.startup_user.investment_advisor_code
+          } : null
         } : null,
           offerAmount: Number(offer.offer_amount) || 0,
           equityPercentage: Number(offer.equity_percentage) || 0,
         status: offer.status,
           currency: offer.currency || 'USD',
           stage: offer.stage || 1,
-          createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : new Date().toISOString()
+          createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : new Date().toISOString(),
+          investorAdvisorCode: investorAdvisors[offer.investor_email] || null
         };
         
         // Debug: Log mapped offer
         console.log('🔍 Mapped startup offer:', {
           id: mappedOffer.id,
           investorName: mappedOffer.investorName,
+          investorAdvisorCode: mappedOffer.investorAdvisorCode,
           investorEmail: mappedOffer.investorEmail,
           offerAmount: mappedOffer.offerAmount,
           equityPercentage: mappedOffer.equityPercentage,
@@ -1496,59 +1700,28 @@ export const investmentService = {
     }
   },
 
-  // Populate new_investments table with mock data
-  async populateNewInvestments() {
-    console.log('=== POPULATING new_investments table ===');
-    
-    // Import mock data from constants
-    const mockData = [
-      { id: 101, name: 'QuantumLeap', investment_type: 'Seed', investment_value: 150000, equity_allocation: 7, sector: 'DeepTech', total_funding: 150000, total_revenue: 0, registration_date: '2024-02-01', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=QJ21TaeN9K0', compliance_status: 'Compliant' },
-      { id: 102, name: 'AgroFuture', investment_type: 'SeriesA', investment_value: 1200000, equity_allocation: 18, sector: 'AgriTech', total_funding: 2500000, total_revenue: 400000, registration_date: '2023-08-15', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=gt_l_4TfG4k', compliance_status: 'Pending' },
-      { id: 103, name: 'CyberGuard', investment_type: 'SeriesB', investment_value: 3000000, equity_allocation: 10, sector: 'Cybersecurity', total_funding: 5000000, total_revenue: 1000000, registration_date: '2022-07-22', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=rok_p26_Z5o', compliance_status: 'Compliant' },
-      { id: 104, name: 'BioSynth', investment_type: 'Seed', investment_value: 500000, equity_allocation: 15, sector: 'BioTech', total_funding: 500000, total_revenue: 50000, registration_date: '2024-01-05', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=8aGhZQkoFbQ', compliance_status: 'Compliant' },
-      { id: 105, name: 'RetailNext', investment_type: 'SeriesA', investment_value: 2500000, equity_allocation: 12, sector: 'RetailTech', total_funding: 4000000, total_revenue: 800000, registration_date: '2023-05-18', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=Y_N1_Jj9-KA', compliance_status: 'Pending' },
-      { id: 106, name: 'GameOn', investment_type: 'Seed', investment_value: 750000, equity_allocation: 20, sector: 'Gaming', total_funding: 750000, total_revenue: 150000, registration_date: '2023-11-30', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=d_HlPboL_sA', compliance_status: 'Compliant' },
-      { id: 107, name: 'PropTech Pro', investment_type: 'PreSeed', investment_value: 100000, equity_allocation: 5, sector: 'Real Estate', total_funding: 100000, total_revenue: 10000, registration_date: '2024-03-01', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=uK67H2PAmn8', compliance_status: 'Pending' },
-      { id: 108, name: 'LogiChain', investment_type: 'SeriesA', investment_value: 1800000, equity_allocation: 9, sector: 'Logistics', total_funding: 3000000, total_revenue: 600000, registration_date: '2022-09-10', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=uJg4B5a-a28', compliance_status: 'Compliant' },
-      { id: 109, name: 'EduKids', investment_type: 'Seed', investment_value: 300000, equity_allocation: 10, sector: 'EdTech', total_funding: 300000, total_revenue: 60000, registration_date: '2023-10-25', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=GGlY3g_2Q_E', compliance_status: 'NonCompliant' },
-      { id: 110, name: 'QuantumLeap 2', investment_type: 'Seed', investment_value: 150000, equity_allocation: 7, sector: 'DeepTech', total_funding: 150000, total_revenue: 0, registration_date: '2024-02-01', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=P1ww1X2-S1U', compliance_status: 'Compliant' },
-      { id: 111, name: 'SpaceHaul', investment_type: 'SeriesB', investment_value: 10000000, equity_allocation: 15, sector: 'Aerospace', total_funding: 25000000, total_revenue: 500000, registration_date: '2021-12-01', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=sO-tjb4Edb8', compliance_status: 'Compliant' },
-      { id: 112, name: 'MindWell', investment_type: 'Seed', investment_value: 400000, equity_allocation: 12, sector: 'HealthTech', total_funding: 400000, total_revenue: 80000, registration_date: '2024-04-10', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=4x7_v-2-a3I', compliance_status: 'Compliant' },
-      { id: 113, name: 'CleanPlate', investment_type: 'Seed', investment_value: 200000, equity_allocation: 8, sector: 'FoodTech', total_funding: 200000, total_revenue: 40000, registration_date: '2023-09-05', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=ysz5S6PUM-U', compliance_status: 'Pending' },
-      { id: 114, name: 'Solaris', investment_type: 'SeriesA', investment_value: 2200000, equity_allocation: 11, sector: 'GreenTech', total_funding: 3500000, total_revenue: 700000, registration_date: '2022-11-20', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=o0u4M6vppCI', compliance_status: 'Compliant' },
-      { id: 115, name: 'LegalEase', investment_type: 'PreSeed', investment_value: 120000, equity_allocation: 6, sector: 'LegalTech', total_funding: 120000, total_revenue: 25000, registration_date: '2024-05-15', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=J132shgI_Ns', compliance_status: 'Pending' },
-      { id: 116, name: 'TravelBug', investment_type: 'Seed', investment_value: 600000, equity_allocation: 14, sector: 'TravelTech', total_funding: 600000, total_revenue: 120000, registration_date: '2023-03-12', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=T_i-T58-S2E', compliance_status: 'Compliant' },
-      { id: 117, name: 'DataWeave', investment_type: 'SeriesB', investment_value: 4500000, equity_allocation: 10, sector: 'Data Analytics', total_funding: 8000000, total_revenue: 1500000, registration_date: '2021-10-01', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=R2vXbFp5C9o', compliance_status: 'Compliant' },
-      { id: 118, name: 'AutoDrive', investment_type: 'SeriesA', investment_value: 5000000, equity_allocation: 18, sector: 'Automotive', total_funding: 10000000, total_revenue: 800000, registration_date: '2022-06-01', pitch_deck_url: '#', pitch_video_url: 'https://www.youtube.com/watch?v=uA8X54c_w18', compliance_status: 'NonCompliant' }
-    ];
-    
+  // Debug function to check what's actually in new_investments table
+  async debugNewInvestmentsTable() {
+    console.log('=== DEBUG: Checking new_investments table ===');
     try {
-      // Clear existing data
-      const { error: deleteError } = await supabase
-        .from('new_investments')
-        .delete()
-        .neq('id', 0);
-      
-      if (deleteError) {
-        console.error('Error clearing new_investments:', deleteError);
-        return false;
-      }
-      
-      // Insert mock data
       const { data, error } = await supabase
         .from('new_investments')
-        .insert(mockData);
+        .select('*')
+        .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('Error populating new_investments:', error);
-        return false;
+        console.error('Error fetching new_investments:', error);
+        return;
       }
       
-      console.log('Successfully populated new_investments with', data?.length || 0, 'records');
-      return true;
+      console.log('Current data in new_investments table:', data);
+      console.log('Number of records:', data?.length || 0);
+      
+      if (data && data.length > 0) {
+        console.log('Sample record:', data[0]);
+      }
     } catch (error) {
-      console.error('Error in populateNewInvestments:', error);
-      return false;
+      console.error('Error in debugNewInvestmentsTable:', error);
     }
   },
 
@@ -1586,13 +1759,23 @@ export const investmentService = {
 
   // Get investment offers for specific user
   async getUserInvestmentOffers(userEmail: string) {
-    console.log('Fetching investment offers for user:', userEmail);
+    console.log('🔍 Fetching investment offers for user:', userEmail);
     try {
       const { data, error } = await supabase
         .from('investment_offers')
         .select(`
           *,
-          startup:startups(*)
+          startup:startups(
+            id,
+            name,
+            sector,
+            user_id,
+            investment_advisor_code,
+            compliance_status,
+            startup_nation_validated,
+            validation_date,
+            created_at
+          )
         `)
         .eq('investor_email', userEmail)
         .order('created_at', { ascending: false })
@@ -1602,19 +1785,79 @@ export const investmentService = {
         return [];
       }
       
-      console.log('User investment offers fetched successfully:', data?.length || 0);
+      console.log('🔍 User investment offers fetched successfully:', data?.length || 0);
+      console.log('🔍 Raw investment offers data:', data);
+      
+      // Now fetch startup user information separately using user_id
+      const enhancedData = await Promise.all((data || []).map(async (offer) => {
+        console.log('🔍 Processing offer:', offer.id, 'startup:', offer.startup);
+        
+        if (offer.startup?.id) {
+          console.log('🔍 Startup found for offer:', offer.id, 'user_id:', offer.startup.user_id);
+          
+          if (offer.startup?.user_id) {
+            try {
+              // Get startup user information using user_id
+              console.log('🔍 Fetching user by user_id:', offer.startup.user_id);
+              const { data: startupUserData, error: userError } = await supabase
+                .from('users')
+                .select('id, email, name, investment_advisor_code')
+                .eq('id', offer.startup.user_id)
+                .single();
+
+              if (!userError && startupUserData) {
+                offer.startup.startup_user = startupUserData;
+                console.log('🔍 ✅ Added startup user data for offer:', offer.id, startupUserData);
+              } else {
+                console.log('🔍 ❌ No startup user found for user_id:', offer.startup.user_id, userError);
+              }
+            } catch (err) {
+              console.log('🔍 ❌ Error fetching startup user for offer:', offer.id, err);
+            }
+          } else {
+            console.log('🔍 ❌ No user_id found in startup for offer:', offer.id);
+          }
+          
+          // Always try fallback method
+          try {
+            console.log('🔍 Trying fallback method for startup_name:', offer.startup_name);
+            const { data: fallbackUserData, error: fallbackError } = await supabase
+              .from('users')
+              .select('id, email, name, investment_advisor_code')
+              .eq('startup_name', offer.startup_name)
+              .eq('role', 'Startup')
+              .single();
+
+            if (!fallbackError && fallbackUserData) {
+              offer.startup.startup_user = fallbackUserData;
+              console.log('🔍 ✅ Added startup user data via fallback for offer:', offer.id, fallbackUserData);
+            } else {
+              console.log('🔍 ❌ No startup user found via fallback for:', offer.startup_name, fallbackError);
+            }
+          } catch (err) {
+            console.log('🔍 ❌ Error in fallback method for offer:', offer.id, err);
+          }
+        } else {
+          console.log('🔍 ❌ No startup found for offer:', offer.id);
+        }
+        
+        console.log('🔍 Final offer after processing:', offer.id, 'startup_user:', offer.startup?.startup_user);
+        return offer;
+      }));
+
+      console.log('🔍 Enhanced investment offers data:', enhancedData);
       
       // Debug: Log raw data from database
-      if (data && data.length > 0) {
-        console.log('🔍 Raw offer data from database:', data[0]);
-        console.log('🔍 Raw offer amount:', data[0].offer_amount);
-        console.log('🔍 Raw equity percentage:', data[0].equity_percentage);
-        console.log('🔍 Raw currency:', data[0].currency);
-        console.log('🔍 Raw created_at:', data[0].created_at);
+      if (enhancedData && enhancedData.length > 0) {
+        console.log('🔍 Raw offer data from database:', enhancedData[0]);
+        console.log('🔍 Raw offer amount:', enhancedData[0].offer_amount);
+        console.log('🔍 Raw equity percentage:', enhancedData[0].equity_percentage);
+        console.log('🔍 Raw currency:', enhancedData[0].currency);
+        console.log('🔍 Raw created_at:', enhancedData[0].created_at);
       }
       
       // Map database fields to frontend expected format
-      const mappedData = (data || []).map(offer => ({
+      const mappedData = (enhancedData || []).map(offer => ({
         id: offer.id,
         investorEmail: offer.investor_email,
         investorName: (offer as any).investor_name || undefined,
@@ -1627,7 +1870,14 @@ export const investmentService = {
           complianceStatus: offer.startup.compliance_status,
           startupNationValidated: offer.startup.startup_nation_validated,
           validationDate: offer.startup.validation_date,
-          createdAt: offer.startup.created_at
+          createdAt: offer.startup.created_at,
+          user_id: offer.startup.user_id,
+          startup_user: offer.startup.startup_user ? {
+            id: offer.startup.startup_user.id,
+            email: offer.startup.startup_user.email,
+            name: offer.startup.startup_user.name,
+            investment_advisor_code: offer.startup.startup_user.investment_advisor_code
+          } : null
         } : null,
         offerAmount: Number(offer.offer_amount) || 0,
         equityPercentage: Number(offer.equity_percentage) || 0,

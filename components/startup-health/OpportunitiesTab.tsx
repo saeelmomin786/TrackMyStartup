@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { messageService } from '../../lib/messageService';
 import Modal from '../ui/Modal';
 import { getQueryParam, setQueryParam } from '../../lib/urlState';
+import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsService';
 
 interface StartupRef {
     id: number;
@@ -75,6 +76,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
     const [applications, setApplications] = useState<ApplicationItem[]>([]);
     const [selectedOpportunity, setSelectedOpportunity] = useState<OpportunityItem | null>(null);
+    const [adminPosts, setAdminPosts] = useState<AdminProgramPost[]>([]);
     // Per-application apply modal state
     const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
     const [applyingOppId, setApplyingOppId] = useState<string | null>(null);
@@ -128,6 +130,13 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             }
 
             // One-time pitch materials removed; per-application upload handled in modal
+            try {
+                const posts = await adminProgramsService.listActive();
+                if (mounted) setAdminPosts(posts);
+            } catch (e) {
+                console.warn('Failed to load admin program posts', e);
+                if (mounted) setAdminPosts([]);
+            }
         })();
         return () => { mounted = false; };
     }, [startup.id]);
@@ -500,6 +509,48 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     <p className="text-slate-500 mt-2">Please check back later for new programs and offerings.</p>
                 </Card>
             )}
+
+            {/* Other Program subsection (Admin posted programs as cards) */}
+            <div className="space-y-3 sm:space-y-4">
+                <h3 className="text-lg font-semibold text-slate-700">Other Program</h3>
+                {adminPosts.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {adminPosts.map(p => (
+                            <Card key={p.id} className="flex flex-col !p-0 overflow-hidden">
+                                {p.posterUrl ? (
+                                    <img 
+                                        src={p.posterUrl} 
+                                        alt={`${p.programName} poster`} 
+                                        className="w-full h-40 object-contain bg-slate-100"
+                                    />
+                                ) : (
+                                    <div className="w-full h-40 bg-slate-200 flex items-center justify-center text-slate-500">
+                                        <Video className="h-10 w-10" />
+                                    </div>
+                                )}
+                                <div className="p-4 flex flex-col flex-grow">
+                                    <div className="flex-grow">
+                                        <p className="text-sm font-medium text-brand-primary">{p.incubationCenter}</p>
+                                        <h3 className="text-lg font-semibold text-slate-800 mt-1">{p.programName}</h3>
+                                        <p className="text-xs text-slate-500 mt-2">Deadline: <span className="font-semibold">{p.deadline}</span></p>
+                                    </div>
+                                    <div className="border-t pt-4 mt-4">
+                                        <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="block">
+                                            <button className="w-full inline-flex items-center justify-center px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm">
+                                                Apply
+                                            </button>
+                                        </a>
+                                    </div>
+                                </div>
+                            </Card>
+                        ))}
+                    </div>
+                ) : (
+                    <Card className="text-center py-10">
+                        <p className="text-slate-500">No programs posted by admin yet.</p>
+                    </Card>
+                )}
+            </div>
             
             
             {/* Apply Modal */}

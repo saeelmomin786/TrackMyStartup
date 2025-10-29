@@ -30,3 +30,7 @@ FROM investment_offers io
 WHERE io.startup_name ILIKE '%MULSETU%'
 ORDER BY io.created_at DESC;
 
+
+
+
+

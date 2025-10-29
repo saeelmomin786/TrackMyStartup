@@ -43,3 +43,7 @@ SELECT id, name, sector FROM startups WHERE name ILIKE '%MULSETU%';
 -- (Replace X with the actual startup ID from query 3)
 -- SELECT * FROM investment_offers WHERE startup_id = X;
 
+
+
+
+

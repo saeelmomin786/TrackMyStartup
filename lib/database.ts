@@ -691,34 +691,49 @@ export const investmentService = {
   async createInvestmentOffer(offerData: {
     investor_email: string
     startup_name: string
-    startup_id: number
+    investment_id: number  // This is the new_investments.id
     offer_amount: number
     equity_percentage: number
     currency?: string
   }) {
     console.log('Creating investment offer with data:', offerData);
     
-    // Check what startup ID we're trying to reference
-    console.log('Trying to reference startup_id:', offerData.startup_id);
+    // Check what investment ID we're trying to reference
+    console.log('Trying to reference investment_id:', offerData.investment_id);
     
-    // First, check if the startup_id exists in startups table
-    const { data: startupCheck, error: checkError } = await supabase
-      .from('startups')
+    // First, check if the investment_id exists in new_investments table
+    const { data: investmentCheck, error: checkError } = await supabase
+      .from('new_investments')
       .select('id')
-      .eq('id', offerData.startup_id)
+      .eq('id', offerData.investment_id)
       .single();
     
-    if (checkError || !startupCheck) {
-      console.error('Startup not found in startups table:', offerData.startup_id);
-      throw new Error(`Startup with ID ${offerData.startup_id} not found in startups table`);
+    if (checkError || !investmentCheck) {
+      console.error('Investment not found in new_investments table:', offerData.investment_id);
+      
+      // Try to find a matching investment by name instead
+      const { data: investmentByName, error: nameError } = await supabase
+        .from('new_investments')
+        .select('id')
+        .eq('name', offerData.startup_name)
+        .single();
+      
+      if (nameError || !investmentByName) {
+        console.error('Investment not found by name either:', offerData.startup_name);
+        throw new Error(`Investment "${offerData.startup_name}" not found in new_investments table. Please run the POPULATE_NEW_INVESTMENTS_TABLE.sql script to populate the table.`);
+      } else {
+        console.log('Found investment by name, using ID:', investmentByName.id);
+        // Update the offerData to use the correct ID
+        offerData.investment_id = investmentByName.id;
+      }
     }
     
-    // Check if user already has a pending offer for this startup
+    // Check if user already has a pending offer for this investment
     const { data: existingOffers, error: existingError } = await supabase
       .from('investment_offers')
       .select('id, status')
       .eq('investor_email', offerData.investor_email)
-      .eq('startup_id', offerData.startup_id);
+      .eq('investment_id', offerData.investment_id);
     
     console.log('Existing offers for this user and investment:', existingOffers);
     
@@ -730,9 +745,10 @@ export const investmentService = {
         offer.status === 'investor_advisor_approved' ||
         offer.status === 'startup_advisor_approved'
       );
+      
       if (pendingOffer) {
         console.error('User already has a pending offer for this startup');
-        throw new Error('You already have a pending offer for this startup');
+        throw new Error(`You already have a pending offer for ${offerData.startup_name}. Please wait for it to be processed or contact support if you need to modify it.`);
       }
       
       // If there are rejected offers, delete them to allow new offers
@@ -751,16 +767,39 @@ export const investmentService = {
             .eq('id', rejectedOffer.id);
         }
       }
+      
+      // Check if there are any accepted offers
+      const acceptedOffer = existingOffers.find(offer => 
+        offer.status === 'accepted'
+      );
+      
+      if (acceptedOffer) {
+        console.error('User already has an accepted offer for this startup');
+        throw new Error(`You already have an accepted offer for ${offerData.startup_name}. You cannot make another offer for the same startup.`);
+      }
+      
+      // If there are any other offers that aren't rejected, we need to handle them
+      const otherOffers = existingOffers.filter(offer => 
+        offer.status !== 'rejected' && 
+        offer.status !== 'investor_advisor_rejected' &&
+        offer.status !== 'startup_advisor_rejected'
+      );
+      
+      if (otherOffers.length > 0) {
+        console.error('User has existing offers that cannot be replaced:', otherOffers);
+        throw new Error(`You already have an offer for ${offerData.startup_name} with status: ${otherOffers[0].status}. Please contact support if you need assistance.`);
+      }
     }
     
-    // Use the simple function to create offer without scouting fees
+    // Use the safe function that handles both startup_id and investment_id
     const { data, error } = await supabase.rpc('create_investment_offer_with_fee', {
       p_investor_email: offerData.investor_email,
       p_startup_name: offerData.startup_name,
-      p_startup_id: offerData.startup_id,
       p_offer_amount: offerData.offer_amount,
       p_equity_percentage: offerData.equity_percentage,
-      p_currency: offerData.currency || 'USD'
+      p_currency: offerData.currency || 'USD',
+      p_startup_id: null,  // We'll let the function find this by name
+      p_investment_id: offerData.investment_id  // This is the new_investments.id
     });
 
     if (error) {
@@ -1913,6 +1952,422 @@ export const investmentService = {
     } catch (error) {
       console.error('Error in getUserInvestmentOffers:', error);
       return [];
+    }
+  },
+
+  // Create co-investment opportunity
+  async createCoInvestmentOpportunity(opportunityData: {
+    startup_id: number
+    listed_by_user_id: string
+    listed_by_type: 'Investor' | 'Investment Advisor'
+    investment_amount: number
+    equity_percentage: number
+    minimum_co_investment: number
+    maximum_co_investment: number
+    description: string
+  }) {
+    console.log('Creating co-investment opportunity:', opportunityData);
+    
+    try {
+      // First, check if the co_investment_opportunities table exists
+      const { data: tableCheck, error: tableError } = await supabase
+        .from('co_investment_opportunities')
+        .select('id')
+        .limit(1);
+
+      if (tableError && tableError.code === 'PGRST116') {
+        console.error('❌ co_investment_opportunities table does not exist');
+        throw new Error('Co-investment system is not set up. Please run the FIX_CO_INVESTMENT_CREATION_ERROR.sql script in your Supabase database.');
+      }
+
+      // Check if startup exists
+      const { data: startupCheck, error: startupError } = await supabase
+        .from('startups')
+        .select('id, name')
+        .eq('id', opportunityData.startup_id)
+        .single();
+
+      if (startupError || !startupCheck) {
+        console.error('❌ Startup not found:', opportunityData.startup_id);
+        throw new Error(`Startup with ID ${opportunityData.startup_id} not found`);
+      }
+
+      // Check if user exists
+      const { data: userCheck, error: userError } = await supabase
+        .from('users')
+        .select('id, email, role')
+        .eq('id', opportunityData.listed_by_user_id)
+        .single();
+
+      if (userError || !userCheck) {
+        console.error('❌ User not found:', opportunityData.listed_by_user_id);
+        throw new Error(`User with ID ${opportunityData.listed_by_user_id} not found`);
+      }
+
+      // Check if co-investment opportunity already exists
+      const { data: existingOpportunity, error: existingError } = await supabase
+        .from('co_investment_opportunities')
+        .select('id, status')
+        .eq('startup_id', opportunityData.startup_id)
+        .eq('listed_by_user_id', opportunityData.listed_by_user_id)
+        .eq('status', 'active')
+        .single();
+
+      if (existingOpportunity) {
+        console.error('❌ Co-investment opportunity already exists for this startup and user');
+        throw new Error('A co-investment opportunity already exists for this startup');
+      }
+
+      // Create the co-investment opportunity
+      const { data, error } = await supabase
+        .from('co_investment_opportunities')
+        .insert([{
+          startup_id: opportunityData.startup_id,
+          listed_by_user_id: opportunityData.listed_by_user_id,
+          listed_by_type: opportunityData.listed_by_type,
+          investment_amount: opportunityData.investment_amount,
+          equity_percentage: opportunityData.equity_percentage,
+          minimum_co_investment: opportunityData.minimum_co_investment,
+          maximum_co_investment: opportunityData.maximum_co_investment,
+          description: opportunityData.description,
+          status: 'active',
+          stage: 1, // Start at stage 1
+          lead_investor_advisor_approval_status: 'not_required',
+          startup_advisor_approval_status: 'not_required',
+          startup_approval_status: 'pending'
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Error creating co-investment opportunity:', error);
+        console.error('Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        throw new Error(`Failed to create co-investment opportunity: ${error.message}`);
+      }
+
+      console.log('✅ Co-investment opportunity created successfully:', data);
+      
+      // Handle the stage-wise flow logic
+      if (data && data.id) {
+        await this.handleCoInvestmentFlow(data.id);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('❌ Error in createCoInvestmentOpportunity:', error);
+      throw error;
+    }
+  },
+
+  // Handle co-investment flow logic based on stages
+  async handleCoInvestmentFlow(opportunityId: number) {
+    try {
+      // Get the opportunity details
+      const { data: opportunity, error: opportunityError } = await supabase
+        .from('co_investment_opportunities')
+        .select(`
+          *,
+          startup:startups(
+            id,
+            name,
+            investment_advisor_code
+          ),
+          lead_investor:users(
+            id,
+            email,
+            name,
+            investment_advisor_code_entered
+          )
+        `)
+        .eq('id', opportunityId)
+        .single();
+
+      if (opportunityError || !opportunity) {
+        console.error('Error fetching opportunity for flow logic:', opportunityError);
+        return;
+      }
+
+      const currentStage = opportunity.stage || 1;
+      console.log(`🔄 Processing co-investment flow for opportunity ${opportunityId}, current stage: ${currentStage}`);
+
+      // Stage 1: Check if lead investor has investment advisor code
+      if (currentStage === 1) {
+        const leadInvestorAdvisorCode = opportunity.lead_investor?.investment_advisor_code_entered;
+        if (leadInvestorAdvisorCode) {
+          console.log(`✅ Lead investor has advisor code: ${leadInvestorAdvisorCode}, keeping at stage 1 for advisor approval`);
+          // Keep at stage 1 - will be displayed in lead investor's advisor dashboard
+          return;
+        } else {
+          console.log(`❌ Lead investor has no advisor code, moving to stage 2`);
+          // Move to stage 2
+          await this.updateCoInvestmentOpportunityStage(opportunityId, 2);
+        }
+      }
+
+      // Stage 2: Check if startup has investment advisor code
+      if (currentStage === 2) {
+        const startupAdvisorCode = opportunity.startup?.investment_advisor_code;
+        if (startupAdvisorCode) {
+          console.log(`✅ Startup has advisor code: ${startupAdvisorCode}, keeping at stage 2 for advisor approval`);
+          // Keep at stage 2 - will be displayed in startup's advisor dashboard
+          return;
+        } else {
+          console.log(`❌ Startup has no advisor code, moving to stage 3`);
+          // Move to stage 3
+          await this.updateCoInvestmentOpportunityStage(opportunityId, 3);
+        }
+      }
+
+      // Stage 3: Display to startup (no further automatic progression)
+      if (currentStage === 3) {
+        console.log(`✅ Co-investment opportunity is at stage 3, ready for startup review`);
+        // This will be displayed in startup's "Offers Received" table
+        return;
+      }
+
+    } catch (error) {
+      console.error('Error in handleCoInvestmentFlow:', error);
+    }
+  },
+
+  // Update co-investment opportunity stage
+  async updateCoInvestmentOpportunityStage(opportunityId: number, newStage: number) {
+    try {
+      const { error } = await supabase.rpc('update_co_investment_opportunity_stage', {
+        p_opportunity_id: opportunityId,
+        p_new_stage: newStage
+      });
+
+      if (error) {
+        console.error('Error updating co-investment opportunity stage:', error);
+        throw error;
+      }
+
+      console.log(`✅ Co-investment opportunity ${opportunityId} moved to stage ${newStage}`);
+    } catch (error) {
+      console.error('Error in updateCoInvestmentOpportunityStage:', error);
+      throw error;
+    }
+  },
+
+  // Approve co-investment opportunity by lead investor advisor
+  async approveLeadInvestorAdvisorCoInvestment(opportunityId: number, action: 'approve' | 'reject') {
+    try {
+      const { data, error } = await supabase.rpc('approve_lead_investor_advisor_co_investment', {
+        p_opportunity_id: opportunityId,
+        p_approval_action: action
+      });
+
+      if (error) {
+        console.error('Error approving co-investment by lead investor advisor:', error);
+        throw error;
+      }
+
+      console.log(`✅ Lead investor advisor ${action} for co-investment opportunity ${opportunityId}`);
+      return data;
+    } catch (error) {
+      console.error('Error in approveLeadInvestorAdvisorCoInvestment:', error);
+      throw error;
+    }
+  },
+
+  // Approve co-investment opportunity by startup advisor
+  async approveStartupAdvisorCoInvestment(opportunityId: number, action: 'approve' | 'reject') {
+    try {
+      const { data, error } = await supabase.rpc('approve_startup_advisor_co_investment', {
+        p_opportunity_id: opportunityId,
+        p_approval_action: action
+      });
+
+      if (error) {
+        console.error('Error approving co-investment by startup advisor:', error);
+        throw error;
+      }
+
+      console.log(`✅ Startup advisor ${action} for co-investment opportunity ${opportunityId}`);
+      return data;
+    } catch (error) {
+      console.error('Error in approveStartupAdvisorCoInvestment:', error);
+      throw error;
+    }
+  },
+
+  // Approve co-investment opportunity by startup
+  async approveStartupCoInvestment(opportunityId: number, action: 'approve' | 'reject') {
+    try {
+      const { data, error } = await supabase.rpc('approve_startup_co_investment', {
+        p_opportunity_id: opportunityId,
+        p_approval_action: action
+      });
+
+      if (error) {
+        console.error('Error approving co-investment by startup:', error);
+        throw error;
+      }
+
+      console.log(`✅ Startup ${action} for co-investment opportunity ${opportunityId}`);
+      return data;
+    } catch (error) {
+      console.error('Error in approveStartupCoInvestment:', error);
+      throw error;
+    }
+  },
+
+  // Get co-investment opportunities
+  async getCoInvestmentOpportunities() {
+    console.log('Fetching co-investment opportunities...');
+    
+    try {
+      const { data, error } = await supabase
+        .from('co_investment_opportunities')
+        .select(`
+          *,
+          startup:startups(
+            id,
+            name,
+            sector,
+            stage,
+            user_id
+          ),
+          listed_by_user:users(
+            id,
+            name,
+            email
+          )
+        `)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching co-investment opportunities:', error);
+        return [];
+      }
+
+      console.log('Co-investment opportunities fetched successfully:', data?.length || 0);
+      return data || [];
+    } catch (error) {
+      console.error('Error in getCoInvestmentOpportunities:', error);
+      return [];
+    }
+  },
+
+  // Express interest in co-investment opportunity
+  async expressCoInvestmentInterest(interestData: {
+    opportunity_id: number
+    interested_user_id: string
+    interested_user_type: 'Investor' | 'Investment Advisor'
+    message?: string
+  }) {
+    console.log('Expressing co-investment interest:', interestData);
+    
+    try {
+      const { data, error } = await supabase
+        .from('co_investment_interests')
+        .insert([{
+          opportunity_id: interestData.opportunity_id,
+          interested_user_id: interestData.interested_user_id,
+          interested_user_type: interestData.interested_user_type,
+          message: interestData.message,
+          status: 'pending'
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error expressing co-investment interest:', error);
+        throw error;
+      }
+
+      console.log('Co-investment interest expressed successfully:', data);
+      return data;
+    } catch (error) {
+      console.error('Error in expressCoInvestmentInterest:', error);
+      throw error;
+    }
+  },
+
+  // Update existing investment offer
+  async updateInvestmentOffer(offerId: number, updateData: {
+    offer_amount?: number
+    equity_percentage?: number
+    currency?: string
+    wants_co_investment?: boolean
+  }) {
+    console.log('Updating investment offer:', offerId, updateData);
+    
+    try {
+      const { data, error } = await supabase
+        .from('investment_offers')
+        .update({
+          offer_amount: updateData.offer_amount,
+          equity_percentage: updateData.equity_percentage,
+          currency: updateData.currency,
+          wants_co_investment: updateData.wants_co_investment,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', offerId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error updating investment offer:', error);
+        throw error;
+      }
+
+      console.log('Investment offer updated successfully:', data);
+      
+      // If co-investment is requested, create/update co-investment opportunity
+      if (updateData.wants_co_investment && data) {
+        try {
+          // Check if co-investment opportunity already exists
+          const { data: existingCoInvestment } = await supabase
+            .from('co_investment_opportunities')
+            .select('id')
+            .eq('startup_id', data.startup_id)
+            .eq('listed_by_user_id', data.investor_id)
+            .single();
+
+          if (existingCoInvestment) {
+            // Update existing co-investment opportunity
+            const remainingAmount = data.total_investment_amount - updateData.offer_amount!;
+            await supabase
+              .from('co_investment_opportunities')
+              .update({
+                investment_amount: data.total_investment_amount,
+                minimum_co_investment: Math.min(remainingAmount * 0.1, 10000),
+                maximum_co_investment: remainingAmount,
+                description: `Co-investment opportunity for ${data.startup_name}. Lead investor has committed ${updateData.currency || 'USD'} ${updateData.offer_amount!.toLocaleString()} for ${updateData.equity_percentage}% equity. Remaining ${updateData.currency || 'USD'} ${remainingAmount.toLocaleString()} available for co-investors.`,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', existingCoInvestment.id);
+          } else {
+            // Create new co-investment opportunity
+            await this.createCoInvestmentOpportunity({
+              startup_id: data.startup_id,
+              listed_by_user_id: data.investor_id,
+              listed_by_type: 'Investor',
+              investment_amount: data.total_investment_amount,
+              equity_percentage: data.equity_percentage,
+              minimum_co_investment: Math.min((data.total_investment_amount - updateData.offer_amount!) * 0.1, 10000),
+              maximum_co_investment: data.total_investment_amount - updateData.offer_amount!,
+              description: `Co-investment opportunity for ${data.startup_name}. Lead investor has committed ${updateData.currency || 'USD'} ${updateData.offer_amount!.toLocaleString()} for ${updateData.equity_percentage}% equity. Remaining ${updateData.currency || 'USD'} ${(data.total_investment_amount - updateData.offer_amount!).toLocaleString()} available for co-investors.`
+            });
+          }
+        } catch (coInvestmentError) {
+          console.error('Error handling co-investment update:', coInvestmentError);
+          // Don't throw error here, just log it
+        }
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Error in updateInvestmentOffer:', error);
+      throw error;
     }
   }
 }

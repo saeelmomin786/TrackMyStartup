@@ -21,3 +21,7 @@ if (window.location.href.includes('startup')) {
   console.log('❌ Not on startup page');
 }
 
+
+
+
+

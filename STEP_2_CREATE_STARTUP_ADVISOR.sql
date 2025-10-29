@@ -60,3 +60,7 @@ $$ LANGUAGE plpgsql;
 -- Grant permissions for startup advisor function
 GRANT EXECUTE ON FUNCTION approve_startup_advisor_offer(INTEGER, TEXT) TO authenticated;
 
+
+
+
+

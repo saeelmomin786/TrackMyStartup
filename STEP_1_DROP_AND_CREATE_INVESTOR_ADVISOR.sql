@@ -78,3 +78,7 @@ $$ LANGUAGE plpgsql;
 -- STEP 3: Grant permissions for investor advisor function
 GRANT EXECUTE ON FUNCTION approve_investor_advisor_offer(INTEGER, TEXT) TO authenticated;
 
+
+
+
+

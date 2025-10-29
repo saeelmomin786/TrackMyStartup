@@ -24,7 +24,7 @@ interface InvestorViewProps {
   currentUser?: { id: string; email: string; investorCode?: string; investor_code?: string };
   onViewStartup: (startup: Startup) => void;
   onAcceptRequest: (id: number) => void;
-  onMakeOffer: (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string) => void;
+  onMakeOffer: (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string, wantsCoInvestment?: boolean) => void;
   onUpdateOffer?: (offerId: number, offerAmount: number, equityPercentage: number) => void;
   onCancelOffer?: (offerId: number) => void;
   isViewOnly?: boolean;
@@ -111,6 +111,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
     const [selectedOpportunity, setSelectedOpportunity] = useState<ActiveFundraisingStartup | null>(null);
     const [selectedCurrency, setSelectedCurrency] = useState<string>('USD');
+    const [wantsCoInvestment, setWantsCoInvestment] = useState<boolean>(false);
     
     // Get available currencies from the currency rates
     const getAvailableCurrencies = () => {
@@ -366,13 +367,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             pitchVideoUrl: selectedOpportunity.pitchVideoUrl
         };
 
-        onMakeOffer(newInvestment, offerAmount, equityPercentage, selectedCurrency);
+        onMakeOffer(newInvestment, offerAmount, equityPercentage, selectedCurrency, wantsCoInvestment);
         // After submitting, switch to Offers tab
         setActiveTab('offers');
         
         setIsOfferModalOpen(false);
         setSelectedOpportunity(null);
         setSelectedCurrency('USD');
+        setWantsCoInvestment(false);
     };
     
     const handleFavoriteToggle = (pitchId: number) => {
@@ -1536,12 +1538,36 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     <Input label="Equity Requested (%)" id="offer-equity" name="offer-equity" type="number" step="0.1" required />
                 </div>
                 
+                {/* Co-investment option */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-start space-x-3">
+                        <input
+                            type="checkbox"
+                            id="co-investment"
+                            name="co-investment"
+                            checked={wantsCoInvestment}
+                            onChange={(e) => setWantsCoInvestment(e.target.checked)}
+                            className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <div className="flex-1">
+                            <label htmlFor="co-investment" className="text-sm font-medium text-blue-900 cursor-pointer">
+                                Looking for Co-Investment Partners
+                            </label>
+                            <p className="text-xs text-blue-700 mt-1">
+                                Check this if you want to find other investors to complete the funding round. 
+                                The remaining amount will be listed as a co-investment opportunity for other investors.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                
                 {/* Scouting fee information removed */}
                 
                 <div className="flex justify-end gap-3 pt-4">
                     <Button type="button" variant="secondary" onClick={() => {
                         setIsOfferModalOpen(false);
                         setSelectedCurrency('USD');
+                        setWantsCoInvestment(false);
                     }}>Cancel</Button>
                     <Button type="submit">Submit Offer</Button>
                 </div>

@@ -62,3 +62,7 @@ LEFT JOIN startups s ON io.startup_id = s.id
 WHERE io.stage IN (1, 2, 3)
 ORDER BY io.created_at DESC;
 
+
+
+
+

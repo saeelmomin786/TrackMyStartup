@@ -4,7 +4,8 @@ import { ValidationRequest } from '../lib/validationService';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Badge from './ui/Badge';
-import { Users, Building2, HelpCircle, FileCheck2, LayoutGrid, Eye, Check, X, UserCheck, NotebookPen, BookUser, FileStack, Database, Shield, Settings, DollarSign, TrendingUp, AlertTriangle, BarChart3, UserPlus, Building, CreditCard, MessageSquare, Calendar, Globe, Target, Zap } from 'lucide-react';
+import { Users, Building2, HelpCircle, FileCheck2, LayoutGrid, Eye, Check, X, UserCheck, NotebookPen, BookUser, FileStack, Database, Shield, Settings, DollarSign, TrendingUp, AlertTriangle, BarChart3, UserPlus, Building, CreditCard, MessageSquare, Calendar, Globe, Target, Zap, Megaphone } from 'lucide-react';
+import AdminProgramsTab from './admin/AdminProgramsTab';
 import UserGrowthChart from './admin/UserGrowthChart';
 import UserRoleDistributionChart from './admin/UserRoleDistributionChart';
 import DataManager from './DataManager';
@@ -26,7 +27,7 @@ interface AdminViewProps {
   onViewStartup: (id: number) => void;
 }
 
-type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'financial' | 'analytics' | 'system';
+type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'financial' | 'analytics' | 'system' | 'programs';
 type TimeFilter = '30d' | '90d' | 'all';
 
 const SummaryCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -80,6 +81,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             case 'financial': return <FinancialTab />;
             case 'analytics': return <AnalyticsTab users={filteredUsers} startups={startups} offers={investmentOffers} timeFilter={timeFilter} setTimeFilter={setTimeFilter} />;
             case 'system': return <SystemTab />;
+            case 'programs': return <AdminProgramsTab />;
             default: return null;
         }
     }
@@ -120,6 +122,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
                     <TabButton id="financial" activeTab={activeTab} setActiveTab={setActiveTab} icon={<DollarSign />}>Financial</TabButton>
                     <TabButton id="analytics" activeTab={activeTab} setActiveTab={setActiveTab} icon={<BarChart3 />}>Analytics</TabButton>
                     <TabButton id="system" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Settings />}>System</TabButton>
+                    <TabButton id="programs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Megaphone />}>Programs</TabButton>
                 </nav>
             </div>
 

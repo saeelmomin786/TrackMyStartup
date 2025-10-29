@@ -1924,16 +1924,67 @@ const App: React.FC = () => {
     );
   }, []);
 
-  const handleSubmitOffer = useCallback(async (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string) => {
+  const handleSubmitOffer = useCallback(async (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string, wantsCoInvestment?: boolean) => {
     if (!currentUserRef.current) return;
     
     try {
-      // Since we're now referencing new_investments table which has the same IDs as startups,
-      // we can use the opportunity.id directly (which is the startup ID)
+      // Check if user already has an offer for this startup
+      const existingOffers = await investmentService.getUserOffers(currentUserRef.current.email);
+      const existingOffer = existingOffers.find(offer => 
+        offer.startup_name === opportunity.name || 
+        offer.startup_id === opportunity.id
+      );
+      
+      if (existingOffer) {
+        // If there's an existing offer, ask user if they want to update it
+        const shouldUpdate = window.confirm(
+          `You already have an offer for ${opportunity.name}:\n` +
+          `Amount: ${existingOffer.offer_amount} ${existingOffer.currency || 'USD'}\n` +
+          `Equity: ${existingOffer.equity_percentage}%\n\n` +
+          `Do you want to update this offer with your new details?\n\n` +
+          `New Amount: ${offerAmount} ${currency || 'USD'}\n` +
+          `New Equity: ${equityPercentage}%\n` +
+          `Co-investment: ${wantsCoInvestment ? 'Yes' : 'No'}`
+        );
+        
+        if (shouldUpdate) {
+          // Update the existing offer
+          const updatedOffer = await investmentService.updateInvestmentOffer(existingOffer.id, {
+            offer_amount: offerAmount,
+            equity_percentage: equityPercentage,
+            currency: currency || 'USD',
+            wants_co_investment: wantsCoInvestment
+          });
+          
+          // Update local state
+          setInvestmentOffers(prev => 
+            prev.map(offer => 
+              offer.id === existingOffer.id ? { ...offer, ...updatedOffer } : offer
+            )
+          );
+          
+          messageService.success(
+            'Offer Updated',
+            `Your offer for ${opportunity.name} has been updated successfully!`,
+            3000
+          );
+          
+          return;
+        } else {
+          messageService.info(
+            'Offer Cancelled',
+            'Your offer update was cancelled.',
+            2000
+          );
+          return;
+        }
+      }
+      
+      // Use opportunity.id which is the new_investments.id
       const newOffer = await investmentService.createInvestmentOffer({
         investor_email: currentUserRef.current.email,
         startup_name: opportunity.name,
-        startup_id: opportunity.id, // This is the startup ID from the startups table
+        investment_id: opportunity.id, // This is the new_investments.id
         offer_amount: offerAmount,
         equity_percentage: equityPercentage,
         currency: currency || 'USD'
@@ -1942,19 +1993,81 @@ const App: React.FC = () => {
       // Update local state
       setInvestmentOffers(prev => [newOffer, ...prev]);
       
-      const scoutingFee = newOffer.startup_scouting_fee_paid || 0;
-      if (scoutingFee > 0) {
-        messageService.success(
-          'Offer Submitted',
-          `Your offer for ${opportunity.name} has been submitted successfully! A startup scouting fee of $${scoutingFee.toFixed(2)} has been paid. The startup will now review your offer.`,
-          5000
-        );
+      // Handle co-investment logic if requested
+      if (wantsCoInvestment) {
+        const remainingAmount = opportunity.investmentValue - offerAmount;
+        if (remainingAmount > 0) {
+          try {
+            console.log('🔄 Creating co-investment opportunity...');
+            
+            // For co-investment, we need to find the corresponding startup_id
+            // Since opportunity.id is from new_investments, we need to map it to startups
+            const { data: startupData, error: startupError } = await supabase
+              .from('startups')
+              .select('id, name')
+              .eq('name', opportunity.name)
+              .single();
+            
+            if (startupError || !startupData) {
+              console.error('❌ Startup not found for co-investment:', opportunity.name);
+              messageService.warning(
+                'Co-Investment Setup Failed',
+                `Your offer was submitted successfully, but the co-investment opportunity could not be created: Startup "${opportunity.name}" not found in the system.`,
+                5000
+              );
+              return;
+            }
+            
+            console.log('✅ Found startup for co-investment:', startupData);
+            
+            await investmentService.createCoInvestmentOpportunity({
+              startup_id: startupData.id,
+              listed_by_user_id: currentUserRef.current.id,
+              listed_by_type: 'Investor',
+              investment_amount: opportunity.investmentValue,
+              equity_percentage: opportunity.equityAllocation,
+              minimum_co_investment: Math.min(remainingAmount * 0.1, 10000), // 10% of remaining or 10k minimum
+              maximum_co_investment: remainingAmount,
+              description: `Co-investment opportunity for ${opportunity.name}. Lead investor has committed ${currency || 'USD'} ${offerAmount.toLocaleString()} for ${equityPercentage}% equity. Remaining ${currency || 'USD'} ${remainingAmount.toLocaleString()} available for co-investors.`
+            });
+            
+            console.log('✅ Co-investment opportunity created successfully');
+            messageService.success(
+              'Offer Submitted with Co-Investment',
+              `Your offer for ${opportunity.name} has been submitted successfully! A co-investment opportunity has been created for the remaining ${currency || 'USD'} ${remainingAmount.toLocaleString()}.`,
+              5000
+            );
+            
+          } catch (coInvestmentError) {
+            console.error('❌ Error creating co-investment opportunity:', coInvestmentError);
+            messageService.warning(
+              'Co-Investment Setup Failed',
+              `Your offer was submitted successfully, but the co-investment opportunity could not be created: ${coInvestmentError.message || 'Unknown error occurred'}. Please contact support for assistance.`,
+              5000
+            );
+          }
+        } else {
+          messageService.success(
+            'Offer Submitted',
+            `Your offer for ${opportunity.name} has been submitted successfully!`,
+            3000
+          );
+        }
       } else {
-        messageService.success(
-          'Offer Submitted',
-          `Your offer for ${opportunity.name} has been submitted successfully! The startup will now review your offer.`,
-          3000
-        );
+        const scoutingFee = newOffer.startup_scouting_fee_paid || 0;
+        if (scoutingFee > 0) {
+          messageService.success(
+            'Offer Submitted',
+            `Your offer for ${opportunity.name} has been submitted successfully! A startup scouting fee of $${scoutingFee.toFixed(2)} has been paid. The startup will now review your offer.`,
+            5000
+          );
+        } else {
+          messageService.success(
+            'Offer Submitted',
+            `Your offer for ${opportunity.name} has been submitted successfully! The startup will now review your offer.`,
+            3000
+          );
+        }
       }
     } catch (error) {
       console.error('Error submitting offer:', error);

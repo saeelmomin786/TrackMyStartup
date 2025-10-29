@@ -22,6 +22,7 @@ import { capTableService } from '../../lib/capTableService';
 import { IncubationType, FeeType } from '../../types';
 import { messageService } from '../../lib/messageService';
 import { complianceRulesIntegrationService } from '../../lib/complianceRulesIntegrationService';
+import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsService';
 
 // Types for offers received
 interface OfferReceived {
@@ -43,6 +44,18 @@ interface OfferReceived {
   programName?: string;
   facilitatorName?: string;
   diligenceUrls?: string[]; // Array of uploaded diligence document URLs
+  // Co-investment fields
+  isSeekingCoInvestment?: boolean;
+  remainingCoInvestmentAmount?: number;
+  isCoInvestmentOpportunity?: boolean;
+  coInvestmentOpportunityId?: number;
+  description?: string;
+  totalInvestmentAmount?: number;
+  equityPercentage?: number;
+  // Stage information
+  stage?: number;
+  stageStatus?: string;
+  stageColor?: string;
 }
 
 interface StartupDashboardTabProps {
@@ -70,6 +83,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [dailyData, setDailyData] = useState<any[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [adminProgramPosts, setAdminProgramPosts] = useState<AdminProgramPost[]>([]);
   
   // Offers Received states
   const [offersReceived, setOffersReceived] = useState<OfferReceived[]>([]);
@@ -149,6 +163,15 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         
         // Load compliance data
         await loadComplianceData();
+
+        // Load admin program posts (Other Program)
+        try {
+          const posts = await adminProgramsService.listActive();
+          setAdminProgramPosts(posts);
+        } catch (e) {
+          console.warn('Failed to load admin program posts:', e);
+          setAdminProgramPosts([]);
+        }
         
       } catch (error) {
         console.error('Error loading dashboard data:', error);
@@ -664,11 +687,15 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           mappedStatus = offer.status as 'pending' | 'accepted' | 'rejected' || 'pending';
         }
         
+        // Check if this investor is seeking co-investment
+        const isSeekingCoInvestment = offer.wants_co_investment || offer.seeking_co_investment || false;
+        const remainingAmount = isSeekingCoInvestment ? (offer.total_investment_amount || offer.investmentValue || 0) - amount : 0;
+        
         return {
           id: `investment_${offer.id}`,
           from: investorName,
           type: 'Investment' as const,
-          offerDetails: `${formatCurrency(amount, offerCurrency)} for ${equityPercentage}% equity`,
+          offerDetails: `${formatCurrency(amount, offerCurrency)} for ${equityPercentage}% equity${isSeekingCoInvestment ? ` (Seeking co-investors for remaining ${formatCurrency(remainingAmount, offerCurrency)})` : ''}`,
           status: mappedStatus,
           code: offer.id.toString(),
           createdAt: offer.createdAt,
@@ -676,16 +703,67 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           investmentOfferId: offer.id,
           startupScoutingFee: Number(offer.startup_scouting_fee_paid || offer.startup_scouting_fee) || 0,
           investorScoutingFee: Number(offer.investor_scouting_fee_paid || offer.investor_scouting_fee) || 0,
-          contactDetailsRevealed: offer.contact_details_revealed || false
+          contactDetailsRevealed: offer.contact_details_revealed || false,
+          isSeekingCoInvestment,
+          remainingCoInvestmentAmount: remainingAmount
+        };
+      });
+      
+      // Load and format co-investment opportunities
+      const coInvestmentOpportunities = await investmentService.getCoInvestmentOpportunities();
+      const startupCoInvestmentOpportunities = coInvestmentOpportunities.filter(
+        (opp: any) => opp.startup_id === startup.id
+      );
+      
+      const coInvestmentOffersFormatted: OfferReceived[] = startupCoInvestmentOpportunities.map((opp: any) => {
+        // Get stage status display
+        const stage = opp.stage || 1;
+        let stageStatus = '';
+        let stageColor = 'bg-blue-100 text-blue-800';
+        
+        if (stage === 1) {
+          stageStatus = opp.lead_investor_advisor_approval_status === 'pending' 
+            ? '🔵 Stage 1: Lead Investor Advisor Approval' 
+            : '⚡ Stage 1: Auto-Processing';
+        } else if (stage === 2) {
+          stageStatus = opp.startup_advisor_approval_status === 'pending'
+            ? '🟣 Stage 2: Startup Advisor Approval'
+            : '⚡ Stage 2: Auto-Processing';
+        } else if (stage === 3) {
+          stageStatus = '✅ Stage 3: Ready for Startup Review';
+          stageColor = 'bg-green-100 text-green-800';
+        } else if (stage === 4) {
+          stageStatus = '🎉 Stage 4: Approved';
+          stageColor = 'bg-emerald-100 text-emerald-800';
+        }
+        
+        return {
+          id: `co_investment_${opp.id}`,
+          from: opp.listed_by_user?.name || 'Lead Investor',
+          type: 'Investment' as const,
+          offerDetails: `Co-investment opportunity: ${formatCurrency(opp.minimum_co_investment, startupCurrency)} - ${formatCurrency(opp.maximum_co_investment, startupCurrency)} available`,
+          status: opp.startup_approval_status === 'approved' ? 'accepted' : 
+                  opp.startup_approval_status === 'rejected' ? 'rejected' : 'pending',
+          code: `co-${opp.id}`,
+          createdAt: opp.created_at,
+          isCoInvestmentOpportunity: true,
+          coInvestmentOpportunityId: opp.id,
+          description: opp.description,
+          totalInvestmentAmount: opp.investment_amount,
+          equityPercentage: opp.equity_percentage,
+          stage: stage,
+          stageStatus: stageStatus,
+          stageColor: stageColor
         };
       });
       
       // Combine all offers - only include properly resolved offers
-      const allOffers = [...incubationOffers, ...diligenceOffers, ...investmentOffersFormatted];
+      const allOffers = [...incubationOffers, ...diligenceOffers, ...investmentOffersFormatted, ...coInvestmentOffersFormatted];
       console.log('🎯 Combined offers array:', allOffers);
       console.log('🎯 Incubation offers:', incubationOffers);
       console.log('🎯 Diligence offers:', diligenceOffers);
       console.log('🎯 Investment offers:', investmentOffersFormatted);
+      console.log('🎯 Co-investment opportunities:', coInvestmentOffersFormatted);
       console.log('🎯 Total offers count:', allOffers.length);
       
       // If no offers found, show a debug message
@@ -1620,6 +1698,48 @@ Contact the investor directly to proceed with the investment process.
             </div>
           </Card>
         </div>
+      </div>
+
+      {/* Other Program subsection (cards) */}
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base sm:text-lg font-semibold text-slate-700">Other Program</h3>
+        </div>
+        {adminProgramPosts.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {adminProgramPosts.map(p => (
+              <Card key={p.id} className="flex flex-col !p-0 overflow-hidden">
+                {p.posterUrl ? (
+                  <img 
+                    src={p.posterUrl} 
+                    alt={`${p.programName} poster`} 
+                    className="w-full h-40 object-contain bg-slate-100"
+                  />
+                ) : (
+                  <div className="w-full h-40 bg-slate-200 flex items-center justify-center text-slate-500">
+                    <span className="text-sm">No poster</span>
+                  </div>
+                )}
+                <div className="p-4 flex flex-col flex-grow">
+                  <div className="flex-grow">
+                    <p className="text-sm font-medium text-brand-primary">{p.incubationCenter}</p>
+                    <h3 className="text-lg font-semibold text-slate-800 mt-1">{p.programName}</h3>
+                    <p className="text-xs text-slate-500 mt-2">Deadline: <span className="font-semibold">{p.deadline}</span></p>
+                  </div>
+                  <div className="border-t pt-4 mt-4">
+                    <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="block">
+                      <Button className="w-full">Apply</Button>
+                    </a>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card className="text-center py-10">
+            <p className="text-slate-500">No programs posted by admin yet.</p>
+          </Card>
+        )}
       </div>
 
       {/* Offers Received Section */}

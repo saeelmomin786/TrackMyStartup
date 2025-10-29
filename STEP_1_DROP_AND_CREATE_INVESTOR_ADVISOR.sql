@@ -82,3 +82,4 @@ GRANT EXECUTE ON FUNCTION approve_investor_advisor_offer(INTEGER, TEXT) TO authe
 
 
 
+

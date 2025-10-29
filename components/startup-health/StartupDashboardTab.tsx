@@ -1700,47 +1700,7 @@ Contact the investor directly to proceed with the investment process.
         </div>
       </div>
 
-      {/* Other Program subsection (cards) */}
-      <div className="space-y-3 sm:space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base sm:text-lg font-semibold text-slate-700">Other Program</h3>
-        </div>
-        {adminProgramPosts.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {adminProgramPosts.map(p => (
-              <Card key={p.id} className="flex flex-col !p-0 overflow-hidden">
-                {p.posterUrl ? (
-                  <img 
-                    src={p.posterUrl} 
-                    alt={`${p.programName} poster`} 
-                    className="w-full h-40 object-contain bg-slate-100"
-                  />
-                ) : (
-                  <div className="w-full h-40 bg-slate-200 flex items-center justify-center text-slate-500">
-                    <span className="text-sm">No poster</span>
-                  </div>
-                )}
-                <div className="p-4 flex flex-col flex-grow">
-                  <div className="flex-grow">
-                    <p className="text-sm font-medium text-brand-primary">{p.incubationCenter}</p>
-                    <h3 className="text-lg font-semibold text-slate-800 mt-1">{p.programName}</h3>
-                    <p className="text-xs text-slate-500 mt-2">Deadline: <span className="font-semibold">{p.deadline}</span></p>
-                  </div>
-                  <div className="border-t pt-4 mt-4">
-                    <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="block">
-                      <Button className="w-full">Apply</Button>
-                    </a>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <Card className="text-center py-10">
-            <p className="text-slate-500">No programs posted by admin yet.</p>
-          </Card>
-        )}
-      </div>
+      
 
       {/* Offers Received Section */}
       <div className="space-y-3 sm:space-y-4">

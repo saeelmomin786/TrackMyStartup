@@ -47,3 +47,4 @@ SELECT id, name, sector FROM startups WHERE name ILIKE '%MULSETU%';
 
 
 
+

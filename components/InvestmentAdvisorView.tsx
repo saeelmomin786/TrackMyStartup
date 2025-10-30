@@ -19,6 +19,7 @@ interface InvestmentAdvisorViewProps {
   offers: InvestmentOffer[];
   interests: any[];
   pendingRelationships?: any[];
+  onViewStartup: (id: number, targetTab?: string) => void;
 }
 
 const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({ 
@@ -28,7 +29,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   investments,
   offers,
   interests,
-  pendingRelationships = []
+  pendingRelationships = [],
+  onViewStartup
 }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'system'>('dashboard');
   const [showProfilePage, setShowProfilePage] = useState(false);
@@ -510,30 +512,36 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     fetchStartupFundraisingData();
   }, [myStartups]);
 
-  // Get co-investment opportunities
-  const coInvestmentOpportunities = useMemo(() => {
-    if (!investments || !Array.isArray(investments)) {
-      return [];
+  // All co-investment opportunities (active), for advisors
+  const [advisorCoOpps, setAdvisorCoOpps] = useState<any[]>([]);
+  const [loadingAdvisorCoOpps, setLoadingAdvisorCoOpps] = useState(false);
+  useEffect(() => {
+    const loadAllCoOpps = async () => {
+      try {
+        setLoadingAdvisorCoOpps(true);
+        const { data, error } = await supabase
+          .from('co_investment_opportunities')
+          .select('id,startup_id,investment_amount,equity_percentage,status,stage,created_at, startup:startups(name, sector)')
+          .eq('status', 'active')
+          .order('created_at', { ascending: false });
+        if (error) {
+          console.error('Error fetching co-investment opportunities (advisor):', error);
+          setAdvisorCoOpps([]);
+        } else {
+          setAdvisorCoOpps(data || []);
+        }
+      } catch (e) {
+        console.error('Error loading co-investment opportunities (advisor):', e);
+        setAdvisorCoOpps([]);
+      } finally {
+        setLoadingAdvisorCoOpps(false);
+      }
+    };
+    // Load when advisor dashboard tab visible
+    if (activeTab === 'dashboard') {
+      loadAllCoOpps();
     }
-    
-    // Filter and map investments to co-investment opportunities
-    const opportunities = investments.map(investment => ({
-      id: investment.id,
-      name: investment.name,
-      sector: investment.sector,
-      investmentValue: investment.investmentValue,
-      equityAllocation: investment.equityAllocation,
-      complianceStatus: investment.complianceStatus,
-      pitchDeckUrl: investment.pitchDeckUrl,
-      pitchVideoUrl: investment.pitchVideoUrl,
-      totalFunding: investment.totalFunding,
-      totalRevenue: investment.totalRevenue,
-      registrationDate: investment.registrationDate,
-      investmentType: investment.investmentType
-    }));
-    
-    return opportunities;
-  }, [investments]);
+  }, [activeTab]);
 
   // Handle accepting service requests
   const handleAcceptRequest = async (request: any) => {
@@ -906,8 +914,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   };
 
   const handleDueDiligenceClick = (startup: ActiveFundraisingStartup) => {
-    // For advisors, this could open a modal or redirect to due diligence service
-    alert(`Due Diligence service for ${startup.name} - This feature can be implemented for advisors`);
+    // Open full Startup Dashboard (read-only) for advisor-led due diligence review
+    (onViewStartup as any)(startup.id, 'dashboard');
   };
 
   const handleMakeOfferClick = (startup: ActiveFundraisingStartup) => {
@@ -1637,47 +1645,36 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {coInvestmentOpportunities.length === 0 ? (
+                    {loadingAdvisorCoOpps ? (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-8 text-center text-gray-500">Loading co-investment opportunities...</td>
+                      </tr>
+                    ) : advisorCoOpps.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                          <div className="flex flex-col items-center">
-                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                            </svg>
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Co-Investment Opportunities</h3>
-                            <p className="text-sm text-gray-500 mb-4">
-                              No investment opportunities are currently available for co-investment. Check back later for new opportunities.
-                            </p>
-                          </div>
+                          No Co-Investment Opportunities
                         </td>
                       </tr>
                     ) : (
-                      coInvestmentOpportunities.map((investment) => (
-                        <tr key={investment.id}>
+                      advisorCoOpps.map((row) => (
+                        <tr key={row.id}>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {investment.name || 'Unknown Startup'}
+                            {row.startup?.name || 'Unknown Startup'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {investment.sector || 'Not specified'}
+                            {row.startup?.sector || 'Not specified'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {investment.investmentValue ? formatCurrency(investment.investmentValue) : 'Not specified'}
+                            {row.investment_amount ? formatCurrency(row.investment_amount) : 'Not specified'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {investment.equityAllocation ? `${investment.equityAllocation}%` : 'Not specified'}
+                            {row.equity_percentage ? `${row.equity_percentage}%` : 'Not specified'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             <span className="text-gray-400 italic">TBD</span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                              investment.complianceStatus === 'Compliant' ? 'bg-green-100 text-green-800' :
-                              investment.complianceStatus === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
-                              investment.complianceStatus === 'Non-Compliant' ? 'bg-red-100 text-red-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {investment.complianceStatus || 'Unknown'}
-                            </span>
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${row.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{row.status}</span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex gap-2">
@@ -1690,7 +1687,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 Due Diligence
                               </button>
                               <button
-                                onClick={() => handleRecommendCoInvestment(investment.id)}
+                                onClick={() => handleRecommendCoInvestment(row.id)}
                                 disabled={isLoading || myInvestors.length === 0}
                                 className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                                   myInvestors.length === 0 

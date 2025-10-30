@@ -13,7 +13,7 @@ interface AdvisorAwareLogoProps {
 
 const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({ 
   currentUser, 
-  className = "h-8 w-8 sm:h-10 sm:w-10 object-contain cursor-pointer hover:opacity-80 transition-opacity",
+  className = "h-40 w-40 sm:h-48 sm:w-48 object-contain cursor-pointer hover:opacity-80 transition-opacity",
   alt = "TrackMyStartup",
   onClick,
   showText = true,

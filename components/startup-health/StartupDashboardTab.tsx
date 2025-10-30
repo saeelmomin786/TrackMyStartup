@@ -23,6 +23,7 @@ import { IncubationType, FeeType } from '../../types';
 import { messageService } from '../../lib/messageService';
 import { complianceRulesIntegrationService } from '../../lib/complianceRulesIntegrationService';
 import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsService';
+import { paymentService } from '../../lib/paymentService';
 
 // Types for offers received
 interface OfferReceived {
@@ -84,6 +85,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [adminProgramPosts, setAdminProgramPosts] = useState<AdminProgramPost[]>([]);
+
+  // Due Diligence Requests (investor → startup)
+  const [diligenceRequests, setDiligenceRequests] = useState<any[]>([]);
   
   // Offers Received states
   const [offersReceived, setOffersReceived] = useState<OfferReceived[]>([]);
@@ -171,6 +175,67 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         } catch (e) {
           console.warn('Failed to load admin program posts:', e);
           setAdminProgramPosts([]);
+        }
+
+        // Load due diligence requests for this startup (RLS-safe via RPC if available)
+        try {
+          let rows: any[] | null = null;
+          try {
+            const { data: rpcData, error: rpcError } = await supabase.rpc('get_due_diligence_requests_for_startup', {
+              p_startup_id: String(startup.id)
+            });
+            if (!rpcError && rpcData) {
+              rows = rpcData;
+            }
+          } catch (_) {
+            // Ignore - RPC might not exist yet
+          }
+
+          if (!rows) {
+            // Fallback (may be blocked by RLS):
+            const { data, error } = await supabase
+              .from('due_diligence_requests')
+              .select('id, user_id, startup_id, status, created_at')
+              .eq('startup_id', String(startup.id))
+              .order('created_at', { ascending: false });
+            if (!error) rows = data || [];
+          }
+
+          if (rows) {
+            // Enrich with investor names unless rpc already provided them
+            const hasInvestorInfo = rows.length > 0 && (rows[0].investor_name || rows[0].investor_email);
+            if (hasInvestorInfo) {
+              setDiligenceRequests(rows.map(r => ({
+                id: r.id,
+                user_id: r.user_id,
+                startup_id: r.startup_id,
+                status: r.status,
+                created_at: r.created_at,
+                investor: { name: r.investor_name, email: r.investor_email }
+              })));
+            } else {
+              const userIds = Array.from(new Set(rows.map(r => r.user_id)));
+              let usersMap: Record<string, any> = {};
+              if (userIds.length > 0) {
+                const { data: users } = await supabase
+                  .from('users')
+                  .select('id, name, email')
+                  .in('id', userIds);
+                (users || []).forEach(u => { usersMap[u.id] = u; });
+              }
+              setDiligenceRequests(
+                rows.map(r => ({
+                  ...r,
+                  investor: usersMap[r.user_id] || { name: 'Investor', email: '' }
+                }))
+              );
+            }
+          } else {
+            setDiligenceRequests([]);
+          }
+        } catch (e) {
+          console.warn('Failed to load due diligence requests:', e);
+          setDiligenceRequests([]);
         }
         
       } catch (error) {
@@ -811,6 +876,27 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         'Diligence Failed',
         'Failed to accept due diligence request.'
       );
+    }
+  };
+
+  // Approve/Reject due diligence request coming from investors (panel actions)
+  const approveDiligenceRequest = async (requestId: string) => {
+    const ok = await paymentService.approveDueDiligence(requestId);
+    if (ok) {
+      setDiligenceRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'completed', completed_at: new Date().toISOString() } : r));
+      messageService.success('Due Diligence Approved', 'Investor has been granted access.', 3000);
+    } else {
+      messageService.error('Approval Failed', 'Could not approve due diligence request.');
+    }
+  };
+
+  const rejectDiligenceRequest = async (requestId: string) => {
+    const ok = await paymentService.rejectDueDiligence(requestId);
+    if (ok) {
+      setDiligenceRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'failed' } : r));
+      messageService.success('Request Rejected', 'Due diligence request rejected.', 3000);
+    } else {
+      messageService.error('Rejection Failed', 'Could not reject the request.');
     }
   };
 
@@ -1699,6 +1785,59 @@ Contact the investor directly to proceed with the investment process.
           </Card>
         </div>
       </div>
+
+      {/* Due Diligence Requests Panel */}
+      <Card padding="md">
+        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-slate-700">Due Diligence Requests</h3>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Investor</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-slate-200">
+              {diligenceRequests.map(r => (
+                <tr key={r.id}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{r.investor?.name || 'Investor'}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{r.investor?.email || ''}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      r.status === 'completed' ? 'bg-green-100 text-green-800' :
+                      r.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-red-100 text-red-800'
+                    }`}>
+                      {r.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    {r.status === 'pending' ? (
+                      <div className="flex gap-2">
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => approveDiligenceRequest(r.id)}>
+                          <Check className="h-4 w-4 mr-1" /> Approve
+                        </Button>
+                        <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50" onClick={() => rejectDiligenceRequest(r.id)}>
+                          <X className="h-4 w-4 mr-1" /> Reject
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400">No actions</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {diligenceRequests.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">No due diligence requests yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
       
 

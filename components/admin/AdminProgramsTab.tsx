@@ -3,6 +3,7 @@ import Card from '../ui/Card';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
 import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsService';
+import { toDirectImageUrl } from '../../lib/imageUrl';
 import { Calendar, ExternalLink, Trash2 } from 'lucide-react';
 
 const AdminProgramsTab: React.FC = () => {
@@ -34,12 +35,13 @@ const AdminProgramsTab: React.FC = () => {
     if (!form.programName || !form.incubationCenter || !form.deadline || !form.applicationLink) return;
     setLoading(true);
     try {
+      const normalizedPoster = toDirectImageUrl(form.posterUrl);
       await adminProgramsService.create({
         programName: form.programName.trim(),
         incubationCenter: form.incubationCenter.trim(),
         deadline: form.deadline,
         applicationLink: form.applicationLink.trim(),
-        posterUrl: form.posterUrl.trim() || undefined
+        posterUrl: normalizedPoster || undefined
       });
       setForm({ programName: '', incubationCenter: '', deadline: '', applicationLink: '', posterUrl: '' });
       await loadPosts();
@@ -134,7 +136,7 @@ const AdminProgramsTab: React.FC = () => {
                   <td className="px-6 py-4 text-sm font-medium text-slate-900">{p.programName}</td>
                   <td className="px-6 py-4 text-sm text-slate-600">
                     {p.posterUrl ? (
-                      <img src={p.posterUrl} alt={`${p.programName} poster`} className="h-10 w-16 object-cover rounded border" />
+                      <img src={toDirectImageUrl(p.posterUrl)} alt={`${p.programName} poster`} className="h-10 w-16 object-cover rounded border" />
                     ) : (
                       <span className="text-slate-400">—</span>
                     )}

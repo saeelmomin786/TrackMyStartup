@@ -748,6 +748,81 @@ class PaymentService {
       return [];
     }
   }
+
+  // Create a due diligence request without payment
+  async createDueDiligenceRequest(userId: string, startupId: string): Promise<any> {
+    try {
+      const { data, error } = await supabase
+        .from('due_diligence_requests')
+        .insert({
+          user_id: userId,
+          startup_id: String(startupId),
+          status: 'pending'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error creating due diligence request:', error);
+      throw error;
+    }
+  }
+
+  // Return true if investor already has an approved/completed due diligence for the startup
+  async hasApprovedDueDiligence(userId: string, startupId: string): Promise<boolean> {
+    const { data, error } = await supabase
+      .from('due_diligence_requests')
+      .select('id, status')
+      .eq('user_id', userId)
+      .eq('startup_id', String(startupId))
+      .in('status', ['completed'])
+      .limit(1);
+    if (error) {
+      console.error('Error checking approved due diligence:', error);
+      return false;
+    }
+    return Array.isArray(data) && data.length > 0;
+  }
+
+  // Create pending request only if one doesn't already exist
+  async createPendingDueDiligenceIfNeeded(userId: string, startupId: string): Promise<any> {
+    const { data: existing, error: checkError } = await supabase
+      .from('due_diligence_requests')
+      .select('id, status')
+      .eq('user_id', userId)
+      .eq('startup_id', String(startupId))
+      .in('status', ['pending'])
+      .limit(1);
+    if (!checkError && Array.isArray(existing) && existing.length > 0) {
+      return existing[0];
+    }
+    return this.createDueDiligenceRequest(userId, String(startupId));
+  }
+
+  // Approve due diligence (for startup use) – marks as completed
+  async approveDueDiligence(requestId: string): Promise<boolean> {
+    const { data, error } = await supabase.rpc('approve_due_diligence_for_startup', {
+      p_request_id: requestId
+    });
+    if (error) {
+      console.error('Error approving due diligence:', error);
+      return false;
+    }
+    return !!data;
+  }
+
+  async rejectDueDiligence(requestId: string): Promise<boolean> {
+    const { data, error } = await supabase.rpc('reject_due_diligence_for_startup', {
+      p_request_id: requestId
+    });
+    if (error) {
+      console.error('Error rejecting due diligence:', error);
+      return false;
+    }
+    return !!data;
+  }
 }
 
 export const paymentService = new PaymentService();

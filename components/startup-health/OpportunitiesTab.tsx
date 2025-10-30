@@ -9,6 +9,7 @@ import { messageService } from '../../lib/messageService';
 import Modal from '../ui/Modal';
 import { getQueryParam, setQueryParam } from '../../lib/urlState';
 import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsService';
+import { toDirectImageUrl } from '../../lib/imageUrl';
 
 interface StartupRef {
     id: number;
@@ -225,7 +226,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     };
 
     const openImageModal = (imageUrl: string, altText: string) => {
-        setSelectedImageUrl(imageUrl);
+        setSelectedImageUrl(toDirectImageUrl(imageUrl) || imageUrl);
         setSelectedImageAlt(altText);
         setIsImageModalOpen(true);
     };
@@ -374,7 +375,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                             );
                             if (selectedOpportunity.posterUrl) return (
                                 <img 
-                                    src={selectedOpportunity.posterUrl} 
+                                    src={toDirectImageUrl(selectedOpportunity.posterUrl) || selectedOpportunity.posterUrl} 
                                     alt={`${selectedOpportunity.programName} poster`} 
                                     className="w-full h-64 object-contain bg-slate-100 cursor-pointer hover:opacity-90 transition-opacity" 
                                     onClick={() => openImageModal(selectedOpportunity.posterUrl!, `${selectedOpportunity.programName} poster`)}
@@ -440,7 +441,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                     </div>
                                 ) : opp.posterUrl ? (
                                     <img 
-                                        src={opp.posterUrl} 
+                                        src={toDirectImageUrl(opp.posterUrl) || opp.posterUrl} 
                                         alt={`${opp.programName} poster`} 
                                         className="w-full h-40 object-contain bg-slate-100 cursor-pointer hover:opacity-90 transition-opacity" 
                                         onClick={() => openImageModal(opp.posterUrl!, `${opp.programName} poster`)}
@@ -519,9 +520,10 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                             <Card key={p.id} className="flex flex-col !p-0 overflow-hidden">
                                 {p.posterUrl ? (
                                     <img 
-                                        src={p.posterUrl} 
+                                        src={toDirectImageUrl(p.posterUrl) || p.posterUrl} 
                                         alt={`${p.programName} poster`} 
-                                        className="w-full h-40 object-contain bg-slate-100"
+                                        className="w-full h-40 object-contain bg-slate-100 cursor-pointer hover:opacity-90 transition-opacity"
+                                        onClick={() => openImageModal(p.posterUrl!, `${p.programName} poster`)}
                                     />
                                 ) : (
                                     <div className="w-full h-40 bg-slate-200 flex items-center justify-center text-slate-500">

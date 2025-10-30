@@ -1506,26 +1506,26 @@ const App: React.FC = () => {
       startupObj = startupsRef.current.find(s => s.id === startup);
       if (!startupObj) {
         console.error('Startup not found with ID:', startup, 'in available startups:', startupsRef.current.map(s => ({ id: s.id, name: s.name })));
-        
-        // If facilitator is trying to access a startup, we need to fetch it from the database
-        if (currentUser?.role === 'Startup Facilitation Center') {
-          console.log('🔍 Facilitator accessing startup, fetching from database...');
-          
-          // Call the async function to fetch startup data
-          handleFacilitatorStartupAccess(startup, targetTab);
-          return;
-        } else {
-          return; // For non-facilitator users, return if startup not found
-        }
+        // Fetch from database as a fallback for all roles (including Investor)
+        console.log('🔍 Fallback: fetching startup from database for direct view access...');
+        handleFacilitatorStartupAccess(startup, targetTab);
+        return;
       }
     } else {
       startupObj = startup;
     }
     
+    // For investors and investment advisors, always fetch fresh, enriched startup data from DB so all fields are populated
+    if (currentUser?.role === 'Investor' || currentUser?.role === 'Investment Advisor') {
+      console.log('🔍 Investor access: fetching enriched startup data for view');
+      handleFacilitatorStartupAccess(startupObj.id, targetTab);
+      return;
+    }
+    
     console.log('🔍 Setting selectedStartup to:', startupObj);
     
     // Set view-only mode based on user role
-    const isViewOnlyMode = currentUser?.role === 'CA' || currentUser?.role === 'CS' || currentUser?.role === 'Startup Facilitation Center' || currentUser?.role === 'Investor';
+    const isViewOnlyMode = currentUser?.role === 'CA' || currentUser?.role === 'CS' || currentUser?.role === 'Startup Facilitation Center' || currentUser?.role === 'Investor' || currentUser?.role === 'Investment Advisor';
     console.log('🔍 Setting isViewOnly to:', isViewOnlyMode);
     
     // Set the startup and view
@@ -1564,13 +1564,18 @@ const App: React.FC = () => {
     try {
       console.log('🔍 Fetching startup data for facilitator, ID:', startupId);
       
-      // Fetch startup data, share data, and founders data in parallel
-      const [startupResult, sharesResult, foundersResult] = await Promise.allSettled([
+      // Fetch startup data, fundraising details, share data, and founders data in parallel
+      const [startupResult, fundraisingResult, sharesResult, foundersResult] = await Promise.allSettled([
         supabase
           .from('startups')
           .select('*')
           .eq('id', startupId)
           .single(),
+        supabase
+          .from('fundraising_details')
+          .select('value, equity, domain')
+          .eq('startup_id', startupId)
+          .limit(1),
         supabase
           .from('startup_shares')
           .select('total_shares, esop_reserved_shares, price_per_share')
@@ -1583,6 +1588,7 @@ const App: React.FC = () => {
       ]);
       
       const startupData = startupResult.status === 'fulfilled' ? startupResult.value : null;
+      const fundraisingData = fundraisingResult.status === 'fulfilled' ? fundraisingResult.value : null;
       const sharesData = sharesResult.status === 'fulfilled' ? sharesResult.value : null;
       const foundersData = foundersResult.status === 'fulfilled' ? foundersResult.value : null;
       
@@ -1615,15 +1621,17 @@ const App: React.FC = () => {
       });
       
       // Convert database format to Startup interface
+      const fundraisingRow = (fundraisingData && (fundraisingData as any).data && (fundraisingData as any).data[0]) || null;
       const startupObj: Startup = {
         id: fetchedStartup.id,
         name: fetchedStartup.name,
         investmentType: fetchedStartup.investment_type,
-        investmentValue: fetchedStartup.investment_value,
-        equityAllocation: fetchedStartup.equity_allocation,
+        // Prefer fundraising_details values when present
+        investmentValue: Number(fundraisingRow?.value ?? fetchedStartup.investment_value) || 0,
+        equityAllocation: Number(fundraisingRow?.equity ?? fetchedStartup.equity_allocation) || 0,
         currentValuation: fetchedStartup.current_valuation,
         complianceStatus: fetchedStartup.compliance_status,
-        sector: fetchedStartup.sector,
+        sector: fundraisingRow?.domain || fetchedStartup.sector,
         totalFunding: fetchedStartup.total_funding,
         totalRevenue: fetchedStartup.total_revenue,
         registrationDate: fetchedStartup.registration_date,
@@ -2691,6 +2699,7 @@ const App: React.FC = () => {
           offers={investmentOffers}
           interests={[]} // TODO: Add investment interests data
           pendingRelationships={pendingRelationships}
+          onViewStartup={handleViewStartup}
         />
       );
     }
@@ -2876,8 +2885,8 @@ const App: React.FC = () => {
         <MessageContainer />
         <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
         <header className="bg-white shadow-sm sticky top-0 z-50">
-          <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-            <div className="flex items-center gap-3">
+          <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-2 flex justify-between items-center">
+            <div className="flex items-center gap-2">
               {/* Show investment advisor logo if user is an Investment Advisor OR has an assigned investment advisor */}
               {(() => {
                 const isInvestmentAdvisor = currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url;
@@ -2904,18 +2913,18 @@ const App: React.FC = () => {
                           ? (currentUser as any).logo_url 
                           : assignedInvestmentAdvisor?.logo_url} 
                         alt="Company Logo" 
-                        className="h-8 w-8 rounded object-contain bg-white border border-gray-200 p-1"
+                        className="h-24 w-24 sm:h-28 sm:w-28 rounded object-contain bg-white border border-gray-200 p-1"
                         onError={(e) => {
                           // Fallback to TrackMyStartup logo if image fails to load
                           e.currentTarget.style.display = 'none';
                           e.currentTarget.nextElementSibling?.classList.remove('hidden');
                         }}
                       />
-                      <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 object-contain hidden" />
+                      <img src={LogoTMS} alt="TrackMyStartup" className="h-24 w-24 sm:h-28 sm:w-28 object-contain hidden" />
                     </>
                   ) : (
-                    <div className="h-8 w-8 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
-                      <span className="text-purple-600 font-semibold text-xs">IA</span>
+                    <div className="h-24 w-24 sm:h-28 sm:w-28 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
+                      <span className="text-purple-600 font-semibold text-base sm:text-lg">IA</span>
                     </div>
                   )}
                   <div>
@@ -2928,10 +2937,10 @@ const App: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <img src={LogoTMS} alt="TrackMyStartup" className="h-8 w-8 object-contain" />
+                <img src={LogoTMS} alt="TrackMyStartup" className="h-24 w-24 sm:h-28 sm:w-28 object-contain" />
               )}
             </div>
-             <div className="flex items-center gap-6">
+             <div className="flex items-center gap-3">
               {currentUser?.role === 'Investor' && (
                   <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
                       Investor Code: <span className="font-semibold text-brand-primary">

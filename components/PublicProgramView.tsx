@@ -5,6 +5,7 @@ import { ArrowLeft, Share2, Calendar, User, Video, Download, FileText } from 'lu
 import { supabase } from '../lib/supabase';
 import { messageService } from '../lib/messageService';
 import Modal from './ui/Modal';
+import { toDirectImageUrl } from '../lib/imageUrl';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 
 interface OpportunityItem {
@@ -91,7 +92,7 @@ const PublicProgramView: React.FC = () => {
     };
 
     const openImageModal = (imageUrl: string, altText: string) => {
-        setSelectedImageUrl(imageUrl);
+        setSelectedImageUrl(toDirectImageUrl(imageUrl) || imageUrl);
         setSelectedImageAlt(altText);
         setIsImageModalOpen(true);
     };
@@ -203,7 +204,7 @@ const PublicProgramView: React.FC = () => {
                         );
                         if (opportunity.posterUrl) return (
                             <img 
-                                src={opportunity.posterUrl} 
+                                src={toDirectImageUrl(opportunity.posterUrl) || opportunity.posterUrl} 
                                 alt={`${opportunity.programName} poster`} 
                                 className="w-full h-64 object-contain bg-slate-100 cursor-pointer hover:opacity-90 transition-opacity" 
                                 onClick={() => openImageModal(opportunity.posterUrl!, `${opportunity.programName} poster`)}

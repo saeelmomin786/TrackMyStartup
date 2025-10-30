@@ -238,7 +238,7 @@ class InvestorService {
   }
 
   // Format currency for display
-  formatCurrency(amount: number, currency: string = 'USD'): string {
+  formatCurrency(amount: number, currency: string = 'INR'): string {
     const symbol = this.getCurrencySymbol(currency);
     return `${symbol}${amount.toLocaleString()}`;
   }

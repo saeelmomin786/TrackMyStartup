@@ -3,12 +3,12 @@ import { Startup } from '../../types';
 
 /**
  * Custom hook to get the startup's currency preference
- * Falls back to USD if no currency is specified
+ * Falls back to INR if no currency is specified
  */
 export const useCurrency = (startup?: Startup): string => {
   return useMemo(() => {
-    // Get currency from startup profile, fallback to USD
-    return startup?.currency || 'USD';
+    // Get currency from startup profile, fallback to INR
+    return startup?.currency || 'INR';
   }, [startup?.currency]);
 };
 
@@ -30,9 +30,9 @@ export const useAdminCurrency = (): string => {
  */
 export const useInvestorCurrency = (): string => {
   return useMemo(() => {
-    // For investor view, default to USD
+    // For investor view, default to INR
     // In the future, this could be made configurable per investor
-    return 'USD';
+    return 'INR';
   }, []);
 };
 

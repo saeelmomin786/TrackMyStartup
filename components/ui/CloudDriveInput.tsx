@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
 import { Cloud, Link, Shield, Info, AlertCircle, CheckCircle } from 'lucide-react';
 import Button from './Button';
 
@@ -29,6 +29,9 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
   showPrivacyMessage = true,
   documentType = 'document'
 }) => {
+  // Generate unique ID for this component instance
+  const fileInputId = useId();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [inputMode, setInputMode] = useState<'url' | 'file'>('url');
   const [urlError, setUrlError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -69,18 +72,71 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
       // Validate file size
       if (file.size > maxSize * 1024 * 1024) {
         setFileError(`File size must be less than ${maxSize}MB`);
+        // Reset input to allow selecting a different file
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
         return;
       }
       
-      // Validate file type
+      // Validate file type - check both extension and MIME type
       const allowedTypes = accept.split(',').map(type => type.trim());
       const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
-      if (!allowedTypes.includes(fileExtension)) {
-        setFileError(`File type not allowed. Accepted types: ${accept}`);
+      const isValidExtension = allowedTypes.includes(fileExtension);
+      
+      // For PDF files, be more lenient - accept if extension is .pdf OR MIME type is correct
+      let isValidFile = isValidExtension;
+      
+      if (fileExtension === '.pdf' || allowedTypes.includes('.pdf')) {
+        // For PDF files, accept if extension is .pdf OR MIME type is application/pdf
+        const isValidPdfMime = file.type === 'application/pdf' || file.type === 'application/x-pdf' || file.type === '' || !file.type;
+        isValidFile = fileExtension === '.pdf' || isValidPdfMime;
+      } else if (!isValidExtension && file.type) {
+        // For other file types, check MIME type as fallback
+        // This is a basic check - you might want to expand this for other file types
+        isValidFile = false;
+      }
+      
+      if (!isValidFile) {
+        setFileError(`File type not allowed. Accepted types: ${accept}. Selected file: ${file.name} (type: ${file.type || 'unknown'})`);
+        // Reset input to allow selecting a different file
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
         return;
       }
       
-      onFileSelect?.(file);
+      // Log if PDF file has unusual MIME type but extension is correct
+      if (fileExtension === '.pdf' && file.type && file.type !== 'application/pdf' && file.type !== 'application/x-pdf') {
+        console.warn('PDF file with unusual MIME type:', file.type, 'File:', file.name, '- Allowing based on file extension');
+      }
+      
+      console.log('📤 CloudDriveInput calling onFileSelect with file:', file);
+      console.log('📤 File details:', {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        lastModified: file.lastModified
+      });
+      
+      if (onFileSelect) {
+        console.log('📤 onFileSelect handler exists, calling it...');
+        try {
+          onFileSelect(file);
+          console.log('✅ onFileSelect handler called successfully');
+        } catch (error) {
+          console.error('❌ Error in onFileSelect handler:', error);
+        }
+      } else {
+        console.warn('⚠️ onFileSelect handler is not defined');
+      }
+      // Reset input value after successful selection to allow re-selecting the same file
+      // This prevents the form from becoming unresponsive
+      setTimeout(() => {
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      }, 100);
     }
   };
 
@@ -104,7 +160,7 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
           <div className="flex items-start gap-3">
             <Shield className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
             <div className="flex-1">
-              <h4 className="font-medium text-blue-900 mb-1">🔒 Recommended: Use Your Cloud Drive</h4>
+              <h4 className="font-medium text-blue-900 mb-1">Recommended: Use Your Cloud Drive</h4>
               <p className="text-sm text-blue-800 mb-2">
                 <strong>Why choose cloud drive?</strong> Keep your documents private, reduce our storage costs, 
                 and maintain full control over your files. You can still upload files if you prefer.
@@ -118,7 +174,7 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
       )}
 
       {/* Input Mode Toggle */}
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <Button
           type="button"
           variant={inputMode === 'url' ? 'primary' : 'outline'}
@@ -127,8 +183,9 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
           className="flex items-center gap-2"
         >
           <Link className="w-4 h-4" />
-          ☁️ Cloud Drive (Recommended)
+          Cloud Drive (Recommended)
         </Button>
+        <span className="text-sm text-slate-500 font-medium">OR</span>
         <Button
           type="button"
           variant={inputMode === 'file' ? 'primary' : 'outline'}
@@ -137,7 +194,7 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
           className="flex items-center gap-2"
         >
           <Cloud className="w-4 h-4" />
-          📁 Upload File
+          Upload File
         </Button>
       </div>
 
@@ -187,14 +244,15 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
           </label>
           <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-gray-400 transition-colors">
             <input
+              ref={fileInputRef}
               type="file"
               onChange={handleFileChange}
               accept={accept}
               className="hidden"
-              id="file-upload"
+              id={fileInputId}
             />
             <label
-              htmlFor="file-upload"
+              htmlFor={fileInputId}
               className="cursor-pointer flex flex-col items-center justify-center space-y-2"
             >
               <Cloud className="w-8 h-8 text-gray-400" />

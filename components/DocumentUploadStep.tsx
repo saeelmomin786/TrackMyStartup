@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
@@ -35,7 +35,15 @@ interface DocumentUploadStepProps {
     role: UserRole;
     startupName?: string;
   };
-  onComplete: (userData: any, documents: any, founders: Founder[], country?: string, fundraising?: FundraisingFormData) => void;
+  onComplete: (
+    userData: any, 
+    documents: any, 
+    founders: Founder[], 
+    country?: string, 
+    fundraising?: FundraisingFormData,
+    inviteCenter?: { name: string; email: string; phone: string },
+    inviteInvestor?: { name: string; email: string; phone: string }
+  ) => void;
   onBack: () => void;
 }
 
@@ -62,6 +70,20 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
     { id: '1', name: '', email: '', equity: 0 }
   ]);
 
+  // Incubation Center (Optional) - Only for Startup role
+  const [inviteCenter, setInviteCenter] = useState<{ name: string; email: string; phone: string }>({ 
+    name: '', 
+    email: '', 
+    phone: '' 
+  });
+
+  // Investor (Optional) - Only for Startup role
+  const [inviteInvestor, setInviteInvestor] = useState<{ name: string; email: string; phone: string }>({ 
+    name: '', 
+    email: '', 
+    phone: '' 
+  });
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,25 +104,93 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
   console.log('DocumentUploadStep - User role:', userData.role);
   console.log('DocumentUploadStep - Is Investment Advisor?', userData.role === 'Investment Advisor');
 
+  // Debug: Monitor fundraising state changes
+  useEffect(() => {
+    console.log('📊 Fundraising state changed:', {
+      active: fundraising.active,
+      hasPitchDeck: !!fundraising.pitchDeckFile,
+      pitchDeckFileName: fundraising.pitchDeckFile?.name,
+      pitchDeckFileSize: fundraising.pitchDeckFile?.size
+    });
+  }, [fundraising.pitchDeckFile, fundraising.active]);
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>, documentType: string) => {
     const file = event.target.files?.[0];
     if (file) {
-      setUploadedFiles(prev => ({ ...prev, [documentType]: file }));
+      // Use functional update to ensure state is updated correctly
+      setUploadedFiles(prev => {
+        const updated = { ...prev, [documentType]: file };
+        // Force React to recognize the state change
+        return updated;
+      });
     }
   };
 
-  const handleFundraisingDeckChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    if (file && file.type !== 'application/pdf') {
-      setError('Please upload a PDF file for the pitch deck.');
-      return;
+  // Handle pitch deck file selection - accepts File directly or event
+  const handleFundraisingDeckChange = (fileOrEvent: File | React.ChangeEvent<HTMLInputElement> | null) => {
+    console.log('🎯 handleFundraisingDeckChange called with:', fileOrEvent);
+    console.log('📦 Type:', typeof fileOrEvent, 'Instance of File?', fileOrEvent instanceof File);
+    
+    let file: File | null = null;
+    
+    // Handle both File object (from CloudDriveInput) and event object
+    if (fileOrEvent instanceof File) {
+      file = fileOrEvent;
+      console.log('✅ File object detected directly');
+    } else if (fileOrEvent && 'target' in fileOrEvent) {
+      file = fileOrEvent.target.files?.[0] || null;
+      console.log('✅ Event object detected, extracted file:', file);
+    } else {
+      file = null;
+      console.warn('⚠️ Unknown file format:', fileOrEvent);
     }
-    if (file && file.size > 10 * 1024 * 1024) {
-      setError('Pitch deck file size must be less than 10MB.');
-      return;
+    
+    if (file) {
+      console.log('📄 Processing file:', file.name, 'Type:', file.type, 'Size:', file.size);
+      
+      // Validate file type - check both MIME type and file extension
+      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+      console.log('🔍 File extension:', fileExtension);
+      
+      const isValidPdf = 
+        file.type === 'application/pdf' || 
+        file.type === 'application/x-pdf' ||
+        fileExtension === '.pdf';
+      
+      console.log('🔍 PDF validation:', {
+        mimeType: file.type,
+        extension: fileExtension,
+        isValidPdf
+      });
+      
+      if (!isValidPdf) {
+        const errorMsg = 'Please upload a PDF file for the pitch deck. Selected file: ' + file.name;
+        console.error('❌ Invalid file type:', errorMsg);
+        setError(errorMsg);
+        return;
+      }
+      
+      // Validate file size
+      if (file.size > 10 * 1024 * 1024) {
+        const errorMsg = 'Pitch deck file size must be less than 10MB. Selected file size: ' + (file.size / 1024 / 1024).toFixed(2) + ' MB';
+        console.error('❌ File too large:', errorMsg);
+        setError(errorMsg);
+        return;
+      }
+      
+      setError(null);
+      console.log('💾 Updating fundraising state with pitch deck file...');
+      setFundraising(prev => {
+        const updated = { ...prev, pitchDeckFile: file };
+        console.log('✅ Fundraising state updated:', updated);
+        return updated;
+      });
+      console.log('✅ Pitch deck file selected:', file.name, 'Size:', (file.size / 1024 / 1024).toFixed(2), 'MB');
+    } else {
+      console.warn('⚠️ No file provided, clearing pitch deck file');
+      // Allow clearing the file
+      setFundraising(prev => ({ ...prev, pitchDeckFile: null }));
     }
-    setError(null);
-    setFundraising(prev => ({ ...prev, pitchDeckFile: file }));
   };
 
   const addFounder = () => {
@@ -156,6 +246,34 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
       return;
     }
 
+    // Validate fundraising fields if active fundraising is enabled
+    if (fundraising.active) {
+      if (!fundraising.type) {
+        setError('Fundraising Type is required when Active Fundraising is enabled');
+        setIsLoading(false);
+        return;
+      }
+      if (!fundraising.value || fundraising.value === '') {
+        setError('Fundraising Value is required when Active Fundraising is enabled');
+        setIsLoading(false);
+        return;
+      }
+      if (!fundraising.equity || fundraising.equity === '') {
+        setError('Equity (%) is required when Active Fundraising is enabled');
+        setIsLoading(false);
+        return;
+      }
+      if (!fundraising.pitchDeckFile) {
+        const hiddenInput = document.getElementById('pitch-deck-url') as HTMLInputElement;
+        const pitchDeckUrl = hiddenInput?.value;
+        if (!pitchDeckUrl) {
+          setError('Pitch Deck is required when Active Fundraising is enabled');
+          setIsLoading(false);
+          return;
+        }
+      }
+    }
+
     // For Investment Advisors, license and logo are required
     if (userData.role === 'Investment Advisor' || userData.role?.trim() === 'Investment Advisor') {
       if (!uploadedFiles.license) {
@@ -178,12 +296,6 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
         return;
       }
 
-      // Basic fundraising validation at registration time (optional but recommended fields)
-      if (fundraising.type && (fundraising.value === '' || Number(fundraising.value) <= 0)) {
-        setError('Please enter a valid fundraising value.');
-        setIsLoading(false);
-        return;
-      }
       if (fundraising.type && (fundraising.equity === '' || Number(fundraising.equity) <= 0 || Number(fundraising.equity) > 100)) {
         setError('Please enter a valid equity percentage (1-100).');
         setIsLoading(false);
@@ -194,7 +306,8 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
     try {
       // Call the completion handler with country data
       // The actual processing (file uploads, database operations) happens in TwoStepRegistration
-      onComplete(userData, uploadedFiles, founders, country, fundraising);
+      // Pass incubation center and investor data as optional fields
+      onComplete(userData, uploadedFiles, founders, country, fundraising, inviteCenter, inviteInvestor);
       
     } catch (err: any) {
       setError(err.message || 'An error occurred');
@@ -471,6 +584,74 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
               </Button>
             </div>
 
+            {/* Incubation Centers (Optional) */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center">
+                <CheckCircle className="h-5 w-5 mr-2" />
+                Your Incubation center (Optional)
+              </h3>
+              <p className="text-sm text-slate-600">
+                Please enter the details of Incubation centers and accelerators you are associated with.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Input
+                  label="Center Name"
+                  type="text"
+                  value={inviteCenter.name}
+                  onChange={(e) => setInviteCenter(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., ABC Innovation Hub"
+                />
+                <Input
+                  label="Contact Number"
+                  type="text"
+                  value={inviteCenter.phone}
+                  onChange={(e) => setInviteCenter(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="e.g., +1 555 123 4567"
+                />
+                <Input
+                  label="Email"
+                  type="email"
+                  value={inviteCenter.email}
+                  onChange={(e) => setInviteCenter(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="e.g., contact@abcinnovations.org"
+                />
+              </div>
+            </div>
+
+            {/* Investors (Optional) */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center">
+                <CheckCircle className="h-5 w-5 mr-2" />
+                Your Investor (Optional)
+              </h3>
+              <p className="text-sm text-slate-600">
+                Please list the investor that have invested (grant, debt or equity) in your startup.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Input
+                  label="Investor Name"
+                  type="text"
+                  value={inviteInvestor.name}
+                  onChange={(e) => setInviteInvestor(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., Jane Doe"
+                />
+                <Input
+                  label="Contact Number"
+                  type="text"
+                  value={inviteInvestor.phone}
+                  onChange={(e) => setInviteInvestor(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="e.g., +1 555 987 6543"
+                />
+                <Input
+                  label="Email"
+                  type="email"
+                  value={inviteInvestor.email}
+                  onChange={(e) => setInviteInvestor(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="e.g., jane@example.com"
+                />
+              </div>
+            </div>
+
             {/* Fundraising (Optional) */}
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-slate-900">Fundraising (Optional)</h3>
@@ -480,86 +661,149 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                   type="checkbox"
                   className="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary"
                   checked={fundraising.active}
-                  onChange={(e) => setFundraising(prev => ({ ...prev, active: e.target.checked }))}
+                  onChange={(e) => {
+                    const isActive = e.target.checked;
+                    setFundraising(prev => ({ ...prev, active: isActive }));
+                    // Clear fundraising data if deactivated
+                    if (!isActive) {
+                      setFundraising({
+                        active: false,
+                        type: '',
+                        value: '',
+                        equity: '',
+                        domain: '',
+                        stage: '',
+                        pitchDeckFile: null,
+                        pitchVideoUrl: '',
+                        validationRequested: false
+                      });
+                    }
+                  }}
                 />
                 <label htmlFor="fr-active" className="text-sm text-slate-700">Activate Fundraising Round</label>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Select
-                  label="Type"
-                  id="fr-type"
-                  value={fundraising.type as any}
-                  onChange={(e) => setFundraising(prev => ({ ...prev, type: e.target.value as InvestmentType }))}
-                >
-                  <option value="">Select round type</option>
-                  {Object.values(InvestmentType).map(t => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </Select>
-                <Input
-                  label="Value"
-                  id="fr-value"
-                  type="number"
-                  value={fundraising.value as any}
-                  onChange={(e) => setFundraising(prev => ({ ...prev, value: e.target.value === '' ? '' : Number(e.target.value) }))}
-                />
-                <Input
-                  label="Equity (%)"
-                  id="fr-equity"
-                  type="number"
-                  value={fundraising.equity as any}
-                  onChange={(e) => setFundraising(prev => ({ ...prev, equity: e.target.value === '' ? '' : Number(e.target.value) }))}
-                />
-                <Select
-                  label="Domain"
-                  id="fr-domain"
-                  value={(fundraising.domain || '') as any}
-                  onChange={(e) => setFundraising(prev => ({ ...prev, domain: (e.target.value || '') as StartupDomain | '' }))}
-                >
-                  <option value="">Select domain</option>
-                  {Object.values(StartupDomain).map(d => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </Select>
-                <Select
-                  label="Stage"
-                  id="fr-stage"
-                  value={(fundraising.stage || '') as any}
-                  onChange={(e) => setFundraising(prev => ({ ...prev, stage: (e.target.value || '') as StartupStage | '' }))}
-                >
-                  <option value="">Select stage</option>
-                  {Object.values(StartupStage).map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </Select>
-                <Input
-                  label="Pitch Video URL"
-                  id="fr-video"
-                  type="url"
-                  value={fundraising.pitchVideoUrl}
-                  onChange={(e) => setFundraising(prev => ({ ...prev, pitchVideoUrl: e.target.value }))}
-                />
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
-                  <CloudDriveInput
-                    value=""
-                    onChange={(url) => {
-                      const hiddenInput = document.getElementById('pitch-deck-url') as HTMLInputElement;
-                      if (hiddenInput) hiddenInput.value = url;
-                    }}
-                    onFileSelect={(file) => handleFundraisingDeckChange({ target: { files: [file] } } as any)}
-                    placeholder="Paste your cloud drive link here..."
-                    label=""
-                    accept=".pdf"
-                    maxSize={10}
-                    documentType="pitch deck"
-                  showPrivacyMessage={false}
-                  className="w-full text-sm"
+              
+              {/* Only show fundraising fields when active */}
+              {fundraising.active && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Select
+                    label="Type *"
+                    id="fr-type"
+                    value={fundraising.type as any}
+                    onChange={(e) => setFundraising(prev => ({ ...prev, type: e.target.value as InvestmentType }))}
+                    required
+                  >
+                    <option value="">Select round type</option>
+                    {Object.values(InvestmentType).map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </Select>
+                  <Input
+                    label="Value *"
+                    id="fr-value"
+                    type="number"
+                    value={fundraising.value as any}
+                    onChange={(e) => setFundraising(prev => ({ ...prev, value: e.target.value === '' ? '' : Number(e.target.value) }))}
+                    required
                   />
-                  <input type="hidden" id="pitch-deck-url" name="pitch-deck-url" />
-                  <p className="text-xs text-slate-500 mt-1">Max 10MB</p>
+                  <Input
+                    label="Equity (%) *"
+                    id="fr-equity"
+                    type="number"
+                    value={fundraising.equity as any}
+                    onChange={(e) => setFundraising(prev => ({ ...prev, equity: e.target.value === '' ? '' : Number(e.target.value) }))}
+                    required
+                  />
+                  <Select
+                    label="Domain"
+                    id="fr-domain"
+                    value={(fundraising.domain || '') as any}
+                    onChange={(e) => setFundraising(prev => ({ ...prev, domain: (e.target.value || '') as StartupDomain | '' }))}
+                  >
+                    <option value="">Select domain</option>
+                    {Object.values(StartupDomain).map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </Select>
+                  <Select
+                    label="Stage"
+                    id="fr-stage"
+                    value={(fundraising.stage || '') as any}
+                    onChange={(e) => setFundraising(prev => ({ ...prev, stage: (e.target.value || '') as StartupStage | '' }))}
+                  >
+                    <option value="">Select stage</option>
+                    {Object.values(StartupStage).map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </Select>
+                  <Input
+                    label="Pitch Video URL"
+                    id="fr-video"
+                    type="url"
+                    value={fundraising.pitchVideoUrl}
+                    onChange={(e) => setFundraising(prev => ({ ...prev, pitchVideoUrl: e.target.value }))}
+                  />
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Pitch Deck (PDF) * {fundraising.pitchDeckFile && <span className="text-green-600">✓</span>}
+                    </label>
+                    <CloudDriveInput
+                      value=""
+                      onChange={(url) => {
+                        console.log('🌐 CloudDrive URL entered:', url);
+                        const hiddenInput = document.getElementById('pitch-deck-url') as HTMLInputElement;
+                        if (hiddenInput) hiddenInput.value = url;
+                        // If URL is provided, clear file
+                        if (url) {
+                          setFundraising(prev => ({ ...prev, pitchDeckFile: null }));
+                        }
+                      }}
+                      onFileSelect={(file) => {
+                        console.log('📥 DocumentUploadStep onFileSelect callback triggered');
+                        console.log('📥 File received:', file);
+                        if (file) {
+                          console.log('📄 File details in callback:', {
+                            name: file?.name,
+                            type: file?.type,
+                            size: file?.size,
+                            lastModified: file?.lastModified,
+                            isFile: file instanceof File
+                          });
+                          console.log('📥 Calling handleFundraisingDeckChange...');
+                          try {
+                            handleFundraisingDeckChange(file);
+                            console.log('✅ handleFundraisingDeckChange called successfully');
+                          } catch (err) {
+                            console.error('❌ Error in handleFundraisingDeckChange:', err);
+                          }
+                        } else {
+                          console.warn('⚠️ No file received in onFileSelect callback');
+                        }
+                      }}
+                      placeholder="Paste your cloud drive link here..."
+                      label=""
+                      accept=".pdf"
+                      maxSize={10}
+                      documentType="pitch deck"
+                      showPrivacyMessage={false}
+                      className="w-full text-sm"
+                      required
+                    />
+                    <input type="hidden" id="pitch-deck-url" name="pitch-deck-url" />
+                    {fundraising.pitchDeckFile && (
+                      <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-md">
+                        <p className="text-sm text-green-700 font-medium">
+                          ✓ Pitch deck selected: {fundraising.pitchDeckFile.name}
+                        </p>
+                        <p className="text-xs text-green-600 mt-1">
+                          Size: {(fundraising.pitchDeckFile.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-500 mt-1">Max 10MB • PDF format only</p>
+                  </div>
                 </div>
-              </div>
+              )}
               {/* Startup Nation validation removed as per requirement */}
             </div>
           </div>

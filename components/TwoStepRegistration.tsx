@@ -103,10 +103,12 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
       pitchDeckFile?: File | null;
       pitchVideoUrl?: string;
       validationRequested?: boolean;
-    }
+    },
+    inviteCenter?: { name: string; email: string; phone: string },
+    inviteInvestor?: { name: string; email: string; phone: string }
   ) => {
     // Payment step removed; proceed to finalize for all roles
-    await finalizeRegistration(userData, documents, founders, country, fundraising);
+    await finalizeRegistration(userData, documents, founders, country, fundraising, inviteCenter, inviteInvestor);
   };
 
   const finalizeRegistration = async (
@@ -124,7 +126,9 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
       pitchDeckFile?: File | null;
       pitchVideoUrl?: string;
       validationRequested?: boolean;
-    }
+    },
+    inviteCenter?: { name: string; email: string; phone: string },
+    inviteInvestor?: { name: string; email: string; phone: string }
   ) => {
     try {
       console.log('🎉 Finalizing registration...');
@@ -217,19 +221,103 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
             startupId = newStartup?.id || null;
           }
 
-          if (startupId && fundraising) {
-            // Upload pitch deck if provided
-            let deckUrl: string | undefined = undefined;
-            if (fundraising.pitchDeckFile) {
+          if (startupId) {
+            // Save incubation center info if provided
+            if (inviteCenter && (inviteCenter.name || inviteCenter.email)) {
               try {
-                deckUrl = await capTableService.uploadPitchDeck(fundraising.pitchDeckFile, startupId);
+                // Try to find facilitator center by email or name
+                const { data: facilitator, error: facError } = await authService.supabase
+                  .from('users')
+                  .select('id')
+                  .eq('role', 'Startup Facilitation Center')
+                  .or(`email.eq.${inviteCenter.email},center_name.ilike.%${inviteCenter.name}%`)
+                  .limit(1)
+                  .maybeSingle();
+
+                if (facilitator && !facError) {
+                  // Facilitator center found - could create relationship if table exists
+                  console.log('✅ Found facilitator center:', facilitator.id);
+                  // Note: Relationship creation would go here if facilitator_startups table is used
+                }
+
+                // Save incubation center contact info to startups table
+                const incubationCenterData = {
+                  incubation_center_name: inviteCenter.name || null,
+                  incubation_center_email: inviteCenter.email || null,
+                  incubation_center_phone: inviteCenter.phone || null
+                };
+
+                const { error: updateError } = await authService.supabase
+                  .from('startups')
+                  .update(incubationCenterData)
+                  .eq('id', startupId);
+
+                if (updateError) {
+                  console.warn('Failed to save incubation center info:', updateError);
+                } else {
+                  console.log('✅ Incubation center info saved to database');
+                }
               } catch (e) {
-                console.warn('Pitch deck upload failed (non-blocking):', e);
+                console.warn('Failed to save incubation center info (non-blocking):', e);
               }
             }
 
-            // Compose fundraising details only if type/value/equity provided
-            if (fundraising.type && fundraising.value !== '' && fundraising.equity !== '') {
+            // Save investor info if provided
+            if (inviteInvestor && (inviteInvestor.name || inviteInvestor.email)) {
+              try {
+                // Try to find investor by email
+                const { data: investor, error: invError } = await authService.supabase
+                  .from('users')
+                  .select('id')
+                  .eq('role', 'Investor')
+                  .eq('email', inviteInvestor.email)
+                  .limit(1)
+                  .maybeSingle();
+
+                if (investor && !invError) {
+                  console.log('✅ Found investor:', investor.id);
+                  // Investor found - could create relationship if needed
+                }
+
+                // Save investor contact info to startups table
+                const investorData = {
+                  investor_name: inviteInvestor.name || null,
+                  investor_email: inviteInvestor.email || null,
+                  investor_phone: inviteInvestor.phone || null
+                };
+
+                const { error: updateError } = await authService.supabase
+                  .from('startups')
+                  .update(investorData)
+                  .eq('id', startupId);
+
+                if (updateError) {
+                  console.warn('Failed to save investor info:', updateError);
+                } else {
+                  console.log('✅ Investor info saved to database');
+                }
+              } catch (e) {
+                console.warn('Failed to save investor info (non-blocking):', e);
+              }
+            }
+
+            // Save fundraising details only if active fundraising is enabled
+            if (fundraising && fundraising.active && fundraising.type && fundraising.value !== '' && fundraising.equity !== '') {
+              let deckUrl: string | undefined = undefined;
+              
+              // Upload pitch deck if provided
+              if (fundraising.pitchDeckFile) {
+                try {
+                  console.log('📤 Uploading pitch deck file:', fundraising.pitchDeckFile.name);
+                  deckUrl = await capTableService.uploadPitchDeck(fundraising.pitchDeckFile, startupId);
+                  console.log('✅ Pitch deck uploaded successfully:', deckUrl);
+                } catch (e) {
+                  console.error('❌ Pitch deck upload failed:', e);
+                  console.warn('Pitch deck upload failed (non-blocking):', e);
+                }
+              }
+
+              // Save to fundraising_details table only
               const frToSave: FundraisingDetails = {
                 active: !!fundraising.active,
                 type: fundraising.type as InvestmentType,
@@ -244,7 +332,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
 
               try {
                 await capTableService.updateFundraisingDetails(startupId, frToSave);
-                console.log('✅ Fundraising details saved during registration');
+                console.log('✅ Fundraising details saved to fundraising_details table');
               } catch (e) {
                 console.warn('Failed to save fundraising during registration (non-blocking):', e);
               }

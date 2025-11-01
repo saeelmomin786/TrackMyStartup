@@ -34,7 +34,6 @@ CREATE OR REPLACE FUNCTION get_correct_current_valuation(p_startup_id INTEGER)
 RETURNS DECIMAL AS $$
 DECLARE
     base_valuation DECIMAL;
-    total_investment DECIMAL;
     latest_post_money DECIMAL;
     correct_valuation DECIMAL;
 BEGIN
@@ -42,12 +41,6 @@ BEGIN
     SELECT COALESCE(total_shares * price_per_share, 0) 
     INTO base_valuation
     FROM startup_shares 
-    WHERE startup_id = p_startup_id;
-    
-    -- Get total investment amount
-    SELECT COALESCE(SUM(amount), 0)
-    INTO total_investment
-    FROM investment_records 
     WHERE startup_id = p_startup_id;
     
     -- Get latest post-money valuation from investment records
@@ -61,10 +54,9 @@ BEGIN
     LIMIT 1;
     
     -- Calculate correct valuation
-    -- Priority: latest post-money > (base + investments) > base > 0
+    -- Priority: latest post-money > base (total_shares * price_per_share) > 0
     correct_valuation := COALESCE(
         latest_post_money,
-        base_valuation + total_investment,
         base_valuation,
         0
     );
@@ -96,6 +88,13 @@ AND id IN (
     FROM investment_records 
     WHERE startup_id IS NOT NULL
 );
+
+-- Fix any remaining mismatches: non-zero current_valuation that differs from computed value
+UPDATE startups s
+SET 
+    current_valuation = get_correct_current_valuation(s.id),
+    updated_at = NOW()
+WHERE COALESCE(s.current_valuation, 0) <> COALESCE(get_correct_current_valuation(s.id), 0);
 
 -- =====================================================
 -- STEP 4: CREATE CONSISTENT PRICE PER SHARE CALCULATION

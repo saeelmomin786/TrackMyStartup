@@ -166,6 +166,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         pitchDeckUrl: '',
         pitchVideoUrl: '',
     });
+    const [pitchDeckFile, setPitchDeckFile] = useState<File | null>(null);
     
     const [isFounderModalOpen, setIsFounderModalOpen] = useState(false);
     const [editingFounders, setEditingFounders] = useState<FounderStateItem[]>([]);
@@ -876,6 +877,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             // Set current fundraising details if available
             if (fundraisingData.status === 'fulfilled' && fundraisingData.value.length > 0) {
                 setFundraising(fundraisingData.value[0]);
+                setPitchDeckFile(null); // Reset file state when loading fundraising data
             }
 
             // Handle recognition records
@@ -1030,6 +1032,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setFundraisingDetails(details);
             if (details.length > 0) {
                 setFundraising(details[0]);
+                setPitchDeckFile(null); // Reset file state when fundraising data updates
             }
         });
 
@@ -1152,14 +1155,14 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setError(null);
 
             // Handle pitch deck upload if user selected a file
-            const deckInput = document.getElementById('fr-deck') as HTMLInputElement | null;
-            const deckFile = deckInput?.files?.[0];
             let deckUrl = fundraising.pitchDeckUrl;
             
-            if (deckFile) {
-                console.log('📁 Uploading pitch deck:', deckFile.name);
-                deckUrl = await capTableService.uploadPitchDeck(deckFile, startup.id);
+            if (pitchDeckFile) {
+                console.log('📁 Uploading pitch deck:', pitchDeckFile.name);
+                deckUrl = await capTableService.uploadPitchDeck(pitchDeckFile, startup.id);
                 console.log('✅ Pitch deck uploaded:', deckUrl);
+                // Clear the file after successful upload
+                setPitchDeckFile(null);
             }
 
             const toSave = { ...fundraising, pitchDeckUrl: deckUrl };
@@ -1172,6 +1175,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             // Update local state with saved data
             setFundraising(savedFundraising);
             setFundraisingDetails([savedFundraising]);
+            setPitchDeckFile(null); // Clear file after successful save
             
             // Handle validation request logic
             if (savedFundraising.validationRequested) {
@@ -2603,12 +2607,18 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                  )}
                              </div>
                              {!isEditingFundraising ? (
-                                 <Button variant="outline" size="sm" onClick={() => setIsEditingFundraising(true)} disabled={!canEdit}>
+                                 <Button variant="outline" size="sm" onClick={() => {
+                                     setIsEditingFundraising(true);
+                                     setPitchDeckFile(null); // Reset file when entering edit mode
+                                 }} disabled={!canEdit}>
                                      <Edit3 className="h-4 w-4 mr-2" />Edit
                                  </Button>
                              ) : (
                                  <div className="flex gap-2">
-                                     <Button variant="secondary" size="sm" onClick={() => setIsEditingFundraising(false)}>
+                                     <Button variant="secondary" size="sm" onClick={() => {
+                                         setIsEditingFundraising(false);
+                                         setPitchDeckFile(null); // Clear file when cancelling edit
+                                     }}>
                                          <X className="h-4 w-4"/>
                                      </Button>
                                      <Button size="sm" onClick={handleFundraisingSave} disabled={isLoading}>
@@ -2722,17 +2732,18 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                         {Object.values(StartupStage).map(s => <option key={s} value={s}>{s}</option>)}
                                     </Select>
                                      <CloudDriveInput
-                                         value=""
+                                         value={fundraising.pitchDeckUrl || ''}
                                          onChange={(url) => {
-                                             const hiddenInput = document.getElementById('pitch-deck-url') as HTMLInputElement;
-                                             if (hiddenInput) hiddenInput.value = url;
+                                             // If URL is provided, clear the file and update URL
+                                             setPitchDeckFile(null);
+                                             setFundraising({...fundraising, pitchDeckUrl: url});
                                          }}
                                          onFileSelect={(file) => {
-                                             const fileInput = document.getElementById('fr-deck') as HTMLInputElement;
-                                             if (fileInput) {
-                                                 const dataTransfer = new DataTransfer();
-                                                 dataTransfer.items.add(file);
-                                                 fileInput.files = dataTransfer.files;
+                                             console.log('📥 Pitch deck file selected:', file?.name);
+                                             if (file) {
+                                                 setPitchDeckFile(file);
+                                                 // Clear URL when file is selected
+                                                 setFundraising({...fundraising, pitchDeckUrl: ''});
                                              }
                                          }}
                                          placeholder="Paste your cloud drive link here..."
@@ -2742,6 +2753,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                          documentType="pitch deck"
                                          showPrivacyMessage={false}
                                      />
+                                     {pitchDeckFile && (
+                                         <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                                             📄 File selected: {pitchDeckFile.name} ({(pitchDeckFile.size / 1024 / 1024).toFixed(2)} MB)
+                                         </div>
+                                     )}
                                      <input type="hidden" id="pitch-deck-url" name="pitch-deck-url" />
                                      <Input 
                                          label="Pitch Video (YouTube Link)" 

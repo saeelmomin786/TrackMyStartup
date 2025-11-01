@@ -1,4 +1,4 @@
-import React, { useState, useId } from 'react';
+import React, { useState, useId, useEffect } from 'react';
 import { Cloud, Link, Shield, Info, AlertCircle, CheckCircle } from 'lucide-react';
 import Button from './Button';
 
@@ -32,7 +32,11 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
   // Generate unique ID for this component instance
   const fileInputId = useId();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [inputMode, setInputMode] = useState<'url' | 'file'>('url');
+  // Initialize input mode based on whether value exists
+  const [inputMode, setInputMode] = useState<'url' | 'file'>(() => {
+    // If there's a value, default to URL mode
+    return value && value.trim() ? 'url' : 'url';
+  });
   const [urlError, setUrlError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [isValidUrl, setIsValidUrl] = useState<boolean>(false);
@@ -49,6 +53,20 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
     
     return cloudDrivePatterns.some(pattern => pattern.test(url));
   };
+
+  // Validate existing value when component mounts or value changes
+  useEffect(() => {
+    if (value && value.trim()) {
+      const isValid = validateCloudUrl(value);
+      setIsValidUrl(isValid);
+      setUrlError(isValid ? null : 'Please provide a valid cloud drive link (Google Drive, OneDrive, Dropbox, etc.)');
+      // If there's a value, ensure we're in URL mode
+      setInputMode('url');
+    } else {
+      setIsValidUrl(false);
+      setUrlError(null);
+    }
+  }, [value]);
 
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const url = e.target.value;

@@ -775,7 +775,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       });
       
       // Load and format co-investment opportunities
-      const coInvestmentOpportunities = await investmentService.getCoInvestmentOpportunities();
+      const coInvestmentOpportunities = await databaseInvestmentService.getCoInvestmentOpportunities();
       const startupCoInvestmentOpportunities = coInvestmentOpportunities.filter(
         (opp: any) => opp.startup_id === startup.id
       );

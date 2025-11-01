@@ -6,8 +6,8 @@ import { formatCurrency, formatCurrencyCompact, getCurrencySymbol } from '../lib
 import { useInvestmentAdvisorCurrency } from '../lib/hooks/useInvestmentAdvisorCurrency';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { AuthUser, authService } from '../lib/auth';
+import { Eye } from 'lucide-react';
 import ProfilePage from './ProfilePage';
-import UserDataManager from './UserDataManager';
 import InvestorView from './InvestorView';
 import StartupHealthView from './StartupHealthView';
 
@@ -32,19 +32,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   pendingRelationships = [],
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'system'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests'>('dashboard');
   const [showProfilePage, setShowProfilePage] = useState(false);
-  const [isAcceptRequestModalOpen, setIsAcceptRequestModalOpen] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState<any>(null);
-  const [requestType, setRequestType] = useState<'investor' | 'startup'>('investor');
-  const [financialMatrix, setFinancialMatrix] = useState({
-    minimumInvestment: '',
-    maximumInvestment: '',
-    stage: '',
-    successFee: '',
-    successFeeType: 'percentage',
-    scoutingFee: ''
-  });
   const [agreementFile, setAgreementFile] = useState<File | null>(null);
   const [coInvestmentListings, setCoInvestmentListings] = useState<Set<number>>(new Set());
   
@@ -70,6 +59,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [selectedInvestor, setSelectedInvestor] = useState<User | null>(null);
   const [selectedStartup, setSelectedStartup] = useState<Startup | null>(null);
   const [investorOffers, setInvestorOffers] = useState<any[]>([]);
+  const [investorDashboardData, setInvestorDashboardData] = useState<{
+    investorStartups: Startup[];
+    investorInvestments: any[];
+    investorStartupAdditionRequests: any[];
+  }>({ investorStartups: [], investorInvestments: [], investorStartupAdditionRequests: [] });
   const [startupOffers, setStartupOffers] = useState<any[]>([]);
 
   // Get the investment advisor's currency
@@ -98,10 +92,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     checkAuthHealth();
   }, []);
 
-  // Fetch active fundraising startups for Discovery tab
+  // Fetch active fundraising startups for Discovery tab and Investment Interests tab
   useEffect(() => {
     const loadActiveFundraisingStartups = async () => {
-      if (activeTab === 'discovery') {
+      if (activeTab === 'discovery' || activeTab === 'interests') {
         setIsLoadingPitches(true);
         try {
           const startups = await investorService.getActiveFundraisingStartups();
@@ -227,13 +221,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       return [];
     }
 
-    // Find investors who have entered the investment advisor code (including new ones)
+    // Find investors who have entered the investment advisor code AND have been accepted
     const acceptedInvestors = users.filter(user => {
       const hasEnteredCode = user.role === 'Investor' && 
         (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
       const isAccepted = (user as any).advisor_accepted === true;
 
-      return hasEnteredCode; // Include all investors who entered the code, regardless of acceptance status
+      return hasEnteredCode && isAccepted; // Only include investors who have been accepted
     });
 
     return acceptedInvestors;
@@ -268,6 +262,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Offers Made - Fetch directly from database based on advisor code and stages
   const [offersMade, setOffersMade] = useState<any[]>([]);
   const [loadingOffersMade, setLoadingOffersMade] = useState(false);
+  
+  // Separate offers into investor offers and startup offers for the "Offers Made" section
+  const investorOffersList = useMemo(() => {
+    return offersMade.filter(offer => (offer as any).isInvestorOffer);
+  }, [offersMade]);
+  
+  const startupOffersList = useMemo(() => {
+    return offersMade.filter(offer => (offer as any).isStartupOffer);
+  }, [offersMade]);
   
   // Startup fundraising data
   const [startupFundraisingData, setStartupFundraisingData] = useState<{[key: number]: any}>({});
@@ -452,15 +455,29 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
         
         return false;
-      }).map(offer => ({
+      }).map(offer => {
+        const investor = investorsMap[offer.investor_email];
+        const startup = startupsMap[offer.startup_id];
+        
+        const investorHasThisAdvisor = investor?.investment_advisor_code_entered === currentUser?.investment_advisor_code;
+        const startupHasThisAdvisor = startup?.investment_advisor_code === currentUser?.investment_advisor_code;
+        
+        return {
         ...offer,
+          investor_name: investor?.name || offer.investor_name || null, // Extract investor name from mapped investor object
         startup: startupsMap[offer.startup_id],
         fundraising: fundraisingMap[offer.startup_id],
-        investor: investorsMap[offer.investor_email],
+          investor: investor,
         startup_user: startupUsersMap[offer.startup_name],
         investor_advisor: advisorsMap[offer.investor_advisor_code],
-        startup_advisor: advisorsMap[offer.startup_advisor_code]
-      }));
+        startup_advisor: advisorsMap[offer.startup_advisor_code],
+        // Add flags to identify if this is an investor offer or startup offer
+        // Investor offers: Stage 1 (investor advisor approval) or Stage 4 where investor has this advisor
+        isInvestorOffer: investorHasThisAdvisor && (offer.stage === 1 || offer.stage === 4),
+        // Startup offers: Stage 2 (startup advisor approval) or Stage 4 where startup has this advisor
+        isStartupOffer: startupHasThisAdvisor && (offer.stage === 2 || offer.stage === 4)
+        };
+      });
 
       // Set the properly filtered offers (no debugging fallback)
       setOffersMade(filteredOffers);
@@ -515,18 +532,225 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // All co-investment opportunities (active), for advisors
   const [advisorCoOpps, setAdvisorCoOpps] = useState<any[]>([]);
   const [loadingAdvisorCoOpps, setLoadingAdvisorCoOpps] = useState(false);
+
+  // Investment Interests - Favorites from assigned investors
+  const [investmentInterests, setInvestmentInterests] = useState<any[]>([]);
+  const [loadingInvestmentInterests, setLoadingInvestmentInterests] = useState(false);
+  
+  // Selected pitch ID for discovery tab
+  const [selectedPitchId, setSelectedPitchId] = useState<number | null>(null);
+
+  // Load investment interests (favorites from assigned investors)
+  useEffect(() => {
+    const loadInvestmentInterests = async () => {
+      if (activeTab !== 'interests' || !currentUser?.investment_advisor_code || myInvestors.length === 0) {
+        setInvestmentInterests([]);
+        return;
+      }
+
+      setLoadingInvestmentInterests(true);
+      try {
+        // Get investor IDs from myInvestors
+        const investorIds = myInvestors.map(investor => investor.id);
+        
+        if (investorIds.length === 0) {
+          setInvestmentInterests([]);
+          return;
+        }
+
+        // Fetch favorites from assigned investors
+        const { data: favoritesData, error: favoritesError } = await supabase
+          .from('investor_favorites')
+          .select(`
+            id,
+            investor_id,
+            startup_id,
+            created_at,
+            investor:users(id, name, email),
+            startup:startups(id, name, sector)
+          `)
+          .in('investor_id', investorIds)
+          .order('created_at', { ascending: false });
+
+        if (favoritesError) {
+          // If table doesn't exist yet, silently fail
+          if (favoritesError.code !== 'PGRST116') {
+            console.error('Error fetching investment interests with join:', favoritesError);
+            // Fallback: try without join if RLS blocks it
+            const { data: fallbackData, error: fallbackError } = await supabase
+              .from('investor_favorites')
+              .select('*')
+              .in('investor_id', investorIds)
+              .order('created_at', { ascending: false });
+            
+            if (fallbackError) {
+              console.error('Fallback fetch also failed:', fallbackError);
+              setInvestmentInterests([]);
+              return;
+            }
+            
+            // Fetch investor names separately
+            const investorMap: Record<string, { name: string; email: string }> = {};
+            if (investorIds.length > 0) {
+              const { data: investorsData } = await supabase
+                .from('users')
+                .select('id, name, email')
+                .in('id', investorIds);
+              
+              if (investorsData) {
+                investorsData.forEach((investor: any) => {
+                  investorMap[investor.id] = { name: investor.name || 'Unknown', email: investor.email || '' };
+                });
+              }
+            }
+            
+            // Fetch startup names separately
+            const startupIds = Array.from(new Set((fallbackData || []).map((row: any) => row.startup_id).filter(Boolean)));
+            const startupMap: Record<number, { name: string; sector: string }> = {};
+            
+            if (startupIds.length > 0) {
+              const { data: startupsData } = await supabase
+                .from('startups')
+                .select('id, name, sector')
+                .in('id', startupIds);
+              
+              if (startupsData) {
+                startupsData.forEach((startup: any) => {
+                  startupMap[startup.id] = { name: startup.name || 'Unknown Startup', sector: startup.sector || 'Unknown' };
+                });
+              }
+            }
+            
+            // Normalize fallback data with fetched investor and startup names
+            const normalized = (fallbackData || []).map((fav: any) => ({
+              id: fav.id,
+              investor_id: fav.investor_id,
+              startup_id: fav.startup_id,
+              investor_name: investorMap[fav.investor_id]?.name || 'Unknown Investor',
+              investor_email: investorMap[fav.investor_id]?.email || null,
+              startup_name: startupMap[fav.startup_id]?.name || 'Unknown Startup',
+              startup_sector: startupMap[fav.startup_id]?.sector || 'Not specified',
+              created_at: fav.created_at
+            }));
+            setInvestmentInterests(normalized);
+          } else {
+            setInvestmentInterests([]);
+          }
+          return;
+        }
+
+        if (favoritesData && favoritesData.length > 0) {
+          // Normalize the data
+          const normalized = favoritesData.map((fav: any) => ({
+            id: fav.id,
+            investor_id: fav.investor_id,
+            startup_id: fav.startup_id,
+            investor_name: fav.investor?.name || 'Unknown Investor',
+            investor_email: fav.investor?.email || null,
+            startup_name: fav.startup?.name || 'Unknown Startup',
+            startup_sector: fav.startup?.sector || 'Not specified',
+            created_at: fav.created_at
+          }));
+          
+          setInvestmentInterests(normalized);
+        } else {
+          setInvestmentInterests([]);
+        }
+      } catch (error) {
+        console.error('Error loading investment interests:', error);
+        setInvestmentInterests([]);
+      } finally {
+        setLoadingInvestmentInterests(false);
+      }
+    };
+
+    loadInvestmentInterests();
+  }, [activeTab, myInvestors, currentUser?.investment_advisor_code]);
+
   useEffect(() => {
     const loadAllCoOpps = async () => {
       try {
         setLoadingAdvisorCoOpps(true);
+        // Fetch all active co-investment opportunities with lead investor name (only Stage 4 approved)
         const { data, error } = await supabase
           .from('co_investment_opportunities')
-          .select('id,startup_id,investment_amount,equity_percentage,status,stage,created_at, startup:startups(name, sector)')
+          .select(`
+            id,
+            startup_id,
+            listed_by_user_id,
+            listed_by_type,
+            investment_amount,
+            equity_percentage,
+            minimum_co_investment,
+            maximum_co_investment,
+            status,
+            stage,
+            created_at,
+            startup:startups(id, name, sector),
+            listed_by_user:users!fk_listed_by_user_id(id, name, email)
+          `)
           .eq('status', 'active')
+          .eq('stage', 4)  // Only show fully approved opportunities (after all approvals)
+          .eq('startup_approval_status', 'approved')  // Only show startup-approved opportunities
           .order('created_at', { ascending: false });
+        
         if (error) {
           console.error('Error fetching co-investment opportunities (advisor):', error);
+          // Fallback: try without join if RLS blocks it
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('co_investment_opportunities')
+            .select('*')
+            .eq('status', 'active')
+            .eq('stage', 4)  // Only show fully approved opportunities (after all approvals)
+            .eq('startup_approval_status', 'approved')  // Only show startup-approved opportunities
+            .order('created_at', { ascending: false });
+          
+          if (fallbackError) {
+            console.error('Fallback fetch also failed:', fallbackError);
           setAdvisorCoOpps([]);
+          } else {
+            // Fetch user names separately
+            const userIds = Array.from(new Set((fallbackData || []).map((row: any) => row.listed_by_user_id).filter(Boolean)));
+            const userMap: Record<string, { name: string; email: string }> = {};
+            
+            if (userIds.length > 0) {
+              const { data: usersData } = await supabase
+                .from('users')
+                .select('id, name, email')
+                .in('id', userIds);
+              
+              if (usersData) {
+                usersData.forEach((user: any) => {
+                  userMap[user.id] = { name: user.name || 'Unknown', email: user.email || '' };
+                });
+              }
+            }
+            
+            // Fetch startup names separately
+            const startupIds = Array.from(new Set((fallbackData || []).map((row: any) => row.startup_id).filter(Boolean)));
+            const startupMap: Record<number, { name: string; sector: string }> = {};
+            
+            if (startupIds.length > 0) {
+              const { data: startupsData } = await supabase
+                .from('startups')
+                .select('id, name, sector')
+                .in('id', startupIds);
+              
+              if (startupsData) {
+                startupsData.forEach((startup: any) => {
+                  startupMap[startup.id] = { name: startup.name || 'Unknown Startup', sector: startup.sector || 'Unknown' };
+                });
+              }
+            }
+            
+            // Normalize fallback data with fetched user and startup names
+            const normalized = (fallbackData || []).map((row: any) => ({
+              ...row,
+              startup: startupMap[row.startup_id] || { name: 'Unknown Startup', sector: 'Unknown' },
+              listed_by_user: userMap[row.listed_by_user_id] || { name: 'Unknown', email: '' }
+            }));
+            setAdvisorCoOpps(normalized);
+          }
         } else {
           setAdvisorCoOpps(data || []);
         }
@@ -545,48 +769,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle accepting service requests
   const handleAcceptRequest = async (request: any) => {
-    // Validate form data before submission
-    if (!financialMatrix.minimumInvestment || !financialMatrix.maximumInvestment) {
-      setNotifications(prev => [...prev, {
-        id: Date.now().toString(),
-        message: 'Please fill in minimum and maximum investment amounts',
-        type: 'error',
-        timestamp: new Date()
-      }]);
-      return;
-    }
-
-    if (financialMatrix.successFee && financialMatrix.successFeeType === 'percentage') {
-      const feeValue = parseFloat(financialMatrix.successFee);
-      if (feeValue < 0 || feeValue > 100) {
-        setNotifications(prev => [...prev, {
-          id: Date.now().toString(),
-          message: 'Success fee percentage must be between 0 and 100',
-          type: 'error',
-          timestamp: new Date()
-        }]);
-        return;
-      }
-    }
-
-    if (financialMatrix.successFee && financialMatrix.successFeeType === 'fixed') {
-      const feeValue = parseFloat(financialMatrix.successFee);
-      if (feeValue < 0) {
-        setNotifications(prev => [...prev, {
-          id: Date.now().toString(),
-          message: 'Success fee amount must be positive',
-          type: 'error',
-          timestamp: new Date()
-        }]);
-        return;
-      }
-    }
-
     try {
       setIsLoading(true);
       
       if (request.type === 'investor') {
-        await (userService as any).acceptInvestmentAdvisorRequest(request.id, financialMatrix);
+        await (userService as any).acceptInvestmentAdvisorRequest(request.id);
       } else {
         // For startup requests, request.id is the startup ID, we need to find the user ID
         const startup = startups.find(s => s.id === request.id);
@@ -601,7 +788,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
         
         // Pass both startup ID and user ID to the function
-        await (userService as any).acceptStartupAdvisorRequest(startup.id, startupUser.id, financialMatrix);
+        await (userService as any).acceptStartupAdvisorRequest(startup.id, startupUser.id);
       }
       
       // Add success notification
@@ -611,7 +798,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         type: 'success',
         timestamp: new Date()
       }]);
-      setIsAcceptRequestModalOpen(false);
       // Auto-remove notification after 5 seconds
       setTimeout(() => {
         setNotifications(prev => prev.slice(1));
@@ -782,17 +968,148 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle viewing investor dashboard
   const handleViewInvestorDashboard = async (investor: User) => {
-    // Load investor's offers using the same logic as App.tsx
+    setIsLoading(true);
     try {
+      // Load investor's offers (same as App.tsx does)
       const investorOffersData = await investmentService.getUserInvestmentOffers(investor.email);
       setInvestorOffers(investorOffersData);
+
+      // Fetch all startup addition requests (like App.tsx does)
+      let allStartupAdditionRequests: any[] = [];
+      try {
+        const { data: requestsData, error: requestsError } = await supabase
+          .from('startup_addition_requests')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (!requestsError && requestsData) {
+          allStartupAdditionRequests = requestsData;
+        }
     } catch (error) {
-      console.error('Error loading investor offers:', error);
-      setInvestorOffers([]);
-    }
-    
-    setSelectedInvestor(investor);
+        console.error('Error fetching startup addition requests:', error);
+      }
+
+      // Get investor code
+      const investorCode = (investor as any).investor_code || (investor as any).investorCode;
+
+      // Filter investor's startups (same logic as App.tsx lines 1246-1274)
+      // 1. Start with startups from investment records
+      const investorStartupIds = new Set<number>();
+      
+      if (investorCode) {
+        // Get startups from investment records
+        const { data: investorInvestments } = await supabase
+          .from('investment_records')
+          .select('startup_id')
+          .eq('investor_code', investorCode);
+        
+        if (investorInvestments) {
+          investorInvestments.forEach((inv: any) => {
+            if (inv.startup_id) investorStartupIds.add(inv.startup_id);
+          });
+        }
+      }
+
+      // 2. Get startups from offers
+      if (investorOffersData.length > 0) {
+        investorOffersData.forEach(offer => {
+          if (offer.startup_id) investorStartupIds.add(offer.startup_id);
+        });
+      }
+
+      // 3. Augment with approved startup addition requests (same as App.tsx)
+      let investorStartupsList = startups.filter(s => investorStartupIds.has(s.id));
+      
+      if (investorCode && Array.isArray(allStartupAdditionRequests)) {
+        const approvedNames = allStartupAdditionRequests
+          .filter((r: any) => (r.status || 'pending') === 'approved' && (
+            !investorCode || !r?.investor_code || (r.investor_code === investorCode || r.investorCode === investorCode)
+          ))
+          .map((r: any) => r.name)
+          .filter((n: any) => !!n);
+        
+        if (approvedNames.length > 0) {
+          // Get startups by names (map to Startup format like startupService.getStartupsByNames does)
+          const { data: approvedStartupsData } = await supabase
+            .from('startups')
+            .select('*')
+            .in('name', approvedNames);
+          
+          if (approvedStartupsData) {
+            // Map to Startup format
+            const mappedApprovedStartups = approvedStartupsData.map((startup: any) => ({
+              id: startup.id,
+              name: startup.name,
+              investmentType: startup.investment_type || 'Unknown',
+              investmentValue: Number(startup.investment_value) || 0,
+              equityAllocation: Number(startup.equity_allocation) || 0,
+              currentValuation: Number(startup.current_valuation) || 0,
+              complianceStatus: startup.compliance_status || 'Pending',
+              sector: startup.sector || 'Unknown',
+              totalFunding: Number(startup.total_funding) || 0,
+              totalRevenue: Number(startup.total_revenue) || 0,
+              registrationDate: startup.registration_date || '',
+              founders: startup.founders || [],
+              user_id: startup.user_id
+            }));
+            
+            // Merge unique by name (same logic as App.tsx)
+            const byName: Record<string, any> = {};
+            investorStartupsList.forEach((s: any) => {
+              if (s && s.name) byName[s.name] = s;
+            });
+            mappedApprovedStartups.forEach((s: any) => {
+              if (s && s.name) byName[s.name] = s;
+            });
+            investorStartupsList = Object.values(byName) as Startup[];
+          }
+        }
+      }
+
+      // Format currentUser for InvestorView (must match what InvestorView expects)
+      // Include advisor-related fields so AdvisorAwareLogo can show advisor logo
+      const formattedInvestor = {
+        id: investor.id,
+        email: investor.email,
+        name: investor.name, // Include name for display
+        investorCode: investorCode || null,
+        investor_code: investorCode || null,
+        // Include advisor code so advisor logo is shown
+        investment_advisor_code_entered: (investor as any).investment_advisor_code_entered || null,
+        role: 'Investor' as const
+      };
+
+      // Store investor data - pass filtered startups (only investor's portfolio)
+      setSelectedInvestor(formattedInvestor as any);
+      setInvestorDashboardData({
+        investorStartups: investorStartupsList, // Filtered to investor's startups only
+        investorInvestments: investments, // Pass all investments (InvestorView may filter internally)
+        investorStartupAdditionRequests: allStartupAdditionRequests // Pass all requests (InvestorView filters by investor code)
+      });
     setViewingInvestorDashboard(true);
+    } catch (error) {
+      console.error('Error loading investor dashboard:', error);
+      // Fallback: just set the investor
+      const formattedInvestor = {
+        id: investor.id,
+        email: investor.email,
+        name: investor.name, // Include name for display
+        investorCode: (investor as any).investor_code || (investor as any).investorCode || null,
+        investor_code: (investor as any).investor_code || (investor as any).investorCode || null,
+        // Include advisor code so advisor logo is shown
+        investment_advisor_code_entered: (investor as any).investment_advisor_code_entered || null,
+        role: 'Investor' as const
+      };
+      setSelectedInvestor(formattedInvestor as any);
+      setInvestorDashboardData({
+        investorStartups: [],
+        investorInvestments: investments,
+        investorStartupAdditionRequests: []
+      });
+      setViewingInvestorDashboard(true);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Handle viewing startup dashboard
@@ -815,6 +1132,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     setViewingInvestorDashboard(false);
     setSelectedInvestor(null);
     setInvestorOffers([]);
+    setInvestorDashboardData({ investorStartups: [], investorInvestments: [], investorStartupAdditionRequests: [] });
   };
 
   // Handle closing startup dashboard
@@ -830,7 +1148,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       setIsLoading(true);
       await investmentService.revealContactDetails(offerId);
       alert('Contact details have been revealed to both parties.');
-      window.location.reload();
+      
+      // Dispatch global event to notify other components
+      window.dispatchEvent(new CustomEvent('offerStageUpdated', { 
+        detail: { offerId, action: 'reveal_contact', type: 'advisor', newStage: null }
+      }));
+      
+      // Refresh offers made after revealing contact details
+      await fetchOffersMade();
     } catch (error) {
       console.error('Error revealing contact details:', error);
       alert('Failed to reveal contact details. Please try again.');
@@ -863,7 +1188,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 • Amount: ${formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')}
 • Equity: ${Number(offer.equity_percentage) || 0}%
 • Status: Stage 4 - Active Investment
-• Date: ${new Date(offer.created_at).toLocaleDateString()}
+• Date: ${offer.created_at ? new Date(offer.created_at).toLocaleDateString() : 'N/A'}
 
 📧 CONTACT DETAILS:
 • ${startupContact}
@@ -872,12 +1197,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     
     // Show the detailed contact information
     alert(contactDetails);
-  };
-
-  // Logout handler
-  const handleLogout = () => {
-    console.log('Logging out...');
-    window.location.href = '/logout';
   };
 
   // Discovery tab handlers
@@ -1002,22 +1321,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             <div className="flex items-center">
               <h1 className="text-2xl font-bold text-gray-900">Investment Advisor Dashboard</h1>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center">
               <button
                 onClick={() => setShowProfilePage(true)}
-                className="text-gray-500 hover:text-gray-700"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg transition-all duration-200 font-medium"
+                title="View Profile"
               >
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
-              </button>
-              <button
-                onClick={handleLogout}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
+                <span>Profile</span>
               </button>
             </div>
           </div>
@@ -1119,23 +1432,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 Investment Interests
               </div>
             </button>
-            
-            <button
-              onClick={() => setActiveTab('system')}
-              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
-                activeTab === 'system'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                System Manager
-              </div>
-            </button>
           </nav>
         </div>
       </div>
@@ -1210,65 +1506,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
           </div>
           
-          {/* Quick Actions */}
-          <div className="bg-white rounded-lg shadow">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <button
-                  onClick={() => setActiveTab('discovery')}
-                  className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex-shrink-0">
-                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                      <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className="ml-4">
-                    <h4 className="text-sm font-medium text-gray-900">Discover Pitches</h4>
-                    <p className="text-xs text-gray-500">Browse startup pitches</p>
-                  </div>
-                </button>
-                
-                <button
-                  onClick={() => setActiveTab('myInvestors')}
-                  className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex-shrink-0">
-                    <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                      <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className="ml-4">
-                    <h4 className="text-sm font-medium text-gray-900">My Investors</h4>
-                    <p className="text-xs text-gray-500">Manage investor relationships</p>
-                  </div>
-                </button>
-                
-                <button
-                  onClick={() => setActiveTab('myStartups')}
-                  className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex-shrink-0">
-                    <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className="ml-4">
-                    <h4 className="text-sm font-medium text-gray-900">My Startups</h4>
-                    <p className="text-xs text-gray-500">Manage startup relationships</p>
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
-          
           {/* Service Requests Section */}
           <div className="bg-white rounded-lg shadow">
             <div className="p-6">
@@ -1321,14 +1558,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <button
-                              onClick={() => {
-                                setSelectedRequest(request);
-                                setRequestType(request.type);
-                                setIsAcceptRequestModalOpen(true);
-                              }}
-                              className="text-blue-600 hover:text-blue-900"
+                              onClick={() => handleAcceptRequest(request)}
+                              disabled={isLoading}
+                              className="text-blue-600 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              Accept Request
+                              {isLoading ? 'Accepting...' : 'Accept Request'}
                             </button>
                           </td>
                         </tr>
@@ -1340,19 +1574,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
           </div>
 
-          {/* Offers Made Section */}
+          {/* Offers Made Section - Split into Investor Offers and Startup Offers */}
+          
+          {/* Investor Offers Section */}
           <div className="bg-white rounded-lg shadow">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Offers Made</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Investor Offers</h3>
                   <p className="text-sm text-gray-600">
-                Investment offers made by your assigned investors or received by your assigned startups
+                    Investment offers made by your assigned investors
               </p>
                 </div>
                 <div className="text-right">
-                  <div className="text-2xl font-bold text-blue-600">{offersMade.length}</div>
-                  <div className="text-sm text-gray-500">Total Offers</div>
+                  <div className="text-2xl font-bold text-green-600">{investorOffersList.length}</div>
+                  <div className="text-sm text-gray-500">Investor Offers</div>
                 </div>
               </div>
               
@@ -1360,7 +1596,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">User Type</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Startup</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Investor</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Offer Details</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Startup Ask</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">Approval Status</th>
@@ -1369,50 +1606,28 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {offersMade.length === 0 ? (
+                    {loadingOffersMade ? (
                       <tr>
-                        <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
-                          <div className="flex flex-col items-center">
-                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Offers Found</h3>
-                            <p className="text-sm text-gray-500 mb-4">
-                              No investment offers are currently requiring your approval or involving your clients.
-                            </p>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : loadingOffersMade ? (
-                      <tr>
-                        <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                        <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
                           Loading offers...
                         </td>
                       </tr>
-                    ) : offersMade.length === 0 ? (
+                    ) : investorOffersList.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                           <div className="flex flex-col items-center">
                             <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Offers Found</h3>
+                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Investor Offers Found</h3>
                             <p className="text-sm text-gray-500 mb-4">
-                              No investment offers are currently requiring your approval or involving your clients.
+                              No investment offers from your assigned investors at this time.
                             </p>
-                            <div className="text-xs text-gray-400 bg-gray-50 p-3 rounded border max-w-md">
-                              <div className="font-medium mb-2">How offers appear here:</div>
-                              <div className="text-left space-y-1">
-                                <div>• <strong>Stage 1:</strong> Offers from your investors (need your approval)</div>
-                                <div>• <strong>Stage 2:</strong> Offers to your startups (need your approval)</div>
-                                <div>• <strong>Stage 4:</strong> Completed deals involving your clients</div>
-                              </div>
-                            </div>
                           </div>
                         </td>
                       </tr>
                     ) : (
-                      offersMade.map((offer) => {
+                      investorOffersList.map((offer) => {
                         const investorAdvisorStatus = (offer as any).investor_advisor_approval_status;
                         const startupAdvisorStatus = (offer as any).startup_advisor_approval_status;
                         const hasContactDetails = (offer as any).contact_details_revealed;
@@ -1420,24 +1635,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         return (
                           <tr key={offer.id}>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              <div className="flex items-center">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-2">
-                                  Startup
-                                </span>
                               {offer.startup_name || 'Unknown Startup'}
-                              </div>
                             </td>
                             <td className="px-3 py-4 text-sm text-gray-500">
-                              <div className="space-y-1">
-                                <div className="flex items-center">
-                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mr-2">
-                                    Investor
-                                  </span>
-                                  <span className="text-xs truncate">{offer.investor_name || offer.investor_email || 'Unknown Investor'}</span>
-                                </div>
+                              <span className="text-sm font-medium text-gray-900">{offer.investor_name || 'Unknown Investor'}</span>
+                            </td>
+                            <td className="px-3 py-4 text-sm text-gray-500">
                                 <div className="text-sm font-medium text-gray-900">
                                   {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
-                                </div>
                               </div>
                             </td>
                             <td className="px-3 py-4 text-sm text-gray-500">
@@ -1513,7 +1718,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </td>
                             <td className="px-3 py-4 text-sm text-gray-500">
                               <div className="text-xs">
-                                {new Date(offer.created_at).toLocaleDateString()}
+                                {offer.created_at ? new Date(offer.created_at).toLocaleDateString() : 'N/A'}
                               </div>
                             </td>
                             <td className="px-3 py-4 text-sm font-medium">
@@ -1527,8 +1732,20 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                   return (
                                     <div className="flex flex-col space-y-1">
                                       <button
-                                        onClick={() => offer.startup && handleViewStartupDashboard(offer.startup as any)}
-                                        disabled={isLoading}
+                                        onClick={() => {
+                                          if (offer.startup) {
+                                            handleViewStartupDashboard(offer.startup as any);
+                                          } else {
+                                            // If startup object is not in offer, find it from startups array
+                                            const startup = startups.find(s => s.id === offer.startup_id);
+                                            if (startup) {
+                                              handleViewStartupDashboard(startup);
+                                            } else {
+                                              alert('Startup information not available. Please refresh the page.');
+                                            }
+                                          }
+                                        }}
+                                        disabled={isLoading || !offer.startup_id}
                                         className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 disabled:opacity-50 font-medium"
                                       >
                                         View Startup
@@ -1624,6 +1841,258 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
           </div>
 
+          {/* Startup Offers Section */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Startup Offers</h3>
+                  <p className="text-sm text-gray-600">
+                    Investment offers received by your assigned startups
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-purple-600">{startupOffersList.length}</div>
+                  <div className="text-sm text-gray-500">Startup Offers</div>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Startup</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Investor</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Offer Details</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Startup Ask</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">Approval Status</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Date</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {loadingOffersMade ? (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
+                          Loading offers...
+                        </td>
+                      </tr>
+                    ) : startupOffersList.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                          <div className="flex flex-col items-center">
+                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Startup Offers Found</h3>
+                            <p className="text-sm text-gray-500 mb-4">
+                              No investment offers received by your assigned startups at this time.
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      startupOffersList.map((offer) => {
+                        const investorAdvisorStatus = (offer as any).investor_advisor_approval_status;
+                        const startupAdvisorStatus = (offer as any).startup_advisor_approval_status;
+                        const hasContactDetails = (offer as any).contact_details_revealed;
+                        
+                        return (
+                          <tr key={offer.id}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {offer.startup_name || 'Unknown Startup'}
+                            </td>
+                            <td className="px-3 py-4 text-sm text-gray-500">
+                              <span className="text-sm font-medium text-gray-900">{offer.investor_name || 'Unknown Investor'}</span>
+                            </td>
+                            <td className="px-3 py-4 text-sm text-gray-500">
+                              <div className="text-sm font-medium text-gray-900">
+                                {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
+                              </div>
+                            </td>
+                            <td className="px-3 py-4 text-sm text-gray-500">
+                              <div className="text-sm font-medium text-gray-900">
+                                {(() => {
+                                  const investmentValue = Number(offer.fundraising?.value) || 0;
+                                  const equityAllocation = Number(offer.fundraising?.equity) || 0;
+                                  const currency = offer.startup?.currency || offer.currency || 'USD';
+                                  
+                                  if (investmentValue === 0 && equityAllocation === 0) {
+                                    return (
+                                      <span className="text-gray-500 italic">
+                                        Funding ask not specified
+                                      </span>
+                                    );
+                                  }
+                                  
+                                  return `Seeking ${formatCurrency(investmentValue, currency)} for ${equityAllocation}% equity`;
+                                })()}
+                              </div>
+                            </td>
+                            <td className="px-3 py-4">
+                              {(() => {
+                                const offerStage = (offer as any).stage || 1;
+                                
+                                if (offerStage === 1) {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                      🔵 Stage 1: Investor Advisor Approval
+                                    </span>
+                                  );
+                                }
+                                if (offerStage === 2) {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                                      🟣 Stage 2: Startup Advisor Approval
+                                    </span>
+                                  );
+                                }
+                                if (offerStage === 3) {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                      ✅ Stage 3: Ready for Startup Review
+                                    </span>
+                                  );
+                                }
+                                if (investorAdvisorStatus === 'rejected') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                      ❌ Rejected by Investor Advisor
+                                    </span>
+                                  );
+                                }
+                                if ((offer as any).startup_advisor_approval_status === 'rejected') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                      ❌ Rejected by Startup Advisor
+                                    </span>
+                                  );
+                                }
+                                
+                                return (
+                                  <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
+                                    ❓ Unknown Status
+                                  </span>
+                                );
+                              })()}
+                            </td>
+                            <td className="px-3 py-4 text-sm text-gray-500">
+                              <div className="text-xs">
+                                {offer.created_at ? new Date(offer.created_at).toLocaleDateString() : 'N/A'}
+                              </div>
+                            </td>
+                            <td className="px-3 py-4 text-sm font-medium">
+                              {(() => {
+                                const offerStage = (offer as any).stage || 1;
+                                
+                                if (offerStage === 1) {
+                                  return (
+                                    <div className="flex flex-col space-y-1">
+                                      <button
+                                        onClick={() => {
+                                          if (offer.startup) {
+                                            handleViewStartupDashboard(offer.startup as any);
+                                          } else {
+                                            const startup = startups.find(s => s.id === offer.startup_id);
+                                            if (startup) {
+                                              handleViewStartupDashboard(startup);
+                                            } else {
+                                              alert('Startup information not available. Please refresh the page.');
+                                            }
+                                          }
+                                        }}
+                                        disabled={isLoading || !offer.startup_id}
+                                        className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 disabled:opacity-50 font-medium"
+                                      >
+                                        View Startup
+                                      </button>
+                                      <button
+                                        onClick={() => handleAdvisorApproval(offer.id, 'approve', 'investor')}
+                                        disabled={isLoading}
+                                        className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200 disabled:opacity-50 font-medium"
+                                      >
+                                        Accept
+                                      </button>
+                                      <button
+                                        onClick={() => handleAdvisorApproval(offer.id, 'reject', 'investor')}
+                                        disabled={isLoading}
+                                        className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium"
+                                      >
+                                        Decline
+                                      </button>
+                                    </div>
+                                  );
+                                }
+                                
+                                if (offerStage === 2) {
+                                  return (
+                                    <div className="flex flex-col space-y-1">
+                                      <button
+                                        onClick={() => handleNegotiateOffer(offer.id)}
+                                        disabled={isLoading}
+                                        className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 disabled:opacity-50 font-medium"
+                                      >
+                                        Negotiate Offer
+                                      </button>
+                                      <button
+                                        onClick={() => handleAdvisorApproval(offer.id, 'approve', 'startup')}
+                                        disabled={isLoading}
+                                        className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200 disabled:opacity-50 font-medium"
+                                      >
+                                        Accept
+                                      </button>
+                                      <button
+                                        onClick={() => handleAdvisorApproval(offer.id, 'reject', 'startup')}
+                                        disabled={isLoading}
+                                        className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium"
+                                      >
+                                        Decline
+                                      </button>
+                                    </div>
+                                  );
+                                }
+                                
+                                if (offerStage === 3) {
+                                  return (
+                                    <span className="text-xs text-gray-500">
+                                      Ready
+                                    </span>
+                                  );
+                                }
+                                
+                                if (investorAdvisorStatus === 'approved' && startupAdvisorStatus === 'approved' && !hasContactDetails) {
+                                  return (
+                                    <button
+                                      onClick={() => handleRevealContactDetails(offer.id)}
+                                      disabled={isLoading}
+                                      className="text-blue-600 hover:text-blue-900 disabled:opacity-50"
+                                    >
+                                      View Contact Details
+                                    </button>
+                                  );
+                                }
+                                
+                                if (hasContactDetails) {
+                                  return <span className="text-green-600 text-xs">Contact Details Revealed</span>;
+                                }
+                                
+                                if (investorAdvisorStatus === 'approved' && startupAdvisorStatus === 'approved') {
+                                  return <span className="text-green-600 text-xs">Approved & Ready</span>;
+                                }
+                                
+                                return <span className="text-gray-400 text-xs">No actions</span>;
+                              })()}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
           {/* Co-Investment Opportunities Section */}
           <div className="bg-white rounded-lg shadow">
             <div className="p-6">
@@ -1635,23 +2104,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Investor</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Investment Amount</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Equity %</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Investor</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View Startup</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {loadingAdvisorCoOpps ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-8 text-center text-gray-500">Loading co-investment opportunities...</td>
+                        <td colSpan={8} className="px-6 py-8 text-center text-gray-500">Loading co-investment opportunities...</td>
                       </tr>
                     ) : advisorCoOpps.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
                           No Co-Investment Opportunities
                         </td>
                       </tr>
@@ -1661,20 +2131,36 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             {row.startup?.name || 'Unknown Startup'}
                           </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700">
+                            {row.listed_by_user?.name || 'Unknown'}
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {row.startup?.sector || 'Not specified'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${row.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                              {row.stage === 4 ? 'Active' : row.status || 'Active'}
+                            </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             {row.investment_amount ? formatCurrency(row.investment_amount) : 'Not specified'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {row.equity_percentage ? `${row.equity_percentage}%` : 'Not specified'}
-                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <span className="text-gray-400 italic">TBD</span>
+                            {row.equity_percentage ? `${row.equity_percentage}%` : '—'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${row.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{row.status}</span>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <button
+                              onClick={() => {
+                                if (row.startup_id) {
+                                  onViewStartup(row.startup_id, 'dashboard');
+                                } else {
+                                  alert('Startup information not available');
+                                }
+                              }}
+                              className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                            >
+                              View Startup
+                            </button>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex gap-2">
@@ -2091,7 +2577,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mr-2">
                                   Investor
                                 </span>
-                                <span className="text-xs truncate">{offer.investor_name || offer.investor_email || 'Unknown Investor'}</span>
+                                <span className="text-xs truncate">{offer.investor_name || 'Unknown Investor'}</span>
                               </div>
                               <div className="text-sm font-medium text-gray-900">
                                 {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
@@ -2127,7 +2613,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-500">
                             <div className="text-xs">
-                              {new Date(offer.created_at).toLocaleDateString()}
+                              {offer.created_at ? new Date(offer.created_at).toLocaleDateString() : 'N/A'}
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm font-medium">
@@ -2185,7 +2671,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           {investor.email}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {new Date(investor.created_at || Date.now()).toLocaleDateString()}
+                          {(investor as any).advisor_accepted_date 
+                            ? new Date((investor as any).advisor_accepted_date).toLocaleDateString()
+                            : investor.created_at 
+                              ? new Date(investor.created_at).toLocaleDateString()
+                              : 'N/A'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
@@ -2243,7 +2733,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           {startup.name}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {startup.sector}
+                          {startup.sector || 'Not specified'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {(() => {
@@ -2290,115 +2780,109 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       {/* Investment Interests Tab */}
       {activeTab === 'interests' && (
+        <div className="space-y-6">
         <div className="bg-white rounded-lg shadow">
           <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Investment Interests</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Investment interests and preferences from your assigned clients
+                  <p className="text-sm text-gray-600">
+                    Startups liked/favorited by your assigned investors from the Discover page
             </p>
-            <div className="text-center text-gray-500 py-8">
-              Investment interests functionality coming soon
             </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-purple-600">
+                    {investmentInterests.length}
           </div>
+                  <div className="text-sm text-gray-500">Total Interests</div>
         </div>
-      )}
-
-      {activeTab === 'system' && (
-        <UserDataManager />
-      )}
-
-      {/* Accept Request Modal */}
-      {isAcceptRequestModalOpen && selectedRequest && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">
-                Accept {selectedRequest.type === 'investor' ? 'Investor' : 'Startup'} Request
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Minimum Investment</label>
-                  <input
-                    type="number"
-                    value={financialMatrix.minimumInvestment}
-                    onChange={(e) => setFinancialMatrix({...financialMatrix, minimumInvestment: e.target.value})}
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Maximum Investment</label>
-                  <input
-                    type="number"
-                    value={financialMatrix.maximumInvestment}
-                    onChange={(e) => setFinancialMatrix({...financialMatrix, maximumInvestment: e.target.value})}
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Success Fee Type</label>
-                  <select
-                    value={financialMatrix.successFeeType}
-                    onChange={(e) => setFinancialMatrix({...financialMatrix, successFeeType: e.target.value})}
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="percentage">Percentage (%)</option>
-                    <option value="fixed">Fixed Amount</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Success Fee {financialMatrix.successFeeType === 'percentage' ? '(%)' : '(Amount)'}
-                  </label>
-                  <input
-                    type="number"
-                    step={financialMatrix.successFeeType === 'percentage' ? '0.01' : '0.01'}
-                    min={financialMatrix.successFeeType === 'percentage' ? '0' : '0'}
-                    max={financialMatrix.successFeeType === 'percentage' ? '100' : undefined}
-                    value={financialMatrix.successFee}
-                    onChange={(e) => setFinancialMatrix({...financialMatrix, successFee: e.target.value})}
-                    placeholder={financialMatrix.successFeeType === 'percentage' ? '2.5' : '500'}
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  />
-                  {financialMatrix.successFeeType === 'percentage' && (
-                    <p className="text-xs text-gray-500 mt-1">Enter percentage (e.g., 2.5 for 2.5%)</p>
-                  )}
-                  {financialMatrix.successFeeType === 'fixed' && (
-                    <p className="text-xs text-gray-500 mt-1">Enter fixed amount in your currency</p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Scouting Fee</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={financialMatrix.scoutingFee}
-                    onChange={(e) => setFinancialMatrix({...financialMatrix, scoutingFee: e.target.value})}
-                    placeholder="100"
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Enter scouting fee amount</p>
-                </div>
               </div>
-              <div className="flex justify-end space-x-3 mt-6">
+              
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Investor Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Liked Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View in Discover</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {loadingInvestmentInterests ? (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                          Loading investment interests...
+                        </td>
+                      </tr>
+                    ) : investmentInterests.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                          <div className="flex flex-col items-center">
+                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                            </svg>
+                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Investment Interests</h3>
+                            <p className="text-sm text-gray-500">
+                              Your assigned investors haven't liked any startups yet. Interests will appear here when investors favorite startups from the Discover page.
+                            </p>
+                </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      investmentInterests.map((interest) => (
+                        <tr key={`${interest.investor_id}-${interest.startup_id}`}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {interest.investor_name || 'Unknown Investor'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {interest.startup_name || 'Unknown Startup'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {interest.startup_sector || 'Not specified'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {interest.created_at ? new Date(interest.created_at).toLocaleDateString() : 'N/A'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                 <button
-                  onClick={() => setIsAcceptRequestModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-                >
-                  Cancel
+                              onClick={() => {
+                                // Switch to discovery tab and set the pitch ID
+                                setActiveTab('discovery');
+                                // Find the startup in activeFundraisingStartups
+                                const matchedPitch = activeFundraisingStartups.find(pitch => 
+                                  pitch.id === interest.startup_id || 
+                                  pitch.name === interest.startup_name
+                                );
+                                
+                                if (matchedPitch) {
+                                  setPlayingVideoId(matchedPitch.id);
+                                  // Scroll to top to ensure the pitch is visible
+                                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                                } else {
+                                  // If not found, just switch to discovery tab
+                                  setActiveTab('discovery');
+                                  alert(`Opening discover page. If ${interest.startup_name} is not visible, it may not be actively fundraising.`);
+                                }
+                              }}
+                              className="text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
+                            >
+                              <Eye className="h-4 w-4" />
+                              View in Discover
                 </button>
-                <button
-                  onClick={() => handleAcceptRequest(selectedRequest)}
-                  disabled={isLoading}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {isLoading ? 'Accepting...' : 'Accept Request'}
-                </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         </div>
       )}
+
 
       {/* Investor Dashboard Modal */}
       {viewingInvestorDashboard && selectedInvestor && (
@@ -2406,7 +2890,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           <div className="relative top-4 mx-auto p-4 border w-full max-w-7xl shadow-lg rounded-md bg-white">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-medium text-gray-900">
-                Investor Dashboard - {selectedInvestor.name || selectedInvestor.email}
+                Investor Dashboard - {selectedInvestor.name || 'Investor'}
               </h3>
               <button
                 onClick={handleCloseInvestorDashboard}
@@ -2419,9 +2903,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
             <div className="max-h-[80vh] overflow-y-auto">
               <InvestorView
-                startups={startups}
-                newInvestments={investments}
-                startupAdditionRequests={[]}
+                startups={investorDashboardData.investorStartups}
+                newInvestments={investorDashboardData.investorInvestments}
+                startupAdditionRequests={investorDashboardData.investorStartupAdditionRequests}
                 investmentOffers={investorOffers}
                 currentUser={selectedInvestor}
                 onViewStartup={() => {}}
@@ -2430,19 +2914,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 onUpdateOffer={() => {}}
                 onCancelOffer={() => {}}
                 isViewOnly={true}
+                initialTab="dashboard"
               />
-              {process.env.NODE_ENV === 'development' && (
-                <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded m-2">
-                  <h4 className="font-bold">🔍 Investor Dashboard Debug:</h4>
-                  <p><strong>Selected Investor:</strong> {selectedInvestor?.email}</p>
-                  <p><strong>Total Offers (All):</strong> {offers?.length || 0}</p>
-                  <p><strong>Loaded Investor Offers:</strong> {investorOffers?.length || 0}</p>
-                  <p><strong>Total Startups:</strong> {startups?.length || 0}</p>
-                  <p><strong>Total Investments:</strong> {investments?.length || 0}</p>
-                  <p><strong>Investor ID:</strong> {selectedInvestor?.id}</p>
-                  <p><strong>Investor Code:</strong> {selectedInvestor?.investor_code || selectedInvestor?.investorCode}</p>
-                </div>
-              )}
             </div>
           </div>
         </div>

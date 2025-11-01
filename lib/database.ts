@@ -95,43 +95,14 @@ export const userService = {
   },
 
   // Accept investment advisor request
-  async acceptInvestmentAdvisorRequest(userId: string, financialMatrix: any) {
+  async acceptInvestmentAdvisorRequest(userId: string) {
     console.log('Accepting investment advisor request for user:', userId);
-    console.log('🔍 Financial matrix:', financialMatrix);
     try {
-      // Validate and clean financial matrix data
-      const cleanFinancialMatrix = {
-        minimum_investment: financialMatrix.minimumInvestment ? parseFloat(financialMatrix.minimumInvestment) : null,
-        maximum_investment: financialMatrix.maximumInvestment ? parseFloat(financialMatrix.maximumInvestment) : null,
-        success_fee: financialMatrix.successFee ? parseFloat(financialMatrix.successFee) : null,
-        success_fee_type: financialMatrix.successFeeType || 'percentage',
-        scouting_fee: financialMatrix.scoutingFee ? parseFloat(financialMatrix.scoutingFee) : null
-      };
-
-      // Validate success fee based on type
-      if (cleanFinancialMatrix.success_fee !== null) {
-        if (cleanFinancialMatrix.success_fee_type === 'percentage') {
-          if (cleanFinancialMatrix.success_fee < 0 || cleanFinancialMatrix.success_fee > 100) {
-            throw new Error('Success fee percentage must be between 0 and 100');
-          }
-        } else if (cleanFinancialMatrix.success_fee_type === 'fixed') {
-          if (cleanFinancialMatrix.success_fee < 0) {
-            throw new Error('Success fee amount must be positive');
-          }
-        }
-      }
-
-      console.log('🔍 Cleaned financial matrix:', cleanFinancialMatrix);
-
       const { data, error } = await supabase
         .from('users')
         .update({
           advisor_accepted: true,
-          minimum_investment: cleanFinancialMatrix.minimum_investment,
-          maximum_investment: cleanFinancialMatrix.maximum_investment,
-          success_fee: cleanFinancialMatrix.success_fee,
-          success_fee_type: cleanFinancialMatrix.success_fee_type,
-          scouting_fee: cleanFinancialMatrix.scouting_fee,
+          advisor_accepted_date: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .eq('id', userId)
@@ -160,28 +131,15 @@ export const userService = {
   },
 
   // Accept startup advisor request
-  async acceptStartupAdvisorRequest(startupId: number, userId: string, financialMatrix: any) {
+  async acceptStartupAdvisorRequest(startupId: number, userId: string) {
     console.log('Accepting startup advisor request for startup:', startupId, 'user:', userId);
-    console.log('🔍 Original financial matrix:', financialMatrix);
     try {
-      // Validate and clean financial matrix data
-      const cleanFinancialMatrix = {
-        minimum_investment: financialMatrix.minimumInvestment ? parseFloat(financialMatrix.minimumInvestment) : null,
-        maximum_investment: financialMatrix.maximumInvestment ? parseFloat(financialMatrix.maximumInvestment) : null,
-        success_fee: financialMatrix.successFee ? parseFloat(financialMatrix.successFee) : null,
-        success_fee_type: financialMatrix.successFeeType || null,
-        scouting_fee: financialMatrix.scoutingFee ? parseFloat(financialMatrix.scoutingFee) : null
-      };
-
-      console.log('🔍 Cleaned financial matrix:', cleanFinancialMatrix);
-      console.log('🔍 User ID to update:', userId);
-
       // Use the SECURITY DEFINER function to bypass RLS
       const { data: userData, error: userError } = await supabase
         .rpc('accept_startup_advisor_request', {
           p_user_id: userId,
           p_advisor_id: (await supabase.auth.getUser()).data.user?.id,
-          p_financial_matrix: cleanFinancialMatrix
+          p_financial_matrix: null
         })
 
       if (userError) {
@@ -206,53 +164,6 @@ export const userService = {
         // Don't throw here as the main operation succeeded
       }
 
-      // Create investment offers for the startup
-      console.log('💰 Creating investment offers for startup:', startupId);
-      try {
-        // Get the startup details
-        const { data: startupData, error: startupError } = await supabase
-          .from('startups')
-          .select('name, user_id')
-          .eq('id', startupId)
-          .single();
-
-        if (startupError) {
-          console.error('Error fetching startup data:', startupError);
-        } else if (startupData) {
-          // Get the advisor details
-          const { data: advisorData, error: advisorError } = await supabase
-            .from('users')
-            .select('name, email, investment_advisor_code')
-            .eq('id', (await supabase.auth.getUser()).data.user?.id)
-            .single();
-
-          if (!advisorError && advisorData) {
-            // Create investment offers for the startup
-            const { data: offerData, error: offerError } = await supabase
-              .from('investment_offers')
-              .insert({
-                startup_id: startupId,
-                startup_name: startupData.name,
-                investor_email: advisorData.email,
-                investor_name: advisorData.name,
-                offer_amount: cleanFinancialMatrix.minimum_investment || 0,
-                equity_percentage: 0, // Will be set when actual offers are made
-                status: 'pending',
-                created_at: new Date().toISOString()
-              })
-              .select();
-
-            if (offerError) {
-              console.error('Error creating investment offer:', offerError);
-            } else {
-              console.log('✅ Investment offer created successfully:', offerData);
-            }
-          }
-        }
-      } catch (offerCreationError) {
-        console.error('Error in investment offer creation:', offerCreationError);
-        // Don't throw here as the main operation succeeded
-      }
       
       console.log('Startup advisor request accepted successfully:', userData);
       return userData

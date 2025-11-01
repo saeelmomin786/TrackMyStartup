@@ -56,7 +56,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     onMakeOffer,
     onUpdateOffer,
     onCancelOffer,
-    isViewOnly = false
+    isViewOnly = false,
+    initialTab
 }) => {
     const formatCurrency = (value: number, currency: string = 'INR') => {
       try {
@@ -151,6 +152,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       return fromUrl ? Number(fromUrl) : null;
     });
     const [activeTab, setActiveTab] = useState<'dashboard' | 'reels' | 'offers' | 'recommendations'>(() => {
+      // If initialTab is provided (e.g., from modal), use it
+      if (initialTab) {
+        return initialTab;
+      }
+      // Otherwise, try to get from URL, default to 'dashboard'
       const fromUrl = (getQueryParam('tab') as any) || 'dashboard';
       const valid = ['dashboard','reels','offers','recommendations'];
       return valid.includes(fromUrl) ? fromUrl : 'dashboard';
@@ -210,38 +216,145 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       // If investor has advisor code, show advisor recommendations; otherwise show all active opportunities
       const hasAdvisor = !!((currentUser as any).investment_advisor_code || (currentUser as any).investment_advisor_code_entered);
       if (hasAdvisor) {
-        const { data, error } = await supabase.rpc('get_investor_recommendations', {
-          p_investor_id: currentUser.id
-        });
-        if (error) {
-          console.error('Error fetching recommendations:', error);
+        // Fetch recommendations with startup_id by querying the table directly
+        const { data: recData, error: recError } = await supabase
+          .from('investment_advisor_recommendations')
+          .select(`
+            id,
+            startup_id,
+            recommended_deal_value,
+            recommended_valuation,
+            recommendation_notes,
+            status,
+            created_at,
+            investment_advisor:users!investment_advisor_recommendations_investment_advisor_id_fkey(name),
+            startup:startups(name, sector, current_valuation, investment_value, equity_allocation)
+          `)
+          .eq('investor_id', currentUser.id)
+          .order('created_at', { ascending: false });
+        
+        if (recError) {
+          console.error('Error fetching recommendations:', recError);
           setRecommendations([]);
         } else {
-          setRecommendations(data || []);
+          // Fetch fundraising_details for all startup_ids in parallel
+          const startupIds = (recData || []).map((row: any) => row.startup_id).filter(Boolean);
+          let fundraisingMap: Record<number, { value: number; equity: number }> = {};
+          
+          if (startupIds.length > 0) {
+            try {
+              const { data: fdData } = await supabase
+                .from('fundraising_details')
+                .select('startup_id, value, equity')
+                .in('startup_id', startupIds)
+                .eq('active', true);
+              
+              if (fdData) {
+                fdData.forEach((fd: any) => {
+                  if (!fundraisingMap[fd.startup_id] || Number(fd.value) > Number(fundraisingMap[fd.startup_id].value)) {
+                    fundraisingMap[fd.startup_id] = {
+                      value: Number(fd.value) || 0,
+                      equity: Number(fd.equity) || 0
+                    };
+                  }
+                });
+              }
+            } catch (fdError) {
+              console.error('Error fetching fundraising_details:', fdError);
+            }
+          }
+          
+          // Normalize the data to match expected structure
+          const normalized = (recData || []).map((row: any) => {
+            // Get ask amount and equity - priority: recommended_deal_value > fundraising_details > startups table
+            const fundraising = fundraisingMap[row.startup_id];
+            const askAmount = row.recommended_deal_value || fundraising?.value || row.startup?.investment_value || 0;
+            const equity = fundraising?.equity || row.startup?.equity_allocation || 0;
+            
+            return {
+              id: row.id,
+              startup_id: row.startup_id,
+              startup_name: row.startup?.name,
+              startup_sector: row.startup?.sector,
+              startup_valuation: row.startup?.current_valuation || row.recommended_valuation,
+              recommended_deal_value: row.recommended_deal_value,
+              recommended_valuation: row.recommended_valuation,
+              // Include ask amount and equity from fundraising_details
+              investment_amount: askAmount,
+              equity_percentage: equity,
+              recommendation_notes: row.recommendation_notes,
+              advisor_name: row.investment_advisor?.name || 'Unknown Advisor',
+              status: row.status,
+              created_at: row.created_at,
+              recommended_at: row.created_at
+            };
+          });
+          setRecommendations(normalized);
         }
       } else {
         // Public: fetch all active co-investment opportunities
         const { data, error } = await supabase
           .from('co_investment_opportunities')
-          .select('id,startup_id,investment_amount,equity_percentage,status,stage,created_at, startup:startups(name, sector)')
+          .select('id,startup_id,investment_amount,equity_percentage,status,stage,created_at, startup:startups(name, sector, investment_value, equity_allocation)')
           .eq('status', 'active')
           .order('created_at', { ascending: false });
         if (error) {
           console.error('Error fetching active co-investment opportunities:', error);
           setRecommendations([]);
         } else {
+          // Fetch fundraising_details for all startup_ids in parallel if needed
+          const startupIds = (data || []).map((row: any) => row.startup_id).filter(Boolean);
+          let fundraisingMap: Record<number, { value: number; equity: number }> = {};
+          
+          // Only fetch if we need fallback values (when investment_amount or equity_percentage is missing)
+          const needsFallback = (data || []).some((row: any) => !row.investment_amount || !row.equity_percentage);
+          
+          if (needsFallback && startupIds.length > 0) {
+            try {
+              const { data: fdData } = await supabase
+                .from('fundraising_details')
+                .select('startup_id, value, equity')
+                .in('startup_id', startupIds)
+                .eq('active', true);
+              
+              if (fdData) {
+                fdData.forEach((fd: any) => {
+                  if (!fundraisingMap[fd.startup_id] || Number(fd.value) > Number(fundraisingMap[fd.startup_id].value)) {
+                    fundraisingMap[fd.startup_id] = {
+                      value: Number(fd.value) || 0,
+                      equity: Number(fd.equity) || 0
+                    };
+                  }
+                });
+              }
+            } catch (fdError) {
+              console.error('Error fetching fundraising_details:', fdError);
+            }
+          }
+          
           // Normalize to expected fields used by the table
-          const normalized = (data || []).map((row: any) => ({
-            recommendation_id: row.id,
-            startup_name: row.startup?.name,
-            sector: row.startup?.sector,
-            compliance_status: `Stage ${row.stage || 1}`,
-            investment_amount: row.investment_amount,
-            advisor_name: '—',
-            recommended_at: row.created_at,
-            equity_percentage: row.equity_percentage,
-            opportunity_id: row.id
-          }));
+          const normalized = (data || []).map((row: any) => {
+            // Get ask amount and equity - prioritize co_investment_opportunities values, fallback to fundraising_details or startups table
+            const fundraising = fundraisingMap[row.startup_id];
+            const askAmount = row.investment_amount || fundraising?.value || row.startup?.investment_value || 0;
+            const equity = row.equity_percentage || fundraising?.equity || row.startup?.equity_allocation || 0;
+            
+            return {
+              recommendation_id: row.id,
+              id: row.id,
+              startup_id: row.startup_id,
+              startup_name: row.startup?.name,
+              startup_sector: row.startup?.sector,
+              sector: row.startup?.sector,
+              compliance_status: `Stage ${row.stage || 1}`,
+              investment_amount: askAmount,
+              equity_percentage: equity,
+              advisor_name: '—',
+              recommended_at: row.created_at,
+              created_at: row.created_at,
+              opportunity_id: row.id
+            };
+          });
           setRecommendations(normalized);
         }
       }
@@ -296,15 +409,171 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         fetchActiveFundraisingStartups();
     }, []);
 
-    // Load recommended co-investment opportunities
+    // Load favorited pitches from database
+    useEffect(() => {
+        const loadFavorites = async () => {
+            if (!currentUser?.id) return;
+            
+            try {
+                const { data, error } = await supabase
+                    .from('investor_favorites')
+                    .select('startup_id')
+                    .eq('investor_id', currentUser.id);
+                
+                if (error) {
+                    // If table doesn't exist yet, silently fail (table will be created by SQL script)
+                    if (error.code !== 'PGRST116') {
+                        console.error('Error loading favorites:', error);
+                    }
+                    return;
+                }
+                
+                if (data) {
+                    const favoriteIds = new Set(data.map((fav: any) => fav.startup_id));
+                    setFavoritedPitches(favoriteIds);
+                }
+            } catch (error) {
+                console.error('Error loading favorites:', error);
+            }
+        };
+
+        loadFavorites();
+    }, [currentUser?.id]);
+
+    // Load ALL active co-investment opportunities (not just recommended ones)
     useEffect(() => {
         const loadRecommendedOpportunities = async () => {
             if (currentUser?.id) {
                 try {
-                    const opportunities = await investmentService.getRecommendedCoInvestmentOpportunities(currentUser.id);
-                    setRecommendedOpportunities(opportunities);
+                    // Fetch all active co-investment opportunities with lead investor name
+                    console.log('🔍 Fetching co-investment opportunities for user:', currentUser.id);
+                    const { data, error } = await supabase
+                        .from('co_investment_opportunities')
+                        .select(`
+                            id,
+                            startup_id,
+                            listed_by_user_id,
+                            listed_by_type,
+                            investment_amount,
+                            equity_percentage,
+                            minimum_co_investment,
+                            maximum_co_investment,
+                            status,
+                            stage,
+                            created_at,
+                            startup:startups(id, name, sector),
+                            listed_by_user:users!fk_listed_by_user_id(id, name, email)
+                        `)
+                        .eq('status', 'active')
+                        .eq('stage', 4)  // Only show fully approved opportunities (after all approvals)
+                        .eq('startup_approval_status', 'approved')  // Only show startup-approved opportunities
+                        .order('created_at', { ascending: false });
+                    
+                    console.log('🔍 Co-investment opportunities fetch result:', { data, error, count: data?.length || 0 });
+                    
+                    if (error) {
+                        console.error('Error fetching co-investment opportunities with join:', error);
+                        // Fallback: try without join if RLS blocks it
+                        const { data: fallbackData, error: fallbackError } = await supabase
+                            .from('co_investment_opportunities')
+                            .select('*')
+                            .eq('status', 'active')
+                            .eq('stage', 4)  // Only show fully approved opportunities (after all approvals)
+                            .eq('startup_approval_status', 'approved')  // Only show startup-approved opportunities
+                            .order('created_at', { ascending: false });
+                        
+                        if (fallbackError) {
+                            console.error('Fallback fetch also failed:', fallbackError);
+                            setRecommendedOpportunities([]);
+                        } else {
+                            // Fetch user names separately
+                            const userIds = Array.from(new Set((fallbackData || []).map((row: any) => row.listed_by_user_id).filter(Boolean)));
+                            const userMap: Record<string, { name: string; email: string }> = {};
+                            
+                            if (userIds.length > 0) {
+                                const { data: usersData } = await supabase
+                                    .from('users')
+                                    .select('id, name, email')
+                                    .in('id', userIds);
+                                
+                                if (usersData) {
+                                    usersData.forEach((user: any) => {
+                                        userMap[user.id] = { name: user.name || 'Unknown', email: user.email || '' };
+                                    });
+                                }
+                            }
+                            
+                            // Fetch startup names separately
+                            const startupIds = Array.from(new Set((fallbackData || []).map((row: any) => row.startup_id).filter(Boolean)));
+                            const startupMap: Record<number, { name: string; sector: string }> = {};
+                            
+                            if (startupIds.length > 0) {
+                                const { data: startupsData } = await supabase
+                                    .from('startups')
+                                    .select('id, name, sector')
+                                    .in('id', startupIds);
+                                
+                                if (startupsData) {
+                                    startupsData.forEach((startup: any) => {
+                                        startupMap[startup.id] = { name: startup.name || 'Unknown Startup', sector: startup.sector || 'Unknown' };
+                                    });
+                                }
+                            }
+                            
+                            // Normalize fallback data with fetched user and startup names
+                            const normalized = (fallbackData || []).map((row: any) => ({
+                                recommendation_id: row.id,
+                                startup_name: startupMap[row.startup_id]?.name || 'Unknown Startup',
+                                sector: startupMap[row.startup_id]?.sector || 'Unknown',
+                                compliance_status: `Stage ${row.stage || 1}`,
+                                investment_amount: row.investment_amount,
+                                equity_percentage: row.equity_percentage,
+                                minimum_co_investment: row.minimum_co_investment,
+                                maximum_co_investment: row.maximum_co_investment,
+                                lead_investor_name: userMap[row.listed_by_user_id]?.name || 'Unknown',
+                                lead_investor_email: userMap[row.listed_by_user_id]?.email || null,
+                                advisor_name: '—',
+                                recommended_at: row.created_at,
+                                created_at: row.created_at,
+                                opportunity_id: row.id
+                            }));
+                            setRecommendedOpportunities(normalized);
+                        }
+                    } else {
+                        // Normalize data with lead investor name
+                        console.log('🔍 Normalizing co-investment opportunities data:', data?.length || 0);
+                        const normalized = (data || []).map((row: any) => {
+                            console.log('🔍 Processing opportunity:', {
+                                id: row.id,
+                                startup: row.startup,
+                                listed_by_user: row.listed_by_user,
+                                startup_name: row.startup?.name,
+                                investor_name: row.listed_by_user?.name
+                            });
+                            return {
+                                recommendation_id: row.id,
+                                startup_id: row.startup_id,
+                                startup_name: row.startup?.name || 'Unknown Startup',
+                                sector: row.startup?.sector || 'Unknown',
+                                compliance_status: `Stage ${row.stage || 1}`,
+                                investment_amount: row.investment_amount,
+                                equity_percentage: row.equity_percentage,
+                                minimum_co_investment: row.minimum_co_investment,
+                                maximum_co_investment: row.maximum_co_investment,
+                                lead_investor_name: row.listed_by_user?.name || 'Unknown',
+                                lead_investor_email: row.listed_by_user?.email || null,
+                                advisor_name: '—',
+                                recommended_at: row.created_at,
+                                created_at: row.created_at,
+                                opportunity_id: row.id
+                            };
+                        });
+                        console.log('🔍 Normalized opportunities:', normalized);
+                        setRecommendedOpportunities(normalized);
+                    }
                 } catch (error) {
-                    console.error('Error loading recommended opportunities:', error);
+                    console.error('Error loading co-investment opportunities:', error);
+                    setRecommendedOpportunities([]);
                 }
             }
         };
@@ -522,22 +791,59 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         setWantsCoInvestment(false);
     };
     
-    const handleFavoriteToggle = (pitchId: number) => {
+    const handleFavoriteToggle = async (pitchId: number) => {
+        if (isViewOnly) return; // Prevent favoriting in view-only mode
+        if (!currentUser?.id) {
+            alert('Please log in to favorite startups.');
+            return;
+        }
+
+        const isCurrentlyFavorited = favoritedPitches.has(pitchId);
+        
+        try {
+            if (isCurrentlyFavorited) {
+                // Remove favorite
+                const { error } = await supabase
+                    .from('investor_favorites')
+                    .delete()
+                    .eq('investor_id', currentUser.id)
+                    .eq('startup_id', pitchId);
+                
+                if (error) throw error;
+                
         setFavoritedPitches(prev => {
             const newSet = new Set(prev);
-            if (newSet.has(pitchId)) {
                 newSet.delete(pitchId);
+                    return newSet;
+                });
             } else {
+                // Add favorite
+                const { error } = await supabase
+                    .from('investor_favorites')
+                    .insert([{
+                        investor_id: currentUser.id,
+                        startup_id: pitchId
+                    }]);
+                
+                if (error) throw error;
+                
+                setFavoritedPitches(prev => {
+                    const newSet = new Set(prev);
                 newSet.add(pitchId);
-            }
             return newSet;
         });
+            }
+        } catch (error) {
+            console.error('Error toggling favorite:', error);
+            alert('Failed to update favorite. Please try again.');
+        }
     };
 
     // Due diligence payment flow removed
 
     // Handle editing offers
     const handleEditOffer = (offer: InvestmentOffer) => {
+        if (isViewOnly) return; // Prevent editing in view-only mode
         setSelectedOffer(offer);
         setEditOfferAmount(offer.offerAmount.toString());
         setEditOfferEquity(offer.equityPercentage.toString());
@@ -561,6 +867,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     };
 
     const handleCancelOffer = (offerId: number) => {
+        if (isViewOnly) return; // Prevent canceling in view-only mode
         if (onCancelOffer && confirm('Are you sure you want to cancel this offer?')) {
             onCancelOffer(offerId);
         }
@@ -709,98 +1016,90 @@ const InvestorView: React.FC<InvestorViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header Section - Above Tabs */}
-      <Card className="bg-white border-gray-200">
-        <div className="flex items-center justify-between py-1 px-2">
-          <div className="flex items-center space-x-1">
-            {/* Three-dot Menu - Same as CA/CS */}
-            <div className="relative profile-menu">
+      {/* Header */}
+      <div className="bg-white shadow">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-6">
+            <div className="flex items-center">
+              <h1 className="text-2xl font-bold text-gray-900">Investor Dashboard</h1>
+            </div>
+            <div className="flex items-center">
+              {!isViewOnly && (
               <button
                 onClick={() => {
-                  console.log('🔍 InvestorView: Menu button clicked, setting showProfilePage to true');
+                  console.log('🔍 InvestorView: Profile button clicked, setting showProfilePage to true');
                   setShowProfilePage(true);
                 }}
-                className="p-2 rounded-full hover:bg-slate-100 transition-colors"
-                aria-label="Profile menu"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg transition-all duration-200 font-medium"
+                title="View Profile"
               >
-                <Menu className="h-6 w-6 text-slate-600" />
+                <User className="h-5 w-5" />
+                <span>Profile</span>
               </button>
+              )}
             </div>
-            
-            <div className="flex-shrink-0">
-              <AdvisorAwareLogo 
-                currentUser={currentUser}
-                className="h-24 w-24 sm:h-28 sm:w-28 object-contain cursor-pointer hover:opacity-80 transition-opacity"
-                showText={true}
-                textClassName="text-xl sm:text-2xl font-semibold text-gray-800"
-              />
             </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <div className="text-right">
-              <p className="text-sm font-medium text-gray-500">Investor Code:</p>
-              <div className="flex items-center space-x-2">
-                <span className="px-3 py-2 bg-blue-100 text-blue-800 rounded-lg font-mono text-sm font-semibold">
-                  {(currentUser as any)?.investor_code || (currentUser as any)?.investorCode || 'INV-XXXXXX'}
-                </span>
               </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Users className="h-6 w-6 text-purple-600" />
-              <span className="text-gray-700 font-medium">Investor</span>
-            </div>
-          </div>
-        </div>
-      </Card>
 
-       {/* Tab Navigation */}
-        <div className="border-b border-slate-200">
-            <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+      {/* Navigation Tabs */}
+      <div className="bg-white rounded-lg shadow mb-6">
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex flex-wrap space-x-2 sm:space-x-8 px-4 sm:px-6 overflow-x-auto" aria-label="Tabs">
                  <button
                     onClick={() => setActiveTab('dashboard')}
-                    className={`${
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                         activeTab === 'dashboard'
-                        ? 'border-brand-primary text-brand-primary'
-                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                    } flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
-                >
-                    <LayoutGrid className="h-5 w-5" />
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <LayoutGrid className="h-5 w-5 mr-2" />
                     Dashboard
+              </div>
                 </button>
                 <button
                     onClick={() => setActiveTab('reels')}
-                    className={`${
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                         activeTab === 'reels'
-                        ? 'border-brand-primary text-brand-primary'
-                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                    } flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
-                >
-                    <Film className="h-5 w-5" />
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <Film className="h-5 w-5 mr-2" />
                    Discover Pitches
+              </div>
                 </button>
                 <button
                     onClick={() => setActiveTab('offers')}
-                    className={`${
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                         activeTab === 'offers'
-                        ? 'border-brand-primary text-brand-primary'
-                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                    } flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
-                >
-                    <DollarSign className="h-5 w-5" />
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <DollarSign className="h-5 w-5 mr-2" />
                     Offers
+              </div>
                 </button>
                 <button
                     onClick={() => setActiveTab('recommendations')}
-                    className={`${
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                         activeTab === 'recommendations'
-                        ? 'border-brand-primary text-brand-primary'
-                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                    } flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
-                >
-                    <Star className="h-5 w-5" />
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <Star className="h-5 w-5 mr-2" />
                     Recommendations
+              </div>
                 </button>
             </nav>
+        </div>
         </div>
 
       {activeTab === 'dashboard' && (
@@ -1174,6 +1473,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                         
                       {/* Enhanced Action Buttons */}
                       <div className="flex items-center gap-4 mt-6">
+                        {!isViewOnly && (
                         <Button
                           size="sm"
                           variant="secondary"
@@ -1186,6 +1486,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         >
                           <Heart className={`h-5 w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
                         </Button>
+                        )}
 
                         <Button
                           size="sm"
@@ -1336,7 +1637,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStageStatusDisplay(offer).color}`}>
                           {getStageStatusDisplay(offer).text}
                         </span>
-                        {((offer as any).stage || 1) === 1 && (
+                        {((offer as any).stage || 1) === 1 && !isViewOnly && (
                           <>
                             <Button 
                               size="sm" 
@@ -1356,7 +1657,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             </Button>
                           </>
                         )}
-                        {((offer as any).stage || 1) >= 4 && (
+                        {((offer as any).stage || 1) >= 4 && !isViewOnly && (
                           <div className="flex gap-2">
                             {offer.contact_details_revealed ? (
                               <Button 
@@ -1387,6 +1688,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                               Next Steps
                             </Button>
                           </div>
+                        )}
+                        {isViewOnly && ((offer as any).stage || 1) >= 4 && (
+                          <span className="text-xs text-slate-500 italic">View Only - Actions Disabled</span>
                         )}
                       </div>
                     </div>
@@ -1592,82 +1896,159 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                   <p className="text-slate-500">Loading recommendations...</p>
                 </div>
               ) : recommendations.length > 0 ? (
-                <div className="space-y-4">
-                  {recommendations.map((rec) => (
-                    <div key={rec.id} className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h4 className="text-lg font-semibold text-slate-800">{rec.startup_name}</h4>
-                            <Badge variant="secondary" className="bg-purple-100 text-purple-800">
+                <div className="space-y-3">
+                  {recommendations.map((rec) => {
+                    // Find the startup object to get full details
+                    const startup = startups.find(s => s.name === rec.startup_name || s.id === rec.startup_id);
+                    const websiteUrl = startup?.websiteUrl || startup?.domain || '';
+                    
+                    // Get ask amount - priority: rec.investment_amount > rec.recommended_deal_value > startup.investmentValue > 0 (fallback)
+                    let askAmount = 0;
+                    if (rec.investment_amount !== undefined && rec.investment_amount !== null && Number(rec.investment_amount) > 0) {
+                      askAmount = Number(rec.investment_amount);
+                    } else if (rec.recommended_deal_value !== undefined && rec.recommended_deal_value !== null && Number(rec.recommended_deal_value) > 0) {
+                      askAmount = Number(rec.recommended_deal_value);
+                    } else if (startup?.investmentValue !== undefined && startup?.investmentValue !== null && Number(startup.investmentValue) > 0) {
+                      askAmount = Number(startup.investmentValue);
+                    }
+                    
+                    // Get equity - priority: rec.equity_percentage > startup.equityAllocation > 0 (fallback)
+                    let equity = 0;
+                    if (rec.equity_percentage !== undefined && rec.equity_percentage !== null && Number(rec.equity_percentage) > 0) {
+                      equity = Number(rec.equity_percentage);
+                    } else if (startup?.equityAllocation !== undefined && startup?.equityAllocation !== null && Number(startup.equityAllocation) > 0) {
+                      equity = Number(startup.equityAllocation);
+                    }
+                    
+                    const currency = startup?.currency || 'USD';
+                    const valuation = startup?.currentValuation || rec.startup_valuation || 0;
+                    
+                    return (
+                    <div key={rec.id || rec.recommendation_id} className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-all bg-white">
+                      <div className="flex items-start gap-4">
+                        {/* Startup Logo */}
+                        {startup?.logoUrl ? (
+                          <div className="flex-shrink-0">
+                            <img 
+                              src={startup.logoUrl} 
+                              alt={rec.startup_name}
+                              className="h-14 w-14 rounded-lg object-cover border border-gray-200"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex-shrink-0 h-14 w-14 rounded-lg bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center border border-gray-200">
+                            <Star className="h-7 w-7 text-purple-400" />
+                          </div>
+                        )}
+                        
+                        {/* Startup Details */}
+                        <div className="flex-1 min-w-0">
+                          {/* Startup Name and Sector */}
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="text-lg font-bold text-slate-900">{rec.startup_name}</h4>
+                            {rec.startup_sector && (
+                              <Badge variant="secondary" className="bg-purple-100 text-purple-800 text-xs">
                               {rec.startup_sector}
                             </Badge>
+                            )}
                           </div>
-                          <p className="text-sm text-slate-600 mb-2">
-                            <strong>Recommended by:</strong> {rec.advisor_name}
-                          </p>
-                          <p className="text-sm text-slate-600 mb-2">
-                            <strong>Valuation:</strong> {formatCurrency(rec.startup_valuation || 0)}
-                          </p>
-                          {(rec.recommended_deal_value || rec.investment_amount) > 0 && (
-                            <p className="text-sm text-slate-600 mb-2">
-                              <strong>Investment Amount:</strong> {formatCurrency(rec.recommended_deal_value || rec.investment_amount)}
-                            </p>
+                          
+                          {/* Domain/Website */}
+                          {websiteUrl && (
+                            <div className="mb-2">
+                              <a 
+                                href={websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
+                              >
+                                <span>{websiteUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')}</span>
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                              </a>
+                            </div>
                           )}
-                          {rec.recommendation_notes && (
-                            <p className="text-sm text-slate-600 mb-3">
-                              <strong>Notes:</strong> {rec.recommendation_notes}
-                            </p>
-                          )}
-                          <div className="flex items-center gap-4 text-xs text-slate-500">
-                            <span>Status: {rec.status || rec.compliance_status}</span>
-                            <span>{new Date((rec.created_at || rec.recommended_at)).toLocaleDateString()}</span>
+                          
+                          {/* Investment Details Grid */}
+                          <div className="grid grid-cols-2 gap-3 mb-2">
+                            {/* Ask Amount */}
+                            <div className="bg-blue-50 rounded-lg p-2 border border-blue-100">
+                              <div className="text-xs font-medium text-blue-600 mb-0.5">Ask Amount</div>
+                              <div className="text-sm font-bold text-blue-900">
+                                {askAmount > 0 ? formatCurrency(askAmount, currency) : 'Not specified'}
+                              </div>
+                            </div>
+                            
+                            {/* Equity % */}
+                            <div className="bg-green-50 rounded-lg p-2 border border-green-100">
+                              <div className="text-xs font-medium text-green-600 mb-0.5">Equity %</div>
+                              <div className="text-sm font-bold text-green-900">
+                                {equity > 0 ? `${equity}%` : 'Not specified'}
+                              </div>
+                            </div>
                           </div>
+                          
+                          {/* Additional Details */}
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                            {valuation > 0 && (
+                              <div>
+                                <span className="font-medium">Valuation:</span>{' '}
+                                <span className="text-slate-700">{formatCurrency(valuation)}</span>
+                              </div>
+                            )}
+                            {rec.advisor_name && rec.advisor_name !== '—' && (
+                              <div>
+                                <span className="font-medium">Recommended by:</span>{' '}
+                                <span className="text-slate-700">{rec.advisor_name}</span>
+                          </div>
+                            )}
+                            {startup?.description && (
+                              <div className="w-full mt-1 text-xs text-slate-500 line-clamp-2">
+                                {startup.description}
                         </div>
-                        <div className="flex gap-2">
+                            )}
+                          </div>
+                          
+                          {/* Advisor Notes if available */}
+                          {rec.recommendation_notes && (
+                            <div className="mt-2 bg-amber-50 rounded-lg p-2 border border-amber-100">
+                              <div className="text-xs font-medium text-amber-700 mb-1">Advisor Notes</div>
+                              <p className="text-xs text-amber-900 line-clamp-2">{rec.recommendation_notes}</p>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* View Button */}
+                        <div className="flex-shrink-0">
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => {
-                              const startup = startups.find(s => s.name === rec.startup_name);
-                              if (startup) onViewStartup(startup);
-                            }}
-                          >
-                            <Eye className="h-4 w-4 mr-1" />
-                            View
-                          </Button>
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => {
-                              const startup = startups.find(s => s.name === rec.startup_name);
                               if (startup) {
-                                const activeStartup: ActiveFundraisingStartup = {
-                                  id: startup.id,
-                                  name: startup.name,
-                                  sector: startup.sector,
-                                  investmentValue: rec.recommended_deal_value || rec.investment_amount || 0,
-                                  equityAllocation: rec.equity_percentage || 0,
-                                  complianceStatus: startup.complianceStatus,
-                                  videoUrl: startup.videoUrl,
-                                  logoUrl: startup.logoUrl,
-                                  description: startup.description,
-                                  currentValuation: rec.startup_valuation || startup.currentValuation || 0
-                                };
-                                setSelectedOpportunity(activeStartup);
-                                setIsOfferModalOpen(true);
+                                // Switch to reels tab (Discover Pitches) and set the selected pitch
+                                setActiveTab('reels');
+                                setSelectedPitchId(startup.id);
+                                setPlayingVideoId(startup.id);
+                                // Scroll to top to show the startup card
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
                               } else {
-                                alert('Startup details not found locally. Please open the startup from Discover and try again.');
+                                alert('Startup details not found. Please try again later.');
                               }
                             }}
+                            className="whitespace-nowrap"
                           >
-                            <PlusCircle className="h-4 w-4 mr-1" />
-                            Make Offer
+                            <Eye className="h-4 w-4 mr-1" />
+                            View in Discover
                           </Button>
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
               <div className="text-center py-12">
@@ -1689,7 +2070,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               </svg>
               Co-Investment Opportunities
               <span className="text-sm font-normal text-slate-500">
-                {currentUser?.investment_advisor_code ? '(Approved by your Investment Advisor)' : '(All available opportunities)'}
+                ({recommendedOpportunities.length} active opportunities)
               </span>
             </h3>
             <div className="overflow-x-auto">
@@ -1697,18 +2078,19 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Lead Investor</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Investment Amount</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Recommended By</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Date Recommended</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Equity %</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">View in Discover</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
                   {recommendedOpportunities.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-4 text-center text-slate-500">
+                      <td colSpan={8} className="px-6 py-4 text-center text-slate-500">
                         No co-investment opportunities available yet
                       </td>
                     </tr>
@@ -1718,6 +2100,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
                           {opportunity.startup_name}
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">
+                          {opportunity.lead_investor_name || 'Unknown'}
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                           {opportunity.sector}
                         </td>
@@ -1725,20 +2110,60 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           {opportunity.compliance_status}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                          {formatCurrency(opportunity.investment_amount)}
+                          {formatCurrency(opportunity.investment_amount || 0)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                          {opportunity.advisor_name}
+                          {opportunity.equity_percentage ? `${opportunity.equity_percentage}%` : '—'}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                          {new Date(opportunity.recommended_at).toLocaleDateString()}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button
+                            onClick={() => {
+                              // Find the startup in activeFundraisingStartups to get the correct pitch ID
+                              const matchedPitch = activeFundraisingStartups.find(pitch => 
+                                pitch.name === opportunity.startup_name || 
+                                pitch.id === opportunity.startup_id
+                              );
+                              
+                              if (matchedPitch) {
+                                // Switch to reels tab and set the pitch ID
+                                setActiveTab('reels');
+                                setSelectedPitchId(matchedPitch.id);
+                                // Scroll to top to ensure the pitch is visible
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              } else {
+                                // If startup not found in active fundraising, just switch to reels tab
+                                setActiveTab('reels');
+                                alert(`Opening discover page. If ${opportunity.startup_name} is not visible, it may not be actively fundraising.`);
+                              }
+                            }}
+                            className="text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
+                          >
+                            <Eye className="h-4 w-4" />
+                            View in Discover
+                          </button>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex gap-2">
                             <button
                               onClick={() => {
-                                // TODO: Implement due diligence request
-                                alert('Due diligence request functionality coming soon!');
+                                const startup = startups.find(s => s.name === opportunity.startup_name);
+                                if (startup) {
+                                  handleDueDiligenceClick({
+                                    id: opportunity.opportunity_id || startup.id,
+                                    name: opportunity.startup_name,
+                                    sector: opportunity.sector,
+                                    investmentValue: opportunity.investment_amount || 0,
+                                    equityAllocation: opportunity.equity_percentage || 0,
+                                    complianceStatus: ComplianceStatus.Pending,
+                                    fundraisingType: 'Seed' as any,
+                                    totalFunding: opportunity.investment_amount || 0,
+                                    createdAt: opportunity.recommended_at || new Date().toISOString(),
+                                    fundraisingId: String(opportunity.opportunity_id),
+                                    isStartupNationValidated: false
+                                  });
+                                } else {
+                                  alert('Due diligence request functionality - startup details not found.');
+                                }
                               }}
                               className="px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full hover:bg-blue-200"
                             >
@@ -1747,14 +2172,26 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             <button
                               onClick={() => {
                                 // Set the selected opportunity and open the offer modal
-                                setSelectedOpportunity({
-                                  id: opportunity.opportunity_id,
-                                  name: opportunity.startup_name,
-                                  investmentValue: opportunity.investment_amount,
-                                  equityAllocation: opportunity.equity_percentage,
-                                  totalFunding: opportunity.investment_amount
-                                });
+                                const startup = startups.find(s => s.name === opportunity.startup_name);
+                                if (startup) {
+                                  const activeStartup: ActiveFundraisingStartup = {
+                                    id: startup.id,
+                                    name: startup.name,
+                                    sector: startup.sector,
+                                    investmentValue: opportunity.investment_amount || 0,
+                                    equityAllocation: opportunity.equity_percentage || 0,
+                                    complianceStatus: startup.complianceStatus,
+                                    fundraisingType: startup.investmentType,
+                                    totalFunding: opportunity.investment_amount || 0,
+                                    createdAt: opportunity.recommended_at || new Date().toISOString(),
+                                    fundraisingId: String(opportunity.opportunity_id),
+                                    isStartupNationValidated: startup.complianceStatus === ComplianceStatus.Compliant
+                                  };
+                                  setSelectedOpportunity(activeStartup);
                                 setIsOfferModalOpen(true);
+                                } else {
+                                  alert('Startup details not found. Please refresh and try again.');
+                                }
                               }}
                               className="px-3 py-1 text-xs bg-green-100 text-green-800 rounded-full hover:bg-green-200"
                             >
@@ -1853,7 +2290,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
 
         {/* Edit Offer Modal */}
         <Modal 
-            isOpen={isEditOfferModalOpen} 
+            isOpen={isEditOfferModalOpen && !isViewOnly} 
             onClose={() => setIsEditOfferModalOpen(false)} 
             title={`Edit Offer for ${selectedOffer?.startupName}`}
         >

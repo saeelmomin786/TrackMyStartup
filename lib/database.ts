@@ -862,8 +862,8 @@ export const investmentService = {
     
     console.log('🔍 Formatted offer for return:', formattedOffer);
     
-    // Handle investment flow logic after creating the offer
-    if (createdOffer && createdOffer.id) {
+    // Trigger flow logic to set proper initial stage and status
+    if (createdOffer?.id) {
       await this.handleInvestmentFlow(createdOffer.id);
     }
     
@@ -1113,6 +1113,12 @@ export const investmentService = {
       }
 
       console.log('✅ Investor advisor approval result:', data);
+      
+      // Trigger flow logic to ensure proper stage progression
+      if (action === 'approve') {
+        await this.handleInvestmentFlow(offerId);
+      }
+      
       return data;
     } catch (error) {
       console.error('Error approving investor advisor offer:', error);
@@ -1134,6 +1140,12 @@ export const investmentService = {
       }
 
       console.log('✅ Startup advisor approval result:', data);
+      
+      // Trigger flow logic to ensure proper stage progression
+      if (action === 'approve') {
+        await this.handleInvestmentFlow(offerId);
+      }
+      
       return data;
     } catch (error) {
       console.error('Error approving startup advisor offer:', error);
@@ -1411,32 +1423,86 @@ export const investmentService = {
         const investorAdvisorCode = offer.investor?.investment_advisor_code;
         if (investorAdvisorCode) {
           console.log(`✅ Investor has advisor code: ${investorAdvisorCode}, keeping at stage 1 for advisor approval`);
+          // Update advisor approval status to pending if not already set
+          if (!offer.investor_advisor_approval_status || offer.investor_advisor_approval_status === 'not_required') {
+            await supabase
+              .from('investment_offers')
+              .update({ investor_advisor_approval_status: 'pending' })
+              .eq('id', offerId);
+          }
           // Keep at stage 1 - will be displayed in investor's advisor dashboard
           return;
         } else {
           console.log(`❌ Investor has no advisor code, moving to stage 2`);
-          // Move to stage 2
-          await this.updateInvestmentOfferStage(offerId, 2);
+          // Check if startup has advisor to determine next stage
+          const startupAdvisorCode = offer.startup?.investment_advisor_code;
+          if (startupAdvisorCode) {
+            // Move to stage 2 (startup advisor approval)
+            await supabase
+              .from('investment_offers')
+              .update({ 
+                stage: 2,
+                investor_advisor_approval_status: 'not_required',
+                startup_advisor_approval_status: 'pending',
+                status: 'pending'
+              })
+              .eq('id', offerId);
+          } else {
+            // Move to stage 3 (startup review, no advisors)
+            await supabase
+              .from('investment_offers')
+              .update({ 
+                stage: 3,
+                investor_advisor_approval_status: 'not_required',
+                startup_advisor_approval_status: 'not_required',
+                status: 'pending'
+              })
+              .eq('id', offerId);
+          }
         }
       }
 
       // Stage 2: Check if startup has investment advisor code
       if (currentStage === 2) {
         const startupAdvisorCode = offer.startup?.investment_advisor_code;
-        if (startupAdvisorCode) {
-          console.log(`✅ Startup has advisor code: ${startupAdvisorCode}, keeping at stage 2 for advisor approval`);
-          // Keep at stage 2 - will be displayed in startup's advisor dashboard
-          return;
-        } else {
-          console.log(`❌ Startup has no advisor code, moving to stage 3`);
-          // Move to stage 3
-          await this.updateInvestmentOfferStage(offerId, 3);
+        // If already at stage 2, check if investor advisor has approved
+        if (offer.investor_advisor_approval_status === 'approved') {
+          if (startupAdvisorCode) {
+            console.log(`✅ Startup has advisor code: ${startupAdvisorCode}, keeping at stage 2 for advisor approval`);
+            // Ensure startup advisor status is pending
+            if (offer.startup_advisor_approval_status !== 'pending') {
+              await supabase
+                .from('investment_offers')
+                .update({ startup_advisor_approval_status: 'pending' })
+                .eq('id', offerId);
+            }
+            // Keep at stage 2 - will be displayed in startup's advisor dashboard
+            return;
+          } else {
+            console.log(`❌ Startup has no advisor code, moving to stage 3`);
+            // Move to stage 3
+            await supabase
+              .from('investment_offers')
+              .update({ 
+                stage: 3,
+                startup_advisor_approval_status: 'not_required',
+                status: 'pending'
+              })
+              .eq('id', offerId);
+          }
         }
       }
 
       // Stage 3: Display to startup (no further automatic progression)
       if (currentStage === 3) {
         console.log(`✅ Offer is at stage 3, ready for startup review`);
+        // Ensure status is pending for startup review
+        if (offer.status !== 'pending' && offer.status !== 'accepted' && offer.status !== 'rejected') {
+          await supabase
+            .from('investment_offers')
+            .update({ status: 'pending' })
+            .eq('id', offerId);
+        }
         // This will be displayed in startup's "Offers Received" table
         return;
       }
@@ -2113,36 +2179,88 @@ export const investmentService = {
 
       // Stage 1: Check if lead investor has investment advisor code
       if (currentStage === 1) {
-        const leadInvestorAdvisorCode = opportunity.lead_investor?.investment_advisor_code_entered;
+        // Get lead investor from listed_by_user_id
+        const { data: leadInvestor } = await supabase
+          .from('users')
+          .select('investment_advisor_code')
+          .eq('id', opportunity.listed_by_user_id)
+          .single();
+        
+        const leadInvestorAdvisorCode = leadInvestor?.investment_advisor_code;
+        
         if (leadInvestorAdvisorCode) {
           console.log(`✅ Lead investor has advisor code: ${leadInvestorAdvisorCode}, keeping at stage 1 for advisor approval`);
+          // Update advisor approval status to pending if not already set
+          if (!opportunity.lead_investor_advisor_approval_status || opportunity.lead_investor_advisor_approval_status === 'not_required') {
+            await supabase
+              .from('co_investment_opportunities')
+              .update({ lead_investor_advisor_approval_status: 'pending' })
+              .eq('id', opportunityId);
+          }
           // Keep at stage 1 - will be displayed in lead investor's advisor dashboard
           return;
         } else {
           console.log(`❌ Lead investor has no advisor code, moving to stage 2`);
-          // Move to stage 2
-          await this.updateCoInvestmentOpportunityStage(opportunityId, 2);
+          // Check if startup has advisor to determine next stage
+          const startupAdvisorCode = opportunity.startup?.investment_advisor_code;
+          if (startupAdvisorCode) {
+            // Move to stage 2 (startup advisor approval)
+            await supabase
+              .from('co_investment_opportunities')
+              .update({ 
+                stage: 2,
+                lead_investor_advisor_approval_status: 'not_required',
+                startup_advisor_approval_status: 'pending'
+              })
+              .eq('id', opportunityId);
+          } else {
+            // Move to stage 3 (startup review, no advisors)
+            await supabase
+              .from('co_investment_opportunities')
+              .update({ 
+                stage: 3,
+                lead_investor_advisor_approval_status: 'not_required',
+                startup_advisor_approval_status: 'not_required'
+              })
+              .eq('id', opportunityId);
+          }
         }
       }
 
       // Stage 2: Check if startup has investment advisor code
       if (currentStage === 2) {
         const startupAdvisorCode = opportunity.startup?.investment_advisor_code;
-        if (startupAdvisorCode) {
-          console.log(`✅ Startup has advisor code: ${startupAdvisorCode}, keeping at stage 2 for advisor approval`);
-          // Keep at stage 2 - will be displayed in startup's advisor dashboard
-          return;
-        } else {
-          console.log(`❌ Startup has no advisor code, moving to stage 3`);
-          // Move to stage 3
-          await this.updateCoInvestmentOpportunityStage(opportunityId, 3);
+        // If already at stage 2, check if lead investor advisor has approved
+        if (opportunity.lead_investor_advisor_approval_status === 'approved') {
+          if (startupAdvisorCode) {
+            console.log(`✅ Startup has advisor code: ${startupAdvisorCode}, keeping at stage 2 for advisor approval`);
+            // Ensure startup advisor status is pending
+            if (opportunity.startup_advisor_approval_status !== 'pending') {
+              await supabase
+                .from('co_investment_opportunities')
+                .update({ startup_advisor_approval_status: 'pending' })
+                .eq('id', opportunityId);
+            }
+            // Keep at stage 2 - will be displayed in startup's advisor dashboard
+            return;
+          } else {
+            console.log(`❌ Startup has no advisor code, moving to stage 3`);
+            // Move to stage 3
+            await supabase
+              .from('co_investment_opportunities')
+              .update({ 
+                stage: 3,
+                startup_advisor_approval_status: 'not_required'
+              })
+              .eq('id', opportunityId);
+          }
         }
       }
 
       // Stage 3: Display to startup (no further automatic progression)
       if (currentStage === 3) {
         console.log(`✅ Co-investment opportunity is at stage 3, ready for startup review`);
-        // This will be displayed in startup's "Offers Received" table
+        // This will be displayed in startup's dashboard
         return;
       }
 
@@ -2185,6 +2303,12 @@ export const investmentService = {
       }
 
       console.log(`✅ Lead investor advisor ${action} for co-investment opportunity ${opportunityId}`);
+      
+      // Trigger flow logic to ensure proper stage progression
+      if (action === 'approve') {
+        await this.handleCoInvestmentFlow(opportunityId);
+      }
+      
       return data;
     } catch (error) {
       console.error('Error in approveLeadInvestorAdvisorCoInvestment:', error);
@@ -2206,6 +2330,12 @@ export const investmentService = {
       }
 
       console.log(`✅ Startup advisor ${action} for co-investment opportunity ${opportunityId}`);
+      
+      // Trigger flow logic to ensure proper stage progression
+      if (action === 'approve') {
+        await this.handleCoInvestmentFlow(opportunityId);
+      }
+      
       return data;
     } catch (error) {
       console.error('Error in approveStartupAdvisorCoInvestment:', error);

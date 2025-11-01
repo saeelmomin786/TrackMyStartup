@@ -368,6 +368,84 @@ export function getCurrencyForCountryCode(countryCode: string): string {
  * @param countryCode The country code (e.g., 'AT', 'IN', 'US')
  * @returns Object with caTitle and csTitle
  */
+/**
+ * Converts country code to full country name for display
+ * @param countryCodeOrName The country code (e.g., "IN") or country name (e.g., "India")
+ * @returns The full country name for display
+ */
+export function normalizeCountryNameForDisplay(countryCodeOrName: string | null | undefined): string {
+  if (!countryCodeOrName) return 'Unknown';
+  
+  // Country code to full name mapping
+  const codeToNameMap: Record<string, string> = {
+    'US': 'United States',
+    'IN': 'India',
+    'GB': 'United Kingdom',
+    'UK': 'United Kingdom',
+    'CA': 'Canada',
+    'AU': 'Australia',
+    'DE': 'Germany',
+    'FR': 'France',
+    'SG': 'Singapore',
+    'JP': 'Japan',
+    'CN': 'China',
+    'BR': 'Brazil',
+    'MX': 'Mexico',
+    'ZA': 'South Africa',
+    'NG': 'Nigeria',
+    'KE': 'Kenya',
+    'EG': 'Egypt',
+    'AE': 'UAE',
+    'SA': 'Saudi Arabia',
+    'IL': 'Israel',
+    'AT': 'Austria',
+    'HK': 'Hong Kong',
+    'NL': 'Netherlands',
+    'FI': 'Finland',
+    'GR': 'Greece',
+    'VN': 'Vietnam',
+    'MM': 'Myanmar',
+    'AZ': 'Azerbaijan',
+    'RS': 'Serbia',
+    'MC': 'Monaco',
+    'PK': 'Pakistan',
+    'PH': 'Philippines',
+    'JO': 'Jordan',
+    'GE': 'Georgia',
+    'BY': 'Belarus',
+    'AM': 'Armenia',
+    'BT': 'Bhutan',
+    'LK': 'Sri Lanka',
+    'RU': 'Russia',
+    'IT': 'Italy',
+    'ES': 'Spain',
+    'PT': 'Portugal',
+    'BE': 'Belgium',
+    'CH': 'Switzerland',
+    'SE': 'Sweden',
+    'NO': 'Norway',
+    'DK': 'Denmark',
+    'IE': 'Ireland',
+    'NZ': 'New Zealand',
+    'KR': 'South Korea',
+    'TH': 'Thailand',
+    'MY': 'Malaysia',
+    'ID': 'Indonesia',
+    'BD': 'Bangladesh',
+    'NP': 'Nepal'
+  };
+  
+  // Check if it's already a full country name (exists in values)
+  const isFullName = Object.values(codeToNameMap).includes(countryCodeOrName);
+  if (isFullName) {
+    return countryCodeOrName;
+  }
+  
+  // Try to find by code (case-insensitive)
+  const upperCode = countryCodeOrName.toUpperCase();
+  return codeToNameMap[upperCode] || countryCodeOrName;
+}
+
 export function getCountryProfessionalTitles(countryCode: string): { caTitle: string; csTitle: string } {
   const professionalTitles: Record<string, { caTitle: string; csTitle: string }> = {
     'AT': { caTitle: 'Tax Advisor', csTitle: 'Management' }, // Austria

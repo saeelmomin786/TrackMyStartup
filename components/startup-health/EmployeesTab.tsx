@@ -134,6 +134,14 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     const [isLedgerLoading, setIsLedgerLoading] = useState<boolean>(false);
     const [showLedger, setShowLedger] = useState<boolean>(false);
     
+    // Contract file/URL state for add employee form
+    const [contractFile, setContractFile] = useState<File | null>(null);
+    const [contractUrl, setContractUrl] = useState<string>('');
+    
+    // Contract file/URL state for edit employee form
+    const [editContractFile, setEditContractFile] = useState<File | null>(null);
+    const [editContractUrl, setEditContractUrl] = useState<string>('');
+    
     // Allow editing for Startup/Admin; also allow when role is not yet loaded
     const canEdit = ((userRole === 'Startup' || userRole === 'Admin' || !userRole) && !isViewOnly);
 
@@ -480,7 +488,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 esopPerAllocation: esopPerAllocationValue || 0,
                 pricePerShare: pricePerShare || 0,
                 numberOfShares: calculateNumberOfShares(esopAllocationValue || 0, pricePerShare || 0),
-                contractUrl: ''
+                contractUrl: '' // Will be set after employee creation if file is provided
             };
 
             console.log('📝 Employee data to create:', employeeData);
@@ -491,20 +499,29 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             const created = await employeesService.addEmployee(startup.id, employeeData);
             console.log('✅ Employee created successfully:', created);
 
-            // If a contract file was provided, upload and update the record
-            const contractInput = (e.target as HTMLFormElement).elements.namedItem('contract') as HTMLInputElement | null;
-            const file = contractInput?.files && contractInput.files[0] ? contractInput.files[0] : null;
+            // Handle contract: either file OR URL, not both
+            let finalContractUrl = '';
             
-            if (file && created?.id) {
+            if (contractFile && created?.id) {
                 console.log('📁 Contract file found, uploading...');
-                const upload = await storageService.uploadEmployeeContract(file, String(startup.id), String(created.id));
+                const upload = await storageService.uploadEmployeeContract(contractFile, String(startup.id), String(created.id));
                 console.log('📤 Upload result:', upload);
                 
                 if (upload.success && upload.url) {
-                    console.log('🔄 Updating employee with contract URL...');
-                    await employeesService.updateEmployee(created.id, { contractUrl: upload.url });
-                    console.log('✅ Employee updated with contract URL');
+                    finalContractUrl = upload.url;
+                    console.log('✅ Contract file uploaded:', finalContractUrl);
                 }
+            } else if (contractUrl && contractUrl.trim()) {
+                // Use cloud drive URL if provided (and no file was uploaded)
+                finalContractUrl = contractUrl.trim();
+                console.log('✅ Using cloud drive URL:', finalContractUrl);
+            }
+            
+            // Update employee with contract URL if provided
+            if (finalContractUrl && created?.id) {
+                console.log('🔄 Updating employee with contract URL...');
+                await employeesService.updateEmployee(created.id, { contractUrl: finalContractUrl });
+                console.log('✅ Employee updated with contract URL');
             }
 
             // Refresh financial records to ensure monthly expenditure is updated
@@ -526,6 +543,8 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             setEsopAllocationDraft('');
             setEsopPerAllocationDraft('0');
             setAllocationTypeDraft('one-time');
+            setContractFile(null);
+            setContractUrl('');
             setFormError(null);
             
         } catch (err) {
@@ -634,6 +653,9 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             pricePerShare: emp.pricePerShare ?? pricePerShare,
             numberOfShares: emp.numberOfShares ?? calculateNumberOfShares(current?.esopAllocation ?? emp.esopAllocation, emp.pricePerShare ?? pricePerShare),
         });
+        // Set existing contract URL and clear file
+        setEditContractUrl(emp.contractUrl || '');
+        setEditContractFile(null);
 
         // Then try to refine from latest increment if table exists
         try {
@@ -743,16 +765,29 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 } as any);
             }
 
-            // Optional: handle contract upload if a new file is provided
-            const contractInput = document.getElementById('edit-employee-contract') as HTMLInputElement | null;
-            const file = contractInput?.files && contractInput.files[0] ? contractInput.files[0] : null;
-            if (file) {
-                const upload = await storageService.uploadEmployeeContract(file, String(startup.id), String(editingEmployee.id));
+            // Handle contract: either file OR URL, not both
+            let finalContractUrl = editingEmployee.contractUrl || '';
+            
+            if (editContractFile) {
+                console.log('📁 Edit: Contract file found, uploading...');
+                const upload = await storageService.uploadEmployeeContract(editContractFile, String(startup.id), String(editingEmployee.id));
                 if (upload.success && upload.url) {
-                    await employeesService.updateEmployee(editingEmployee.id, { contractUrl: upload.url } as any);
+                    finalContractUrl = upload.url;
+                    console.log('✅ Edit: Contract file uploaded:', finalContractUrl);
                 }
+            } else if (editContractUrl && editContractUrl.trim()) {
+                // Use cloud drive URL if provided (and no file was uploaded)
+                finalContractUrl = editContractUrl.trim();
+                console.log('✅ Edit: Using cloud drive URL:', finalContractUrl);
+            }
+            
+            // Update contract URL if changed
+            if (finalContractUrl && finalContractUrl !== editingEmployee.contractUrl) {
+                await employeesService.updateEmployee(editingEmployee.id, { contractUrl: finalContractUrl } as any);
             }
             setEditingEmployee(null);
+            setEditContractFile(null);
+            setEditContractUrl('');
             await loadData();
         } catch (err) {
             console.error('Error updating employee:', err);
@@ -1117,7 +1152,12 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             {/* Add Employee button moved to Employee List header */}
 
             {/* Add Employee Modal */}
-            <SimpleModal isOpen={isEditing} onClose={() => { setIsEditing(false); setFormError(null); }} title="Add Employee" width="800px">
+            <SimpleModal isOpen={isEditing} onClose={() => { 
+                setIsEditing(false); 
+                setFormError(null);
+                setContractFile(null);
+                setContractUrl('');
+            }} title="Add Employee" width="800px">
                 {formError && (
                     <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded">
                         <div className="flex items-center">
@@ -1208,19 +1248,18 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             placeholder="Auto-calculated"
                         />
                         <CloudDriveInput
-                            value=""
+                            value={contractUrl}
                             onChange={(url) => {
-                                // Store cloud drive URL in a hidden input for form submission
-                                const hiddenInput = document.getElementById('contract-url') as HTMLInputElement;
-                                if (hiddenInput) hiddenInput.value = url;
+                                // If URL is provided, clear the file and update URL
+                                setContractUrl(url);
+                                setContractFile(null);
                             }}
                             onFileSelect={(file) => {
-                                // Handle file selection for form submission
-                                const fileInput = document.getElementById('employee-contract') as HTMLInputElement;
-                                if (fileInput) {
-                                    const dataTransfer = new DataTransfer();
-                                    dataTransfer.items.add(file);
-                                    fileInput.files = dataTransfer.files;
+                                console.log('📥 Employee contract file selected:', file?.name);
+                                if (file) {
+                                    setContractFile(file);
+                                    // Clear URL when file is selected
+                                    setContractUrl('');
                                 }
                             }}
                             placeholder="Paste your cloud drive link here..."
@@ -1230,6 +1269,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             documentType="employee contract"
                             showPrivacyMessage={false}
                         />
+                        {contractFile && (
+                            <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                                📄 File selected: {contractFile.name} ({(contractFile.size / 1024 / 1024).toFixed(2)} MB)
+                            </div>
+                        )}
                         <input type="hidden" id="contract-url" name="contract-url" />
                         <div className="flex items-end pt-5 col-span-1 md:col-span-2 justify-end">
                             <Button type="submit" className="bg-blue-600 text-white">Save</Button>
@@ -1556,7 +1600,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             {editingEmployee && (
                 <SimpleModal
                     isOpen={!!editingEmployee}
-                    onClose={() => setEditingEmployee(null)}
+                    onClose={() => {
+                        setEditingEmployee(null);
+                        setEditContractFile(null);
+                        setEditContractUrl('');
+                    }}
                     title={`Edit Employee - ${editingEmployee.name}`}
                     width="800px"
                 >
@@ -1607,19 +1655,18 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             placeholder="Auto-calculated"
                         />
                         <CloudDriveInput
-                            value=""
+                            value={editContractUrl}
                             onChange={(url) => {
-                                // Store cloud drive URL for edit form
-                                const hiddenInput = document.getElementById('edit-contract-url') as HTMLInputElement;
-                                if (hiddenInput) hiddenInput.value = url;
+                                // If URL is provided, clear the file and update URL
+                                setEditContractUrl(url);
+                                setEditContractFile(null);
                             }}
                             onFileSelect={(file) => {
-                                // Handle file selection for edit form
-                                const fileInput = document.getElementById('edit-employee-contract') as HTMLInputElement;
-                                if (fileInput) {
-                                    const dataTransfer = new DataTransfer();
-                                    dataTransfer.items.add(file);
-                                    fileInput.files = dataTransfer.files;
+                                console.log('📥 Edit: Employee contract file selected:', file?.name);
+                                if (file) {
+                                    setEditContractFile(file);
+                                    // Clear URL when file is selected
+                                    setEditContractUrl('');
                                 }
                             }}
                             placeholder="Paste your cloud drive link here..."
@@ -1629,6 +1676,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             documentType="employee contract"
                             showPrivacyMessage={false}
                         />
+                        {editContractFile && (
+                            <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                                📄 File selected: {editContractFile.name} ({(editContractFile.size / 1024 / 1024).toFixed(2)} MB)
+                            </div>
+                        )}
                         <input type="hidden" id="edit-contract-url" name="edit-contract-url" />
                         <div className="flex justify-end gap-2 pt-2 md:col-span-2">
                             <Button variant="outline" onClick={() => setEditingEmployee(null)}>Cancel</Button>

@@ -4,7 +4,7 @@ import { complianceRulesIntegrationService, IntegratedComplianceTask } from '../
 import { complianceService, ComplianceUpload } from '../../lib/complianceService';
 import { supabase } from '../../lib/supabase';
 import { messageService } from '../../lib/messageService';
-import { getCountryProfessionalTitles } from '../../lib/utils';
+import { getCountryProfessionalTitles, normalizeCountryNameForDisplay } from '../../lib/utils';
 import { UploadCloud, Download, Trash2, Eye, X, CheckCircle, AlertCircle, Clock, FileText, Calendar, User } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
@@ -622,16 +622,31 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
         const groups: { [entityName: string]: IntegratedComplianceTask[] } = {};
         const expectedEntities = new Set<string>();
         
-        // Build expected entity names
+        // Helper function to normalize entity display name (handle country code variations)
+        const normalizeEntityName = (entityName: string): string => {
+            // Extract country code/name from entity display name
+            // Format: "Parent Company (IN)" or "Parent Company (India)" or "Subsidiary 0 (US)" etc.
+            const match = entityName.match(/^(.+?)\s*\((.+?)\)$/);
+            if (match) {
+                const [, entityType, country] = match;
+                const normalizedCountry = normalizeCountryNameForDisplay(country);
+                return `${entityType} (${normalizedCountry})`;
+            }
+            return entityName; // Return as-is if pattern doesn't match
+        };
+        
+        // Build expected entity names with normalized country names
         if (startup.country_of_registration) {
-            expectedEntities.add(`Parent Company (${startup.country_of_registration})`);
+            const normalizedCountry = normalizeCountryNameForDisplay(startup.country_of_registration);
+            expectedEntities.add(`Parent Company (${normalizedCountry})`);
         }
         
         // Add subsidiaries from profile data
         if (profileData?.subsidiaries) {
             profileData.subsidiaries.forEach((sub: any, index: number) => {
                 if (sub.country) {
-                    expectedEntities.add(`Subsidiary ${index} (${sub.country})`);
+                    const normalizedCountry = normalizeCountryNameForDisplay(sub.country);
+                    expectedEntities.add(`Subsidiary ${index} (${normalizedCountry})`);
                 }
             });
         }
@@ -640,7 +655,8 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
         if (profileData?.internationalOps) {
             profileData.internationalOps.forEach((op: any, index: number) => {
                 if (op.country) {
-                    expectedEntities.add(`International Operation ${index} (${op.country})`);
+                    const normalizedCountry = normalizeCountryNameForDisplay(op.country);
+                    expectedEntities.add(`International Operation ${index} (${normalizedCountry})`);
                 }
             });
         }
@@ -650,18 +666,21 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
         console.log('🔍 Profile data subsidiaries:', profileData?.subsidiaries);
         console.log('🔍 Startup country_of_registration:', startup.country_of_registration);
         
-        // Group tasks by entity
+        // Group tasks by entity with normalized names
         for (const t of complianceTasks) {
+            // Normalize the entity display name to handle "IN" vs "India" variations
+            const normalizedEntityName = normalizeEntityName(t.entityDisplayName);
+            
             // TEMPORARY: Disable filtering to see all tasks
             // TODO: Fix entity name matching
-            // if (expectedEntities.size > 0 && !expectedEntities.has(t.entityDisplayName)) {
-            //     console.log('🔍 Skipping task with entityDisplayName:', t.entityDisplayName, 'as it\'s not in expected entities');
+            // if (expectedEntities.size > 0 && !expectedEntities.has(normalizedEntityName)) {
+            //     console.log('🔍 Skipping task with entityDisplayName:', t.entityDisplayName, 'normalized to:', normalizedEntityName, 'as it\'s not in expected entities');
             //     continue; // Skip stale entities
             // }
-            if (!groups[t.entityDisplayName]) groups[t.entityDisplayName] = [];
-            groups[t.entityDisplayName].push({
+            if (!groups[normalizedEntityName]) groups[normalizedEntityName] = [];
+            groups[normalizedEntityName].push({
                 entityIdentifier: t.entityIdentifier,
-                entityDisplayName: t.entityDisplayName,
+                entityDisplayName: normalizedEntityName, // Use normalized name
                 year: t.year,
                 task: t.task,
                 taskId: t.taskId,

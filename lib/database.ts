@@ -613,14 +613,39 @@ export const investmentService = {
     console.log('Trying to reference investment_id:', offerData.investment_id);
     
     // First, check if the investment_id exists in new_investments table
-    const { data: investmentCheck, error: checkError } = await supabase
-      .from('new_investments')
-      .select('id')
-      .eq('id', offerData.investment_id)
-      .single();
+    let investmentCheck = null;
+    let checkError = null;
+    
+    try {
+      const result = await supabase
+        .from('new_investments')
+        .select('id')
+        .eq('id', offerData.investment_id)
+        .single();
+      
+      investmentCheck = result.data;
+      checkError = result.error;
+    } catch (err) {
+      checkError = err;
+    }
+    
+    // Also check if this ID is actually a startup ID (for backward compatibility)
+    let isStartupId = false;
+    if (checkError || !investmentCheck) {
+      const { data: startupCheck } = await supabase
+        .from('startups')
+        .select('id, name')
+        .eq('id', offerData.investment_id)
+        .single();
+      
+      if (startupCheck) {
+        isStartupId = true;
+        console.log('Investment ID is actually a startup ID, will create/find corresponding investment record');
+      }
+    }
     
     if (checkError || !investmentCheck) {
-      console.error('Investment not found in new_investments table:', offerData.investment_id);
+      console.log('Investment not found in new_investments table by ID:', offerData.investment_id);
       
       // Try to find a matching investment by name instead
       const { data: investmentByName, error: nameError } = await supabase
@@ -630,8 +655,88 @@ export const investmentService = {
         .single();
       
       if (nameError || !investmentByName) {
-        console.error('Investment not found by name either:', offerData.startup_name);
-        throw new Error(`Investment "${offerData.startup_name}" not found in new_investments table. Please run the POPULATE_NEW_INVESTMENTS_TABLE.sql script to populate the table.`);
+        console.log('Investment not found by name either, attempting to create from startup data:', offerData.startup_name);
+        
+        // Try to find the startup - either by ID (if isStartupId is true) or by name
+        let startupData = null;
+        let startupError = null;
+        
+        if (isStartupId) {
+          // If the investment_id is actually a startup ID, use it directly
+          const result = await supabase
+            .from('startups')
+            .select('id, name, sector, registration_date, compliance_status, created_at')
+            .eq('id', offerData.investment_id)
+            .single();
+          
+          startupData = result.data;
+          startupError = result.error;
+        } else {
+          // Otherwise, try to find by name
+          const result = await supabase
+            .from('startups')
+            .select('id, name, sector, registration_date, compliance_status, created_at')
+            .eq('name', offerData.startup_name)
+            .single();
+          
+          startupData = result.data;
+          startupError = result.error;
+        }
+        
+        if (startupError || !startupData) {
+          console.error('Startup not found:', isStartupId ? `ID: ${offerData.investment_id}` : offerData.startup_name);
+          throw new Error(`Startup "${offerData.startup_name}" not found in the system.`);
+        }
+        
+        // Get fundraising details for this startup
+        const { data: fundraisingData, error: fundraisingError } = await supabase
+          .from('fundraising_details')
+          .select('value, equity, type, investment_value, equity_allocation')
+          .eq('startup_id', startupData.id)
+          .eq('active', true)
+          .single();
+        
+        // Create a new_investments record from startup and fundraising data
+        const investmentValue = fundraisingData?.value || fundraisingData?.investment_value || 1000000;
+        const equityAllocation = fundraisingData?.equity || fundraisingData?.equity_allocation || 10;
+        const investmentType = (fundraisingData?.type as any) || 'Seed';
+        
+        const { data: newInvestment, error: createError } = await supabase
+          .from('new_investments')
+          .insert({
+            id: startupData.id, // Use startup.id as new_investments.id to maintain consistency
+            name: startupData.name,
+            investment_type: investmentType,
+            investment_value: investmentValue,
+            equity_allocation: equityAllocation,
+            sector: startupData.sector || 'Technology',
+            total_funding: 0,
+            total_revenue: 0,
+            registration_date: startupData.registration_date || new Date().toISOString().split('T')[0],
+            compliance_status: (startupData.compliance_status as any) || 'Pending'
+          })
+          .select('id')
+          .single();
+        
+        if (createError || !newInvestment) {
+          console.error('Error creating investment record:', createError);
+          // If insert fails (maybe due to ID conflict), try to use existing record
+          const { data: existingByStartupId, error: existingError } = await supabase
+            .from('new_investments')
+            .select('id')
+            .eq('id', startupData.id)
+            .single();
+          
+          if (existingError || !existingByStartupId) {
+            throw new Error(`Failed to create investment record for "${offerData.startup_name}". Please contact support.`);
+          }
+          
+          console.log('Found existing investment record with startup ID:', existingByStartupId.id);
+          offerData.investment_id = existingByStartupId.id;
+        } else {
+          console.log('Created new investment record:', newInvestment.id);
+          offerData.investment_id = newInvestment.id;
+        }
       } else {
         console.log('Found investment by name, using ID:', investmentByName.id);
         // Update the offerData to use the correct ID

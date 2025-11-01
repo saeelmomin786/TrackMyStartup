@@ -874,8 +874,16 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                   <div>
                     <CloudDriveInput
                       value={formState.cloudDriveUrl}
-                      onChange={(url) => setFormState({ ...formState, cloudDriveUrl: url })}
-                      onFileSelect={(file) => setFormState({ ...formState, attachment: file })}
+                      onChange={(url) => {
+                        // If URL is provided, clear the file and update URL
+                        setFormState({ ...formState, cloudDriveUrl: url, attachment: null });
+                      }}
+                      onFileSelect={(file) => {
+                        console.log('📥 Financial attachment file selected:', file?.name);
+                        if (file) {
+                          setFormState({ ...formState, attachment: file, cloudDriveUrl: '' });
+                        }
+                      }}
                       placeholder="Paste your cloud drive link here..."
                       label="Attach Invoice"
                       accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
@@ -883,6 +891,11 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                       documentType="financial attachment"
                       showPrivacyMessage={false}
                     />
+                    {formState.attachment && (
+                      <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                        📄 File selected: {formState.attachment.name} ({(formState.attachment.size / 1024 / 1024).toFixed(2)} MB)
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -891,8 +904,16 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                   <div>
                     <CloudDriveInput
                       value={formState.cloudDriveUrl}
-                      onChange={(url) => setFormState({ ...formState, cloudDriveUrl: url })}
-                      onFileSelect={(file) => setFormState({ ...formState, attachment: file })}
+                      onChange={(url) => {
+                        // If URL is provided, clear the file and update URL
+                        setFormState({ ...formState, cloudDriveUrl: url, attachment: null });
+                      }}
+                      onFileSelect={(file) => {
+                        console.log('📥 Financial attachment file selected:', file?.name);
+                        if (file) {
+                          setFormState({ ...formState, attachment: file, cloudDriveUrl: '' });
+                        }
+                      }}
                       placeholder="Paste your cloud drive link here..."
                       label="Attach Invoice"
                       accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
@@ -900,6 +921,11 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                       documentType="financial attachment"
                       showPrivacyMessage={false}
                     />
+                    {formState.attachment && (
+                      <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                        📄 File selected: {formState.attachment.name} ({(formState.attachment.size / 1024 / 1024).toFixed(2)} MB)
+                      </div>
+                    )}
                   </div>
                   <div></div> {/* Empty div to maintain grid layout */}
                 </>
@@ -910,7 +936,22 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
             </div>
             <div className="border-t border-gray-200 p-6 bg-gray-50">
               <div className="flex justify-end gap-3">
-                <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>
+                <Button variant="outline" onClick={() => {
+                  setIsAddModalOpen(false);
+                  setFormState({
+                    date: '',
+                    entity: 'Parent Company',
+                    description: '',
+                    vertical: '',
+                    amount: '',
+                    cogs: '',
+                    fundingSource: 'Revenue',
+                    attachment: null,
+                    cloudDriveUrl: ''
+                  });
+                  setOtherExpenseLabel('');
+                  setOtherIncomeLabel('');
+                }}>
                   Cancel
                 </Button>
                 <Button type="submit" form="financial-form" disabled={isSubmitting} className="bg-blue-600 text-white px-6 py-2 rounded-md font-semibold hover:bg-blue-700">

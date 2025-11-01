@@ -1971,19 +1971,11 @@ const App: React.FC = () => {
             )
           );
           
-          messageService.success(
-            'Offer Updated',
-            `Your offer for ${opportunity.name} has been updated successfully!`,
-            3000
-          );
+          // Notification removed - offer updated silently
           
           return;
         } else {
-          messageService.info(
-            'Offer Cancelled',
-            'Your offer update was cancelled.',
-            2000
-          );
+          // Notification removed - offer cancelled silently
           return;
         }
       }
@@ -2018,11 +2010,7 @@ const App: React.FC = () => {
             
             if (startupError || !startupData) {
               console.error('❌ Startup not found for co-investment:', opportunity.name);
-              messageService.warning(
-                'Co-Investment Setup Failed',
-                `Your offer was submitted successfully, but the co-investment opportunity could not be created: Startup "${opportunity.name}" not found in the system.`,
-                5000
-              );
+              // Notification removed - startup not found error logged silently
               return;
             }
             
@@ -2040,58 +2028,18 @@ const App: React.FC = () => {
             });
             
             console.log('✅ Co-investment opportunity created successfully');
-            messageService.success(
-              'Offer Submitted with Co-Investment',
-              `Your offer for ${opportunity.name} has been submitted successfully! A co-investment opportunity has been created for the remaining ${currency || 'USD'} ${remainingAmount.toLocaleString()}.`,
-              5000
-            );
+            // Notification removed - co-investment created silently
             
           } catch (coInvestmentError) {
             console.error('❌ Error creating co-investment opportunity:', coInvestmentError);
-            messageService.warning(
-              'Co-Investment Setup Failed',
-              `Your offer was submitted successfully, but the co-investment opportunity could not be created: ${coInvestmentError.message || 'Unknown error occurred'}. Please contact support for assistance.`,
-              5000
-            );
+            // Notification removed - co-investment error logged silently
           }
-        } else {
-          messageService.success(
-            'Offer Submitted',
-            `Your offer for ${opportunity.name} has been submitted successfully!`,
-            3000
-          );
         }
-      } else {
-        const scoutingFee = newOffer.startup_scouting_fee_paid || 0;
-        if (scoutingFee > 0) {
-          messageService.success(
-            'Offer Submitted',
-            `Your offer for ${opportunity.name} has been submitted successfully! A startup scouting fee of $${scoutingFee.toFixed(2)} has been paid. The startup will now review your offer.`,
-            5000
-          );
-        } else {
-          messageService.success(
-            'Offer Submitted',
-            `Your offer for ${opportunity.name} has been submitted successfully! The startup will now review your offer.`,
-            3000
-          );
-        }
+        // Notification removed - offer submitted silently
       }
     } catch (error) {
       console.error('Error submitting offer:', error);
-      
-      // Show more specific error message
-      let errorMessage = 'Failed to submit offer. Please try again.';
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'object' && error !== null) {
-        errorMessage = `Submit failed: ${JSON.stringify(error)}`;
-      }
-      
-      messageService.error(
-        'Submission Failed',
-        errorMessage
-      );
+      // Notification removed - error logged silently
     }
   }, []);
 

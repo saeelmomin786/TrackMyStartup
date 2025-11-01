@@ -185,6 +185,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [isLoadingPitches, setIsLoadingPitches] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     
+    // Discovery sub-tab state
+    const [discoverySubTab, setDiscoverySubTab] = useState<'all' | 'verified' | 'favorites' | 'recommended'>('all');
+    
     // State for editing offers
     const [isEditOfferModalOpen, setIsEditOfferModalOpen] = useState(false);
     const [selectedOffer, setSelectedOffer] = useState<InvestmentOffer | null>(null);
@@ -721,6 +724,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         }
     }, [activeTab, currentUser?.id]);
 
+    // Fetch recommendations when discovery recommended sub-tab is active
+    useEffect(() => {
+        if (activeTab === 'reels' && discoverySubTab === 'recommended') {
+            fetchRecommendations();
+        }
+    }, [activeTab, discoverySubTab, currentUser?.id]);
+
     const totalFunding = startups.reduce((acc, s) => acc + s.totalFunding, 0);
     const totalRevenue = startups.reduce((acc, s) => acc + s.totalRevenue, 0);
     const compliantCount = startups.filter(s => s.complianceStatus === ComplianceStatus.Compliant).length;
@@ -1243,59 +1253,83 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               </div>
             </div>
             
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border border-blue-100 gap-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                  <button
-                    onClick={() => {
-                      setShowOnlyValidated(false);
-                      setShowOnlyFavorites(false);
-                    }}
-                    className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                      !showOnlyValidated && !showOnlyFavorites
-                        ? 'bg-blue-600 text-white shadow-blue-200' 
-                        : 'bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-600 border border-slate-200'
-                    }`}
-                  >
-                    <Film className="h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:inline">All</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => {
-                      setShowOnlyValidated(true);
-                      setShowOnlyFavorites(false);
-                    }}
-                    className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                      showOnlyValidated && !showOnlyFavorites
-                        ? 'bg-green-600 text-white shadow-green-200' 
-                        : 'bg-white text-slate-600 hover:bg-green-50 hover:text-green-600 border border-slate-200'
-                    }`}
-                  >
-                    <CheckCircle className={`h-3 w-3 sm:h-4 sm:w-4 ${showOnlyValidated && !showOnlyFavorites ? 'fill-current' : ''}`} />
-                    <span className="hidden sm:inline">Verified</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => {
-                      setShowOnlyValidated(false);
-                      setShowOnlyFavorites(true);
-                    }}
-                    className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                      showOnlyFavorites
-                        ? 'bg-red-600 text-white shadow-red-200' 
-                        : 'bg-white text-slate-600 hover:bg-red-50 hover:text-red-600 border border-slate-200'
-                    }`}
-                  >
-                    <Heart className={`h-3 w-3 sm:h-4 sm:w-4 ${showOnlyFavorites ? 'fill-current' : ''}`} />
-                    <span className="hidden sm:inline">Favorites</span>
-                  </button>
-                </div>
+            {/* Discovery Sub-Tabs */}
+            <div className="mb-6 border-b border-gray-200">
+              <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Discovery Tabs">
+                <button
+                  onClick={() => {
+                    setDiscoverySubTab('all');
+                    setShowOnlyValidated(false);
+                    setShowOnlyFavorites(false);
+                  }}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                    discoverySubTab === 'all'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Film className="h-4 w-4" />
+                  All
+                </button>
                 
-                <div className="flex items-center gap-2 text-slate-600">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-xs sm:text-sm font-medium">{activeFundraisingStartups.length} active pitches</span>
-                </div>
+                <button
+                  onClick={() => {
+                    setDiscoverySubTab('verified');
+                    setShowOnlyValidated(true);
+                    setShowOnlyFavorites(false);
+                  }}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                    discoverySubTab === 'verified'
+                      ? 'border-green-500 text-green-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <CheckCircle className="h-4 w-4" />
+                  Verified
+                </button>
+                
+                <button
+                  onClick={() => {
+                    setDiscoverySubTab('favorites');
+                    setShowOnlyValidated(false);
+                    setShowOnlyFavorites(true);
+                  }}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                    discoverySubTab === 'favorites'
+                      ? 'border-red-500 text-red-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Heart className={`h-4 w-4 ${discoverySubTab === 'favorites' ? 'fill-current' : ''}`} />
+                  Favorites
+                </button>
+                
+                <button
+                  onClick={() => {
+                    setDiscoverySubTab('recommended');
+                    setShowOnlyValidated(false);
+                    setShowOnlyFavorites(false);
+                  }}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                    discoverySubTab === 'recommended'
+                      ? 'border-purple-500 text-purple-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Star className="h-4 w-4" />
+                  Recommended Startups
+                </button>
+              </nav>
+            </div>
+            
+            <div className="flex items-center justify-between bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border border-blue-100 gap-4 mb-6">
+              <div className="flex items-center gap-2 text-slate-600">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-xs sm:text-sm font-medium">
+                  {discoverySubTab === 'recommended' 
+                    ? `${recommendations.length} recommended startups`
+                    : `${activeFundraisingStartups.length} active pitches`}
+                </span>
               </div>
               
               <div className="flex items-center gap-2 text-slate-500">
@@ -1306,15 +1340,313 @@ const InvestorView: React.FC<InvestorViewProps> = ({
           </div>
                 
           <div className="space-y-8">
-            {isLoadingPitches ? (
-              <Card className="text-center py-20">
-                <div className="max-w-sm mx-auto">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                  <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Pitches...</h3>
-                  <p className="text-slate-500">Fetching active fundraising startups</p>
-                </div>
-              </Card>
-            ) : (() => {
+            {(() => {
+              // Show recommended startups if recommended sub-tab is active
+              if (discoverySubTab === 'recommended') {
+                if (isLoadingRecommendations) {
+                  return (
+                    <Card className="text-center py-20">
+                      <div className="max-w-sm mx-auto">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                        <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Recommended Startups...</h3>
+                        <p className="text-slate-500">Fetching recommendations from your advisor</p>
+                      </div>
+                    </Card>
+                  );
+                }
+                
+                if (recommendations.length === 0) {
+                  return (
+                    <Card className="text-center py-20">
+                      <div className="max-w-sm mx-auto">
+                        <Star className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                        <h3 className="text-xl font-semibold text-slate-800 mb-2">No Recommended Startups</h3>
+                        <p className="text-slate-500">
+                          {((currentUser as any)?.investment_advisor_code || (currentUser as any)?.investment_advisor_code_entered)
+                            ? 'Your investment advisor has not recommended any startups yet. Check back later for recommendations.'
+                            : 'No recommendations available at this time.'}
+                        </p>
+                      </div>
+                    </Card>
+                  );
+                }
+                
+                // Convert recommendations to ActiveFundraisingStartup format for display
+                const recommendedStartupsForDisplay = recommendations.map(rec => {
+                  // Find the corresponding startup in activeFundraisingStartups
+                  const matchingStartup = activeFundraisingStartups.find(s => 
+                    s.id === rec.startup_id || s.name === rec.startup_name
+                  );
+                  
+                  if (matchingStartup) {
+                    return matchingStartup;
+                  }
+                  
+                  // Create a new ActiveFundraisingStartup from recommendation data
+                  return {
+                    id: rec.startup_id || rec.id || 0,
+                    name: rec.startup_name || 'Unknown Startup',
+                    investmentType: 'Seed' as InvestmentType,
+                    investmentValue: rec.investment_amount || rec.recommended_deal_value || 0,
+                    equityAllocation: rec.equity_percentage || 0,
+                    sector: rec.startup_sector || rec.sector || 'Unknown',
+                    totalFunding: 0,
+                    totalRevenue: 0,
+                    registrationDate: rec.created_at || new Date().toISOString().split('T')[0],
+                    complianceStatus: ComplianceStatus.Pending,
+                    currentValuation: rec.startup_valuation || rec.recommended_valuation || 0,
+                    pitchDeckUrl: '',
+                    pitchVideoUrl: '',
+                    isStartupNationValidated: false,
+                    fundraisingDetails: {
+                      active: true,
+                      type: 'Seed' as InvestmentType,
+                      value: rec.investment_amount || rec.recommended_deal_value || 0,
+                      equity: rec.equity_percentage || 0
+                    }
+                  } as ActiveFundraisingStartup;
+                }).filter(s => s.id > 0); // Filter out invalid entries
+                
+                // Apply search filter to recommended startups
+                let filteredRecommended = recommendedStartupsForDisplay;
+                if (searchTerm.trim()) {
+                  filteredRecommended = filteredRecommended.filter(inv => 
+                    inv.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    inv.sector.toLowerCase().includes(searchTerm.toLowerCase())
+                  );
+                }
+                
+                if (filteredRecommended.length === 0) {
+                  return (
+                    <Card className="text-center py-20">
+                      <div className="max-w-sm mx-auto">
+                        <Star className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                        <h3 className="text-xl font-semibold text-slate-800 mb-2">No Matching Startups</h3>
+                        <p className="text-slate-500">No recommended startups found matching your search.</p>
+                      </div>
+                    </Card>
+                  );
+                }
+                
+                // Display recommended startups (reuse the same card format as regular pitches)
+                return (
+                  <>
+                    {filteredRecommended.map(inv => {
+                      const embedUrl = investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
+                      const rec = recommendations.find(r => r.startup_id === inv.id || r.startup_name === inv.name);
+                      return (
+                        <Card key={inv.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white relative">
+                          {/* Recommended Badge */}
+                          {rec && (
+                            <div className="absolute top-4 right-4 z-10 bg-gradient-to-r from-purple-500 to-purple-600 text-white px-3 py-1 rounded-full text-xs font-medium shadow-lg flex items-center gap-1">
+                              <Star className="h-3 w-3 fill-current" />
+                              Recommended
+                            </div>
+                          )}
+                          
+                          {/* Enhanced Video Section */}
+                          <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+                            {embedUrl ? (
+                              playingVideoId === inv.id ? (
+                                <div className="relative w-full h-full">
+                                  <iframe
+                                    src={embedUrl}
+                                    title={`Pitch video for ${inv.name}`}
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                    className="absolute top-0 left-0 w-full h-full"
+                                  ></iframe>
+                                  <button
+                                    onClick={() => setPlayingVideoId(null)}
+                                    className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ) : (
+                                <div
+                                  className="relative w-full h-full group cursor-pointer"
+                                  onClick={() => { setPlayingVideoId(inv.id); setSelectedPitchId(inv.id); }}
+                                >
+                                  <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
+                                      <svg className="w-10 h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M8 5v14l11-7z" />
+                                      </svg>
+                                    </div>
+                                  </div>
+                                  <div className="absolute bottom-4 left-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                    <p className="text-sm font-medium">Click to play</p>
+                                  </div>
+                                </div>
+                              )
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-slate-400">
+                                <div className="text-center">
+                                  <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
+                                  <p className="text-sm">No video available</p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Enhanced Content Section */}
+                          <div className="p-6">
+                            <div className="flex items-start justify-between mb-4">
+                              <div className="flex-1">
+                                <h3 className="text-2xl font-bold text-slate-800 mb-2">{inv.name}</h3>
+                                <p className="text-slate-600 font-medium">{inv.sector}</p>
+                                {rec?.advisor_name && rec.advisor_name !== '—' && (
+                                  <p className="text-sm text-purple-600 mt-1">
+                                    <Star className="h-3 w-3 inline mr-1" />
+                                    Recommended by {rec.advisor_name}
+                                  </p>
+                                )}
+                                {rec?.recommendation_notes && (
+                                  <p className="text-xs text-slate-500 mt-2 italic">{rec.recommendation_notes}</p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {inv.isStartupNationValidated && (
+                                  <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
+                                    <CheckCircle className="h-3 w-3" />
+                                    Verified
+                                  </div>
+                                )}
+                                {(() => {
+                                  const existingOffer = investmentOffers.find(offer => 
+                                    offer.startupName === inv.name && 
+                                    offer.status === 'pending'
+                                  );
+                                  if (existingOffer) {
+                                    return (
+                                      <div className="flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs font-medium">
+                                        <CheckCircle className="h-3 w-3" />
+                                        Offer Submitted
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </div>
+                            </div>
+                                            
+                            {/* Enhanced Action Buttons */}
+                            <div className="flex items-center gap-4 mt-6">
+                              {!isViewOnly && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className={`!rounded-full !p-3 transition-all duration-200 ${
+                                    favoritedPitches.has(inv.id)
+                                      ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
+                                      : 'hover:bg-red-50 hover:text-red-600 border border-slate-200'
+                                  }`}
+                                  onClick={() => handleFavoriteToggle(inv.id)}
+                                >
+                                  <Heart className={`h-5 w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
+                                </Button>
+                              )}
+
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleShare(inv)}
+                                className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
+                              >
+                                <Share2 className="h-5 w-5" />
+                              </Button>
+
+                              {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
+                                <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
+                                  <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200">
+                                    <FileText className="h-4 w-4 mr-2" /> View Deck
+                                  </Button>
+                                </a>
+                              )}
+
+                              <button
+                                onClick={() => handleDueDiligenceClick(inv)}
+                                className="flex-1 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 transition-all duration-200 border border-slate-200 bg-white px-3 py-2 rounded-lg text-sm font-medium"
+                              >
+                                <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                                Due Diligence
+                              </button>
+
+                              {(() => {
+                                const existingOffer = investmentOffers.find(offer => 
+                                  offer.startupName === inv.name && 
+                                  offer.status === 'pending'
+                                );
+                                if (existingOffer) {
+                                  return (
+                                    <div className="flex-1">
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled
+                                        className="w-full bg-slate-100 text-slate-500 cursor-not-allowed border border-slate-200"
+                                        title="View and edit your offer in the Dashboard → Recent Activity"
+                                      >
+                                        <CheckCircle className="h-4 w-4 mr-2" /> Offer Submitted
+                                      </Button>
+                                      <div className="text-xs text-slate-400 mt-1 text-center">
+                                        Edit in Dashboard
+                                      </div>
+                                    </div>
+                                  );
+                                } else {
+                                  return !isViewOnly ? (
+                                    <Button
+                                      size="sm"
+                                      variant="primary"
+                                      onClick={() => handleMakeOfferClick(inv)}
+                                      className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg shadow-blue-200"
+                                    >
+                                      <DollarSign className="h-4 w-4 mr-2" /> Make Offer
+                                    </Button>
+                                  ) : null;
+                                }
+                              })()}
+                            </div>
+                          </div>
+
+                          {/* Enhanced Investment Details Footer */}
+                          <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-6 py-4 flex justify-between items-center border-t border-slate-200">
+                            <div className="text-base">
+                              <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(inv.investmentValue)} for <span className="font-semibold text-purple-600">{inv.equityAllocation}%</span> equity
+                            </div>
+                            {inv.complianceStatus === ComplianceStatus.Compliant && (
+                              <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
+                                <CheckCircle className="h-4 w-4" />
+                                <span className="text-xs font-semibold">Verified</span>
+                              </div>
+                            )}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </>
+                );
+              }
+              
+              // Regular pitches display (when not on recommended sub-tab)
+              if (isLoadingPitches) {
+                return (
+                  <Card className="text-center py-20">
+                    <div className="max-w-sm mx-auto">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                      <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Pitches...</h3>
+                      <p className="text-slate-500">Fetching active fundraising startups</p>
+                    </div>
+                  </Card>
+                );
+              }
+              
               // Use activeFundraisingStartups for the main data source
               const pitchesToShow = activeTab === 'reels' ? shuffledPitches : activeFundraisingStartups;
               let filteredPitches = pitchesToShow;

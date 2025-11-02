@@ -888,7 +888,21 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
               )}
 
               {/* Logo Section - Only show for Investment Advisor users */}
-              {currentUser?.role === 'Investment Advisor' && (
+              {(() => {
+                const isInvestmentAdvisor = 
+                  currentUser?.role === 'Investment Advisor' ||
+                  currentUser?.role?.toLowerCase() === 'investment advisor' ||
+                  !!currentUser?.investment_advisor_code ||
+                  (currentUser?.investment_advisor_code && currentUser.investment_advisor_code.startsWith('IA-'));
+                
+                console.log('🔍 EditProfileModal - Logo Section Check:', {
+                  currentUserRole: currentUser?.role,
+                  currentUserInvestmentAdvisorCode: currentUser?.investment_advisor_code,
+                  isInvestmentAdvisor
+                });
+                
+                return isInvestmentAdvisor;
+              })() && (
                 <div>
                   <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
                     Company Logo
@@ -953,13 +967,22 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                         showPrivacyMessage={true}
                         className="w-full"
                       />
+                      <input 
+                        type="file"
+                        ref={logoRef}
+                        onChange={handleLogoUpload}
+                        accept=".jpg,.jpeg,.png,.svg"
+                        className="hidden"
+                        id="logo-file-input"
+                      />
                       <input type="hidden" id="logo-url" name="logo-url" />
                       <button
                         onClick={() => logoRef.current?.click()}
-                        className="px-3 sm:px-4 py-1.5 sm:py-2 border border-slate-300 rounded-md text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
+                        disabled={isLoading}
+                        className="px-3 sm:px-4 py-1.5 sm:py-2 border border-slate-300 rounded-md text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Camera className="h-3 w-3 sm:h-4 sm:w-4" />
-                        {currentDocuments.logo_url ? 'Replace Logo' : 'Upload Logo'}
+                        {isLoading ? 'Uploading...' : (currentDocuments.logo_url ? 'Replace Logo' : 'Upload Logo')}
                       </button>
                     </div>
                   </div>
@@ -969,7 +992,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                       <p className="font-medium text-blue-800 mb-1">Logo Specifications:</p>
                       <ul className="text-blue-700 space-y-0.5">
                         <li>• Recommended size: 64x64 pixels (square format)</li>
-                        <li>• Maximum file size: 2MB</li>
+                        <li>• Maximum file size: 5MB</li>
                         <li>• Logo will be displayed as 64x64px with white background</li>
                       </ul>
                     </div>

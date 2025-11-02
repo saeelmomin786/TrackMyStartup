@@ -198,3 +198,4 @@ Same issue - sets to `'approve'`/`'reject'` instead of `'approved'`/`'rejected'`
 3. `components/InvestmentAdvisorView.tsx` - Trigger flow after approvals
 4. Database enum type - Add missing status values if needed
 
+

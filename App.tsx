@@ -1243,18 +1243,43 @@ const App: React.FC = () => {
        const requests = requestsData.status === 'fulfilled' ? requestsData.value : [];
 
        // If investor, augment portfolio with approved requests
-      if (currentUser?.role === 'Investor' && Array.isArray(requests)) {
-        const investorCode = (currentUser as any)?.investor_code || (currentUser as any)?.investorCode;
+      // Use currentUserRef.current instead of currentUser since currentUser might be undefined during fetch
+      const actualCurrentUser = currentUserRef.current || currentUser;
+      if (actualCurrentUser?.role === 'Investor' && Array.isArray(requests)) {
+        const investorCode = (actualCurrentUser as any)?.investor_code || (actualCurrentUser as any)?.investorCode;
+        console.log('🔍 Filtering approved startup requests for investor:', {
+          investorCode,
+          totalRequests: requests.length,
+          requestsWithStatus: requests.map((r: any) => ({ id: r.id, name: r.name, status: r.status, investor_code: r.investor_code }))
+        });
+        
         const approvedNames = requests
-          .filter((r: any) => (r.status || 'pending') === 'approved' && (
-            // keep backward-compatible behavior when no investor_code stored
-            !investorCode || !r?.investor_code || (r.investor_code === investorCode || r.investorCode === investorCode)
-          ))
+          .filter((r: any) => {
+            const status = (r.status || 'pending');
+            const isApproved = status === 'approved';
+            const matchesCode = !investorCode || !r?.investor_code || (r.investor_code === investorCode || r.investorCode === investorCode);
+            
+            console.log('🔍 Checking request:', {
+              id: r.id,
+              name: r.name,
+              status,
+              isApproved,
+              investor_code: r.investor_code,
+              userCode: investorCode,
+              matchesCode,
+              willInclude: isApproved && matchesCode
+            });
+            
+            return isApproved && matchesCode;
+          })
           .map((r: any) => r.name)
           .filter((n: any) => !!n);
         
+        console.log('✅ Approved startup names for portfolio:', approvedNames);
+        
         if (approvedNames.length > 0) {
           const canonical = await startupService.getStartupsByNames(approvedNames);
+          console.log('✅ Found startups for approved requests:', canonical.map((s: any) => s.name));
           
           // Merge unique by name (not id) to prevent duplicates
           const byName: Record<string, any> = {};
@@ -1266,10 +1291,14 @@ const App: React.FC = () => {
           
           // Then add approved startups (overwrite if duplicate name)
           canonical.forEach((s: any) => { 
-            if (s && s.name) byName[s.name] = s; 
+            if (s && s.name) {
+              console.log('✅ Adding approved startup to portfolio:', s.name);
+              byName[s.name] = s; 
+            }
           });
           
           baseStartups = Object.values(byName) as any[];
+          console.log('✅ Final portfolio size:', baseStartups.length);
         }
       }
 
@@ -1709,16 +1738,55 @@ const App: React.FC = () => {
         return;
       }
 
-      // Directly proceed without subscription modal
-      setPendingStartupRequest(startupRequest);
+      // Directly approve the request without subscription modal
+      console.log('🔍 Approving startup addition request:', requestId);
+      const newStartup = await startupAdditionService.acceptStartupRequest(requestId);
+      
+      console.log('✅ Startup approval successful:', {
+        startupId: newStartup.id,
+        startupName: newStartup.name,
+        requestId
+      });
+      
+      // Update local state - remove the approved request from the list
+      setStartupAdditionRequests(prev => {
+        const filtered = prev.filter(req => req.id !== requestId);
+        console.log('🔍 Updated startupAdditionRequests:', {
+          before: prev.length,
+          after: filtered.length,
+          removedId: requestId
+        });
+        return filtered;
+      });
+      
+      // Add startup to portfolio if not already present
+      setStartups(prev => {
+        const exists = prev.find(s => s.id === newStartup.id || s.name === newStartup.name);
+        if (exists) {
+          console.log('✅ Startup already in portfolio:', newStartup.name);
+          return prev;
+        }
+        console.log('✅ Adding startup to portfolio:', newStartup.name);
+        return [...prev, newStartup];
+      });
+      
+      messageService.success(
+        'Startup Added',
+        `${newStartup.name} has been added to your portfolio.`,
+        3000
+      );
+      
+      // Refresh data to ensure everything is up to date (including fetching updated requests)
+      console.log('🔄 Refreshing data after approval...');
+      await fetchData(true); // Force refresh
     } catch (error) {
-      console.error('Error preparing startup request:', error);
+      console.error('Error accepting startup request:', error);
       messageService.error(
-        'Preparation Failed',
-        'Failed to prepare startup request. Please try again.'
+        'Acceptance Failed',
+        'Failed to accept startup request. Please try again.'
       );
     }
-  }, [startupAdditionRequests]);
+  }, [startupAdditionRequests, fetchData]);
 
   const handleSubscriptionSuccess = useCallback(async () => {
     // Handle trial subscription success

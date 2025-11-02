@@ -1,7 +1,42 @@
--- Fix create_investment_offer_with_fee function to properly handle advisor approval logic
--- This ensures offers with investor advisors stay at Stage 1 for advisor approval
+-- Fix function overload issue - Drop ALL old signatures and keep only the correct one
+-- There are multiple function signatures causing ambiguity
 
--- Drop existing function
+-- Drop ALL existing versions of create_investment_offer_with_fee
+-- This ensures no function signature conflicts
+
+-- Drop version with TEXT types (positional order: TEXT, TEXT, DECIMAL, DECIMAL, TEXT, INTEGER, INTEGER)
+DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
+    TEXT, TEXT, DECIMAL, DECIMAL, TEXT, INTEGER, INTEGER
+);
+
+-- Drop version with TEXT types (named parameters)
+DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
+    p_investor_email TEXT,
+    p_startup_name TEXT,
+    p_offer_amount DECIMAL,
+    p_equity_percentage DECIMAL,
+    p_currency TEXT,
+    p_startup_id INTEGER,
+    p_investment_id INTEGER
+);
+
+-- Drop old version with CHARACTER VARYING (positional order: VARCHAR, VARCHAR, INTEGER, DECIMAL, DECIMAL, VARCHAR, DECIMAL)
+DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
+    CHARACTER VARYING, CHARACTER VARYING, INTEGER, DECIMAL, DECIMAL, CHARACTER VARYING, DECIMAL
+);
+
+-- Drop old version with named CHARACTER VARYING parameters
+DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
+    p_investor_email CHARACTER VARYING,
+    p_startup_name CHARACTER VARYING,
+    p_startup_id INTEGER,
+    p_offer_amount DECIMAL,
+    p_equity_percentage DECIMAL,
+    p_country CHARACTER VARYING,
+    p_startup_amount_raised DECIMAL
+);
+
+-- Drop any other variations
 DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
     p_investor_email TEXT,
     p_startup_name TEXT,
@@ -11,20 +46,7 @@ DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
     p_currency TEXT
 );
 
-DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
-    TEXT, TEXT, INTEGER, DECIMAL, DECIMAL, TEXT
-);
-
-DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
-    TEXT, TEXT, DECIMAL, DECIMAL, TEXT, INTEGER, INTEGER
-);
-
-DROP FUNCTION IF EXISTS public.create_investment_offer_with_fee(
-    TEXT, TEXT, DECIMAL, DECIMAL, TEXT, INTEGER, INTEGER
-);
-
--- Create the fixed function with proper advisor logic
--- Accepts p_startup_id as optional for backward compatibility
+-- Now create ONLY the correct function with proper advisor logic
 CREATE OR REPLACE FUNCTION public.create_investment_offer_with_fee(
     p_investor_email TEXT,
     p_startup_name TEXT,
@@ -50,7 +72,7 @@ DECLARE
     initial_stage INTEGER := 1;  -- Always start at stage 1
     initial_investor_advisor_status TEXT := 'not_required';
     initial_startup_advisor_status TEXT := 'not_required';
-    initial_status TEXT := 'pending';
+    initial_status offer_status := 'pending'::offer_status;  -- Cast to enum type
 BEGIN
     -- Get investor ID and check if investor has advisor
     -- Check both investment_advisor_code and investment_advisor_code_entered
@@ -168,7 +190,7 @@ BEGIN
             p_offer_amount,
             p_equity_percentage,
             p_currency,
-            initial_status,
+            initial_status::offer_status,  -- Explicitly cast to enum type
             initial_stage,
             initial_investor_advisor_status,
             initial_startup_advisor_status,
@@ -192,16 +214,30 @@ BEGIN
 END;
 $$;
 
--- Grant execute permission
+-- Grant execute permission to authenticated users
 GRANT EXECUTE ON FUNCTION public.create_investment_offer_with_fee(
     TEXT, TEXT, DECIMAL, DECIMAL, TEXT, INTEGER, INTEGER
 ) TO authenticated;
 
--- Verify the function was created
+-- Verify only ONE function exists now
 SELECT 
-    'Function created successfully' as status,
-    routine_name,
-    routine_type
+    'Function signature check' as status,
+    COUNT(*) as function_count,
+    STRING_AGG(DISTINCT routine_name::text, ', ') as function_names
 FROM information_schema.routines
 WHERE routine_name = 'create_investment_offer_with_fee';
+
+-- Show the function parameters to confirm correct signature
+SELECT 
+    parameter_name,
+    data_type,
+    parameter_default,
+    ordinal_position
+FROM information_schema.parameters
+WHERE specific_name IN (
+    SELECT specific_name 
+    FROM information_schema.routines 
+    WHERE routine_name = 'create_investment_offer_with_fee'
+)
+ORDER BY ordinal_position;
 

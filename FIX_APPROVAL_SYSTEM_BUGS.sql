@@ -26,17 +26,29 @@ BEGIN
     END IF;
     
     -- Get offer details with startup advisor check
+    -- Check both by startup_id and by startup_name (in case startup_id is NULL)
     SELECT 
         io.*,
-        CASE WHEN s.investment_advisor_code IS NOT NULL THEN TRUE ELSE FALSE END as startup_has_advisor
+        CASE 
+            WHEN s1.investment_advisor_code IS NOT NULL AND s1.investment_advisor_code != '' THEN TRUE
+            WHEN s2.investment_advisor_code IS NOT NULL AND s2.investment_advisor_code != '' THEN TRUE
+            ELSE FALSE 
+        END as startup_has_advisor,
+        COALESCE(s1.investment_advisor_code, s2.investment_advisor_code) as startup_advisor_code_found
     INTO offer_record
     FROM investment_offers io
-    LEFT JOIN startups s ON io.startup_id = s.id
+    LEFT JOIN startups s1 ON io.startup_id = s1.id
+    LEFT JOIN startups s2 ON io.startup_name = s2.name AND io.startup_id IS NULL
     WHERE io.id = p_offer_id;
     
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Offer with ID % not found', p_offer_id;
     END IF;
+    
+    -- Debug: Log startup advisor check
+    RAISE NOTICE 'Offer ID: %, startup_id: %, startup_name: %, startup_has_advisor: %, advisor_code: %', 
+        p_offer_id, offer_record.startup_id, offer_record.startup_name, 
+        offer_record.startup_has_advisor, offer_record.startup_advisor_code_found;
     
     -- Set approval status correctly
     approval_status := CASE 
@@ -46,27 +58,30 @@ BEGIN
     
     -- Determine new stage and status based on action
     IF p_approval_action = 'approve' THEN
-        -- Check if startup has advisor
-        IF offer_record.startup_has_advisor THEN
+        -- Check if startup has advisor (use the flag we set above)
+        IF offer_record.startup_has_advisor = TRUE THEN
+            RAISE NOTICE 'Startup has advisor, moving to Stage 2 for startup advisor approval';
             new_stage := 2; -- Move to startup advisor approval
-            new_status := 'pending'; -- Use valid enum value
+            new_status := 'pending'; -- Store as text, will cast in UPDATE
         ELSE
+            RAISE NOTICE 'Startup has NO advisor, moving to Stage 3 for startup review';
             new_stage := 3; -- Skip to startup review
-            new_status := 'pending'; -- Use valid enum value
+            new_status := 'pending'; -- Store as text, will cast in UPDATE
         END IF;
     ELSE
         -- Rejection - back to stage 1
         new_stage := 1;
-        new_status := 'rejected';
+        new_status := 'rejected'; -- Store as text, will cast in UPDATE
     END IF;
     
     -- Update the offer with correct values
+    -- IMPORTANT: Cast status to offer_status enum type in UPDATE statement
     UPDATE investment_offers 
     SET 
         investor_advisor_approval_status = approval_status,
         investor_advisor_approval_at = NOW(),
         stage = new_stage,
-        status = new_status,
+        status = new_status::offer_status,  -- Explicitly cast TEXT to enum type
         -- Set startup advisor status if moving to stage 2
         startup_advisor_approval_status = CASE 
             WHEN new_stage = 2 THEN 'pending'
@@ -138,7 +153,7 @@ BEGIN
         startup_advisor_approval_status = approval_status,
         startup_advisor_approval_at = NOW(),
         stage = new_stage,
-        status = new_status,
+        status = new_status::offer_status,  -- Explicitly cast TEXT to enum type
         updated_at = NOW()
     WHERE id = p_offer_id;
     
@@ -210,7 +225,7 @@ BEGIN
     UPDATE investment_offers 
     SET 
         stage = new_stage,
-        status = new_status,
+        status = new_status::offer_status,  -- Explicitly cast TEXT to enum type
         contact_details_revealed = CASE 
             WHEN should_reveal_contacts THEN TRUE 
             ELSE contact_details_revealed 

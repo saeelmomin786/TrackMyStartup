@@ -774,11 +774,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         };
       });
       
-      // Load and format co-investment opportunities
-      const coInvestmentOpportunities = await databaseInvestmentService.getCoInvestmentOpportunities();
-      const startupCoInvestmentOpportunities = coInvestmentOpportunities.filter(
-        (opp: any) => opp.startup_id === startup.id
-      );
+      // Load and format co-investment opportunities for this startup
+      // IMPORTANT: This function already filters by startup_id and applies visibility filtering
+      const startupCoInvestmentOpportunities = await databaseInvestmentService.getCoInvestmentOpportunitiesForStartup(startup.id);
       
       const coInvestmentOffersFormatted: OfferReceived[] = startupCoInvestmentOpportunities.map((opp: any) => {
         // Get stage status display
@@ -925,6 +923,11 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   };
 
   const handleAcceptInvestmentOffer = async (offer: OfferReceived) => {
+    // Handle co-investment opportunities
+    if (offer.isCoInvestmentOpportunity && offer.coInvestmentOpportunityId) {
+      return handleAcceptCoInvestment(offer);
+    }
+    
     if (!offer.investmentOfferId) return;
     
     try {
@@ -951,7 +954,39 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     }
   };
 
+  const handleAcceptCoInvestment = async (offer: OfferReceived) => {
+    if (!offer.coInvestmentOpportunityId) return;
+    
+    try {
+      console.log('💰 Accepting co-investment opportunity:', offer.coInvestmentOpportunityId);
+      
+      // Use the proper database function that updates both status and stage
+      const result = await databaseInvestmentService.approveStartupCoInvestment(offer.coInvestmentOpportunityId, 'approve');
+      console.log('✅ Co-investment opportunity accepted:', result);
+      
+      messageService.success(
+        'Co-Investment Accepted',
+        'Co-investment opportunity accepted successfully!',
+        3000
+      );
+      
+      await loadOffersReceived();
+      
+    } catch (err) {
+      console.error('Error accepting co-investment opportunity:', err);
+      messageService.error(
+        'Acceptance Failed',
+        'Failed to accept co-investment opportunity. Please try again.'
+      );
+    }
+  };
+
   const handleRejectInvestmentOffer = async (offer: OfferReceived) => {
+    // Handle co-investment opportunities
+    if (offer.isCoInvestmentOpportunity && offer.coInvestmentOpportunityId) {
+      return handleRejectCoInvestment(offer);
+    }
+    
     if (!offer.investmentOfferId) return;
     
     try {
@@ -973,6 +1008,32 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       messageService.error(
         'Rejection Failed',
         'Failed to reject investment offer. Please try again.'
+      );
+    }
+  };
+
+  const handleRejectCoInvestment = async (offer: OfferReceived) => {
+    if (!offer.coInvestmentOpportunityId) return;
+    
+    try {
+      console.log('💰 Rejecting co-investment opportunity:', offer.coInvestmentOpportunityId);
+      
+      // Use the proper database function that updates both status and stage
+      const result = await databaseInvestmentService.approveStartupCoInvestment(offer.coInvestmentOpportunityId, 'reject');
+      console.log('✅ Co-investment opportunity rejected:', result);
+      
+      await loadOffersReceived();
+      
+      messageService.success(
+        'Co-Investment Rejected',
+        'Co-investment opportunity rejected successfully.',
+        3000
+      );
+    } catch (err) {
+      console.error('Error rejecting co-investment opportunity:', err);
+      messageService.error(
+        'Rejection Failed',
+        'Failed to reject co-investment opportunity. Please try again.'
       );
     }
   };
@@ -1984,7 +2045,10 @@ Contact the investor directly to proceed with the investment process.
                         </span>
                       )}
                       {/* Remove diligence document actions */}
-                      {offer.type === 'Investment' && (offer.status === 'pending' || offer.status === 'startup_advisor_approved') && (
+                      {/* Show accept/reject buttons for regular investment offers or co-investment opportunities at Stage 3 */}
+                      {offer.type === 'Investment' && 
+                       (offer.status === 'pending' || offer.status === 'startup_advisor_approved') && 
+                       (!offer.isCoInvestmentOpportunity || (offer.isCoInvestmentOpportunity && offer.stage === 3)) && (
                         <div className="flex gap-2">
                           <Button
                             size="sm"

@@ -151,14 +151,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       const fromUrl = getQueryParam('pitchId');
       return fromUrl ? Number(fromUrl) : null;
     });
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'reels' | 'offers' | 'recommendations'>(() => {
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'reels' | 'offers'>(() => {
       // If initialTab is provided (e.g., from modal), use it
       if (initialTab) {
         return initialTab;
       }
       // Otherwise, try to get from URL, default to 'dashboard'
       const fromUrl = (getQueryParam('tab') as any) || 'dashboard';
-      const valid = ['dashboard','reels','offers','recommendations'];
+      const valid = ['dashboard','reels','offers'];
       return valid.includes(fromUrl) ? fromUrl : 'dashboard';
     });
     useEffect(() => {
@@ -186,7 +186,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [searchTerm, setSearchTerm] = useState('');
     
     // Discovery sub-tab state
-    const [discoverySubTab, setDiscoverySubTab] = useState<'all' | 'verified' | 'favorites' | 'recommended'>('all');
+    const [discoverySubTab, setDiscoverySubTab] = useState<'all' | 'verified' | 'favorites' | 'recommended' | 'co-investment'>('all');
+    
+    // Co-investment opportunities state (for discover page)
+    const [coInvestmentOpportunities, setCoInvestmentOpportunities] = useState<any[]>([]);
+    const [isLoadingCoInvestment, setIsLoadingCoInvestment] = useState(false);
     
     // State for editing offers
     const [isEditOfferModalOpen, setIsEditOfferModalOpen] = useState(false);
@@ -199,9 +203,6 @@ const InvestorView: React.FC<InvestorViewProps> = ({
 
     // Profile page state (same as CA/CS)
     const [showProfilePage, setShowProfilePage] = useState(false);
-    
-    // Co-investment state management
-    const [coInvestmentListings, setCoInvestmentListings] = useState<Set<number>>(new Set());
 
     // Recommendations state
     const [recommendations, setRecommendations] = useState<any[]>([]);
@@ -375,18 +376,6 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       window.location.href = '/logout';
     };
 
-    // Co-investment handler
-    const handleSeekCoInvestors = (startupId: number) => {
-      setCoInvestmentListings(prev => {
-        const newSet = new Set(prev);
-        if (newSet.has(startupId)) {
-          newSet.delete(startupId);
-        } else {
-          newSet.add(startupId);
-        }
-        return newSet;
-      });
-    };
 
     // Profile update handler
     const handleProfileUpdate = (updatedUser: any) => {
@@ -464,7 +453,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             status,
                             stage,
                             created_at,
-                            startup:startups(id, name, sector),
+                            startup:startups!fk_startup_id(id, name, sector),
                             listed_by_user:users!fk_listed_by_user_id(id, name, email)
                         `)
                         .eq('status', 'active')
@@ -594,7 +583,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         const { data, error } = await supabase
           .from('co_investment_opportunities')
           .select(
-            `id,startup_id,listed_by_user_id,listed_by_type,investment_amount,equity_percentage,minimum_co_investment,maximum_co_investment,description,status,stage,lead_investor_advisor_approval_status,startup_advisor_approval_status,startup_approval_status,created_at,updated_at, startup:startups(name, sector)`
+            `id,startup_id,listed_by_user_id,listed_by_type,investment_amount,equity_percentage,minimum_co_investment,maximum_co_investment,description,status,stage,lead_investor_advisor_approval_status,startup_advisor_approval_status,startup_approval_status,created_at,updated_at, startup:startups!fk_startup_id(name, sector)`
           )
           .eq('listed_by_user_id', currentUser.id)
           .order('created_at', { ascending: false });
@@ -717,18 +706,81 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         }
     }, [activeFundraisingStartups, activeTab]);
 
-    // Fetch recommendations when recommendations tab is active
-    useEffect(() => {
-        if (activeTab === 'recommendations') {
-            fetchRecommendations();
-        }
-    }, [activeTab, currentUser?.id]);
+    // Note: Recommendations are now only shown in the "reels" tab under "Recommended Startups" sub-tab
 
     // Fetch recommendations when discovery recommended sub-tab is active
     useEffect(() => {
         if (activeTab === 'reels' && discoverySubTab === 'recommended') {
             fetchRecommendations();
         }
+    }, [activeTab, discoverySubTab, currentUser?.id]);
+    
+    // Fetch co-investment opportunities when discovery co-investment sub-tab is active
+    useEffect(() => {
+        const loadCoInvestmentOpportunities = async () => {
+            if (activeTab === 'reels' && discoverySubTab === 'co-investment') {
+                try {
+                    setIsLoadingCoInvestment(true);
+                    console.log('🔍 Fetching co-investment opportunities for discover page');
+                    
+                    const { data, error } = await supabase
+                        .from('co_investment_opportunities')
+                        .select(`
+                            id,
+                            startup_id,
+                            listed_by_user_id,
+                            investment_amount,
+                            equity_percentage,
+                            minimum_co_investment,
+                            maximum_co_investment,
+                            description,
+                            status,
+                            stage,
+                            startup_approval_status,
+                            created_at,
+                            startup:startups!fk_startup_id(id, name, sector, currency),
+                            listed_by_user:users!fk_listed_by_user_id(id, name, email)
+                        `)
+                        .eq('status', 'active')
+                        .eq('stage', 4)
+                        .eq('startup_approval_status', 'approved')
+                        .order('created_at', { ascending: false });
+                    
+                    if (error) {
+                        console.error('Error fetching co-investment opportunities:', error);
+                        setCoInvestmentOpportunities([]);
+                        return;
+                    }
+                    
+                    console.log('✅ Fetched co-investment opportunities:', data?.length || 0);
+                    
+                    // Calculate lead investor investment and remaining amount
+                    const formatted = (data || []).map((opp: any) => {
+                        const totalInvestment = Number(opp.investment_amount) || 0;
+                        const remainingForCoInvestment = Number(opp.maximum_co_investment) || 0;
+                        const leadInvestorInvested = totalInvestment - remainingForCoInvestment;
+                        
+                        return {
+                            ...opp,
+                            leadInvestorInvested,
+                            remainingForCoInvestment,
+                            totalInvestment
+                        };
+                    });
+                    
+                    setCoInvestmentOpportunities(formatted);
+                } catch (err) {
+                    console.error('Error loading co-investment opportunities:', err);
+                    setCoInvestmentOpportunities([]);
+                } finally {
+                    setIsLoadingCoInvestment(false);
+                }
+            } else {
+                setCoInvestmentOpportunities([]);
+            }
+        };
+        
+        loadCoInvestmentOpportunities();
     }, [activeTab, discoverySubTab, currentUser?.id]);
 
     const totalFunding = startups.reduce((acc, s) => acc + s.totalFunding, 0);
@@ -1095,19 +1147,6 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     Offers
               </div>
                 </button>
-                <button
-                    onClick={() => setActiveTab('recommendations')}
-              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
-                        activeTab === 'recommendations'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <Star className="h-5 w-5 mr-2" />
-                    Recommendations
-              </div>
-                </button>
             </nav>
         </div>
         </div>
@@ -1201,19 +1240,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             {!isViewOnly && (
-                                            <div className="flex items-center justify-end gap-2">
                                                 <Button size="sm" variant="outline" onClick={() => onViewStartup(startup)}><Eye className="mr-2 h-4 w-4" /> View</Button>
-                                                <button
-                                                    onClick={() => handleSeekCoInvestors(startup.id)}
-                                                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors duration-200 ${
-                                                        coInvestmentListings.has(startup.id)
-                                                            ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                                                            : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
-                                                    }`}
-                                                >
-                                                    {coInvestmentListings.has(startup.id) ? 'Co-investment Listed' : 'Seek Co-Investors'}
-                                                </button>
-                                            </div>
                                             )}
                                         </td>
                                     </tr>
@@ -1319,6 +1346,22 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                   <Star className="h-4 w-4" />
                   Recommended Startups
                 </button>
+                
+                <button
+                  onClick={() => {
+                    setDiscoverySubTab('co-investment');
+                    setShowOnlyValidated(false);
+                    setShowOnlyFavorites(false);
+                  }}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                    discoverySubTab === 'co-investment'
+                      ? 'border-orange-500 text-orange-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Users className="h-4 w-4" />
+                  Co-Investment Opportunities
+                </button>
               </nav>
             </div>
             
@@ -1328,6 +1371,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 <span className="text-xs sm:text-sm font-medium">
                   {discoverySubTab === 'recommended' 
                     ? `${recommendations.length} recommended startups`
+                    : discoverySubTab === 'co-investment'
+                    ? `${coInvestmentOpportunities.length} co-investment opportunities`
                     : `${activeFundraisingStartups.length} active pitches`}
                 </span>
               </div>
@@ -1341,6 +1386,176 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 
           <div className="space-y-8">
             {(() => {
+              // Show co-investment opportunities if co-investment sub-tab is active
+              if (discoverySubTab === 'co-investment') {
+                if (isLoadingCoInvestment) {
+                  return (
+                    <Card className="text-center py-20">
+                      <div className="max-w-sm mx-auto">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto mb-4"></div>
+                        <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Co-Investment Opportunities...</h3>
+                        <p className="text-slate-500">Fetching approved co-investment opportunities</p>
+                      </div>
+                    </Card>
+                  );
+                }
+                
+                if (coInvestmentOpportunities.length === 0) {
+                  return (
+                    <Card className="text-center py-20">
+                      <div className="max-w-sm mx-auto">
+                        <Users className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                        <h3 className="text-xl font-semibold text-slate-800 mb-2">No Co-Investment Opportunities</h3>
+                        <p className="text-slate-500">
+                          No approved co-investment opportunities available at this time. Check back later for new opportunities.
+                        </p>
+                      </div>
+                    </Card>
+                  );
+                }
+                
+                // Display co-investment opportunities
+                return (
+                  <>
+                    {coInvestmentOpportunities.map((opp: any) => {
+                      const startupCurrency = opp.startup?.currency || 'USD';
+                      const leadInvestorName = opp.listed_by_user?.name || 'Unknown Investor';
+                      const leadInvestorInvested = opp.leadInvestorInvested || 0;
+                      const remainingAmount = opp.remainingForCoInvestment || 0;
+                      const totalInvestment = opp.totalInvestment || 0;
+                      const equityPct = opp.equity_percentage || 0;
+                      
+                      return (
+                        <Card key={opp.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white">
+                          {/* Co-Investment Badge */}
+                          <div className="absolute top-4 right-4 z-10 bg-gradient-to-r from-orange-500 to-orange-600 text-white px-3 py-1 rounded-full text-xs font-medium shadow-lg flex items-center gap-1">
+                            <Users className="h-3 w-3 fill-current" />
+                            Co-Investment Opportunity
+                          </div>
+                          
+                          {/* Startup Info Section */}
+                          <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-6 border-b border-orange-100">
+                            <div className="flex items-start justify-between mb-4">
+                              <div className="flex-1">
+                                <h3 className="text-2xl font-bold text-slate-800 mb-2">{opp.startup?.name || 'Unknown Startup'}</h3>
+                                <p className="text-slate-600 font-medium">{opp.startup?.sector || 'Not specified'}</p>
+                              </div>
+                              <div className="flex items-center gap-1 bg-green-100 text-green-700 px-3 py-1.5 rounded-full text-xs font-medium">
+                                <CheckCircle className="h-3 w-3" />
+                                Approved
+                              </div>
+                            </div>
+                            
+                            {/* Lead Investor Info */}
+                            <div className="bg-white rounded-lg p-4 border border-orange-200 mb-4">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Users className="h-4 w-4 text-orange-600" />
+                                <span className="text-sm font-semibold text-slate-700">Lead Investor:</span>
+                                <span className="text-sm font-bold text-orange-700">{leadInvestorName}</span>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-4 mt-3">
+                                <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                                  <div className="text-xs text-slate-600 mb-1">Already Invested</div>
+                                  <div className="text-lg font-bold text-blue-700">
+                                    {investorService.formatCurrency(leadInvestorInvested, startupCurrency)}
+                                  </div>
+                                </div>
+                                <div className="bg-green-50 rounded-lg p-3 border border-green-200">
+                                  <div className="text-xs text-slate-600 mb-1">Remaining for Co-Investment</div>
+                                  <div className="text-lg font-bold text-green-700">
+                                    {investorService.formatCurrency(remainingAmount, startupCurrency)}
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="mt-3 pt-3 border-t border-orange-200">
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-slate-600">Total Investment Ask:</span>
+                                  <span className="font-semibold text-slate-800">
+                                    {investorService.formatCurrency(totalInvestment, startupCurrency)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm mt-1">
+                                  <span className="text-slate-600">Equity:</span>
+                                  <span className="font-semibold text-slate-800">{equityPct}%</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm mt-1">
+                                  <span className="text-slate-600">Co-Investment Range:</span>
+                                  <span className="font-semibold text-orange-700">
+                                    {investorService.formatCurrency(opp.minimum_co_investment || 0, startupCurrency)} - {investorService.formatCurrency(opp.maximum_co_investment || 0, startupCurrency)}
+                                  </span>
+                                </div>
+                              </div>
+                              
+                              {opp.description && (
+                                <div className="mt-3 pt-3 border-t border-orange-200">
+                                  <p className="text-xs text-slate-600 leading-relaxed">{opp.description}</p>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-3">
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                onClick={() => {
+                                  // Find the startup in activeFundraisingStartups to navigate to the startup
+                                  const matchedPitch = activeFundraisingStartups.find(pitch => 
+                                    pitch.id === opp.startup_id || 
+                                    pitch.name === opp.startup?.name
+                                  );
+                                  
+                                  if (matchedPitch) {
+                                    setActiveTab('reels');
+                                    setSelectedPitchId(matchedPitch.id);
+                                    setDiscoverySubTab('all');
+                                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                                  } else {
+                                    // If startup not found, try to view it directly
+                                    const startup = startups.find(s => s.id === opp.startup_id);
+                                    if (startup) {
+                                      onViewStartup(startup);
+                                    } else {
+                                      alert(`Startup "${opp.startup?.name}" not found.`);
+                                    }
+                                  }
+                                }}
+                                className="flex-1 bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800 transition-all duration-200 shadow-lg shadow-orange-200"
+                              >
+                                <Eye className="h-4 w-4 mr-2" /> View Startup Profile
+                              </Button>
+                              
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => {
+                                  // Find the startup and open make offer modal
+                                  const matchedPitch = activeFundraisingStartups.find(pitch => 
+                                    pitch.id === opp.startup_id || 
+                                    pitch.name === opp.startup?.name
+                                  );
+                                  
+                                  if (matchedPitch) {
+                                    handleMakeOfferClick(matchedPitch);
+                                  } else {
+                                    alert(`Startup "${opp.startup?.name}" is not currently fundraising.`);
+                                  }
+                                }}
+                                className="flex-1 bg-white border border-orange-300 text-orange-700 hover:bg-orange-50 transition-all duration-200"
+                              >
+                                <DollarSign className="h-4 w-4 mr-2" /> Make Co-Investment Offer
+                              </Button>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </>
+                );
+              }
+              
               // Show recommended startups if recommended sub-tab is active
               if (discoverySubTab === 'recommended') {
                 if (isLoadingRecommendations) {
@@ -2205,338 +2420,6 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 })}
               </div>
             )}
-          </Card>
-        </div>
-      )}
-
-      {activeTab === 'recommendations' && (
-        <div className="space-y-6 animate-fade-in">
-          <Card>
-            <h3 className="text-lg font-semibold mb-4 text-slate-700 flex items-center gap-2">
-              <Star className="h-5 w-5 text-purple-600" />
-              Recommended Startups
-              <span className="text-sm font-normal text-slate-500">
-                {((currentUser as any)?.investment_advisor_code || (currentUser as any)?.investment_advisor_code_entered)
-                  ? '(Recommended by your Investment Advisor)'
-                  : '(All available opportunities)'}
-              </span>
-            </h3>
-            <div className="space-y-4">
-              {isLoadingRecommendations ? (
-                <div className="text-center py-12">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
-                  <p className="text-slate-500">Loading recommendations...</p>
-                </div>
-              ) : recommendations.length > 0 ? (
-                <div className="space-y-3">
-                  {recommendations.map((rec) => {
-                    // Find the startup object to get full details
-                    const startup = startups.find(s => s.name === rec.startup_name || s.id === rec.startup_id);
-                    const websiteUrl = startup?.websiteUrl || startup?.domain || '';
-                    
-                    // Get ask amount - priority: rec.investment_amount > rec.recommended_deal_value > startup.investmentValue > 0 (fallback)
-                    let askAmount = 0;
-                    if (rec.investment_amount !== undefined && rec.investment_amount !== null && Number(rec.investment_amount) > 0) {
-                      askAmount = Number(rec.investment_amount);
-                    } else if (rec.recommended_deal_value !== undefined && rec.recommended_deal_value !== null && Number(rec.recommended_deal_value) > 0) {
-                      askAmount = Number(rec.recommended_deal_value);
-                    } else if (startup?.investmentValue !== undefined && startup?.investmentValue !== null && Number(startup.investmentValue) > 0) {
-                      askAmount = Number(startup.investmentValue);
-                    }
-                    
-                    // Get equity - priority: rec.equity_percentage > startup.equityAllocation > 0 (fallback)
-                    let equity = 0;
-                    if (rec.equity_percentage !== undefined && rec.equity_percentage !== null && Number(rec.equity_percentage) > 0) {
-                      equity = Number(rec.equity_percentage);
-                    } else if (startup?.equityAllocation !== undefined && startup?.equityAllocation !== null && Number(startup.equityAllocation) > 0) {
-                      equity = Number(startup.equityAllocation);
-                    }
-                    
-                    const currency = startup?.currency || 'USD';
-                    const valuation = startup?.currentValuation || rec.startup_valuation || 0;
-                    
-                    return (
-                    <div key={rec.id || rec.recommendation_id} className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-all bg-white">
-                      <div className="flex items-start gap-4">
-                        {/* Startup Logo */}
-                        {startup?.logoUrl ? (
-                          <div className="flex-shrink-0">
-                            <img 
-                              src={startup.logoUrl} 
-                              alt={rec.startup_name}
-                              className="h-14 w-14 rounded-lg object-cover border border-gray-200"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex-shrink-0 h-14 w-14 rounded-lg bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center border border-gray-200">
-                            <Star className="h-7 w-7 text-purple-400" />
-                          </div>
-                        )}
-                        
-                        {/* Startup Details */}
-                        <div className="flex-1 min-w-0">
-                          {/* Startup Name and Sector */}
-                          <div className="flex items-center gap-2 mb-2">
-                            <h4 className="text-lg font-bold text-slate-900">{rec.startup_name}</h4>
-                            {rec.startup_sector && (
-                              <Badge variant="secondary" className="bg-purple-100 text-purple-800 text-xs">
-                              {rec.startup_sector}
-                            </Badge>
-                            )}
-                          </div>
-                          
-                          {/* Domain/Website */}
-                          {websiteUrl && (
-                            <div className="mb-2">
-                              <a 
-                                href={websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
-                              >
-                                <span>{websiteUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')}</span>
-                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                </svg>
-                              </a>
-                            </div>
-                          )}
-                          
-                          {/* Investment Details Grid */}
-                          <div className="grid grid-cols-2 gap-3 mb-2">
-                            {/* Ask Amount */}
-                            <div className="bg-blue-50 rounded-lg p-2 border border-blue-100">
-                              <div className="text-xs font-medium text-blue-600 mb-0.5">Ask Amount</div>
-                              <div className="text-sm font-bold text-blue-900">
-                                {askAmount > 0 ? formatCurrency(askAmount, currency) : 'Not specified'}
-                              </div>
-                            </div>
-                            
-                            {/* Equity % */}
-                            <div className="bg-green-50 rounded-lg p-2 border border-green-100">
-                              <div className="text-xs font-medium text-green-600 mb-0.5">Equity %</div>
-                              <div className="text-sm font-bold text-green-900">
-                                {equity > 0 ? `${equity}%` : 'Not specified'}
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* Additional Details */}
-                          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-                            {valuation > 0 && (
-                              <div>
-                                <span className="font-medium">Valuation:</span>{' '}
-                                <span className="text-slate-700">{formatCurrency(valuation)}</span>
-                              </div>
-                            )}
-                            {rec.advisor_name && rec.advisor_name !== '—' && (
-                              <div>
-                                <span className="font-medium">Recommended by:</span>{' '}
-                                <span className="text-slate-700">{rec.advisor_name}</span>
-                          </div>
-                            )}
-                            {startup?.description && (
-                              <div className="w-full mt-1 text-xs text-slate-500 line-clamp-2">
-                                {startup.description}
-                        </div>
-                            )}
-                          </div>
-                          
-                          {/* Advisor Notes if available */}
-                          {rec.recommendation_notes && (
-                            <div className="mt-2 bg-amber-50 rounded-lg p-2 border border-amber-100">
-                              <div className="text-xs font-medium text-amber-700 mb-1">Advisor Notes</div>
-                              <p className="text-xs text-amber-900 line-clamp-2">{rec.recommendation_notes}</p>
-                            </div>
-                          )}
-                        </div>
-                        
-                        {/* View Button */}
-                        <div className="flex-shrink-0">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              if (startup) {
-                                // Switch to reels tab (Discover Pitches) and set the selected pitch
-                                setActiveTab('reels');
-                                setSelectedPitchId(startup.id);
-                                setPlayingVideoId(startup.id);
-                                // Scroll to top to show the startup card
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
-                              } else {
-                                alert('Startup details not found. Please try again later.');
-                              }
-                            }}
-                            className="whitespace-nowrap"
-                          >
-                            <Eye className="h-4 w-4 mr-1" />
-                            View in Discover
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                    );
-                  })}
-                </div>
-              ) : (
-              <div className="text-center py-12">
-                <Star className="h-16 w-16 text-slate-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-slate-800 mb-2">No Recommendations Yet</h3>
-                <p className="text-slate-500">
-                  When your Investment Advisor recommends startups to you, they will appear here.
-                </p>
-              </div>
-              )}
-            </div>
-          </Card>
-          
-          {/* Co-Investment Opportunities Table */}
-          <Card>
-            <h3 className="text-lg font-semibold mb-4 text-slate-700 flex items-center gap-2">
-              <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              Co-Investment Opportunities
-              <span className="text-sm font-normal text-slate-500">
-                ({recommendedOpportunities.length} active opportunities)
-              </span>
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Lead Investor</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Investment Amount</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Equity %</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">View in Discover</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-slate-200">
-                  {recommendedOpportunities.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-6 py-4 text-center text-slate-500">
-                        No co-investment opportunities available yet
-                      </td>
-                    </tr>
-                  ) : (
-                    recommendedOpportunities.map((opportunity) => (
-                      <tr key={opportunity.recommendation_id}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                          {opportunity.startup_name}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">
-                          {opportunity.lead_investor_name || 'Unknown'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                          {opportunity.sector}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                          {opportunity.compliance_status}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                          {formatCurrency(opportunity.investment_amount || 0)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                          {opportunity.equity_percentage ? `${opportunity.equity_percentage}%` : '—'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button
-                            onClick={() => {
-                              // Find the startup in activeFundraisingStartups to get the correct pitch ID
-                              const matchedPitch = activeFundraisingStartups.find(pitch => 
-                                pitch.name === opportunity.startup_name || 
-                                pitch.id === opportunity.startup_id
-                              );
-                              
-                              if (matchedPitch) {
-                                // Switch to reels tab and set the pitch ID
-                                setActiveTab('reels');
-                                setSelectedPitchId(matchedPitch.id);
-                                // Scroll to top to ensure the pitch is visible
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
-                              } else {
-                                // If startup not found in active fundraising, just switch to reels tab
-                                setActiveTab('reels');
-                                alert(`Opening discover page. If ${opportunity.startup_name} is not visible, it may not be actively fundraising.`);
-                              }
-                            }}
-                            className="text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
-                          >
-                            <Eye className="h-4 w-4" />
-                            View in Discover
-                          </button>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => {
-                                const startup = startups.find(s => s.name === opportunity.startup_name);
-                                if (startup) {
-                                  handleDueDiligenceClick({
-                                    id: opportunity.opportunity_id || startup.id,
-                                    name: opportunity.startup_name,
-                                    sector: opportunity.sector,
-                                    investmentValue: opportunity.investment_amount || 0,
-                                    equityAllocation: opportunity.equity_percentage || 0,
-                                    complianceStatus: ComplianceStatus.Pending,
-                                    fundraisingType: 'Seed' as any,
-                                    totalFunding: opportunity.investment_amount || 0,
-                                    createdAt: opportunity.recommended_at || new Date().toISOString(),
-                                    fundraisingId: String(opportunity.opportunity_id),
-                                    isStartupNationValidated: false
-                                  });
-                                } else {
-                                  alert('Due diligence request functionality - startup details not found.');
-                                }
-                              }}
-                              className="px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full hover:bg-blue-200"
-                            >
-                              Due Diligence
-                            </button>
-                            <button
-                              onClick={() => {
-                                // Set the selected opportunity and open the offer modal
-                                const startup = startups.find(s => s.name === opportunity.startup_name);
-                                if (startup) {
-                                  const activeStartup: ActiveFundraisingStartup = {
-                                    id: startup.id,
-                                    name: startup.name,
-                                    sector: startup.sector,
-                                    investmentValue: opportunity.investment_amount || 0,
-                                    equityAllocation: opportunity.equity_percentage || 0,
-                                    complianceStatus: startup.complianceStatus,
-                                    fundraisingType: startup.investmentType,
-                                    totalFunding: opportunity.investment_amount || 0,
-                                    createdAt: opportunity.recommended_at || new Date().toISOString(),
-                                    fundraisingId: String(opportunity.opportunity_id),
-                                    isStartupNationValidated: startup.complianceStatus === ComplianceStatus.Compliant
-                                  };
-                                  setSelectedOpportunity(activeStartup);
-                                setIsOfferModalOpen(true);
-                                } else {
-                                  alert('Startup details not found. Please refresh and try again.');
-                                }
-                              }}
-                              className="px-3 py-1 text-xs bg-green-100 text-green-800 rounded-full hover:bg-green-200"
-                            >
-                              Make Offer
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
           </Card>
         </div>
       )}

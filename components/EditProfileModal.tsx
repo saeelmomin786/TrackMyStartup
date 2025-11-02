@@ -194,6 +194,8 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         setIsLoading(true);
         const oldUrl = currentDocuments.logo_url;
         const result = await storageService.replaceVerificationDocument(file, currentUser.id, 'logo', oldUrl);
+        
+        // Update local state
         setFormData(prev => ({
           ...prev,
           logo_url: result.url
@@ -202,9 +204,33 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
           ...prev,
           logo_url: result.url
         }));
+        
         console.log('✅ Logo replaced successfully:', result.url);
+        
+        // Immediately save logo_url to database
+        try {
+          const updateResult = await authService.updateProfile(currentUser.id, {
+            logo_url: result.url
+          });
+          
+          if (updateResult.error) {
+            console.error('❌ Error saving logo to database:', updateResult.error);
+          } else {
+            console.log('✅ Logo saved to database successfully');
+            
+            // Notify parent component of the update
+            onSave({
+              ...currentUser,
+              logo_url: result.url
+            });
+          }
+        } catch (dbError) {
+          console.error('❌ Error updating profile with logo:', dbError);
+        }
+        
       } catch (error) {
         console.error('❌ Error uploading logo:', error);
+        alert('Failed to upload logo. Please try again.');
       } finally {
         setIsLoading(false);
       }

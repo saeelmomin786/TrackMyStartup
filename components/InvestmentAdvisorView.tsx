@@ -6,7 +6,7 @@ import { formatCurrency, formatCurrencyCompact, getCurrencySymbol } from '../lib
 import { useInvestmentAdvisorCurrency } from '../lib/hooks/useInvestmentAdvisorCurrency';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { AuthUser, authService } from '../lib/auth';
-import { Eye } from 'lucide-react';
+import { Eye, Users } from 'lucide-react';
 import ProfilePage from './ProfilePage';
 import InvestorView from './InvestorView';
 import StartupHealthView from './StartupHealthView';
@@ -327,7 +327,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     setLoadingOffersMade(true);
     try {
       
-      // First, fetch offers at stages 1, 2, and 4
+      // First, fetch regular offers at stages 1, 2, and 4
       const { data: offersData, error: offersError } = await supabase
         .from('investment_offers')
         .select('*')
@@ -335,18 +335,102 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         .order('created_at', { ascending: false });
 
       if (offersError) {
-        console.error('Error fetching offers:', offersError);
-        return;
+        console.error('Error fetching regular offers:', offersError);
       }
 
-      if (!offersData || offersData.length === 0) {
+      // Also fetch co-investment offers that need investor advisor approval
+      console.log('🔍 Fetching co-investment offers for advisor:', {
+        advisor_code: currentUser?.investment_advisor_code,
+        advisor_id: currentUser?.id,
+        advisor_role: currentUser?.role
+      });
+      
+      // Fetch all co-investment offers - RLS policy will filter to only show offers for this advisor's clients
+      // We filter client-side for offers that need approval
+      let finalCoInvestmentData: any[] = [];
+      
+      // First, check what investors have this advisor's code
+      const { data: clientsData, error: clientsError } = await supabase
+        .from('users')
+        .select('email, name, investment_advisor_code_entered')
+        .eq('investment_advisor_code_entered', currentUser?.investment_advisor_code)
+        .eq('role', 'Investor');
+      
+      console.log('🔍 Investors with this advisor code:', clientsData?.length || 0);
+      if (clientsData && clientsData.length > 0) {
+        console.log('📋 Clients:', clientsData.map((c: any) => ({ email: c.email, name: c.name })));
+      } else {
+        console.log('⚠️ No investors found with advisor code:', currentUser?.investment_advisor_code);
+      }
+      
+      const { data: coInvestmentOffersData, error: coInvestmentError } = await supabase
+        .from('co_investment_offers')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (coInvestmentError) {
+        console.error('❌ Error fetching co-investment offers:', coInvestmentError);
+        console.error('Error details:', {
+          message: coInvestmentError.message,
+          details: coInvestmentError.details,
+          hint: coInvestmentError.hint,
+          code: coInvestmentError.code
+        });
+        console.log('💡 Tip: Make sure you have run the SQL migration to add RLS policies for co_investment_offers table');
+        console.log('💡 Run CREATE_CO_INVESTMENT_OFFERS_TABLE.sql in Supabase SQL Editor');
+      } else {
+        console.log('✅ Fetched co-investment offers (before filtering):', coInvestmentOffersData?.length || 0);
+        if (coInvestmentOffersData && coInvestmentOffersData.length > 0) {
+          console.log('📋 All co-investment offers fetched:', coInvestmentOffersData.map((o: any) => ({
+            id: o.id,
+            investor_email: o.investor_email,
+            status: o.status,
+            investor_advisor_approval_status: o.investor_advisor_approval_status,
+            startup_name: o.startup_name
+          })));
+          
+          // Filter to show offers that need approval OR have been approved by this advisor
+          // This allows advisors to see their approved offers for tracking
+          finalCoInvestmentData = coInvestmentOffersData.filter((offer: any) => {
+            const needsApproval = offer.status === 'pending_investor_advisor_approval' || 
+                                 offer.investor_advisor_approval_status === 'pending';
+            const wasApproved = offer.investor_advisor_approval_status === 'approved';
+            // Show if it needs approval OR was approved by this advisor (for tracking)
+            const shouldShow = needsApproval || wasApproved;
+            console.log('🔍 Checking offer:', {
+              id: offer.id,
+              status: offer.status,
+              investor_advisor_approval_status: offer.investor_advisor_approval_status,
+              needsApproval,
+              wasApproved,
+              shouldShow
+            });
+            return shouldShow;
+          });
+          console.log('✅ Co-investment offers needing approval:', finalCoInvestmentData.length);
+        } else {
+          console.log('⚠️ No co-investment offers found. This could mean:');
+          console.log('   1. No co-investment offers exist in the table');
+          console.log('   2. RLS policy is blocking access (check if advisor code matches investor advisor code)');
+          console.log('   3. All offers have already been approved/rejected');
+        }
+      }
+
+      // Combine both types of offers
+      const allOffersData = [
+        ...(offersData || []).map(offer => ({ ...offer, is_co_investment: false })),
+        ...finalCoInvestmentData.map(offer => ({ ...offer, is_co_investment: true }))
+      ];
+
+      if (allOffersData.length === 0) {
         setOffersMade([]);
+        setLoadingOffersMade(false);
         return;
       }
 
-      // Get unique investor emails and startup IDs
-      const investorEmails = [...new Set(offersData.map(offer => offer.investor_email))];
-      const startupIds = [...new Set(offersData.map(offer => offer.startup_id))];
+      // Get unique investor emails and startup IDs from all offers
+      const investorEmails = [...new Set(allOffersData.map(offer => offer.investor_email))];
+      const startupIds = [...new Set(allOffersData.filter(offer => offer.startup_id).map(offer => offer.startup_id))];
 
       // Fetch investor data
       const { data: investorsData, error: investorsError } = await supabase
@@ -389,7 +473,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       // Try to fetch startup emails by matching startup names with user names
       // This is a fallback approach since startup_id doesn't exist in users table
-      const startupNames = [...new Set(offersData.map(offer => offer.startup_name))];
+      const startupNames = [...new Set(allOffersData.map(offer => offer.startup_name))];
       const { data: startupUsersData, error: startupUsersError } = await supabase
         .from('users')
         .select('id, email, name')
@@ -427,10 +511,44 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       
 
       // Filter offers based on advisor relationships and add startup data
-      const filteredOffers = offersData.filter(offer => {
+      console.log('🔍 Filtering offers. Total offers:', allOffersData.length);
+      console.log('🔍 Co-investment offers:', allOffersData.filter(o => o.is_co_investment).length);
+      console.log('🔍 Regular offers:', allOffersData.filter(o => !o.is_co_investment).length);
+      
+      const filteredOffers = allOffersData.filter(offer => {
         const investor = investorsMap[offer.investor_email];
-        const startup = startupsMap[offer.startup_id];
+        const startup = offer.startup_id ? startupsMap[offer.startup_id] : null;
         
+        // For co-investment offers, check if investor has this advisor
+        if (offer.is_co_investment) {
+          if (!investor) {
+            console.log('⚠️ Co-investment offer skipped - investor not found:', offer.investor_email);
+            return false;
+          }
+          const investorHasThisAdvisor = investor.investment_advisor_code_entered === currentUser?.investment_advisor_code;
+          // Show co-investment offers that need approval OR have been approved by this advisor
+          const needsApproval = offer.status === 'pending_investor_advisor_approval' || 
+                               offer.investor_advisor_approval_status === 'pending';
+          const wasApproved = offer.investor_advisor_approval_status === 'approved';
+          const shouldShow = investorHasThisAdvisor && (needsApproval || wasApproved);
+          
+          console.log('🔍 Co-investment offer check:', {
+            offerId: offer.id,
+            investorEmail: offer.investor_email,
+            investorName: investor?.name,
+            investorHasAdvisor: investorHasThisAdvisor,
+            investorAdvisorCode: investor?.investment_advisor_code_entered,
+            currentAdvisorCode: currentUser?.investment_advisor_code,
+            needsApproval,
+            status: offer.status,
+            investor_advisor_approval_status: offer.investor_advisor_approval_status,
+            shouldShow
+          });
+          
+          return shouldShow;
+        }
+        
+        // For regular offers, use existing logic
         // Skip offers where we don't have complete data
         if (!investor || !startup) {
           return false;
@@ -457,25 +575,33 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return false;
       }).map(offer => {
         const investor = investorsMap[offer.investor_email];
-        const startup = startupsMap[offer.startup_id];
+        const startup = offer.startup_id ? startupsMap[offer.startup_id] : null;
         
         const investorHasThisAdvisor = investor?.investment_advisor_code_entered === currentUser?.investment_advisor_code;
         const startupHasThisAdvisor = startup?.investment_advisor_code === currentUser?.investment_advisor_code;
         
+        // For co-investment offers, always show in Investor Offers section if investor has this advisor
+        const isCoInvestment = !!(offer as any).is_co_investment;
+        const isInvestorOfferForCoInvestment = isCoInvestment && investorHasThisAdvisor;
+        
         return {
         ...offer,
           investor_name: investor?.name || offer.investor_name || null, // Extract investor name from mapped investor object
-        startup: startupsMap[offer.startup_id],
-        fundraising: fundraisingMap[offer.startup_id],
+        startup: startup || null,
+        fundraising: offer.startup_id ? fundraisingMap[offer.startup_id] : null,
           investor: investor,
         startup_user: startupUsersMap[offer.startup_name],
         investor_advisor: advisorsMap[offer.investor_advisor_code],
         startup_advisor: advisorsMap[offer.startup_advisor_code],
+        // Mark as co-investment for display
+        isCoInvestment: isCoInvestment, // Use camelCase for UI compatibility
+        is_co_investment: isCoInvestment, // Keep snake_case for consistency
         // Add flags to identify if this is an investor offer or startup offer
-        // Investor offers: Stage 1 (investor advisor approval) or Stage 4 where investor has this advisor
-        isInvestorOffer: investorHasThisAdvisor && (offer.stage === 1 || offer.stage === 4),
-        // Startup offers: Stage 2 (startup advisor approval) or Stage 4 where startup has this advisor
-        isStartupOffer: startupHasThisAdvisor && (offer.stage === 2 || offer.stage === 4)
+        // Co-investment offers: Always go to Investor Offers if investor has this advisor
+        // Regular offers: Stage 1 (investor advisor approval) or Stage 4 where investor has this advisor
+        isInvestorOffer: isInvestorOfferForCoInvestment || (investorHasThisAdvisor && (offer.stage === 1 || offer.stage === 4)),
+        // Startup offers: Stage 2 (startup advisor approval) or Stage 4 where startup has this advisor (only for regular offers)
+        isStartupOffer: !isCoInvestment && startupHasThisAdvisor && (offer.stage === 2 || offer.stage === 4)
         };
       });
 
@@ -1046,92 +1172,117 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   };
 
   // Handle advisor approval actions
-  const handleAdvisorApproval = async (offerId: number, action: 'approve' | 'reject', type: 'investor' | 'startup') => {
+  const handleAdvisorApproval = async (offerId: number | undefined, action: 'approve' | 'reject', type: 'investor' | 'startup') => {
     try {
       setIsLoading(true);
       
       console.log('🔍 handleAdvisorApproval called with:', {
         offerId,
+        offerIdType: typeof offerId,
         action,
         type,
         offersMadeLength: offersMade.length,
         offersMadeSample: offersMade.slice(0, 3).map(o => ({
           id: o.id,
           isCoInvestment: (o as any).isCoInvestment,
-          co_investment_id: (o as any).co_investment_id
+          is_co_investment: (o as any).is_co_investment,
+          co_investment_opportunity_id: (o as any).co_investment_opportunity_id
         }))
       });
       
-      // Check if this is a co-investment opportunity
-      // The offerId passed here is either the regular offer ID or the co_investment_id
+      if (!offerId || offerId === undefined) {
+        console.error('❌ Invalid offerId:', offerId);
+        alert('Invalid offer ID. Please refresh the page and try again.');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Find the offer in the offersMade array - use the actual offer.id from the table
+      // For both regular and co-investment offers, use offer.id
+      // Co-investment offers have their ID from co_investment_offers table
+      // Regular offers have their ID from investment_offers table
       const offer = offersMade.find(o => {
-        if ((o as any).isCoInvestment) {
-          const matches = (o as any).co_investment_id === offerId;
+        const matches = o.id === offerId;
+        
+        if ((o as any).is_co_investment || (o as any).isCoInvestment) {
           console.log('🔍 Checking co-investment offer:', {
-            co_investment_id: (o as any).co_investment_id,
-            offerId,
+            offer_id: o.id,
+            passed_offerId: offerId,
+            is_co_investment: (o as any).is_co_investment,
             matches
           });
-          return matches;
-        }
-        const matches = o.id === offerId;
+        } else {
         console.log('🔍 Checking regular offer:', {
           id: o.id,
           offerId,
           matches
         });
+        }
         return matches;
       });
       
       console.log('🔍 Found offer:', {
         found: !!offer,
-        isCoInvestment: (offer as any)?.isCoInvestment,
-        co_investment_id: (offer as any)?.co_investment_id,
-        regular_id: offer?.id
+        offer_id: offer?.id,
+        isCoInvestment: (offer as any)?.isCoInvestment || (offer as any)?.is_co_investment,
+        is_co_investment: (offer as any)?.is_co_investment,
+        co_investment_opportunity_id: (offer as any)?.co_investment_opportunity_id
       });
       
       if (!offer) {
         console.error('❌ Offer not found in offersMade array:', {
           offerId,
           totalOffers: offersMade.length,
-          coInvestmentOffers: offersMade.filter(o => (o as any).isCoInvestment).length,
-          regularOffers: offersMade.filter(o => !(o as any).isCoInvestment).length
+          coInvestmentOffers: offersMade.filter(o => (o as any).is_co_investment || (o as any).isCoInvestment).length,
+          regularOffers: offersMade.filter(o => !(o as any).is_co_investment && !(o as any).isCoInvestment).length,
+          availableIds: offersMade.map(o => o.id)
         });
         alert(`Offer not found. Please refresh the page and try again.`);
+        setIsLoading(false);
         return;
       }
       
-      const isCoInvestment = (offer as any)?.isCoInvestment;
-      const coInvestmentId = isCoInvestment ? (offer as any).co_investment_id : null;
+      // Check if this is a co-investment offer (could be is_co_investment or isCoInvestment)
+      const isCoInvestment = !!(offer as any)?.is_co_investment || !!(offer as any)?.isCoInvestment;
+      
+      // For co-investment offers, use the actual offer.id (from co_investment_offers table)
+      // For regular offers, also use offer.id (from investment_offers table)
+      const actualOfferId = offer.id;
       
       console.log('🔍 Processing approval:', {
         isCoInvestment,
-        coInvestmentId,
+        actualOfferId,
+        passedOfferId: offerId,
         type,
         action
       });
       
       let result;
-      if (isCoInvestment && coInvestmentId) {
-        // Handle co-investment approval
-        console.log(`🔍 Calling co-investment approval function: ${type === 'investor' ? 'approveLeadInvestorAdvisorCoInvestment' : 'approveStartupAdvisorCoInvestment'}`);
+      if (isCoInvestment) {
+        // Handle co-investment offer approval
+        // For co-investment offers, we need to approve the offer itself, not the opportunity
+        console.log(`🔍 Calling co-investment offer approval function: ${type === 'investor' ? 'approveCoInvestmentOfferInvestorAdvisor' : 'approveCoInvestmentOfferStartupAdvisor'}`);
         if (type === 'investor') {
-          // Stage 1: Lead investor advisor approval for co-investment
-          result = await investmentService.approveLeadInvestorAdvisorCoInvestment(coInvestmentId, action);
+          // Investor advisor approval for co-investment offer
+          // Use actualOfferId which is the ID from co_investment_offers table
+          result = await investmentService.approveCoInvestmentOfferInvestorAdvisor(actualOfferId, action);
         } else {
-          // Stage 2: Startup advisor approval for co-investment
-          result = await investmentService.approveStartupAdvisorCoInvestment(coInvestmentId, action);
+          // Startup advisor approval for co-investment offer (future use)
+          // For now, use the regular approval flow or co-investment offer approval if available
+          result = await investmentService.approveInvestorAdvisorOffer(actualOfferId, action);
         }
-        console.log('✅ Co-investment approval result:', result);
+        console.log('✅ Co-investment offer approval result:', result);
       } else {
         // Handle regular investment offer approval
         console.log(`🔍 Calling regular offer approval function: ${type === 'investor' ? 'approveInvestorAdvisorOffer' : 'approveStartupAdvisorOffer'}`);
         if (type === 'investor') {
           // Stage 1: Investor advisor approval
-          result = await investmentService.approveInvestorAdvisorOffer(offerId, action);
+          // Use actualOfferId which is the ID from investment_offers table
+          result = await investmentService.approveInvestorAdvisorOffer(actualOfferId, action);
         } else {
           // Stage 2: Startup advisor approval
-          result = await investmentService.approveStartupAdvisorOffer(offerId, action);
+          // Use actualOfferId which is the ID from investment_offers table
+          result = await investmentService.approveStartupAdvisorOffer(actualOfferId, action);
         }
         console.log('✅ Regular offer approval result:', result);
       }
@@ -1474,9 +1625,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   if (showProfilePage) {
     return (
       <ProfilePage 
-        user={currentUser} 
+        currentUser={currentUser} 
         onBack={() => setShowProfilePage(false)} 
-        onUpdateUser={() => {}} 
+        onProfileUpdate={(updatedUser) => {
+          // Update current user when profile is updated
+          // This will be handled by App.tsx's onProfileUpdate if needed
+        }}
+        onLogout={() => {
+          // Handle logout if needed
+          window.location.reload();
+        }}
       />
     );
   }
@@ -1864,8 +2022,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                               <div className="flex flex-col">
                                 <span>{offer.startup_name || 'Unknown Startup'}</span>
-                                {(offer as any).isCoInvestment && (
-                                  <span className="text-xs text-blue-600 font-semibold mt-1">Co-Investment Offer</span>
+                                {((offer as any).isCoInvestment || (offer as any).is_co_investment) && (
+                                  <span className="inline-flex items-center gap-1 text-xs text-orange-600 font-semibold mt-1">
+                                    <Users className="h-3 w-3" />
+                                    Co-Investment Offer
+                                  </span>
                                 )}
                               </div>
                             </td>
@@ -1989,11 +2150,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                       </button>
                                       <button
                                         onClick={() => {
-                                          const offerId = (offer as any).isCoInvestment ? (offer as any).co_investment_id : offer.id;
+                                          // For co-investment offers, use the actual offer.id (from co_investment_offers table)
+                                          // For regular offers, also use offer.id (from investment_offers table)
+                                          const offerId = offer.id;
                                           console.log('🔍 Accept button clicked (Investor Offers - Stage 1):', {
-                                            isCoInvestment: (offer as any).isCoInvestment,
-                                            co_investment_id: (offer as any).co_investment_id,
-                                            regular_id: offer.id,
+                                            isCoInvestment: (offer as any).isCoInvestment || (offer as any).is_co_investment,
+                                            is_co_investment: (offer as any).is_co_investment,
+                                            offer_id: offer.id,
+                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
                                             passed_offerId: offerId,
                                             offer_data: {
                                               id: offer.id,
@@ -2010,11 +2174,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                       </button>
                                       <button
                                         onClick={() => {
-                                          const offerId = (offer as any).isCoInvestment ? (offer as any).co_investment_id : offer.id;
+                                          // For co-investment offers, use the actual offer.id (from co_investment_offers table)
+                                          const offerId = offer.id;
                                           console.log('🔍 Decline button clicked (Investor Offers - Stage 1):', {
-                                            isCoInvestment: (offer as any).isCoInvestment,
-                                            co_investment_id: (offer as any).co_investment_id,
-                                            regular_id: offer.id,
+                                            isCoInvestment: (offer as any).isCoInvestment || (offer as any).is_co_investment,
+                                            is_co_investment: (offer as any).is_co_investment,
+                                            offer_id: offer.id,
+                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
                                             passed_offerId: offerId
                                           });
                                           handleAdvisorApproval(offerId, 'reject', 'investor');
@@ -2041,11 +2207,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                       </button>
                                       <button
                                         onClick={() => {
-                                          const offerId = (offer as any).isCoInvestment ? (offer as any).co_investment_id : offer.id;
+                                          // For co-investment offers, use the actual offer.id (from co_investment_offers table)
+                                          const offerId = offer.id;
                                           console.log('🔍 Accept button clicked (Startup Offers - Stage 2):', {
-                                            isCoInvestment: (offer as any).isCoInvestment,
-                                            co_investment_id: (offer as any).co_investment_id,
-                                            regular_id: offer.id,
+                                            isCoInvestment: (offer as any).isCoInvestment || (offer as any).is_co_investment,
+                                            is_co_investment: (offer as any).is_co_investment,
+                                            offer_id: offer.id,
+                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
                                             passed_offerId: offerId,
                                             offer_data: {
                                               id: offer.id,
@@ -2062,11 +2230,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                       </button>
                                       <button
                                         onClick={() => {
-                                          const offerId = (offer as any).isCoInvestment ? (offer as any).co_investment_id : offer.id;
+                                          // For co-investment offers, use the actual offer.id (from co_investment_offers table)
+                                          const offerId = offer.id;
                                           console.log('🔍 Decline button clicked (Startup Offers - Stage 2):', {
-                                            isCoInvestment: (offer as any).isCoInvestment,
-                                            co_investment_id: (offer as any).co_investment_id,
-                                            regular_id: offer.id,
+                                            isCoInvestment: (offer as any).isCoInvestment || (offer as any).is_co_investment,
+                                            is_co_investment: (offer as any).is_co_investment,
+                                            offer_id: offer.id,
+                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
                                             passed_offerId: offerId
                                           });
                                           handleAdvisorApproval(offerId, 'reject', 'startup');
@@ -2185,8 +2355,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                               <div className="flex flex-col">
                                 <span>{offer.startup_name || 'Unknown Startup'}</span>
-                                {(offer as any).isCoInvestment && (
-                                  <span className="text-xs text-blue-600 font-semibold mt-1">Co-Investment Offer</span>
+                                {((offer as any).isCoInvestment || (offer as any).is_co_investment) && (
+                                  <span className="inline-flex items-center gap-1 text-xs text-orange-600 font-semibold mt-1">
+                                    <Users className="h-3 w-3" />
+                                    Co-Investment Offer
+                                  </span>
                                 )}
                               </div>
                             </td>
@@ -2300,14 +2473,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                         View Startup
                                       </button>
                                       <button
-                                        onClick={() => handleAdvisorApproval((offer as any).isCoInvestment ? (offer as any).co_investment_id : offer.id, 'approve', 'investor')}
+                                        onClick={() => handleAdvisorApproval(offer.id, 'approve', 'investor')}
                                         disabled={isLoading}
                                         className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200 disabled:opacity-50 font-medium"
                                       >
                                         Accept
                                       </button>
                                       <button
-                                        onClick={() => handleAdvisorApproval((offer as any).isCoInvestment ? (offer as any).co_investment_id : offer.id, 'reject', 'investor')}
+                                        onClick={() => handleAdvisorApproval(offer.id, 'reject', 'investor')}
                                         disabled={isLoading}
                                         className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium"
                                       >
@@ -2328,14 +2501,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                         Negotiate Offer
                                       </button>
                                       <button
-                                        onClick={() => handleAdvisorApproval((offer as any).isCoInvestment ? (offer as any).co_investment_id : offer.id, 'approve', 'startup')}
+                                        onClick={() => handleAdvisorApproval(offer.id, 'approve', 'startup')}
                                         disabled={isLoading}
                                         className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200 disabled:opacity-50 font-medium"
                                       >
                                         Accept
                                       </button>
                                       <button
-                                        onClick={() => handleAdvisorApproval((offer as any).isCoInvestment ? (offer as any).co_investment_id : offer.id, 'reject', 'startup')}
+                                        onClick={() => handleAdvisorApproval(offer.id, 'reject', 'startup')}
                                         disabled={isLoading}
                                         className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium"
                                       >

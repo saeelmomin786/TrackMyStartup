@@ -606,8 +606,11 @@ export const investmentService = {
     offer_amount: number
     equity_percentage: number
     currency?: string
+    co_investment_opportunity_id?: number  // For co-investment offers
   }) {
     console.log('Creating investment offer with data:', offerData);
+    console.log('🔍 Co-investment opportunity ID in offerData:', offerData.co_investment_opportunity_id);
+    console.log('🔍 Co-investment opportunity ID type:', typeof offerData.co_investment_opportunity_id);
     
     // Check what investment ID we're trying to reference
     console.log('Trying to reference investment_id:', offerData.investment_id);
@@ -745,8 +748,12 @@ export const investmentService = {
     }
     
     // Check if user already has a pending offer for this investment
+    // For co-investment offers, check co_investment_offers table
+    // For regular offers, check investment_offers table
+    const tableName = offerData.co_investment_opportunity_id ? 'co_investment_offers' : 'investment_offers';
+    
     const { data: existingOffers, error: existingError } = await supabase
-      .from('investment_offers')
+      .from(tableName)
       .select('id, status')
       .eq('investor_email', offerData.investor_email)
       .eq('investment_id', offerData.investment_id);
@@ -771,14 +778,15 @@ export const investmentService = {
       const rejectedOffers = existingOffers.filter(offer => 
         offer.status === 'rejected' || 
         offer.status === 'investor_advisor_rejected' ||
-        offer.status === 'startup_advisor_rejected'
+        offer.status === 'startup_advisor_rejected' ||
+        offer.status === 'lead_investor_rejected'
       );
       
       if (rejectedOffers.length > 0) {
         console.log('Deleting rejected offers to allow new offer:', rejectedOffers);
         for (const rejectedOffer of rejectedOffers) {
           await supabase
-            .from('investment_offers')
+            .from(tableName)
             .delete()
             .eq('id', rejectedOffer.id);
         }
@@ -807,86 +815,134 @@ export const investmentService = {
       }
     }
     
-    // Use the safe function that handles both startup_id and investment_id
-    // Pass ALL parameters explicitly to match function signature
-    // Supabase RPC with named parameters requires all parameters to be passed
-    const rpcParams = {
-      p_investor_email: offerData.investor_email,
-      p_startup_name: offerData.startup_name,
-      p_offer_amount: Number(offerData.offer_amount),
-      p_equity_percentage: Number(offerData.equity_percentage),
-      p_currency: offerData.currency || 'USD',
-      p_startup_id: null as number | null,
-      p_investment_id: offerData.investment_id != null ? Number(offerData.investment_id) : null as number | null
-    };
-    
-    console.log('🔍 Calling create_investment_offer_with_fee with params:', JSON.stringify(rpcParams, null, 2));
-    
-    const { data, error } = await supabase.rpc('create_investment_offer_with_fee', rpcParams);
-
-    if (error) {
-      console.error('❌ Error creating investment offer:', error);
-      console.error('❌ Error message:', error.message);
-      console.error('❌ Error code:', error.code);
-      console.error('❌ Error details:', error.details);
-      console.error('❌ Error hint:', error.hint);
-      console.error('❌ Full error object:', JSON.stringify(error, null, 2));
+    // Check if this is a co-investment offer
+    if (offerData.co_investment_opportunity_id) {
+      // Use the new co_investment_offers table for co-investment offers
+      console.log('🔄 Creating co-investment offer using co_investment_offers table');
       
-      // If it's a function signature error, provide helpful message
-      if (error.message?.includes('function') || error.message?.includes('parameter') || error.code === '42883' || error.code === '42725') {
-        console.error('⚠️ This might be a function signature mismatch. Check if create_investment_offer_with_fee function exists and has correct parameters.');
-        console.error('⚠️ The function was called with parameters:', rpcParams);
+      const coInvestmentId = Number(offerData.co_investment_opportunity_id);
+      
+      // Call the new SQL function for co-investment offers
+      const { data: newOfferId, error: rpcError } = await supabase.rpc('create_co_investment_offer', {
+        p_co_investment_opportunity_id: coInvestmentId,
+        p_investor_email: offerData.investor_email,
+        p_startup_name: offerData.startup_name,
+        p_offer_amount: Number(offerData.offer_amount),
+        p_equity_percentage: Number(offerData.equity_percentage),
+        p_currency: offerData.currency || 'USD',
+        p_startup_id: null as number | null,
+        p_investment_id: offerData.investment_id != null ? Number(offerData.investment_id) : null as number | null
+      });
+      
+      if (rpcError) {
+        console.error('❌ Error creating co-investment offer:', rpcError);
+        throw rpcError;
       }
       
-      throw error;
+      console.log('✅ Co-investment offer created with ID:', newOfferId);
+      
+      // Try to get the created offer from co_investment_offers table
+      const { data: createdOffer, error: fetchError } = await supabase
+        .from('co_investment_offers')
+        .select('*')
+        .eq('id', newOfferId)
+        .single();
+      
+      if (fetchError) {
+        console.error('⚠️ Error fetching created co-investment offer, but offer was created:', fetchError);
+        console.log('⚠️ This might be due to RLS policies. Offer ID:', newOfferId);
+        
+        // If we can't fetch it, construct a basic offer object from what we know
+        // This allows the frontend to work even if RLS blocks the read
+        const basicOffer = {
+          id: newOfferId,
+          co_investment_opportunity_id: coInvestmentId,
+          investor_email: offerData.investor_email,
+          startup_name: offerData.startup_name,
+          offer_amount: Number(offerData.offer_amount),
+          equity_percentage: Number(offerData.equity_percentage),
+          currency: offerData.currency || 'USD',
+          status: 'pending_lead_investor_approval', // Default status
+          created_at: new Date().toISOString()
+        };
+        
+        console.log('✅ Returning basic offer object:', basicOffer);
+        return basicOffer;
+      }
+      
+      console.log('✅ Co-investment offer created successfully:', createdOffer);
+      
+      // Format the offer for return
+      const formattedOffer = {
+        ...createdOffer,
+        offer_amount: Number(createdOffer?.offer_amount) || 0,
+        equity_percentage: Number(createdOffer?.equity_percentage) || 0,
+        created_at: createdOffer?.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString()
+      };
+      
+      return formattedOffer;
+    } else {
+      // Regular investment offer - use the existing flow
+      console.log('🔄 Creating regular investment offer using investment_offers table');
+      
+      const rpcParams = {
+        p_investor_email: offerData.investor_email,
+        p_startup_name: offerData.startup_name,
+        p_offer_amount: Number(offerData.offer_amount),
+        p_equity_percentage: Number(offerData.equity_percentage),
+        p_currency: offerData.currency || 'USD',
+        p_startup_id: null as number | null,
+        p_investment_id: offerData.investment_id != null ? Number(offerData.investment_id) : null as number | null,
+        p_co_investment_opportunity_id: null as number | null
+      };
+      
+      console.log('🔍 Calling create_investment_offer_with_fee with params:', JSON.stringify(rpcParams, null, 2));
+      
+      const { data, error } = await supabase.rpc('create_investment_offer_with_fee', rpcParams);
+
+      if (error) {
+        console.error('❌ Error creating investment offer:', error);
+        console.error('❌ Error message:', error.message);
+        throw error;
+      }
+      
+      // Get the created offer
+      const { data: createdOffer, error: fetchError } = await supabase
+        .from('investment_offers')
+        .select('*')
+        .eq('id', data)
+        .single();
+      
+      if (fetchError) {
+        console.error('Error fetching created offer:', fetchError);
+        throw fetchError;
+      }
+      
+      console.log('Investment offer created successfully:', createdOffer);
+      
+      // Ensure the returned data has proper formatting
+      const formattedOffer = {
+        ...createdOffer,
+        offer_amount: Number(createdOffer?.offer_amount) || 0,
+        equity_percentage: Number(createdOffer?.equity_percentage) || 0,
+        created_at: createdOffer?.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString()
+      };
+      
+      // Regular offer flow - trigger flow logic to set proper initial stage and status
+      if (createdOffer?.id) {
+        await this.handleInvestmentFlow(createdOffer.id);
+      }
+      
+      return formattedOffer;
     }
-    
-    // Get the created offer
-    const { data: createdOffer, error: fetchError } = await supabase
-      .from('investment_offers')
-      .select('*')
-      .eq('id', data)
-      .single();
-    
-    if (fetchError) {
-      console.error('Error fetching created offer:', fetchError);
-      throw fetchError;
-    }
-    
-    console.log('Investment offer created successfully:', createdOffer);
-    console.log('🔍 Created offer details:', {
-      id: createdOffer?.id,
-      offer_amount: createdOffer?.offer_amount,
-      equity_percentage: createdOffer?.equity_percentage,
-      currency: createdOffer?.currency,
-      created_at: createdOffer?.created_at,
-      startup_name: createdOffer?.startup_name,
-      investor_email: createdOffer?.investor_email
-    });
-    
-    // Ensure the returned data has proper formatting
-    const formattedOffer = {
-      ...createdOffer,
-      offer_amount: Number(createdOffer?.offer_amount) || 0,
-      equity_percentage: Number(createdOffer?.equity_percentage) || 0,
-      created_at: createdOffer?.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString()
-    };
-    
-    console.log('🔍 Formatted offer for return:', formattedOffer);
-    
-    // Trigger flow logic to set proper initial stage and status
-    if (createdOffer?.id) {
-      await this.handleInvestmentFlow(createdOffer.id);
-    }
-    
-    return formattedOffer;
   },
 
-  // Get user's investment offers
+  // Get user's investment offers (both regular and co-investment offers)
   async getUserOffers(userEmail: string) {
     console.log('🔍 Fetching offers for investor:', userEmail);
     
-    const { data, error } = await supabase
+    // Fetch regular investment offers
+    const { data: regularOffers, error: regularError } = await supabase
       .from('investment_offers')
       .select(`
         *,
@@ -906,12 +962,45 @@ export const investmentService = {
       .eq('investor_email', userEmail)
       .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('Error fetching investor offers:', error);
-      throw error;
+    if (regularError) {
+      console.error('Error fetching regular investor offers:', regularError);
+      throw regularError;
     }
 
-    console.log('🔍 Raw investor offers data:', data);
+    // Fetch co-investment offers
+    const { data: coInvestmentOffers, error: coInvestmentError } = await supabase
+      .from('co_investment_offers')
+      .select(`
+        *,
+        investment:new_investments(*),
+        startup:startups(
+          id,
+          name,
+          sector,
+          user_id,
+          investment_advisor_code,
+          compliance_status,
+          startup_nation_validated,
+          validation_date,
+          created_at
+        ),
+        co_investment_opportunity:co_investment_opportunities(id, listed_by_user_id)
+      `)
+      .eq('investor_email', userEmail)
+      .order('created_at', { ascending: false })
+
+    if (coInvestmentError) {
+      console.error('Error fetching co-investment offers:', coInvestmentError);
+      // Don't throw - continue with regular offers if co-investment fetch fails
+    }
+
+    // Combine both types of offers
+    const data = [
+      ...(regularOffers || []).map(offer => ({ ...offer, is_co_investment: false })),
+      ...(coInvestmentOffers || []).map(offer => ({ ...offer, is_co_investment: true }))
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    console.log('🔍 Raw investor offers data (regular + co-investment):', data);
 
     // Now fetch startup user information separately using user_id
     const enhancedData = await Promise.all((data || []).map(async (offer) => {
@@ -1114,6 +1203,33 @@ export const investmentService = {
   // Approve/reject offer by investor advisor
   async approveInvestorAdvisorOffer(offerId: number, action: 'approve' | 'reject') {
     try {
+      // Check if this is a co-investment offer (check co_investment_offers table first)
+      const { data: coInvestmentOfferData, error: coInvestmentError } = await supabase
+        .from('co_investment_offers')
+        .select('id, co_investment_opportunity_id')
+        .eq('id', offerId)
+        .single();
+      
+      if (!coInvestmentError && coInvestmentOfferData) {
+        // This is a co-investment offer - use co-investment specific approval
+        console.log('🔍 This is a co-investment offer, using co-investment approval flow');
+        return await this.approveCoInvestmentOfferInvestorAdvisor(offerId, action);
+      }
+      
+      // If not found in co_investment_offers, check investment_offers (for backward compatibility)
+      const { data: offerData, error: offerError } = await supabase
+        .from('investment_offers')
+        .select('co_investment_opportunity_id')
+        .eq('id', offerId)
+        .single();
+      
+      if (!offerError && offerData?.co_investment_opportunity_id) {
+        // This is a co-investment offer in the old table (should be migrated, but handle it)
+        console.log('🔍 Found co-investment offer in old table, using co-investment approval flow');
+        return await this.approveCoInvestmentOfferInvestorAdvisor(offerId, action);
+      }
+      
+      // Regular offer approval flow
       console.log('🔍 Calling approve_investor_advisor_offer with params:', {
         p_offer_id: offerId,
         p_approval_action: action
@@ -1144,6 +1260,86 @@ export const investmentService = {
       return data;
     } catch (error) {
       console.error('Error approving investor advisor offer:', error);
+      throw error;
+    }
+  },
+  
+  // Approve co-investment offer by investor advisor
+  async approveCoInvestmentOfferInvestorAdvisor(offerId: number, action: 'approve' | 'reject') {
+    try {
+      console.log('🔍 Calling approve_co_investment_offer_investor_advisor with params:', {
+        p_offer_id: offerId,
+        p_approval_action: action
+      });
+      
+      // The SQL function now works with co_investment_offers table
+      // Verify parameters are correct: p_offer_id (INTEGER), p_approval_action (TEXT)
+      console.log('🔍 RPC call parameters:', {
+        function: 'approve_co_investment_offer_investor_advisor',
+        p_offer_id: offerId,
+        p_offer_id_type: typeof offerId,
+        p_approval_action: action,
+        p_approval_action_type: typeof action
+      });
+      
+      const { data, error } = await supabase.rpc('approve_co_investment_offer_investor_advisor', {
+        p_offer_id: Number(offerId), // Ensure it's a number
+        p_approval_action: String(action) // Ensure it's a string
+      });
+
+      if (error) {
+        console.error('❌ Error in approveCoInvestmentOfferInvestorAdvisor:', error);
+        console.error('Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        
+        // If it's a schema cache error, provide helpful message
+        if (error.message?.includes('schema cache') || error.message?.includes('Could not find the function')) {
+          console.error('💡 Schema cache issue detected. Try:');
+          console.error('   1. Restart your Supabase project');
+          console.error('   2. Or wait a few minutes for schema cache to refresh');
+          console.error('   3. Or run REFRESH_POSTGREST_SCHEMA_CACHE.sql in Supabase SQL Editor');
+        }
+        
+        throw error;
+      }
+
+      console.log('✅ Co-investment offer investor advisor approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error approving co-investment offer by investor advisor:', error);
+      throw error;
+    }
+  },
+  
+  // Approve co-investment offer by lead investor
+  async approveCoInvestmentOfferLeadInvestor(offerId: number, leadInvestorId: string, action: 'approve' | 'reject') {
+    try {
+      console.log('🔍 Calling approve_co_investment_offer_lead_investor with params:', {
+        p_offer_id: offerId,
+        p_lead_investor_id: leadInvestorId,
+        p_approval_action: action
+      });
+      
+      // The SQL function now works with co_investment_offers table
+      const { data, error } = await supabase.rpc('approve_co_investment_offer_lead_investor', {
+        p_offer_id: offerId,
+        p_lead_investor_id: leadInvestorId,
+        p_approval_action: action
+      });
+
+      if (error) {
+        console.error('❌ Error in approveCoInvestmentOfferLeadInvestor:', error);
+        throw error;
+      }
+
+      console.log('✅ Co-investment offer lead investor approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error approving co-investment offer by lead investor:', error);
       throw error;
     }
   },
@@ -2144,7 +2340,11 @@ export const investmentService = {
         startup_advisor_approval_status: offer.startup_advisor_approval_status || 'not_required',
         startup_advisor_approval_at: offer.startup_advisor_approval_at,
         // Stage field
-        stage: offer.stage || 1
+        stage: offer.stage || 1,
+        // Co-investment fields
+        co_investment_opportunity_id: offer.co_investment_opportunity_id || null,
+        lead_investor_approval_status: offer.lead_investor_approval_status || 'not_required',
+        lead_investor_approval_at: offer.lead_investor_approval_at
       }));
       
       // Debug: Log mapped data
@@ -2154,6 +2354,7 @@ export const investmentService = {
         console.log('🔍 Mapped equity percentage:', mappedData[0].equityPercentage);
         console.log('🔍 Mapped currency:', mappedData[0].currency);
         console.log('🔍 Mapped created at:', mappedData[0].createdAt);
+        console.log('🔍 Co-investment opportunity ID:', mappedData[0].co_investment_opportunity_id);
       }
       
       return mappedData;

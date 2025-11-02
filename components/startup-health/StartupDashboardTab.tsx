@@ -15,6 +15,7 @@ import { investmentService } from '../../lib/investmentService';
 import { investmentService as databaseInvestmentService } from '../../lib/database';
 import StartupMessagingModal from './StartupMessagingModal';
 import StartupContractModal from './StartupContractModal';
+import InvestorContactDetailsModal from './InvestorContactDetailsModal';
 import Modal from '../ui/Modal';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
@@ -57,6 +58,9 @@ interface OfferReceived {
   stage?: number;
   stageStatus?: string;
   stageColor?: string;
+  // Co-investment offer fields (for actual offers made on opportunities)
+  isCoInvestmentOffer?: boolean;
+  coInvestmentOfferId?: number;
 }
 
 interface StartupDashboardTabProps {
@@ -102,6 +106,15 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [isContractModalOpen, setIsContractModalOpen] = useState(false);
   const [selectedOfferForContract, setSelectedOfferForContract] = useState<OfferReceived | null>(null);
   const [isRecognitionModalOpen, setIsRecognitionModalOpen] = useState(false);
+  
+  // Investor contact details modal states
+  const [isInvestorContactModalOpen, setIsInvestorContactModalOpen] = useState(false);
+  const [selectedOfferForContact, setSelectedOfferForContact] = useState<InvestmentOffer | null>(null);
+  
+  // Co-investment offer details modal states
+  const [isCoInvestmentDetailsModalOpen, setIsCoInvestmentDetailsModalOpen] = useState(false);
+  const [coInvestmentDetails, setCoInvestmentDetails] = useState<any>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [recognitionFormState, setRecognitionFormState] = useState<{[key:string]: any}>({});
   const [hiddenUploadOffers, setHiddenUploadOffers] = useState<Set<string>>(new Set());
   const [recFeeType, setRecFeeType] = useState<FeeType>(FeeType.Free);
@@ -778,7 +791,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       // IMPORTANT: This function already filters by startup_id and applies visibility filtering
       const startupCoInvestmentOpportunities = await databaseInvestmentService.getCoInvestmentOpportunitiesForStartup(startup.id);
       
-      const coInvestmentOffersFormatted: OfferReceived[] = startupCoInvestmentOpportunities.map((opp: any) => {
+      const coInvestmentOpportunitiesFormatted: OfferReceived[] = startupCoInvestmentOpportunities.map((opp: any) => {
         // Get stage status display
         const stage = opp.stage || 1;
         let stageStatus = '';
@@ -801,13 +814,13 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         }
         
         return {
-          id: `co_investment_${opp.id}`,
+          id: `co_investment_opp_${opp.id}`,
           from: opp.listed_by_user?.name || 'Lead Investor',
           type: 'Investment' as const,
           offerDetails: `Co-investment opportunity: ${formatCurrency(opp.minimum_co_investment, startupCurrency)} - ${formatCurrency(opp.maximum_co_investment, startupCurrency)} available`,
           status: opp.startup_approval_status === 'approved' ? 'accepted' : 
                   opp.startup_approval_status === 'rejected' ? 'rejected' : 'pending',
-          code: `co-${opp.id}`,
+          code: `co-opp-${opp.id}`,
           createdAt: opp.created_at,
           isCoInvestmentOpportunity: true,
           coInvestmentOpportunityId: opp.id,
@@ -819,14 +832,69 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           stageColor: stageColor
         };
       });
+
+      // Load co-investment OFFERS (actual offers made by investors on co-investment opportunities)
+      // These are offers that need startup approval after passing Investor Advisor and Lead Investor approval
+      let coInvestmentOffersFormatted: OfferReceived[] = [];
+      try {
+        console.log('🔍 Fetching co-investment offers for startup:', startup.id);
+        // Fetch all co-investment offers for this startup (pending, accepted, and rejected)
+        // Similar to regular investment offers, we show all offers regardless of status
+        const { data: coInvestmentOffersData, error: coInvestmentOffersError } = await supabase
+          .from('co_investment_offers')
+          .select(`
+            *,
+            investor:users!co_investment_offers_investor_id_fkey(id, name, email),
+            startup:startups(id, name, sector, currency),
+            co_investment_opportunity:co_investment_opportunities(id, investment_amount, equity_percentage)
+          `)
+          .eq('startup_id', startup.id)
+          // Don't filter by status - show all offers (pending, accepted, rejected)
+          // This matches the behavior of regular investment offers
+          .order('created_at', { ascending: false });
+
+        if (coInvestmentOffersError) {
+          console.error('❌ Error fetching co-investment offers:', coInvestmentOffersError);
+        } else {
+          console.log('✅ Fetched co-investment offers:', coInvestmentOffersData?.length || 0);
+          coInvestmentOffersFormatted = (coInvestmentOffersData || []).map((offer: any) => {
+            const investorName = offer.investor?.name || offer.investor_name || offer.investor_email || 'Unknown Investor';
+            const amount = Number(offer.offer_amount) || 0;
+            const equityPercentage = Number(offer.equity_percentage) || 0;
+            const offerCurrency = offer.currency || offer.startup?.currency || startupCurrency || 'USD';
+
+            return {
+              id: `co_investment_offer_${offer.id}`,
+              from: investorName,
+              type: 'Investment' as const,
+              offerDetails: `${formatCurrency(amount, offerCurrency)} for ${equityPercentage}% equity (Co-investment offer)`,
+              status: offer.startup_approval_status === 'approved' ? 'accepted' : 
+                      offer.startup_approval_status === 'rejected' ? 'rejected' : 'pending',
+              code: `co-offer-${offer.id}`,
+              createdAt: offer.created_at,
+              isInvestmentOffer: true,
+              investmentOfferId: offer.id, // Use offer.id for handling
+              isCoInvestmentOffer: true, // Flag to identify co-investment offers
+              coInvestmentOfferId: offer.id, // ID from co_investment_offers table
+              coInvestmentOpportunityId: offer.co_investment_opportunity_id, // Parent opportunity ID
+              startupScoutingFee: 0,
+              investorScoutingFee: 0,
+              contactDetailsRevealed: offer.contact_details_revealed || false
+            };
+          });
+        }
+      } catch (err) {
+        console.error('❌ Error loading co-investment offers:', err);
+      }
       
       // Combine all offers - only include properly resolved offers
-      const allOffers = [...incubationOffers, ...diligenceOffers, ...investmentOffersFormatted, ...coInvestmentOffersFormatted];
+      const allOffers = [...incubationOffers, ...diligenceOffers, ...investmentOffersFormatted, ...coInvestmentOpportunitiesFormatted, ...coInvestmentOffersFormatted];
       console.log('🎯 Combined offers array:', allOffers);
       console.log('🎯 Incubation offers:', incubationOffers);
       console.log('🎯 Diligence offers:', diligenceOffers);
       console.log('🎯 Investment offers:', investmentOffersFormatted);
-      console.log('🎯 Co-investment opportunities:', coInvestmentOffersFormatted);
+      console.log('🎯 Co-investment opportunities:', coInvestmentOpportunitiesFormatted);
+      console.log('🎯 Co-investment offers (actual offers):', coInvestmentOffersFormatted);
       console.log('🎯 Total offers count:', allOffers.length);
       
       // If no offers found, show a debug message
@@ -923,6 +991,11 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   };
 
   const handleAcceptInvestmentOffer = async (offer: OfferReceived) => {
+    // Handle co-investment offers (actual offers made by investors)
+    if (offer.isCoInvestmentOffer && offer.coInvestmentOfferId) {
+      return handleAcceptCoInvestmentOffer(offer);
+    }
+    
     // Handle co-investment opportunities
     if (offer.isCoInvestmentOpportunity && offer.coInvestmentOpportunityId) {
       return handleAcceptCoInvestment(offer);
@@ -982,6 +1055,11 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   };
 
   const handleRejectInvestmentOffer = async (offer: OfferReceived) => {
+    // Handle co-investment offers (actual offers made by investors)
+    if (offer.isCoInvestmentOffer && offer.coInvestmentOfferId) {
+      return handleRejectCoInvestmentOffer(offer);
+    }
+    
     // Handle co-investment opportunities
     if (offer.isCoInvestmentOpportunity && offer.coInvestmentOpportunityId) {
       return handleRejectCoInvestment(offer);
@@ -1008,6 +1086,226 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       messageService.error(
         'Rejection Failed',
         'Failed to reject investment offer. Please try again.'
+      );
+    }
+  };
+
+  // Fetch co-investment offer details
+  const handleViewCoInvestmentDetails = async (offer: OfferReceived) => {
+    if (!offer.coInvestmentOfferId) return;
+    
+    setIsLoadingDetails(true);
+    setIsCoInvestmentDetailsModalOpen(true);
+    
+    try {
+      console.log('🔍 Fetching co-investment offer details:', offer.coInvestmentOfferId);
+      
+      // Fetch the co-investment offer (without joins first to avoid RLS issues)
+      // We'll fetch related data separately using RPC functions
+      const { data: offerData, error: offerError } = await supabase
+        .from('co_investment_offers')
+        .select('*')
+        .eq('id', offer.coInvestmentOfferId)
+        .single();
+      
+      if (offerError || !offerData) {
+        console.error('❌ Error fetching co-investment offer details:', offerError);
+        throw offerError || new Error('Co-investment offer not found');
+      }
+      
+      console.log('✅ Co-investment offer details fetched:', offerData);
+      
+      // Extract data from offer (using stored fields)
+      const investorData = {
+        id: offerData.investor_id,
+        name: offerData.investor_name,
+        email: offerData.investor_email,
+        company_name: null
+      };
+      
+      const startupData = {
+        id: offerData.startup_id,
+        name: offerData.startup_name,
+        currency: offerData.currency || startupCurrency || 'USD'
+      };
+      
+      // Fetch opportunity data separately
+      let opportunityData = null;
+      let leadInvestorData = null;
+      
+      if (offerData.co_investment_opportunity_id) {
+        console.log('🔍 Fetching co-investment opportunity:', offerData.co_investment_opportunity_id);
+        const { data: opportunity, error: opportunityError } = await supabase
+          .from('co_investment_opportunities')
+          .select('id, investment_amount, equity_percentage, minimum_co_investment, maximum_co_investment, listed_by_user_id, listed_by_user_name, listed_by_user_email')
+          .eq('id', offerData.co_investment_opportunity_id)
+          .single();
+        
+        if (!opportunityError && opportunity) {
+          opportunityData = opportunity;
+          console.log('✅ Opportunity fetched:', opportunity);
+          
+          // Use stored lead investor info (safer - no RLS bypass needed)
+          // First check if stored fields exist (from ADD_LEAD_INVESTOR_FIELDS_TO_CO_INVESTMENT_OPPORTUNITIES.sql)
+          if (opportunity.listed_by_user_name || opportunity.listed_by_user_email) {
+            leadInvestorData = {
+              name: opportunity.listed_by_user_name,
+              email: opportunity.listed_by_user_email,
+              company_name: opportunity.listed_by_user_name // Use name as company name fallback
+            };
+            console.log('✅ Lead investor info from stored fields:', leadInvestorData);
+          } else if (opportunity.listed_by_user_id) {
+            // Fallback: Try RPC function if stored fields don't exist
+            console.log('🔍 Stored fields not available, trying RPC function:', opportunity.listed_by_user_id);
+            try {
+              const { data: leadInvestorRpc, error: rpcError } = await supabase.rpc('get_user_public_info', {
+                p_user_id: String(opportunity.listed_by_user_id)
+              });
+              
+              if (!rpcError && leadInvestorRpc) {
+                if (typeof leadInvestorRpc === 'string') {
+                  try {
+                    leadInvestorData = JSON.parse(leadInvestorRpc);
+                  } catch (e) {
+                    leadInvestorData = leadInvestorRpc;
+                  }
+                } else {
+                  leadInvestorData = leadInvestorRpc;
+                }
+                console.log('✅ Lead investor fetched via RPC:', leadInvestorData);
+              } else {
+                console.warn('⚠️ RPC function failed:', rpcError);
+              }
+            } catch (rpcErr) {
+              console.warn('⚠️ RPC function not available:', rpcErr);
+            }
+          }
+        } else {
+          console.warn('⚠️ Error fetching opportunity:', opportunityError);
+        }
+      }
+      
+      // Calculate amounts
+      const totalInvestment = Number(opportunityData?.investment_amount) || 0;
+      const maximumCoInvestment = Number(opportunityData?.maximum_co_investment) || 0;
+      const leadInvestorInvested = Math.max(totalInvestment - maximumCoInvestment, 0);
+      const newOfferAmount = Number(offerData.offer_amount) || 0;
+      const newEquityPercentage = Number(offerData.equity_percentage) || 0;
+      const totalEquityPercentage = Number(opportunityData?.equity_percentage) || 0;
+      
+      // Calculate equity allocation
+      const leadInvestorEquity = totalInvestment > 0 && totalEquityPercentage > 0 
+        ? (totalEquityPercentage * (leadInvestorInvested / totalInvestment))
+        : 0;
+      
+      // Combine all data
+      // Set lead investor data at both nested and top level for easier access
+      const finalCoInvestmentDetails: any = {
+        ...offerData,
+        investor: investorData,
+        startup: startupData,
+        co_investment_opportunity: opportunityData ? {
+          ...opportunityData,
+          listed_by_user: leadInvestorData
+        } : null,
+        // Also add lead investor data at top level for easier access
+        leadInvestor: leadInvestorData,
+        leadInvestorInvested,
+        remainingForCoInvestment: maximumCoInvestment,
+        newOfferAmount,
+        newEquityPercentage,
+        totalInvestment,
+        totalEquityPercentage,
+        leadInvestorEquity,
+        currency: offerData.currency || startupData?.currency || startupCurrency || 'USD'
+      };
+      
+      console.log('📦 Final co-investment details:', finalCoInvestmentDetails);
+      console.log('👤 Lead investor data:', leadInvestorData);
+      console.log('📊 Opportunity data:', opportunityData);
+      
+      setCoInvestmentDetails(finalCoInvestmentDetails);
+      
+    } catch (err) {
+      console.error('Error loading co-investment details:', err);
+      messageService.error(
+        'Error Loading Details',
+        'Failed to load co-investment offer details. Please try again.'
+      );
+      setIsCoInvestmentDetailsModalOpen(false);
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
+  const handleAcceptCoInvestmentOffer = async (offer: OfferReceived) => {
+    if (!offer.coInvestmentOfferId) return;
+    
+    try {
+      console.log('💰 Accepting co-investment offer:', offer.coInvestmentOfferId);
+      
+      // Use the proper database function to approve co-investment offer
+      const { data, error } = await supabase.rpc('approve_co_investment_offer_startup', {
+        p_offer_id: offer.coInvestmentOfferId,
+        p_approval_action: 'approve'
+      });
+
+      if (error) {
+        console.error('❌ Error approving co-investment offer:', error);
+        throw error;
+      }
+
+      console.log('✅ Co-investment offer accepted:', data);
+      
+      messageService.success(
+        'Co-Investment Offer Accepted',
+        'Co-investment offer accepted successfully!',
+        3000
+      );
+      
+      await loadOffersReceived();
+      
+    } catch (err) {
+      console.error('Error accepting co-investment offer:', err);
+      messageService.error(
+        'Acceptance Failed',
+        'Failed to accept co-investment offer. Please try again.'
+      );
+    }
+  };
+
+  const handleRejectCoInvestmentOffer = async (offer: OfferReceived) => {
+    if (!offer.coInvestmentOfferId) return;
+    
+    try {
+      console.log('💰 Rejecting co-investment offer:', offer.coInvestmentOfferId);
+      
+      // Use the proper database function to reject co-investment offer
+      const { data, error } = await supabase.rpc('approve_co_investment_offer_startup', {
+        p_offer_id: offer.coInvestmentOfferId,
+        p_approval_action: 'reject'
+      });
+
+      if (error) {
+        console.error('❌ Error rejecting co-investment offer:', error);
+        throw error;
+      }
+
+      console.log('✅ Co-investment offer rejected:', data);
+      
+      messageService.success(
+        'Co-Investment Offer Rejected',
+        'Co-investment offer rejected successfully.',
+        3000
+      );
+      
+      await loadOffersReceived();
+      
+    } catch (err) {
+      console.error('Error rejecting co-investment offer:', err);
+      messageService.error(
+        'Rejection Failed',
+        'Failed to reject co-investment offer. Please try again.'
       );
     }
   };
@@ -1169,26 +1467,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       return;
     }
     
-    // Create contact details display
-    const contactDetails = `
-🎯 INVESTMENT OFFER CONTACT INFORMATION
-
-📊 OFFER DETAILS:
-• Offer ID: ${originalOffer.id}
-• Amount: ${formatCurrency(Number(originalOffer.offerAmount) || 0, (originalOffer as any).currency || 'USD')}
-• Equity: ${Number(originalOffer.equityPercentage) || 0}%
-• Status: Stage 4 - Accepted by Startup
-• Date: ${new Date(originalOffer.createdAt).toLocaleDateString()}
-
-📧 CONTACT DETAILS:
-• Investor: ${originalOffer.investorName || originalOffer.investorEmail || 'Not Available'}
-• Investor Email: ${originalOffer.investorEmail || 'Not Available'}
-
-💡 NEXT STEPS:
-Contact the investor directly to proceed with the investment process.
-    `;
-    
-    alert(contactDetails);
+    // Set the selected offer and open the modal
+    setSelectedOfferForContact(originalOffer);
+    setIsInvestorContactModalOpen(true);
   };
 
   const handleSubmitRecognition = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -2046,10 +2327,24 @@ Contact the investor directly to proceed with the investment process.
                       )}
                       {/* Remove diligence document actions */}
                       {/* Show accept/reject buttons for regular investment offers or co-investment opportunities at Stage 3 */}
+                      {/* Also show buttons for co-investment offers that are pending startup approval */}
                       {offer.type === 'Investment' && 
                        (offer.status === 'pending' || offer.status === 'startup_advisor_approved') && 
-                       (!offer.isCoInvestmentOpportunity || (offer.isCoInvestmentOpportunity && offer.stage === 3)) && (
+                       ((!offer.isCoInvestmentOpportunity || (offer.isCoInvestmentOpportunity && offer.stage === 3)) || 
+                        (offer.isCoInvestmentOffer && offer.status === 'pending')) && (
                         <div className="flex gap-2">
+                          {/* View Details button for co-investment offers */}
+                          {offer.isCoInvestmentOffer && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleViewCoInvestmentDetails(offer)}
+                              className="border-blue-300 text-blue-600 hover:bg-blue-50"
+                            >
+                              <FileText className="h-4 w-4 mr-1" />
+                              View Details
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             onClick={() => handleAcceptInvestmentOffer(offer)}
@@ -2075,15 +2370,30 @@ Contact the investor directly to proceed with the investment process.
                             <Check className="h-4 w-4" />
                             Accepted
                           </span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleViewContactDetails(offer)}
-                            className="border-blue-300 text-blue-600 hover:bg-blue-50"
-                          >
-                            <MessageCircle className="h-4 w-4 mr-1" />
-                            View Contact Details
-                          </Button>
+                          {/* View Details button for accepted co-investment offers */}
+                          {offer.isCoInvestmentOffer && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleViewCoInvestmentDetails(offer)}
+                              className="border-blue-300 text-blue-600 hover:bg-blue-50"
+                            >
+                              <FileText className="h-4 w-4 mr-1" />
+                              View Details
+                            </Button>
+                          )}
+                          {/* Only show View Contact Details for regular investment offers, not co-investment offers */}
+                          {!offer.isCoInvestmentOffer && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleViewContactDetails(offer)}
+                              className="border-blue-300 text-blue-600 hover:bg-blue-50"
+                            >
+                              <MessageCircle className="h-4 w-4 mr-1" />
+                              View Contact Details
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
@@ -2167,6 +2477,29 @@ Contact the investor directly to proceed with the investment process.
         />
       )}
 
+      {/* Investor Contact Details Modal */}
+      {selectedOfferForContact && (
+        <InvestorContactDetailsModal
+          isOpen={isInvestorContactModalOpen}
+          onClose={() => {
+            setIsInvestorContactModalOpen(false);
+            setSelectedOfferForContact(null);
+          }}
+          offer={{
+            id: selectedOfferForContact.id,
+            offerAmount: selectedOfferForContact.offerAmount,
+            equityPercentage: selectedOfferForContact.equityPercentage,
+            currency: (selectedOfferForContact as any).currency || 'USD',
+            createdAt: selectedOfferForContact.createdAt,
+            stage: (selectedOfferForContact as any).stage || 4,
+            status: selectedOfferForContact.status,
+            investorName: selectedOfferForContact.investorName,
+            investorEmail: selectedOfferForContact.investorEmail,
+            investorAdvisor: (selectedOfferForContact as any).investor_advisor || null
+          }}
+        />
+      )}
+
       {/* Recognition / Incubation Entry Modal */}
       <Modal 
         isOpen={isRecognitionModalOpen}
@@ -2222,6 +2555,141 @@ Contact the investor directly to proceed with the investment process.
             <Button type="submit" className="bg-blue-600 text-white">Save</Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Co-Investment Offer Details Modal */}
+      <Modal
+        isOpen={isCoInvestmentDetailsModalOpen}
+        onClose={() => setIsCoInvestmentDetailsModalOpen(false)}
+        title="Co-Investment Offer Details"
+        size="large"
+      >
+        {isLoadingDetails ? (
+          <div className="py-8 text-center text-slate-500">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-2">Loading details...</p>
+          </div>
+        ) : coInvestmentDetails ? (
+          <div className="space-y-6">
+            {/* Lead Investor Section */}
+            <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+              <h3 className="text-lg font-semibold text-blue-900 mb-3">Lead Investor Information</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Name:</span>
+                  <span className="font-medium">
+                    {coInvestmentDetails.leadInvestor?.name || 
+                     coInvestmentDetails.co_investment_opportunity?.listed_by_user?.name ||
+                     coInvestmentDetails.leadInvestor?.company_name || 
+                     coInvestmentDetails.co_investment_opportunity?.listed_by_user?.company_name || 
+                     coInvestmentDetails.leadInvestorName ||
+                     'Not Available'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Email:</span>
+                  <span className="font-medium">
+                    {coInvestmentDetails.leadInvestor?.email || 
+                     coInvestmentDetails.co_investment_opportunity?.listed_by_user?.email || 
+                     coInvestmentDetails.leadInvestorEmail ||
+                     'Not Available'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Lead Investment Amount:</span>
+                  <span className="font-semibold text-blue-700">
+                    {formatCurrency(coInvestmentDetails.leadInvestorInvested, coInvestmentDetails.currency)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Lead Equity Percentage:</span>
+                  <span className="font-semibold text-blue-700">
+                    {coInvestmentDetails.leadInvestorEquity.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Co-Investment Summary */}
+            <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+              <h3 className="text-lg font-semibold text-slate-900 mb-3">Co-Investment Summary</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Total Investment Amount:</span>
+                  <span className="font-semibold">
+                    {formatCurrency(coInvestmentDetails.totalInvestment, coInvestmentDetails.currency)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Total Equity Percentage:</span>
+                  <span className="font-semibold">
+                    {coInvestmentDetails.totalEquityPercentage.toFixed(2)}%
+                  </span>
+                </div>
+                <div className="flex justify-between border-t pt-2 mt-2">
+                  <span className="text-slate-600">Remaining for Co-Investment:</span>
+                  <span className="font-semibold text-orange-600">
+                    {formatCurrency(coInvestmentDetails.remainingForCoInvestment, coInvestmentDetails.currency)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* New Investor Offer Section */}
+            <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+              <h3 className="text-lg font-semibold text-green-900 mb-3">New Investment Offer</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Investor Name:</span>
+                  <span className="font-medium">
+                    {coInvestmentDetails.investor?.name || 
+                     coInvestmentDetails.investor?.company_name || 
+                     coInvestmentDetails.investor_name || 
+                     'Unknown'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Investor Email:</span>
+                  <span className="font-medium">
+                    {coInvestmentDetails.investor?.email || 
+                     coInvestmentDetails.investor_email || 
+                     'N/A'}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t pt-2 mt-2">
+                  <span className="text-slate-600">Offer Amount:</span>
+                  <span className="font-semibold text-green-700">
+                    {formatCurrency(coInvestmentDetails.newOfferAmount, coInvestmentDetails.currency)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Equity Percentage:</span>
+                  <span className="font-semibold text-green-700">
+                    {coInvestmentDetails.newEquityPercentage.toFixed(2)}%
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Currency:</span>
+                  <span className="font-medium">{coInvestmentDetails.currency}</span>
+                </div>
+              </div>
+            </div>
+
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => setIsCoInvestmentDetailsModalOpen(false)}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="py-8 text-center text-slate-500">
+            <p>No details available</p>
+          </div>
+        )}
       </Modal>
 
     </div>

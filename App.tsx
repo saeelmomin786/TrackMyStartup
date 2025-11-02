@@ -2000,8 +2000,18 @@ const App: React.FC = () => {
     );
   }, []);
 
-  const handleSubmitOffer = useCallback(async (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string, wantsCoInvestment?: boolean) => {
+  const handleSubmitOffer = useCallback(async (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string, wantsCoInvestment?: boolean, coInvestmentOpportunityId?: number) => {
     if (!currentUserRef.current) return;
+    
+    console.log('🔍 handleSubmitOffer called with:', {
+      opportunity: opportunity.name,
+      offerAmount,
+      equityPercentage,
+      currency,
+      wantsCoInvestment,
+      coInvestmentOpportunityId,
+      coInvestmentOpportunityIdType: typeof coInvestmentOpportunityId
+    });
     
     try {
       // Check if user already has an offer for this startup
@@ -2049,20 +2059,61 @@ const App: React.FC = () => {
       }
       
       // Use opportunity.id which is the new_investments.id
-      const newOffer = await investmentService.createInvestmentOffer({
+      const createdOffer = await investmentService.createInvestmentOffer({
         investor_email: currentUserRef.current.email,
         startup_name: opportunity.name,
         investment_id: opportunity.id, // This is the new_investments.id
         offer_amount: offerAmount,
         equity_percentage: equityPercentage,
-        currency: currency || 'USD'
+        currency: currency || 'USD',
+        co_investment_opportunity_id: coInvestmentOpportunityId // Track co-investment opportunity if this is a co-investment offer
       });
       
-      // Update local state
-      setInvestmentOffers(prev => [newOffer, ...prev]);
+      // Format the offer to match the InvestmentOffer interface format (camelCase)
+      // This ensures it displays correctly in the UI, especially for co-investment offers
+      const isCoInvestment = !!coInvestmentOpportunityId || !!(createdOffer as any).co_investment_opportunity_id;
       
-      // Handle co-investment logic if requested
-      if (wantsCoInvestment) {
+      const formattedNewOffer: any = {
+        id: createdOffer.id,
+        investorEmail: createdOffer.investor_email || currentUserRef.current.email,
+        investorName: (createdOffer as any).investor_name || currentUserRef.current.name || undefined,
+        startupName: createdOffer.startup_name || opportunity.name,
+        startupId: (createdOffer as any).startup_id,
+        startup: (createdOffer as any).startup || null,
+        offerAmount: Number(createdOffer.offer_amount) || offerAmount,
+        equityPercentage: Number(createdOffer.equity_percentage) || equityPercentage,
+        status: createdOffer.status || 'pending',
+        currency: createdOffer.currency || currency || 'USD',
+        createdAt: createdOffer.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString(),
+        // Co-investment fields
+        is_co_investment: isCoInvestment, // Flag to identify co-investment offers
+        co_investment_opportunity_id: createdOffer.co_investment_opportunity_id || coInvestmentOpportunityId || null,
+        lead_investor_approval_status: (createdOffer as any).lead_investor_approval_status || 'not_required',
+        lead_investor_approval_at: (createdOffer as any).lead_investor_approval_at,
+        investor_advisor_approval_status: (createdOffer as any).investor_advisor_approval_status || 'not_required',
+        investor_advisor_approval_at: (createdOffer as any).investor_advisor_approval_at,
+        startup_advisor_approval_status: (createdOffer as any).startup_advisor_approval_status || 'not_required',
+        startup_advisor_approval_at: (createdOffer as any).startup_advisor_approval_at,
+        stage: (createdOffer as any).stage || 1,
+        contact_details_revealed: (createdOffer as any).contact_details_revealed || false,
+        contact_details_revealed_at: (createdOffer as any).contact_details_revealed_at
+      };
+      
+      // Update local state
+      setInvestmentOffers(prev => [formattedNewOffer, ...prev]);
+      
+      // Handle co-investment offer flow - different from creating new co-investment opportunity
+      if (coInvestmentOpportunityId) {
+        // This is an offer for an existing co-investment opportunity
+        // The approval flow is handled by the createInvestmentOffer function
+        // Flow: Investor Advisor → Lead Investor → Startup
+        console.log('✅ Co-investment offer created with opportunity ID:', coInvestmentOpportunityId);
+        console.log('📋 Formatted offer for state:', formattedNewOffer);
+        console.log('🔍 Co-investment opportunity ID in formatted offer:', formattedNewOffer.co_investment_opportunity_id);
+      }
+      
+      // Handle co-investment logic if requested (creating NEW co-investment opportunity)
+      if (wantsCoInvestment && !coInvestmentOpportunityId) {
         const remainingAmount = opportunity.investmentValue - offerAmount;
         if (remainingAmount > 0) {
           try {

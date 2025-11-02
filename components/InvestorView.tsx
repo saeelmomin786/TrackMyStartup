@@ -25,7 +25,7 @@ interface InvestorViewProps {
   currentUser?: { id: string; email: string; investorCode?: string; investor_code?: string };
   onViewStartup: (startup: Startup) => void;
   onAcceptRequest: (id: number) => void;
-  onMakeOffer: (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string, wantsCoInvestment?: boolean) => void;
+  onMakeOffer: (opportunity: NewInvestment, offerAmount: number, equityPercentage: number, currency?: string, wantsCoInvestment?: boolean, coInvestmentOpportunityId?: number) => void;
   onUpdateOffer?: (offerId: number, offerAmount: number, equityPercentage: number) => void;
   onCancelOffer?: (offerId: number) => void;
   isViewOnly?: boolean;
@@ -114,6 +114,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [selectedOpportunity, setSelectedOpportunity] = useState<ActiveFundraisingStartup | null>(null);
     const [selectedCurrency, setSelectedCurrency] = useState<string>('INR');
     const [wantsCoInvestment, setWantsCoInvestment] = useState<boolean>(false);
+    const [isCoInvestmentOffer, setIsCoInvestmentOffer] = useState<boolean>(false); // Track if offer is for existing co-investment opportunity
     
     // Get available currencies from the currency rates
     const getAvailableCurrencies = () => {
@@ -211,6 +212,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
   const [myCoInvestmentOpps, setMyCoInvestmentOpps] = useState<any[]>([]);
   const [startupNames, setStartupNames] = useState<Record<number, string>>({});
   const [isLoadingMyOpps, setIsLoadingMyOpps] = useState<boolean>(false);
+  
+  // Co-investment offers pending lead investor approval
+  const [pendingCoInvestmentOffers, setPendingCoInvestmentOffers] = useState<any[]>([]);
+  const [isLoadingPendingOffers, setIsLoadingPendingOffers] = useState<boolean>(false);
 
   // Fetch recommendations or all active co-investment opportunities
   const fetchRecommendations = async () => {
@@ -667,6 +672,159 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     }
   }, [activeTab, myCoInvestmentOpps, startupNames]);
 
+  // Load co-investment offers pending lead investor approval
+  useEffect(() => {
+    const loadPendingCoInvestmentOffers = async () => {
+      if (activeTab !== 'offers' || !currentUser?.id) return;
+      try {
+        setIsLoadingPendingOffers(true);
+        console.log('🔍 Loading pending co-investment offers for lead investor:', currentUser.id);
+        
+        // Fetch co-investment offers that need this user's (lead investor's) approval
+        // Now query from the new co_investment_offers table
+        // Get co-investment opportunities created by this user
+        const { data: myOpps } = await supabase
+          .from('co_investment_opportunities')
+          .select('id')
+          .eq('listed_by_user_id', currentUser.id);
+        
+        if (!myOpps || myOpps.length === 0) {
+          setPendingCoInvestmentOffers([]);
+          return;
+        }
+        
+        const myOppIds = myOpps.map(opp => opp.id);
+        
+        // Fetch co-investment offers for this user's opportunities
+        // Show both pending AND approved offers (for tracking)
+        const { data: offersData, error: offersError } = await supabase
+          .from('co_investment_offers')
+          .select(`
+            *,
+            startup:startups(id, name, sector, currency),
+            investor:users!co_investment_offers_investor_id_fkey(id, name, email)
+          `)
+          .in('status', ['pending_lead_investor_approval', 'pending_startup_approval'])
+          .in('co_investment_opportunity_id', myOppIds)
+          .order('created_at', { ascending: false });
+        
+        if (offersError) {
+          console.error('Error fetching pending co-investment offers:', offersError);
+          // Fallback: try without join and fetch manually
+          const { data: offersDataSimple, error: simpleError } = await supabase
+            .from('co_investment_offers')
+            .select('*')
+            .in('status', ['pending_lead_investor_approval', 'pending_startup_approval'])
+            .in('co_investment_opportunity_id', myOppIds)
+            .order('created_at', { ascending: false });
+          
+          if (simpleError) {
+            console.error('Error fetching pending co-investment offers (simple):', simpleError);
+            setPendingCoInvestmentOffers([]);
+            return;
+          }
+          
+          // Manually fetch startup and investor data
+          const offersWithData = await Promise.all(
+            (offersDataSimple || []).map(async (offer: any) => {
+              const { data: startupData } = await supabase
+                .from('startups')
+                .select('id, name, sector, currency')
+                .eq('name', offer.startup_name)
+                .single();
+              
+              const { data: investorData } = await supabase
+                .from('users')
+                .select('id, name, email')
+                .eq('email', offer.investor_email)
+                .single();
+              
+              return {
+                ...offer,
+                startup: startupData || null,
+                investor: investorData || null
+              };
+            })
+          );
+          
+          setPendingCoInvestmentOffers(offersWithData);
+          return;
+        }
+        
+        // Format the offers data
+        const offersWithData = (offersData || []).map((offer: any) => ({
+          ...offer,
+          startup: offer.startup || null,
+          investor: offer.investor || null
+        }));
+        
+        console.log('✅ Found pending co-investment offers:', offersWithData.length);
+        setPendingCoInvestmentOffers(offersWithData);
+      } catch (error) {
+        console.error('Error loading pending co-investment offers:', error);
+        setPendingCoInvestmentOffers([]);
+      } finally {
+        setIsLoadingPendingOffers(false);
+      }
+    };
+    
+    loadPendingCoInvestmentOffers();
+  }, [activeTab, currentUser?.id, myCoInvestmentOpps]);
+
+  // Handle lead investor approval/rejection
+  const handleLeadInvestorApproval = async (offerId: number, action: 'approve' | 'reject') => {
+    if (!currentUser?.id) return;
+    
+    try {
+      console.log(`🔍 Lead investor ${action}ing co-investment offer:`, offerId);
+      const result = await investmentService.approveCoInvestmentOfferLeadInvestor(
+        offerId,
+        currentUser.id,
+        action
+      );
+      
+      console.log('✅ Lead investor approval result:', result);
+      
+      // Refresh co-investment offers after approval
+      // This will reload the offers list including approved ones
+      const { data: myOpps } = await supabase
+        .from('co_investment_opportunities')
+        .select('id')
+        .eq('listed_by_user_id', currentUser.id);
+      
+      if (myOpps && myOpps.length > 0) {
+        const myOppIds = myOpps.map(opp => opp.id);
+        
+        const { data: offersData, error: offersError } = await supabase
+          .from('co_investment_offers')
+          .select(`
+            *,
+            startup:startups(id, name, sector, currency),
+            investor:users!co_investment_offers_investor_id_fkey(id, name, email)
+          `)
+          .in('status', ['pending_lead_investor_approval', 'pending_startup_approval'])
+          .in('co_investment_opportunity_id', myOppIds)
+          .order('created_at', { ascending: false });
+        
+        if (!offersError && offersData) {
+          // Fetch startup data manually if needed
+          const offersWithData = offersData.map(offer => ({
+            ...offer,
+            startup: offer.startup || { id: offer.startup_id, name: offer.startup_name, sector: null, currency: offer.currency },
+            investor: offer.investor || { id: offer.investor_id, name: offer.investor_name, email: offer.investor_email }
+          }));
+          
+          setPendingCoInvestmentOffers(offersWithData);
+        }
+      }
+      
+      alert(`Co-investment offer ${action === 'approve' ? 'approved' : 'rejected'} successfully!`);
+    } catch (error) {
+      console.error('Error in lead investor approval:', error);
+      alert(`Failed to ${action} co-investment offer. Please try again.`);
+    }
+  };
+
     // No separate investor investments list needed; approvals drive portfolio
 
     // Shuffle pitches when reels tab is active
@@ -788,8 +946,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const compliantCount = startups.filter(s => s.complianceStatus === ComplianceStatus.Compliant).length;
     const complianceRate = startups.length > 0 ? (compliantCount / startups.length) * 100 : 0;
 
-    const handleMakeOfferClick = (opportunity: ActiveFundraisingStartup) => {
-        setSelectedOpportunity(opportunity);
+    const handleMakeOfferClick = (opportunity: ActiveFundraisingStartup, isFromCoInvestment: boolean = false, coInvestmentOpportunityId?: number) => {
+        // Preserve coInvestmentOpportunityId if it exists in the opportunity object or is passed
+        const opportunityWithCoInvestment = coInvestmentOpportunityId 
+          ? {...opportunity, coInvestmentOpportunityId} as any
+          : opportunity;
+        setSelectedOpportunity(opportunityWithCoInvestment);
+        setIsCoInvestmentOffer(isFromCoInvestment);
+        setWantsCoInvestment(false); // Always reset to false - co-investment checkbox should not be checked when making offer for existing co-investment
         setIsOfferModalOpen(true);
     };
     
@@ -843,7 +1007,28 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             pitchVideoUrl: selectedOpportunity.pitchVideoUrl
         };
 
-        onMakeOffer(newInvestment, offerAmount, equityPercentage, selectedCurrency, wantsCoInvestment);
+        // When making offer for existing co-investment opportunity, don't pass wantsCoInvestment=true
+        // because that would create a NEW co-investment opportunity
+        // We only want to create a regular offer as a co-investor
+        const shouldCreateCoInvestment = isCoInvestmentOffer ? false : wantsCoInvestment;
+        const coInvestmentOpportunityId = isCoInvestmentOffer && (selectedOpportunity as any)?.coInvestmentOpportunityId 
+          ? (selectedOpportunity as any).coInvestmentOpportunityId 
+          : undefined;
+        
+        console.log('🔍 Submitting co-investment offer:', {
+          isCoInvestmentOffer,
+          selectedOpportunity: selectedOpportunity ? {
+            id: selectedOpportunity.id,
+            name: selectedOpportunity.name,
+            coInvestmentOpportunityId: (selectedOpportunity as any)?.coInvestmentOpportunityId
+          } : null,
+          coInvestmentOpportunityId,
+          shouldCreateCoInvestment,
+          offerAmount,
+          equityPercentage
+        });
+        
+        onMakeOffer(newInvestment, offerAmount, equityPercentage, selectedCurrency, shouldCreateCoInvestment, coInvestmentOpportunityId);
         // After submitting, switch to Offers tab
         setActiveTab('offers');
         
@@ -851,6 +1036,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         setSelectedOpportunity(null);
         setSelectedCurrency('INR');
         setWantsCoInvestment(false);
+        setIsCoInvestmentOffer(false);
     };
     
     const handleFavoriteToggle = async (pitchId: number) => {
@@ -974,6 +1160,65 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     };
     
     const getStageStatusDisplay = (offer: any) => {
+        // Check if this is a co-investment offer (either by flag or co_investment_opportunity_id)
+        const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+        
+        if (isCoInvestmentOffer) {
+            // Co-investment offer flow: Investor Advisor → Lead Investor → Startup
+            const status = offer.status || 'pending';
+            
+            if (status === 'pending_investor_advisor_approval') {
+                return {
+                    color: 'bg-blue-100 text-blue-800',
+                    text: '🔵 Co-Investment: Investor Advisor Approval',
+                    icon: '🔵'
+                };
+            }
+            if (status === 'pending_lead_investor_approval') {
+                return {
+                    color: 'bg-orange-100 text-orange-800',
+                    text: '🟠 Co-Investment: Lead Investor Approval',
+                    icon: '🟠'
+                };
+            }
+            if (status === 'pending_startup_approval') {
+                return {
+                    color: 'bg-green-100 text-green-800',
+                    text: '🟢 Co-Investment: Startup Review',
+                    icon: '🟢'
+                };
+            }
+            if (status === 'investor_advisor_rejected') {
+                return {
+                    color: 'bg-red-100 text-red-800',
+                    text: '❌ Rejected by Investor Advisor',
+                    icon: '❌'
+                };
+            }
+            if (status === 'lead_investor_rejected') {
+                return {
+                    color: 'bg-red-100 text-red-800',
+                    text: '❌ Rejected by Lead Investor',
+                    icon: '❌'
+                };
+            }
+            if (status === 'accepted') {
+                return {
+                    color: 'bg-emerald-100 text-emerald-800',
+                    text: '✅ Co-Investment: Accepted',
+                    icon: '✅'
+                };
+            }
+            if (status === 'rejected') {
+                return {
+                    color: 'bg-red-100 text-red-800',
+                    text: '❌ Rejected by Startup',
+                    icon: '❌'
+                };
+            }
+        }
+        
+        // Regular offer flow: Investor Advisor → Startup Advisor → Startup
         // Get offer stage (default to 1 if not set)
         const offerStage = offer.stage || 1;
         
@@ -1527,26 +1772,56 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                 <Eye className="h-4 w-4 mr-2" /> View Startup Profile
                               </Button>
                               
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => {
-                                  // Find the startup and open make offer modal
-                                  const matchedPitch = activeFundraisingStartups.find(pitch => 
-                                    pitch.id === opp.startup_id || 
-                                    pitch.name === opp.startup?.name
+                              {/* Check if current user is the lead investor */}
+                              {(() => {
+                                const isLeadInvestor = currentUser?.id === opp.listed_by_user_id;
+                                
+                                if (isLeadInvestor) {
+                                  // Lead investor cannot make offer on their own co-investment opportunity
+                                  return (
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      disabled
+                                      className="flex-1 bg-gray-100 border border-gray-300 text-gray-500 cursor-not-allowed"
+                                      title="You are the lead investor for this co-investment opportunity. You cannot make an offer on your own opportunity."
+                                    >
+                                      <DollarSign className="h-4 w-4 mr-2" /> You Created This Opportunity
+                                    </Button>
                                   );
-                                  
-                                  if (matchedPitch) {
-                                    handleMakeOfferClick(matchedPitch);
-                                  } else {
-                                    alert(`Startup "${opp.startup?.name}" is not currently fundraising.`);
-                                  }
-                                }}
-                                className="flex-1 bg-white border border-orange-300 text-orange-700 hover:bg-orange-50 transition-all duration-200"
-                              >
-                                <DollarSign className="h-4 w-4 mr-2" /> Make Co-Investment Offer
-                              </Button>
+                                }
+                                
+                                // Regular investor can make offer
+                                return (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                      // Find the startup and open make offer modal
+                                      const matchedPitch = activeFundraisingStartups.find(pitch => 
+                                        pitch.id === opp.startup_id || 
+                                        pitch.name === opp.startup?.name
+                                      );
+                                      
+                                      if (matchedPitch) {
+                                        // Store the co-investment opportunity ID for later use
+                                        console.log('🔍 Setting selectedOpportunity with co-investment ID:', {
+                                          opportunityId: opp.id,
+                                          matchedPitch: matchedPitch.name,
+                                          matchedPitchId: matchedPitch.id
+                                        });
+                                        // Pass coInvestmentOpportunityId to handleMakeOfferClick so it's preserved
+                                        handleMakeOfferClick(matchedPitch, true, opp.id); // true = this is an offer for existing co-investment opportunity
+                                      } else {
+                                        alert(`Startup "${opp.startup?.name}" is not currently fundraising.`);
+                                      }
+                                    }}
+                                    className="flex-1 bg-white border border-orange-300 text-orange-700 hover:bg-orange-50 transition-all duration-200"
+                                  >
+                                    <DollarSign className="h-4 w-4 mr-2" /> Make Co-Investment Offer
+                                  </Button>
+                                );
+                              })()}
                             </div>
                           </div>
                         </Card>
@@ -2136,6 +2411,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               {investmentOffers.length > 0 ? (
                 investmentOffers.map(offer => {
                   // Debug logging
+            // Check if this is a co-investment offer (either by flag or co_investment_opportunity_id)
+            const isCoInvestment = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
             console.log('🔍 Offer data:', {
               id: offer.id,
               offerAmount: offer.offerAmount,
@@ -2143,7 +2420,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               currency: (offer as any).currency,
               createdAt: offer.createdAt,
               startupName: offer.startupName,
-              status: offer.status
+              status: offer.status,
+              isCoInvestment: isCoInvestment,
+              is_co_investment: (offer as any).is_co_investment,
+              co_investment_opportunity_id: (offer as any).co_investment_opportunity_id
             });
                   
                   return (
@@ -2152,7 +2432,19 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                       <div className="flex items-center gap-3 min-w-0">
                         <span className="text-lg">{getStageStatusDisplay(offer).icon}</span>
                         <div>
-                          <div className="font-medium text-slate-900 truncate">Offer for {offer.startupName}</div>
+                          <div className="font-medium text-slate-900 truncate">
+                            {(() => {
+                              const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                              return isCoInvestmentOffer ? (
+                                <span className="flex items-center gap-1">
+                                  <Users className="h-3 w-3 text-orange-600" />
+                                  Co-Investment Offer for {offer.startupName}
+                                </span>
+                              ) : (
+                                `Offer for ${offer.startupName}`
+                              );
+                            })()}
+                          </div>
                           <div className="text-sm text-slate-500">
                             {(() => {
                               const amount = Number(offer.offerAmount) || 0;
@@ -2171,13 +2463,36 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                               }
                             })()}
                           </div>
-                          {((offer as any).stage || 1) >= 2 && (
-                            <div className="text-xs text-blue-600 mt-1">
-                              {((offer as any).stage || 1) === 2 && "Awaiting startup advisor approval"}
-                              {((offer as any).stage || 1) === 3 && "Awaiting startup review"}
-                              {((offer as any).stage || 1) >= 4 && "Approved by startup"}
-                            </div>
-                          )}
+                          {/* Show status message for co-investment offers */}
+                          {(() => {
+                            const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                            if (isCoInvestmentOffer) {
+                              const status = offer.status || 'pending';
+                              if (status === 'pending_investor_advisor_approval') {
+                                return <div className="text-xs text-blue-600 mt-1">Awaiting investor advisor approval</div>;
+                              }
+                              if (status === 'pending_lead_investor_approval') {
+                                return <div className="text-xs text-orange-600 mt-1">Awaiting lead investor approval</div>;
+                              }
+                              if (status === 'pending_startup_approval') {
+                                return <div className="text-xs text-green-600 mt-1">Awaiting startup review</div>;
+                              }
+                              if (status === 'accepted') {
+                                return <div className="text-xs text-emerald-600 mt-1">Co-investment offer accepted</div>;
+                              }
+                            }
+                            // Regular offer status messages
+                            if (((offer as any).stage || 1) >= 2) {
+                              return (
+                                <div className="text-xs text-blue-600 mt-1">
+                                  {((offer as any).stage || 1) === 2 && "Awaiting startup advisor approval"}
+                                  {((offer as any).stage || 1) === 3 && "Awaiting startup review"}
+                                  {((offer as any).stage || 1) >= 4 && "Approved by startup"}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -2294,6 +2609,103 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                )}
             </div>
           </Card>
+
+          {/* Co-Investment Offers - Pending and Approved */}
+          {pendingCoInvestmentOffers.length > 0 && (
+            <Card>
+              <h3 className="text-lg font-semibold mb-4 text-slate-700 flex items-center gap-2">
+                <Users className="h-5 w-5 text-orange-600" />
+                Co-Investment Offers
+                <span className="text-sm font-normal text-slate-500">
+                  ({pendingCoInvestmentOffers.filter((o: any) => o.status === 'pending_lead_investor_approval' || o.lead_investor_approval_status === 'pending').length} pending, {pendingCoInvestmentOffers.filter((o: any) => o.status === 'pending_startup_approval' || o.lead_investor_approval_status === 'approved').length} approved)
+                </span>
+              </h3>
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>Note:</strong> As the lead investor, please review and approve co-investment offers. Once approved, they will be sent directly to the startup for final approval.
+                </p>
+              </div>
+              <div className="space-y-3">
+                {pendingCoInvestmentOffers.map((offer: any) => {
+                  const isPending = offer.status === 'pending_lead_investor_approval' || offer.lead_investor_approval_status === 'pending';
+                  const isApproved = offer.status === 'pending_startup_approval' || offer.lead_investor_approval_status === 'approved';
+                  
+                  return (
+                    <div key={offer.id} className={`p-4 rounded-lg border ${isPending ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Users className="h-4 w-4 text-orange-600" />
+                              <span className="text-xs font-medium text-orange-700 uppercase tracking-wide">Co-Investment Offer</span>
+                            </div>
+                            <div className="text-sm text-slate-500 mb-0.5">From Investor:</div>
+                            <div className="text-base font-semibold text-slate-900">
+                              {offer.investor?.name || offer.investor_email || 'Unknown Investor'}
+                            </div>
+                            <div className="text-xs text-slate-600 mt-2">
+                              Startup: <span className="font-medium">{offer.startup?.name || offer.startup_name}</span>
+                            </div>
+                            <div className="text-xs text-slate-600 mt-1">
+                              Offer Amount: <span className="font-medium">
+                                {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-600 mt-1">
+                              Equity Requested: <span className="font-medium">{offer.equity_percentage || 0}%</span>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            {isPending ? (
+                              <>
+                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-800">
+                                  Awaiting Your Approval
+                                </span>
+                                <span className="text-xs text-slate-500 text-right">
+                                  Will go to<br />Startup after<br />approval
+                                </span>
+                              </>
+                            ) : isApproved ? (
+                              <>
+                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                                  ✓ Approved by You
+                                </span>
+                                <span className="text-xs text-slate-500 text-right">
+                                  Sent to<br />Startup for<br />review
+                                </span>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                        {isPending && (
+                          <div className="pt-2 border-t border-orange-200">
+                            <Button
+                              size="sm"
+                              variant="primary"
+                              onClick={() => handleLeadInvestorApproval(offer.id, 'approve')}
+                              className="w-full bg-green-600 hover:bg-green-700 text-white font-medium"
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" /> Approve Co-Investment Offer
+                            </Button>
+                            <p className="text-xs text-slate-500 mt-2 text-center">
+                              Approving this offer will send it directly to the startup for final review
+                            </p>
+                          </div>
+                        )}
+                        {isApproved && (
+                          <div className="pt-2 border-t border-green-200">
+                            <p className="text-xs text-green-700 text-center font-medium">
+                              ✓ This offer has been approved by you and is now pending startup approval
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
 
           {/* Co-Investment You Created (moved after Your Offers) */}
           <Card>
@@ -2429,6 +2841,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             onClose={() => {
                 setIsOfferModalOpen(false);
                 setSelectedCurrency('INR');
+                setWantsCoInvestment(false);
+                setIsCoInvestmentOffer(false);
             }} 
             title={`Make an Offer for ${selectedOpportunity?.name}`}
         >
@@ -2467,28 +2881,47 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     <Input label="Equity Requested (%)" id="offer-equity" name="offer-equity" type="number" step="0.1" required />
                 </div>
                 
-                {/* Co-investment option */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <div className="flex items-start space-x-3">
-                        <input
-                            type="checkbox"
-                            id="co-investment"
-                            name="co-investment"
-                            checked={wantsCoInvestment}
-                            onChange={(e) => setWantsCoInvestment(e.target.checked)}
-                            className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                        <div className="flex-1">
-                            <label htmlFor="co-investment" className="text-sm font-medium text-blue-900 cursor-pointer">
-                                Looking for Co-Investment Partners
-                            </label>
-                            <p className="text-xs text-blue-700 mt-1">
-                                Check this if you want to find other investors to complete the funding round. 
-                                The remaining amount will be listed as a co-investment opportunity for other investors.
-                            </p>
+                {/* Co-investment option - Only show if NOT making offer for existing co-investment opportunity */}
+                {!isCoInvestmentOffer && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div className="flex items-start space-x-3">
+                            <input
+                                type="checkbox"
+                                id="co-investment"
+                                name="co-investment"
+                                checked={wantsCoInvestment}
+                                onChange={(e) => setWantsCoInvestment(e.target.checked)}
+                                className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            />
+                            <div className="flex-1">
+                                <label htmlFor="co-investment" className="text-sm font-medium text-blue-900 cursor-pointer">
+                                    Looking for Co-Investment Partners
+                                </label>
+                                <p className="text-xs text-blue-700 mt-1">
+                                    Check this if you want to find other investors to complete the funding round. 
+                                    The remaining amount will be listed as a co-investment opportunity for other investors.
+                                </p>
+                            </div>
                         </div>
                     </div>
-                </div>
+                )}
+                
+                {/* Show info message when making offer for existing co-investment opportunity */}
+                {isCoInvestmentOffer && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                        <div className="flex items-start space-x-2">
+                            <Users className="h-5 w-5 text-orange-600 mt-0.5" />
+                            <div className="flex-1">
+                                <p className="text-sm font-medium text-orange-900">
+                                    Making Co-Investment Offer
+                                </p>
+                                <p className="text-xs text-orange-700 mt-1">
+                                    You are making an offer as a co-investor. Your offer will be considered along with the lead investor's commitment.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 
                 {/* Scouting fee information removed */}
                 
@@ -2497,6 +2930,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         setIsOfferModalOpen(false);
                         setSelectedCurrency('INR');
                         setWantsCoInvestment(false);
+                        setIsCoInvestmentOffer(false);
                     }}>Cancel</Button>
                     <Button type="submit">Submit Offer</Button>
                 </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, User, Bell, HelpCircle, LogOut, Edit3, Shield, RefreshCw } from 'lucide-react';
+import { ArrowLeft, User, Bell, HelpCircle, LogOut, Edit3, Shield, RefreshCw, Camera, Image } from 'lucide-react';
 import Button from './ui/Button';
 import EditProfileModal from './EditProfileModal';
 // PaymentSection removed
@@ -111,21 +111,38 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ currentUser, onBack, onProfil
           ...currentUser,
           ...updatedData,
           // Ensure these specific fields are updated
-          profile_photo_url: updatedData.profile_photo_url || currentUser.profile_photo_url,
-          investment_advisor_code_entered: updatedData.investment_advisor_code_entered || currentUser.investment_advisor_code_entered,
-          logo_url: updatedData.logo_url || currentUser.logo_url,
-          name: updatedData.name || currentUser.name,
-          phone: updatedData.phone || currentUser.phone,
-          address: updatedData.address || currentUser.address,
-          city: updatedData.city || currentUser.city,
-          state: updatedData.state || currentUser.state,
-          country: updatedData.country || currentUser.country,
-          company: updatedData.company || currentUser.company,
-          company_type: updatedData.company_type || currentUser.company_type, // Added company type field
+          profile_photo_url: updatedData.profile_photo_url || currentUser?.profile_photo_url,
+          investment_advisor_code_entered: updatedData.investment_advisor_code_entered || currentUser?.investment_advisor_code_entered,
+          logo_url: updatedData.logo_url || currentUser?.logo_url,
+          name: updatedData.name || currentUser?.name,
+          phone: updatedData.phone || currentUser?.phone,
+          address: updatedData.address || currentUser?.address,
+          city: updatedData.city || currentUser?.city,
+          state: updatedData.state || currentUser?.state,
+          country: updatedData.country || currentUser?.country,
+          company: updatedData.company || currentUser?.company,
+          company_type: updatedData.company_type || currentUser?.company_type, // Added company type field
         };
+        
+        // Update refreshedProfile immediately if logo was updated
+        if (updatedData.logo_url) {
+          setRefreshedProfile((prev) => ({
+            ...prev,
+            ...updatedUser
+          } as AuthUser));
+          console.log('✅ Logo updated in local state');
+        }
         
         console.log('✅ Profile updated, calling onProfileUpdate with:', updatedUser);
         onProfileUpdate(updatedUser);
+      }
+      
+      // If logo was updated, refresh profile data after a short delay
+      if (updatedData.logo_url) {
+        console.log('🔄 Logo updated, refreshing profile data...');
+        setTimeout(() => {
+          refreshProfileData();
+        }, 1000); // 1 second delay to ensure database update is complete
       }
       
       console.log('Profile saved successfully!');
@@ -229,7 +246,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ currentUser, onBack, onProfil
             <span className="text-xs sm:text-sm text-slate-500">Role:</span>
             <span className="bg-green-100 text-green-800 px-2 py-1 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium">
               {refreshedProfile?.role === 'CA' ? 'Chartered Accountant' : 
-               refreshedProfile?.role === 'CS' ? 'Company Secretary' : 'User'}
+               refreshedProfile?.role === 'CS' ? 'Company Secretary' : 
+               refreshedProfile?.role === 'Investment Advisor' ? 'Investment Advisor' :
+               refreshedProfile?.role || 'User'}
             </span>
           </div>
 
@@ -256,14 +275,126 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ currentUser, onBack, onProfil
           )}
 
           {/* Investment Advisor Code Badge */}
-          {refreshedProfile?.role === 'Investment Advisor' && refreshedProfile?.investment_advisor_code && (
+          {((refreshedProfile?.role === 'Investment Advisor' && refreshedProfile?.investment_advisor_code) ||
+            (refreshedProfile?.investment_advisor_code && !refreshedProfile?.role?.includes('Investment Advisor'))) && (
             <div className="flex flex-col sm:flex-row items-center gap-2 mb-4 sm:mb-6">
               <span className="text-xs sm:text-sm text-slate-500">Investment Advisor Code:</span>
               <span className="bg-purple-100 text-purple-800 px-2 py-1 sm:px-3 sm:py-1 rounded-md text-xs sm:text-sm font-medium">
-                {refreshedProfile.investment_advisor_code}
+                {refreshedProfile?.investment_advisor_code || currentUser?.investment_advisor_code || 'N/A'}
               </span>
             </div>
           )}
+
+          {/* Logo Section - Only for Investment Advisor */}
+          {(() => {
+            // Check role with multiple variations
+            const refreshedRole = refreshedProfile?.role?.toString().trim();
+            const currentUserRole = currentUser?.role?.toString().trim();
+            
+            // Get advisor codes from both sources
+            const refreshedAdvisorCode = refreshedProfile?.investment_advisor_code?.toString().trim();
+            const currentUserAdvisorCode = currentUser?.investment_advisor_code?.toString().trim();
+            
+            // Check if they have an Investment Advisor code (IA-XXXXXX format)
+            const hasAdvisorCode = !!(
+              refreshedAdvisorCode || 
+              currentUserAdvisorCode ||
+              (refreshedAdvisorCode && refreshedAdvisorCode.startsWith('IA-')) ||
+              (currentUserAdvisorCode && currentUserAdvisorCode.startsWith('IA-'))
+            );
+            
+            const isInvestmentAdvisor = 
+              refreshedRole === 'Investment Advisor' || 
+              currentUserRole === 'Investment Advisor' ||
+              refreshedRole?.toLowerCase() === 'investment advisor' ||
+              currentUserRole?.toLowerCase() === 'investment advisor' ||
+              hasAdvisorCode;  // Show if they have an advisor code
+            
+            // Debug: Log role information (always log for debugging)
+            console.log('🔍 ProfilePage - Logo Section Check:', {
+              refreshedProfileRole: refreshedProfile?.role,
+              refreshedRole,
+              currentUserRole: currentUser?.role,
+              currentUserRole,
+              refreshedProfileInvestmentAdvisorCode: refreshedProfile?.investment_advisor_code,
+              refreshedAdvisorCode,
+              currentUserInvestmentAdvisorCode: currentUser?.investment_advisor_code,
+              currentUserAdvisorCode,
+              hasAdvisorCode,
+              isInvestmentAdvisor,
+              willShowLogo: isInvestmentAdvisor
+            });
+            
+            // Always show for debugging - remove the condition temporarily to see if it's a visibility issue
+            return isInvestmentAdvisor && (
+              <div className="w-full max-w-xs sm:max-w-sm lg:max-w-md mb-4 sm:mb-6">
+                <div className="bg-purple-50 rounded-lg border-2 border-purple-200 p-4 sm:p-6 shadow-sm">
+                  <div className="flex flex-col items-center gap-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Image className="h-5 w-5 text-purple-600" />
+                    <h3 className="text-base sm:text-lg font-semibold text-slate-900">Company Logo</h3>
+                  </div>
+                  
+                  {/* Logo Display */}
+                  <div className="relative w-24 h-24 sm:w-32 sm:h-32 bg-white rounded-lg border-2 border-slate-300 flex items-center justify-center overflow-hidden shadow-sm">
+                    {refreshedProfile?.logo_url ? (
+                      <>
+                        <img 
+                          src={refreshedProfile.logo_url} 
+                          alt="Company Logo" 
+                          className="w-full h-full object-contain p-2"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const fallback = target.nextElementSibling as HTMLElement;
+                            if (fallback) fallback.classList.remove('hidden');
+                          }}
+                        />
+                        {/* Fallback if image fails to load */}
+                        <div className="hidden w-full h-full bg-slate-100 flex items-center justify-center">
+                          <Image className="h-8 w-8 text-slate-400" />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center text-slate-400">
+                        <Image className="h-10 w-10 mb-2" />
+                        <span className="text-xs text-center px-2">No Logo</span>
+                      </div>
+                    )}
+                    
+                    {/* Edit Logo Button */}
+                    <button
+                      onClick={() => setShowEditModal(true)}
+                      className="absolute bottom-1 right-1 bg-purple-600 hover:bg-purple-700 text-white rounded-full p-1.5 sm:p-2 shadow-md hover:shadow-lg transition-all duration-200"
+                      title="Edit Logo"
+                    >
+                      <Camera className="h-3 w-3 sm:h-4 sm:w-4" />
+                    </button>
+                  </div>
+                  
+                  {/* Logo Status Text */}
+                  <div className="text-center">
+                    {refreshedProfile?.logo_url ? (
+                      <p className="text-xs sm:text-sm text-green-600 font-medium">
+                        ✓ Logo Uploaded
+                      </p>
+                    ) : (
+                      <p className="text-xs sm:text-sm text-slate-500">
+                        No logo uploaded yet
+                      </p>
+                    )}
+                    <button
+                      onClick={() => setShowEditModal(true)}
+                      className="text-xs sm:text-sm text-purple-600 hover:text-purple-700 font-medium mt-1 underline"
+                    >
+                      {refreshedProfile?.logo_url ? 'Update Logo' : 'Upload Logo'}
+                    </button>
+                  </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Edit Profile Button */}
           <Button

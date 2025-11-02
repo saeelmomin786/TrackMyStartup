@@ -1415,6 +1415,33 @@ const App: React.FC = () => {
     }
   }, [isAuthenticated, currentUser?.id]);
 
+  // Listen for offer stage updates and refresh investor offers
+  useEffect(() => {
+    const handleOfferStageUpdate = async (event: CustomEvent) => {
+      const detail = event.detail;
+      console.log('🔔 Offer stage updated event received:', detail);
+      
+      // Only refresh if current user is an Investor
+      if (currentUser?.role === 'Investor' && currentUser?.email) {
+        console.log('🔄 Refreshing investor offers after stage update...');
+        try {
+          // Use getUserInvestmentOffers which is what App.tsx uses
+          const refreshedOffers = await investmentService.getUserInvestmentOffers(currentUser.email);
+          console.log('✅ Refreshed offers:', refreshedOffers.length);
+          setInvestmentOffers(refreshedOffers);
+        } catch (error) {
+          console.error('❌ Error refreshing offers after stage update:', error);
+        }
+      }
+    };
+
+    window.addEventListener('offerStageUpdated', handleOfferStageUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('offerStageUpdated', handleOfferStageUpdate as EventListener);
+    };
+  }, [currentUser?.role, currentUser?.email]);
+
   // Set ignore flag when user is fully authenticated and has data
   useEffect(() => {
     if (isAuthenticated && currentUser && hasInitialDataLoaded) {

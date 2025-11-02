@@ -26,7 +26,7 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
   accept = '.pdf,.doc,.docx,.jpg,.jpeg,.png',
   maxSize = 10,
   className = '',
-  showPrivacyMessage = true,
+  showPrivacyMessage = false,
   documentType = 'document'
 }) => {
   // Generate unique ID for this component instance
@@ -102,18 +102,81 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
       const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
       const isValidExtension = allowedTypes.includes(fileExtension);
       
-      // For PDF files, be more lenient - accept if extension is .pdf OR MIME type is correct
+      // Check for wildcard patterns (e.g., image/*, audio/*)
+      const hasWildcardPattern = allowedTypes.some(type => type.includes('/*'));
       let isValidFile = isValidExtension;
       
-      if (fileExtension === '.pdf' || allowedTypes.includes('.pdf')) {
-        // For PDF files, accept if extension is .pdf OR MIME type is application/pdf
-        const isValidPdfMime = file.type === 'application/pdf' || file.type === 'application/x-pdf' || file.type === '' || !file.type;
+      // Get file MIME type safely
+      const fileMimeType = file.type || '';
+      
+      // If wildcard pattern is used, check MIME type instead of extension
+      if (hasWildcardPattern) {
+        if (allowedTypes.includes('image/*')) {
+          // Accept any image MIME type OR if extension matches image types
+          const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'];
+          const isValidImageMime = fileMimeType && fileMimeType.startsWith('image/');
+          const isValidImageExtension = imageExtensions.includes(fileExtension);
+          // Always accept if MIME type is image/* or extension is image type
+          isValidFile = isValidImageMime || isValidImageExtension || isValidExtension;
+          console.log('🔍 Image validation details:', {
+            isValidImageMime,
+            isValidImageExtension,
+            isValidExtension,
+            finalIsValidFile: isValidFile,
+            fileMimeType,
+            fileExtension
+          });
+        } else if (allowedTypes.includes('audio/*')) {
+          // Accept any audio MIME type
+          isValidFile = (fileMimeType && fileMimeType.startsWith('audio/')) || isValidExtension;
+        } else if (allowedTypes.includes('video/*')) {
+          // Accept any video MIME type
+          isValidFile = (fileMimeType && fileMimeType.startsWith('video/')) || isValidExtension;
+        } else {
+          // Generic wildcard pattern matching (e.g., application/*)
+          const wildcardPattern = allowedTypes.find(type => type.includes('/*'));
+          if (wildcardPattern) {
+            const mimePrefix = wildcardPattern.replace('/*', '/');
+            isValidFile = (fileMimeType && fileMimeType.startsWith(mimePrefix)) || isValidExtension;
+          }
+        }
+      } else if (fileExtension === '.pdf' || allowedTypes.includes('.pdf')) {
+        // For PDF files, be more lenient - accept if extension is .pdf OR MIME type is correct
+        const isValidPdfMime = fileMimeType === 'application/pdf' || fileMimeType === 'application/x-pdf' || !fileMimeType;
         isValidFile = fileExtension === '.pdf' || isValidPdfMime;
-      } else if (!isValidExtension && file.type) {
-        // For other file types, check MIME type as fallback
-        // This is a basic check - you might want to expand this for other file types
-        isValidFile = false;
+      } else if (!isValidExtension) {
+        // For other file types, check if MIME type matches any allowed type
+        const imageTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'];
+        const imageMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp', 'image/x-icon'];
+        
+        // If it's an image file by extension or MIME type, accept it
+        if (imageTypes.includes(fileExtension) || (fileMimeType && imageMimeTypes.includes(fileMimeType))) {
+          isValidFile = true;
+        } else if (fileMimeType) {
+          // Check if MIME type matches any allowed type pattern
+          // This handles cases where MIME type might be set but extension doesn't match
+          const matchingType = allowedTypes.some(allowed => {
+            if (allowed.includes('/*')) {
+              const prefix = allowed.replace('/*', '/');
+              return fileMimeType.startsWith(prefix);
+            }
+            return false;
+          });
+          isValidFile = matchingType;
+        }
       }
+      
+      // Debug logging
+      console.log('🔍 File validation:', {
+        fileName: file.name,
+        fileExtension,
+        fileMimeType,
+        allowedTypes,
+        isValidExtension,
+        hasWildcardPattern,
+        isValidFile,
+        willAcceptFile: isValidFile
+      });
       
       if (!isValidFile) {
         setFileError(`File type not allowed. Accepted types: ${accept}. Selected file: ${file.name} (type: ${file.type || 'unknown'})`);
@@ -172,24 +235,7 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
 
   return (
     <div className={`space-y-4 ${className}`}>
-      {/* Privacy Message */}
-      {showPrivacyMessage && (
-        <div className="bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <Shield className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-            <div className="flex-1">
-              <h4 className="font-medium text-blue-900 mb-1">Recommended: Use Your Cloud Drive</h4>
-              <p className="text-sm text-blue-800 mb-2">
-                <strong>Why choose cloud drive?</strong> Keep your documents private, reduce our storage costs, 
-                and maintain full control over your files. You can still upload files if you prefer.
-              </p>
-              <div className="text-xs text-blue-700">
-                <strong>Supported:</strong> Google Drive, OneDrive, Dropbox, Box, iCloud, MEGA, pCloud, MediaFire
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Privacy Message - Removed per user request */}
 
       {/* Input Mode Toggle */}
       <div className="flex items-center gap-2">

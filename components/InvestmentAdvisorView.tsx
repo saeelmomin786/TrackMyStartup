@@ -389,20 +389,23 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             startup_name: o.startup_name
           })));
           
-          // Filter to show offers that need approval OR have been approved by this advisor
-          // This allows advisors to see their approved offers for tracking
+          // Filter to show offers that need approval OR have been approved/rejected by this advisor
+          // This allows advisors to see their approved/rejected offers for tracking
           finalCoInvestmentData = coInvestmentOffersData.filter((offer: any) => {
             const needsApproval = offer.status === 'pending_investor_advisor_approval' || 
                                  offer.investor_advisor_approval_status === 'pending';
             const wasApproved = offer.investor_advisor_approval_status === 'approved';
-            // Show if it needs approval OR was approved by this advisor (for tracking)
-            const shouldShow = needsApproval || wasApproved;
+            const wasRejected = offer.investor_advisor_approval_status === 'rejected' ||
+                               offer.status === 'investor_advisor_rejected';
+            // Show if it needs approval OR was approved/rejected by this advisor (for tracking)
+            const shouldShow = needsApproval || wasApproved || wasRejected;
             console.log('🔍 Checking offer:', {
               id: offer.id,
               status: offer.status,
               investor_advisor_approval_status: offer.investor_advisor_approval_status,
               needsApproval,
               wasApproved,
+              wasRejected,
               shouldShow
             });
             return shouldShow;
@@ -526,11 +529,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             return false;
           }
           const investorHasThisAdvisor = investor.investment_advisor_code_entered === currentUser?.investment_advisor_code;
-          // Show co-investment offers that need approval OR have been approved by this advisor
+          // Show co-investment offers that need approval OR have been approved/rejected by this advisor
           const needsApproval = offer.status === 'pending_investor_advisor_approval' || 
                                offer.investor_advisor_approval_status === 'pending';
           const wasApproved = offer.investor_advisor_approval_status === 'approved';
-          const shouldShow = investorHasThisAdvisor && (needsApproval || wasApproved);
+          const wasRejected = offer.investor_advisor_approval_status === 'rejected' ||
+                             offer.status === 'investor_advisor_rejected';
+          const shouldShow = investorHasThisAdvisor && (needsApproval || wasApproved || wasRejected);
           
           console.log('🔍 Co-investment offer check:', {
             offerId: offer.id,
@@ -1267,9 +1272,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           // Use actualOfferId which is the ID from co_investment_offers table
           result = await investmentService.approveCoInvestmentOfferInvestorAdvisor(actualOfferId, action);
         } else {
-          // Startup advisor approval for co-investment offer (future use)
-          // For now, use the regular approval flow or co-investment offer approval if available
-          result = await investmentService.approveInvestorAdvisorOffer(actualOfferId, action);
+          // Startup advisor approval for co-investment offer
+          // Note: Co-investment offers typically don't go through startup advisor approval
+          // If they do, use the regular startup advisor approval flow
+          result = await investmentService.approveStartupAdvisorOffer(actualOfferId, action);
         }
         console.log('✅ Co-investment offer approval result:', result);
       } else {
@@ -2067,31 +2073,68 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </td>
                             <td className="px-3 py-4">
                               {(() => {
-                                // Get offer stage (default to 1 if not set)
-                                const offerStage = (offer as any).stage || 1;
+                                // Check if this is a co-investment offer
+                                const isCoInvestment = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
                                 
-                                // Determine the approval status to display based on stage
-                                if (offerStage === 1) {
+                                // For co-investment offers, check status field
+                                if (isCoInvestment) {
+                                  const coStatus = (offer as any).status || 'pending';
+                                  if (coStatus === 'pending_investor_advisor_approval') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                                      🔵 Stage 1: Investor Advisor Approval
+                                        🔵 Co-Investment: Investor Advisor Approval
                               </span>
                                   );
                                 }
-                                if (offerStage === 2) {
+                                  if (coStatus === 'pending_lead_investor_approval') {
                                   return (
-                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
-                                      🟣 Stage 2: Startup Advisor Approval
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                                        🟠 Co-Investment: Lead Investor Approval
                                     </span>
                                   );
                                 }
-                                if (offerStage === 3) {
+                                  if (coStatus === 'pending_startup_approval') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                      ✅ Stage 3: Ready for Startup Review
+                                        🟢 Co-Investment: Startup Review
                                     </span>
                                   );
                                 }
+                                  if (coStatus === 'investor_advisor_rejected') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                        ❌ Rejected by Investor Advisor
+                                      </span>
+                                    );
+                                  }
+                                  if (coStatus === 'lead_investor_rejected') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                        ❌ Rejected by Lead Investor
+                                      </span>
+                                    );
+                                  }
+                                  if (coStatus === 'accepted') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">
+                                        🎉 Co-Investment: Accepted
+                                      </span>
+                                    );
+                                  }
+                                  if (coStatus === 'rejected') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                        ❌ Co-Investment: Rejected
+                                      </span>
+                                    );
+                                  }
+                                }
+                                
+                                // For regular offers, check stage and approval statuses
+                                const offerStage = (offer as any).stage || 1;
+                                const offerStatus = (offer as any).status || 'pending';
+                                
+                                // Check rejection statuses first
                                 if (investorAdvisorStatus === 'rejected') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
@@ -2099,7 +2142,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                     </span>
                                   );
                                 }
-                                if ((offer as any).startup_advisor_approval_status === 'rejected') {
+                                if (startupAdvisorStatus === 'rejected') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
                                       ❌ Rejected by Startup Advisor
@@ -2107,9 +2150,119 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                   );
                                 }
                                 
+                                // Check stage-based status
+                                if (offerStage === 4 || offerStatus === 'accepted') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">
+                                      🎉 Stage 4: Accepted by Startup
+                                    </span>
+                                  );
+                                }
+                                if (offerStage === 3) {
+                                  // Check if investor advisor has approved
+                                  if (investorAdvisorStatus === 'approved' && startupAdvisorStatus === 'approved') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                        ✅ Stage 3: Ready for Startup Review
+                                      </span>
+                                    );
+                                  }
+                                  if (investorAdvisorStatus === 'approved') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                        ✅ Stage 3: Ready for Startup Review
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                      ✅ Stage 3: Ready for Startup Review
+                                    </span>
+                                  );
+                                }
+                                if (offerStage === 2) {
+                                  // Check if investor advisor has approved
+                                  if (investorAdvisorStatus === 'approved') {
+                                    if (startupAdvisorStatus === 'pending') {
+                                      return (
+                                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                                          🟣 Stage 2: Startup Advisor Approval
+                                        </span>
+                                      );
+                                    }
+                                    if (startupAdvisorStatus === 'approved') {
+                                      return (
+                                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                          ✅ Stage 2: Approved, Moving to Startup Review
+                                        </span>
+                                      );
+                                    }
+                                  }
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                                      🟣 Stage 2: Startup Advisor Approval
+                                    </span>
+                                  );
+                                }
+                                if (offerStage === 1) {
+                                  // Check approval status
+                                  if (investorAdvisorStatus === 'approved') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                        ✅ Stage 1: Approved, Moving Forward
+                                      </span>
+                                    );
+                                  }
+                                  if (investorAdvisorStatus === 'pending') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                        🔵 Stage 1: Investor Advisor Approval
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                      🔵 Stage 1: Investor Advisor Approval
+                                    </span>
+                                  );
+                                }
+                                
+                                // Fallback: Check main status field
+                                if (offerStatus === 'accepted') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">
+                                      🎉 Accepted
+                                    </span>
+                                  );
+                                }
+                                if (offerStatus === 'rejected') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                      ❌ Rejected
+                                    </span>
+                                  );
+                                }
+                                if (offerStatus === 'pending') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                      ⏳ Pending
+                                    </span>
+                                  );
+                                }
+                                
+                                // Debug: Log unknown status
+                                console.log('🔍 Unknown approval status:', {
+                                  offerId: offer.id,
+                                  stage: offerStage,
+                                  status: offerStatus,
+                                  investorAdvisorStatus,
+                                  startupAdvisorStatus,
+                                  isCoInvestment
+                                });
+                                
                                 return (
                                   <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
-                                    ❓ Unknown Status
+                                    ❓ Unknown Status (Stage {offerStage})
                                   </span>
                                 );
                               })()}
@@ -2121,12 +2274,140 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </td>
                             <td className="px-3 py-4 text-sm font-medium">
                               {(() => {
+                                // Check if this is a co-investment offer
+                                const isCoInvestment = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                                const coStatus = (offer as any).status || 'pending';
+                                const investorAdvisorStatus = (offer as any).investor_advisor_approval_status || 'not_required';
+                                
                                 // Get offer stage (default to 1 if not set)
                                 const offerStage = (offer as any).stage || 1;
                                 
-                                // Show approval buttons based on stage
+                                // For co-investment offers: Only show Accept/Decline if status is still pending_investor_advisor_approval
+                                if (isCoInvestment) {
+                                  // If already approved by investor advisor, don't show action buttons
+                                  if (coStatus !== 'pending_investor_advisor_approval' || investorAdvisorStatus === 'approved' || investorAdvisorStatus === 'rejected') {
+                                    return (
+                                      <div className="flex flex-col space-y-1">
+                                        <button
+                                          onClick={() => {
+                                            if (offer.startup) {
+                                              handleViewStartupDashboard(offer.startup as any);
+                                            } else {
+                                              const startup = startups.find(s => s.id === offer.startup_id);
+                                              if (startup) {
+                                                handleViewStartupDashboard(startup);
+                                              } else {
+                                                alert('Startup information not available. Please refresh the page.');
+                                              }
+                                            }
+                                          }}
+                                          disabled={isLoading || !offer.startup_id}
+                                          className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 disabled:opacity-50 font-medium"
+                                        >
+                                          View Startup
+                                        </button>
+                                        <span className="text-xs text-gray-500 mt-1">
+                                          {investorAdvisorStatus === 'approved' ? '✅ Approved' : investorAdvisorStatus === 'rejected' ? '❌ Rejected' : 'No actions'}
+                                        </span>
+                                      </div>
+                                    );
+                                  }
+                                  
+                                  // Show Accept/Decline buttons only when status is pending_investor_advisor_approval
+                                  return (
+                                    <div className="flex flex-col space-y-1">
+                                      <button
+                                        onClick={() => {
+                                          if (offer.startup) {
+                                            handleViewStartupDashboard(offer.startup as any);
+                                          } else {
+                                            const startup = startups.find(s => s.id === offer.startup_id);
+                                            if (startup) {
+                                              handleViewStartupDashboard(startup);
+                                            } else {
+                                              alert('Startup information not available. Please refresh the page.');
+                                            }
+                                          }
+                                        }}
+                                        disabled={isLoading || !offer.startup_id}
+                                        className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 disabled:opacity-50 font-medium"
+                                      >
+                                        View Startup
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          const offerId = offer.id;
+                                          console.log('🔍 Accept button clicked (Investor Offers - Co-Investment - Stage 1):', {
+                                            isCoInvestment: true,
+                                            is_co_investment: (offer as any).is_co_investment,
+                                            offer_id: offer.id,
+                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
+                                            passed_offerId: offerId,
+                                            status: coStatus,
+                                            investor_advisor_status: investorAdvisorStatus
+                                          });
+                                          handleAdvisorApproval(offerId, 'approve', 'investor');
+                                        }}
+                                        disabled={isLoading}
+                                        className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200 disabled:opacity-50 font-medium"
+                                      >
+                                        Accept
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          const offerId = offer.id;
+                                          console.log('🔍 Decline button clicked (Investor Offers - Co-Investment - Stage 1):', {
+                                            isCoInvestment: true,
+                                            is_co_investment: (offer as any).is_co_investment,
+                                            offer_id: offer.id,
+                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
+                                            passed_offerId: offerId,
+                                            status: coStatus,
+                                            investor_advisor_status: investorAdvisorStatus
+                                          });
+                                          handleAdvisorApproval(offerId, 'reject', 'investor');
+                                        }}
+                                        disabled={isLoading}
+                                        className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium"
+                                      >
+                                        Decline
+                                      </button>
+                                    </div>
+                                  );
+                                }
+                                
+                                // For regular offers: Show approval buttons based on stage
                                 if (offerStage === 1) {
                                   // Stage 1: Investor advisor approval
+                                  // Only show Accept/Decline if not already approved/rejected
+                                  if (investorAdvisorStatus === 'approved' || investorAdvisorStatus === 'rejected') {
+                                    return (
+                                      <div className="flex flex-col space-y-1">
+                                        <button
+                                          onClick={() => {
+                                            if (offer.startup) {
+                                              handleViewStartupDashboard(offer.startup as any);
+                                            } else {
+                                              const startup = startups.find(s => s.id === offer.startup_id);
+                                              if (startup) {
+                                                handleViewStartupDashboard(startup);
+                                              } else {
+                                                alert('Startup information not available. Please refresh the page.');
+                                              }
+                                            }
+                                          }}
+                                          disabled={isLoading || !offer.startup_id}
+                                          className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 disabled:opacity-50 font-medium"
+                                        >
+                                          View Startup
+                                        </button>
+                                        <span className="text-xs text-gray-500 mt-1">
+                                          {investorAdvisorStatus === 'approved' ? '✅ Approved' : '❌ Rejected'}
+                                        </span>
+                                      </div>
+                                    );
+                                  }
+                                  
                                   return (
                                     <div className="flex flex-col space-y-1">
                                       <button
@@ -2198,13 +2479,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                   // Stage 2: Startup advisor approval
                                   return (
                                     <div className="flex flex-col space-y-1">
-                                      <button
-                                        onClick={() => handleNegotiateOffer(offer.id)}
-                                        disabled={isLoading}
-                                        className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 disabled:opacity-50 font-medium"
-                                      >
-                                        Negotiate Offer
-                                      </button>
                                       <button
                                         onClick={() => {
                                           // For co-investment offers, use the actual offer.id (from co_investment_offers table)
@@ -2397,29 +2671,68 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </td>
                             <td className="px-3 py-4">
                               {(() => {
-                                const offerStage = (offer as any).stage || 1;
+                                // Check if this is a co-investment offer
+                                const isCoInvestment = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
                                 
-                                if (offerStage === 1) {
+                                // For co-investment offers, check status field
+                                if (isCoInvestment) {
+                                  const coStatus = (offer as any).status || 'pending';
+                                  if (coStatus === 'pending_investor_advisor_approval') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                                      🔵 Stage 1: Investor Advisor Approval
+                                        🔵 Co-Investment: Investor Advisor Approval
                                     </span>
                                   );
                                 }
-                                if (offerStage === 2) {
+                                  if (coStatus === 'pending_lead_investor_approval') {
                                   return (
-                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
-                                      🟣 Stage 2: Startup Advisor Approval
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                                        🟠 Co-Investment: Lead Investor Approval
                                     </span>
                                   );
                                 }
-                                if (offerStage === 3) {
+                                  if (coStatus === 'pending_startup_approval') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                      ✅ Stage 3: Ready for Startup Review
+                                        🟢 Co-Investment: Startup Review
                                     </span>
                                   );
                                 }
+                                  if (coStatus === 'investor_advisor_rejected') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                        ❌ Rejected by Investor Advisor
+                                      </span>
+                                    );
+                                  }
+                                  if (coStatus === 'lead_investor_rejected') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                        ❌ Rejected by Lead Investor
+                                      </span>
+                                    );
+                                  }
+                                  if (coStatus === 'accepted') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">
+                                        🎉 Co-Investment: Accepted
+                                      </span>
+                                    );
+                                  }
+                                  if (coStatus === 'rejected') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                        ❌ Co-Investment: Rejected
+                                      </span>
+                                    );
+                                  }
+                                }
+                                
+                                // For regular offers, check stage and approval statuses
+                                const offerStage = (offer as any).stage || 1;
+                                const offerStatus = (offer as any).status || 'pending';
+                                
+                                // Check rejection statuses first
                                 if (investorAdvisorStatus === 'rejected') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
@@ -2427,7 +2740,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                     </span>
                                   );
                                 }
-                                if ((offer as any).startup_advisor_approval_status === 'rejected') {
+                                if (startupAdvisorStatus === 'rejected') {
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
                                       ❌ Rejected by Startup Advisor
@@ -2435,9 +2748,119 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                   );
                                 }
                                 
+                                // Check stage-based status
+                                if (offerStage === 4 || offerStatus === 'accepted') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">
+                                      🎉 Stage 4: Accepted by Startup
+                                    </span>
+                                  );
+                                }
+                                if (offerStage === 3) {
+                                  // Check if both advisors have approved
+                                  if (investorAdvisorStatus === 'approved' && startupAdvisorStatus === 'approved') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                        ✅ Stage 3: Ready for Startup Review
+                                      </span>
+                                    );
+                                  }
+                                  if (investorAdvisorStatus === 'approved') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                        ✅ Stage 3: Ready for Startup Review
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                      ✅ Stage 3: Ready for Startup Review
+                                    </span>
+                                  );
+                                }
+                                if (offerStage === 2) {
+                                  // Check if investor advisor has approved
+                                  if (investorAdvisorStatus === 'approved') {
+                                    if (startupAdvisorStatus === 'pending') {
+                                      return (
+                                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                                          🟣 Stage 2: Startup Advisor Approval
+                                        </span>
+                                      );
+                                    }
+                                    if (startupAdvisorStatus === 'approved') {
+                                      return (
+                                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                          ✅ Stage 2: Approved, Moving to Startup Review
+                                        </span>
+                                      );
+                                    }
+                                  }
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                                      🟣 Stage 2: Startup Advisor Approval
+                                    </span>
+                                  );
+                                }
+                                if (offerStage === 1) {
+                                  // Check approval status
+                                  if (investorAdvisorStatus === 'approved') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                        ✅ Stage 1: Approved, Moving Forward
+                                      </span>
+                                    );
+                                  }
+                                  if (investorAdvisorStatus === 'pending') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                        🔵 Stage 1: Investor Advisor Approval
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                      🔵 Stage 1: Investor Advisor Approval
+                                    </span>
+                                  );
+                                }
+                                
+                                // Fallback: Check main status field
+                                if (offerStatus === 'accepted') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">
+                                      🎉 Accepted
+                                    </span>
+                                  );
+                                }
+                                if (offerStatus === 'rejected') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                      ❌ Rejected
+                                    </span>
+                                  );
+                                }
+                                if (offerStatus === 'pending') {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                      ⏳ Pending
+                                    </span>
+                                  );
+                                }
+                                
+                                // Debug: Log unknown status
+                                console.log('🔍 Unknown approval status (Startup Offers):', {
+                                  offerId: offer.id,
+                                  stage: offerStage,
+                                  status: offerStatus,
+                                  investorAdvisorStatus,
+                                  startupAdvisorStatus,
+                                  isCoInvestment
+                                });
+                                
                                 return (
                                   <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
-                                    ❓ Unknown Status
+                                    ❓ Unknown Status (Stage {offerStage})
                                   </span>
                                 );
                               })()}
@@ -2494,21 +2917,42 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                   return (
                                     <div className="flex flex-col space-y-1">
                                       <button
-                                        onClick={() => handleNegotiateOffer(offer.id)}
-                                        disabled={isLoading}
-                                        className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 disabled:opacity-50 font-medium"
-                                      >
-                                        Negotiate Offer
-                                      </button>
-                                      <button
-                                        onClick={() => handleAdvisorApproval(offer.id, 'approve', 'startup')}
+                                        onClick={() => {
+                                          // For co-investment offers, use the actual offer.id (from co_investment_offers table)
+                                          // For regular offers, also use offer.id (from investment_offers table)
+                                          const offerId = offer.id;
+                                          console.log('🔍 Accept button clicked (Startup Offers - Stage 2):', {
+                                            isCoInvestment: (offer as any).isCoInvestment || (offer as any).is_co_investment,
+                                            is_co_investment: (offer as any).is_co_investment,
+                                            offer_id: offer.id,
+                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
+                                            passed_offerId: offerId,
+                                            offer_data: {
+                                              id: offer.id,
+                                              stage: (offer as any).stage,
+                                              startup_name: offer.startup_name
+                                            }
+                                          });
+                                          handleAdvisorApproval(offerId, 'approve', 'startup');
+                                        }}
                                         disabled={isLoading}
                                         className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200 disabled:opacity-50 font-medium"
                                       >
                                         Accept
                                       </button>
                                       <button
-                                        onClick={() => handleAdvisorApproval(offer.id, 'reject', 'startup')}
+                                        onClick={() => {
+                                          // For co-investment offers, use the actual offer.id (from co_investment_offers table)
+                                          const offerId = offer.id;
+                                          console.log('🔍 Decline button clicked (Startup Offers - Stage 2):', {
+                                            isCoInvestment: (offer as any).isCoInvestment || (offer as any).is_co_investment,
+                                            is_co_investment: (offer as any).is_co_investment,
+                                            offer_id: offer.id,
+                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
+                                            passed_offerId: offerId
+                                          });
+                                          handleAdvisorApproval(offerId, 'reject', 'startup');
+                                        }}
                                         disabled={isLoading}
                                         className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium"
                                       >
@@ -2579,17 +3023,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Remaining for Co-Investment</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Equity %</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View Startup</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {loadingAdvisorCoOpps ? (
                       <tr>
-                        <td colSpan={10} className="px-6 py-8 text-center text-gray-500">Loading co-investment opportunities...</td>
+                        <td colSpan={9} className="px-6 py-8 text-center text-gray-500">Loading co-investment opportunities...</td>
                       </tr>
                     ) : advisorCoOpps.length === 0 ? (
                       <tr>
-                        <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                           No Co-Investment Opportunities
                         </td>
                       </tr>
@@ -2647,30 +3090,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             >
                               View Startup
                             </button>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => {
-                                  alert('Due diligence functionality coming soon!');
-                                }}
-                                className="px-3 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800 hover:bg-purple-200 transition-colors"
-                              >
-                                Due Diligence
-                              </button>
-                              <button
-                                onClick={() => handleRecommendCoInvestment(row.id)}
-                                disabled={isLoading || myInvestors.length === 0}
-                                className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                                  myInvestors.length === 0 
-                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                    : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
-                                }`}
-                                title={myInvestors.length === 0 ? 'No investors assigned to recommend to' : 'Recommend to your investors'}
-                              >
-                                {isLoading ? 'Recommending...' : 'Recommend to Investors'}
-                              </button>
-                            </div>
                           </td>
                         </tr>
                         );

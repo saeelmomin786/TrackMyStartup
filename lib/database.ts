@@ -1060,7 +1060,51 @@ export const investmentService = {
     }));
 
     console.log('🔍 Enhanced investor offers data:', enhancedData);
-    return enhancedData;
+    
+    // Format offers to match InvestmentOffer interface (camelCase)
+    const formattedOffers = enhancedData.map((offer: any) => {
+      const isCoInvestment = offer.is_co_investment || !!offer.co_investment_opportunity_id;
+      
+      return {
+        id: offer.id,
+        investorEmail: offer.investor_email || offer.investorEmail,
+        investorName: offer.investor_name || offer.investorName || offer.investor?.name,
+        startupName: offer.startup_name || offer.startupName || offer.startup?.name,
+        startupId: offer.startup_id || offer.startupId || offer.startup?.id,
+        startup: offer.startup || null,
+        offerAmount: Number(offer.offer_amount || offer.offerAmount) || 0,
+        equityPercentage: Number(offer.equity_percentage || offer.equityPercentage) || 0,
+        status: offer.status || 'pending',
+        currency: offer.currency || 'USD',
+        createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : (offer.createdAt || new Date().toISOString()),
+        // Co-investment fields
+        is_co_investment: isCoInvestment,
+        co_investment_opportunity_id: offer.co_investment_opportunity_id || null,
+        // Approval fields
+        investor_advisor_approval_status: offer.investor_advisor_approval_status || 'not_required',
+        investor_advisor_approval_at: offer.investor_advisor_approval_at,
+        lead_investor_approval_status: offer.lead_investor_approval_status || 'not_required',
+        lead_investor_approval_at: offer.lead_investor_approval_at,
+        startup_advisor_approval_status: offer.startup_advisor_approval_status || 'not_required',
+        startup_advisor_approval_at: offer.startup_advisor_approval_at,
+        stage: offer.stage || 1,
+        contact_details_revealed: offer.contact_details_revealed || false,
+        contact_details_revealed_at: offer.contact_details_revealed_at,
+        // Keep original fields for backward compatibility (spread last to preserve)
+        ...offer,
+        // Ensure camelCase fields take precedence
+        investorEmail: offer.investor_email || offer.investorEmail,
+        investorName: offer.investor_name || offer.investorName || offer.investor?.name,
+        startupName: offer.startup_name || offer.startupName || offer.startup?.name,
+        startupId: offer.startup_id || offer.startupId || offer.startup?.id,
+        offerAmount: Number(offer.offer_amount || offer.offerAmount) || 0,
+        equityPercentage: Number(offer.equity_percentage || offer.equityPercentage) || 0,
+        createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : (offer.createdAt || new Date().toISOString())
+      };
+    });
+    
+    console.log('✅ Formatted investor offers:', formattedOffers.length);
+    return formattedOffers;
   },
 
   // Update offer status
@@ -2200,11 +2244,12 @@ export const investmentService = {
     }
   },
 
-  // Get investment offers for specific user
+  // Get investment offers for specific user (both regular and co-investment offers)
   async getUserInvestmentOffers(userEmail: string) {
     console.log('🔍 Fetching investment offers for user:', userEmail);
     try {
-      const { data, error } = await supabase
+      // Fetch regular investment offers
+      const { data: regularOffers, error: regularError } = await supabase
         .from('investment_offers')
         .select(`
           *,
@@ -2223,12 +2268,51 @@ export const investmentService = {
         .eq('investor_email', userEmail)
         .order('created_at', { ascending: false })
 
-      if (error) {
-        console.error('Error fetching user investment offers:', error);
+      if (regularError) {
+        console.error('Error fetching regular investor offers:', regularError);
+        throw regularError;
+      }
+
+      // Fetch co-investment offers
+      const { data: coInvestmentOffers, error: coInvestmentError } = await supabase
+        .from('co_investment_offers')
+        .select(`
+          *,
+          startup:startups(
+            id,
+            name,
+            sector,
+            user_id,
+            investment_advisor_code,
+            compliance_status,
+            startup_nation_validated,
+            validation_date,
+            created_at
+          ),
+          co_investment_opportunity:co_investment_opportunities(id, listed_by_user_id)
+        `)
+        .eq('investor_email', userEmail)
+        .order('created_at', { ascending: false })
+
+      if (coInvestmentError) {
+        console.error('Error fetching co-investment offers:', coInvestmentError);
+        // Don't throw - continue with regular offers if co-investment fetch fails
+      }
+
+      // Combine both types of offers
+      const data = [
+        ...(regularOffers || []).map(offer => ({ ...offer, is_co_investment: false })),
+        ...(coInvestmentOffers || []).map(offer => ({ ...offer, is_co_investment: true }))
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      console.log('🔍 Raw investor offers data (regular + co-investment):', data.length);
+
+      if (!data || data.length === 0) {
+        console.log('🔍 No offers found for user');
         return [];
       }
       
-      console.log('🔍 User investment offers fetched successfully:', data?.length || 0);
+      console.log('🔍 User investment offers fetched successfully:', data.length);
       console.log('🔍 Raw investment offers data:', data);
       
       // Now fetch startup user information separately using user_id
@@ -2342,9 +2426,25 @@ export const investmentService = {
         // Stage field
         stage: offer.stage || 1,
         // Co-investment fields
+        is_co_investment: offer.is_co_investment || false,
         co_investment_opportunity_id: offer.co_investment_opportunity_id || null,
+        // Approval fields for co-investment offers
+        investor_advisor_approval_status: offer.investor_advisor_approval_status || 'not_required',
+        investor_advisor_approval_at: offer.investor_advisor_approval_at,
         lead_investor_approval_status: offer.lead_investor_approval_status || 'not_required',
-        lead_investor_approval_at: offer.lead_investor_approval_at
+        lead_investor_approval_at: offer.lead_investor_approval_at,
+        startup_advisor_approval_status: offer.startup_advisor_approval_status || 'not_required',
+        startup_advisor_approval_at: offer.startup_advisor_approval_at,
+        // Keep original fields for backward compatibility (spread last to preserve)
+        ...offer,
+        // Ensure camelCase fields take precedence
+        investorEmail: offer.investor_email || offer.investorEmail,
+        investorName: offer.investor_name || offer.investorName || offer.investor?.name,
+        startupName: offer.startup_name || offer.startupName || offer.startup?.name,
+        startupId: offer.startup_id || offer.startupId || offer.startup?.id,
+        offerAmount: Number(offer.offer_amount || offer.offerAmount) || 0,
+        equityPercentage: Number(offer.equity_percentage || offer.equityPercentage) || 0,
+        createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : (offer.createdAt || new Date().toISOString())
       }));
       
       // Debug: Log mapped data
@@ -2355,8 +2455,11 @@ export const investmentService = {
         console.log('🔍 Mapped currency:', mappedData[0].currency);
         console.log('🔍 Mapped created at:', mappedData[0].createdAt);
         console.log('🔍 Co-investment opportunity ID:', mappedData[0].co_investment_opportunity_id);
+        console.log('🔍 Is co-investment:', mappedData[0].is_co_investment);
+        console.log('🔍 Status:', mappedData[0].status);
       }
       
+      console.log('✅ Formatted investor offers (getUserInvestmentOffers):', mappedData.length);
       return mappedData;
     } catch (error) {
       console.error('Error in getUserInvestmentOffers:', error);

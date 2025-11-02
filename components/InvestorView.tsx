@@ -177,9 +177,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [shuffledPitches, setShuffledPitches] = useState<ActiveFundraisingStartup[]>([]);
     const [playingVideoId, setPlayingVideoId] = useState<number | null>(null);
     
-    // State for contact details modal
-    const [isContactModalOpen, setIsContactModalOpen] = useState(false);
-    const [contactModalOffer, setContactModalOffer] = useState<InvestmentOffer | null>(null);
+  // State for contact details modal
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [contactModalOffer, setContactModalOffer] = useState<InvestmentOffer | null>(null);
+  
+  // State for co-investment offer details modal
+  const [isCoInvestmentDetailsModalOpen, setIsCoInvestmentDetailsModalOpen] = useState(false);
+  const [coInvestmentDetails, setCoInvestmentDetails] = useState<any>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
     const [favoritedPitches, setFavoritedPitches] = useState<Set<number>>(new Set());
     const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
     const [showOnlyValidated, setShowOnlyValidated] = useState(false);
@@ -696,7 +701,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         const myOppIds = myOpps.map(opp => opp.id);
         
         // Fetch co-investment offers for this user's opportunities
-        // Show both pending AND approved offers (for tracking)
+        // IMPORTANT: Only show offers that have passed investor advisor approval
+        // Only show offers that are ready for lead investor approval or beyond
         const { data: offersData, error: offersError } = await supabase
           .from('co_investment_offers')
           .select(`
@@ -704,7 +710,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             startup:startups(id, name, sector, currency),
             investor:users!co_investment_offers_investor_id_fkey(id, name, email)
           `)
-          .in('status', ['pending_lead_investor_approval', 'pending_startup_approval'])
+          // Show offers where investor advisor has approved OR where investor has no advisor (not_required)
+          .in('investor_advisor_approval_status', ['approved', 'not_required'])
+          .in('status', ['pending_lead_investor_approval', 'pending_startup_approval', 'accepted', 'rejected']) // Only show offers ready for lead investor or already processed
           .in('co_investment_opportunity_id', myOppIds)
           .order('created_at', { ascending: false });
         
@@ -714,7 +722,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
           const { data: offersDataSimple, error: simpleError } = await supabase
             .from('co_investment_offers')
             .select('*')
-            .in('status', ['pending_lead_investor_approval', 'pending_startup_approval'])
+            .eq('investor_advisor_approval_status', 'approved') // Must have investor advisor approval
+            .in('status', ['pending_lead_investor_approval', 'pending_startup_approval', 'accepted', 'rejected']) // Only show offers ready for lead investor or already processed
             .in('co_investment_opportunity_id', myOppIds)
             .order('created_at', { ascending: false });
           
@@ -771,6 +780,132 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     loadPendingCoInvestmentOffers();
   }, [activeTab, currentUser?.id, myCoInvestmentOpps]);
 
+  // Fetch co-investment offer details
+  const handleViewCoInvestmentDetails = async (offer: any) => {
+    const offerId = offer.id || offer.co_investment_offer_id;
+    if (!offerId) return;
+    
+    setIsLoadingDetails(true);
+    setIsCoInvestmentDetailsModalOpen(true);
+    
+    try {
+      console.log('🔍 Fetching co-investment offer details:', offerId);
+      
+      // Fetch the co-investment offer
+      const { data: offerData, error: offerError } = await supabase
+        .from('co_investment_offers')
+        .select('*')
+        .eq('id', offerId)
+        .single();
+      
+      if (offerError || !offerData) {
+        console.error('❌ Error fetching co-investment offer details:', offerError);
+        throw offerError || new Error('Co-investment offer not found');
+      }
+      
+      console.log('✅ Co-investment offer details fetched:', offerData);
+      
+      // Extract data from offer (using stored fields)
+      const investorData = {
+        id: offerData.investor_id,
+        name: offerData.investor_name,
+        email: offerData.investor_email,
+        company_name: null
+      };
+      
+      const startupData = {
+        id: offerData.startup_id,
+        name: offerData.startup_name,
+        currency: offerData.currency || 'USD'
+      };
+      
+      // Fetch opportunity data separately
+      let opportunityData = null;
+      let leadInvestorData = null;
+      
+      if (offerData.co_investment_opportunity_id) {
+        console.log('🔍 Fetching co-investment opportunity:', offerData.co_investment_opportunity_id);
+        const { data: opportunity, error: opportunityError } = await supabase
+          .from('co_investment_opportunities')
+          .select('id, investment_amount, equity_percentage, minimum_co_investment, maximum_co_investment, listed_by_user_id, listed_by_user_name, listed_by_user_email')
+          .eq('id', offerData.co_investment_opportunity_id)
+          .single();
+        
+        if (!opportunityError && opportunity) {
+          opportunityData = opportunity;
+          console.log('✅ Opportunity fetched:', opportunity);
+          
+          // Use stored lead investor info
+          if (opportunity.listed_by_user_name || opportunity.listed_by_user_email) {
+            leadInvestorData = {
+              name: opportunity.listed_by_user_name,
+              email: opportunity.listed_by_user_email,
+              company_name: opportunity.listed_by_user_name
+            };
+            console.log('✅ Lead investor info from stored fields:', leadInvestorData);
+          } else if (opportunity.listed_by_user_id) {
+            // Fallback: Try RPC function
+            try {
+              const { data: leadInvestorRpc, error: rpcError } = await supabase.rpc('get_user_public_info', {
+                p_user_id: String(opportunity.listed_by_user_id)
+              });
+              
+              if (!rpcError && leadInvestorRpc) {
+                leadInvestorData = typeof leadInvestorRpc === 'string' ? JSON.parse(leadInvestorRpc) : leadInvestorRpc;
+                console.log('✅ Lead investor fetched via RPC:', leadInvestorData);
+              }
+            } catch (rpcErr) {
+              console.warn('⚠️ RPC function not available:', rpcErr);
+            }
+          }
+        }
+      }
+      
+      // Calculate amounts
+      const totalInvestment = Number(opportunityData?.investment_amount) || 0;
+      const maximumCoInvestment = Number(opportunityData?.maximum_co_investment) || 0;
+      const leadInvestorInvested = Math.max(totalInvestment - maximumCoInvestment, 0);
+      const newOfferAmount = Number(offerData.offer_amount) || 0;
+      const newEquityPercentage = Number(offerData.equity_percentage) || 0;
+      const totalEquityPercentage = Number(opportunityData?.equity_percentage) || 0;
+      
+      // Calculate equity allocation
+      const leadInvestorEquity = totalInvestment > 0 && totalEquityPercentage > 0 
+        ? (totalEquityPercentage * (leadInvestorInvested / totalInvestment))
+        : 0;
+      
+      // Combine all data
+      const finalCoInvestmentDetails: any = {
+        ...offerData,
+        investor: investorData,
+        startup: startupData,
+        co_investment_opportunity: opportunityData ? {
+          ...opportunityData,
+          listed_by_user: leadInvestorData
+        } : null,
+        leadInvestor: leadInvestorData,
+        leadInvestorInvested,
+        remainingForCoInvestment: maximumCoInvestment,
+        newOfferAmount,
+        newEquityPercentage,
+        totalInvestment,
+        totalEquityPercentage,
+        leadInvestorEquity,
+        currency: offerData.currency || startupData?.currency || 'USD'
+      };
+      
+      console.log('📦 Final co-investment details:', finalCoInvestmentDetails);
+      setCoInvestmentDetails(finalCoInvestmentDetails);
+      
+    } catch (err) {
+      console.error('Error loading co-investment details:', err);
+      alert('Failed to load co-investment offer details. Please try again.');
+      setIsCoInvestmentDetailsModalOpen(false);
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
   // Handle lead investor approval/rejection
   const handleLeadInvestorApproval = async (offerId: number, action: 'approve' | 'reject') => {
     if (!currentUser?.id) return;
@@ -802,7 +937,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             startup:startups(id, name, sector, currency),
             investor:users!co_investment_offers_investor_id_fkey(id, name, email)
           `)
-          .in('status', ['pending_lead_investor_approval', 'pending_startup_approval'])
+          // Show offers where investor advisor has approved OR where investor has no advisor (not_required)
+          .in('investor_advisor_approval_status', ['approved', 'not_required'])
+          .in('status', ['pending_lead_investor_approval', 'pending_startup_approval', 'accepted', 'rejected']) // Only show offers ready for lead investor or already processed
           .in('co_investment_opportunity_id', myOppIds)
           .order('created_at', { ascending: false });
         
@@ -2499,58 +2636,123 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStageStatusDisplay(offer).color}`}>
                           {getStageStatusDisplay(offer).text}
                         </span>
-                        {((offer as any).stage || 1) === 1 && !isViewOnly && (
-                          <>
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => handleEditOffer(offer)}
-                            >
-                              <Edit className="h-3 w-3 mr-1" />
-                              Edit
-                            </Button>
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => handleCancelOffer(offer.id)}
-                            >
-                              <X className="h-3 w-3 mr-1" />
-                              Cancel
-                            </Button>
-                          </>
-                        )}
-                        {((offer as any).stage || 1) >= 4 && !isViewOnly && (
-                          <div className="flex gap-2">
-                            {offer.contact_details_revealed ? (
+                        {(() => {
+                          const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                          const status = offer.status || 'pending';
+                          const stage = (offer as any).stage || 1;
+                          const investorAdvisorStatus = (offer as any).investor_advisor_approval_status || 'not_required';
+                          
+                          // For co-investment offers: Only show edit/cancel if investor advisor hasn't approved yet
+                          if (isCoInvestmentOffer) {
+                            // Show edit/cancel only if status is still pending_investor_advisor_approval
+                            // Once approved (status becomes pending_lead_investor_approval or beyond), hide them
+                            if (status === 'pending_investor_advisor_approval' && investorAdvisorStatus === 'pending' && !isViewOnly) {
+                              return (
+                                <>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => handleEditOffer(offer)}
+                                  >
+                                    <Edit className="h-3 w-3 mr-1" />
+                                    Edit
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => handleCancelOffer(offer.id)}
+                                  >
+                                    <X className="h-3 w-3 mr-1" />
+                                    Cancel
+                                  </Button>
+                                </>
+                              );
+                            }
+                            // After investor advisor approval, don't show edit/cancel
+                            return null;
+                          }
+                          
+                          // For regular offers: Show edit/cancel only at stage 1 (before any approvals)
+                          if (stage === 1 && !isViewOnly) {
+                            return (
+                              <>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleEditOffer(offer)}
+                                >
+                                  <Edit className="h-3 w-3 mr-1" />
+                                  Edit
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleCancelOffer(offer.id)}
+                                >
+                                  <X className="h-3 w-3 mr-1" />
+                                  Cancel
+                                </Button>
+                              </>
+                            );
+                          }
+                          
+                          return null;
+                        })()}
+                        {(() => {
+                          const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                          const status = offer.status || 'pending';
+                          const isAccepted = status === 'accepted' || ((offer as any).stage || 1) >= 4;
+                          
+                          // For co-investment offers that are accepted, show "View Details" button
+                          if (isCoInvestmentOffer && status === 'accepted' && !isViewOnly) {
+                            return (
                               <Button 
                                 size="sm" 
                                 variant="outline"
-                                onClick={() => {
-                                  // Set the selected offer and open the modal
-                                  setContactModalOffer(offer);
-                                  setIsContactModalOpen(true);
-                                }}
+                                onClick={() => handleViewCoInvestmentDetails(offer)}
                               >
-                                View Contact Details
+                                View Details
                               </Button>
-                            ) : (
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => alert('Contact details will be revealed once the investment advisor approves or if no advisor is assigned.')}
-                              >
-                                Contact Details Pending
-                              </Button>
-                            )}
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => alert('Our team will contact you soon')}
-                            >
-                              Next Steps
-                            </Button>
-                          </div>
-                        )}
+                            );
+                          }
+                          
+                          // For regular offers or non-accepted co-investment offers
+                          if (isAccepted && !isViewOnly) {
+                            return (
+                              <div className="flex gap-2">
+                                {offer.contact_details_revealed ? (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => {
+                                      setContactModalOffer(offer);
+                                      setIsContactModalOpen(true);
+                                    }}
+                                  >
+                                    View Contact Details
+                                  </Button>
+                                ) : (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => alert('Contact details will be revealed once the investment advisor approves or if no advisor is assigned.')}
+                                  >
+                                    Contact Details Pending
+                                  </Button>
+                                )}
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => alert('Our team will contact you soon')}
+                                >
+                                  Next Steps
+                                </Button>
+                              </div>
+                            );
+                          }
+                          
+                          return null;
+                        })()}
                         {isViewOnly && ((offer as any).stage || 1) >= 4 && (
                           <span className="text-xs text-slate-500 italic">View Only - Actions Disabled</span>
                         )}
@@ -2984,6 +3186,182 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             offer={contactModalOffer}
           />
         )}
+
+        {/* Co-Investment Offer Details Modal */}
+        <Modal
+          isOpen={isCoInvestmentDetailsModalOpen}
+          onClose={() => setIsCoInvestmentDetailsModalOpen(false)}
+          title="Co-Investment Offer Details"
+          size="large"
+        >
+          {isLoadingDetails ? (
+            <div className="py-8 text-center text-slate-500">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-2">Loading details...</p>
+            </div>
+          ) : coInvestmentDetails ? (
+            <div className="space-y-6">
+              {/* Lead Investor Section */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <h3 className="text-lg font-semibold text-blue-900 mb-3">Lead Investor Information</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Name:</span>
+                    <span className="font-medium">
+                      {coInvestmentDetails.leadInvestor?.name || 
+                       coInvestmentDetails.co_investment_opportunity?.listed_by_user?.name ||
+                       coInvestmentDetails.leadInvestor?.company_name || 
+                       coInvestmentDetails.co_investment_opportunity?.listed_by_user?.company_name || 
+                       coInvestmentDetails.leadInvestorName ||
+                       'Not Available'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Email:</span>
+                    <span className="font-medium">
+                      {coInvestmentDetails.leadInvestor?.email || 
+                       coInvestmentDetails.co_investment_opportunity?.listed_by_user?.email || 
+                       coInvestmentDetails.leadInvestorEmail ||
+                       'Not Available'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Lead Investment Amount:</span>
+                    <span className="font-semibold text-blue-700">
+                      {formatCurrency(coInvestmentDetails.leadInvestorInvested, coInvestmentDetails.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Lead Equity Percentage:</span>
+                    <span className="font-semibold text-blue-700">
+                      {coInvestmentDetails.leadInvestorEquity?.toFixed(2) || '0.00'}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Co-Investment Summary */}
+              <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                <h3 className="text-lg font-semibold text-slate-900 mb-3">Co-Investment Summary</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Total Investment Amount:</span>
+                    <span className="font-semibold">
+                      {formatCurrency(coInvestmentDetails.totalInvestment, coInvestmentDetails.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Total Equity Percentage:</span>
+                    <span className="font-semibold">
+                      {coInvestmentDetails.totalEquityPercentage?.toFixed(2) || '0.00'}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t pt-2 mt-2">
+                    <span className="text-slate-600">Remaining for Co-Investment:</span>
+                    <span className="font-semibold text-orange-600">
+                      {formatCurrency(coInvestmentDetails.remainingForCoInvestment, coInvestmentDetails.currency)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* New Investor Offer Section */}
+              <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                <h3 className="text-lg font-semibold text-green-900 mb-3">Your Investment Offer</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Investor Name:</span>
+                    <span className="font-medium">
+                      {coInvestmentDetails.investor?.name || 
+                       coInvestmentDetails.investor?.company_name || 
+                       coInvestmentDetails.investor_name || 
+                       currentUser?.name ||
+                       'Unknown'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Investor Email:</span>
+                    <span className="font-medium">
+                      {coInvestmentDetails.investor?.email || 
+                       coInvestmentDetails.investor_email || 
+                       currentUser?.email ||
+                       'N/A'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t pt-2 mt-2">
+                    <span className="text-slate-600">Offer Amount:</span>
+                    <span className="font-semibold text-green-700">
+                      {formatCurrency(coInvestmentDetails.newOfferAmount, coInvestmentDetails.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Equity Percentage:</span>
+                    <span className="font-semibold text-green-700">
+                      {coInvestmentDetails.newEquityPercentage?.toFixed(2) || '0.00'}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Currency:</span>
+                    <span className="font-medium">{coInvestmentDetails.currency || 'USD'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Approval Process Timeline */}
+              <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                <h3 className="text-lg font-semibold text-purple-900 mb-3">Approval Process</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${coInvestmentDetails.investor_advisor_approval_status === 'approved' ? 'bg-green-500 text-white' : coInvestmentDetails.investor_advisor_approval_status === 'rejected' ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'}`}>
+                      {coInvestmentDetails.investor_advisor_approval_status === 'approved' ? '✓' : coInvestmentDetails.investor_advisor_approval_status === 'rejected' ? '✗' : '1'}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-medium">Investor Advisor Approval</div>
+                      <div className="text-sm text-slate-600 capitalize">
+                        {coInvestmentDetails.investor_advisor_approval_status?.replaceAll('_', ' ') || 'Pending'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${coInvestmentDetails.lead_investor_approval_status === 'approved' ? 'bg-green-500 text-white' : coInvestmentDetails.lead_investor_approval_status === 'rejected' ? 'bg-red-500 text-white' : 'bg-orange-500 text-white'}`}>
+                      {coInvestmentDetails.lead_investor_approval_status === 'approved' ? '✓' : coInvestmentDetails.lead_investor_approval_status === 'rejected' ? '✗' : '2'}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-medium">Lead Investor Approval</div>
+                      <div className="text-sm text-slate-600 capitalize">
+                        {coInvestmentDetails.lead_investor_approval_status?.replaceAll('_', ' ') || 'Pending'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${coInvestmentDetails.status === 'accepted' ? 'bg-green-500 text-white' : coInvestmentDetails.status === 'rejected' ? 'bg-red-500 text-white' : 'bg-green-400 text-white'}`}>
+                      {coInvestmentDetails.status === 'accepted' ? '✓' : coInvestmentDetails.status === 'rejected' ? '✗' : '3'}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-medium">Startup Approval</div>
+                      <div className="text-sm text-slate-600 capitalize">
+                        {coInvestmentDetails.status?.replaceAll('_', ' ') || 'Pending'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsCoInvestmentDetailsModalOpen(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-slate-500">
+              <p>No details available</p>
+            </div>
+          )}
+        </Modal>
 
         <style>{`
             @keyframes fade-in {

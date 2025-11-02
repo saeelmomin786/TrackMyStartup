@@ -79,35 +79,81 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file && currentUser?.id) {
-      try {
-        setIsLoading(true);
-        
-        // Use the new replaceProfilePhoto method for better management
-        const oldPhotoUrl = currentUser?.profile_photo_url;
-        const result = await storageService.replaceProfilePhoto(file, currentUser.id, oldPhotoUrl);
-        
-        // Update local state
-        setProfilePhoto(result.url);
-        setFormData(prev => ({
-          ...prev,
-          profile_photo_url: result.url
-        }));
-        
-        console.log('✅ Profile photo replaced successfully:', result.url);
-        
-        // Call onSave to update parent component
-        onSave({
-          ...currentUser,
-          profile_photo_url: result.url
-        });
-        
-      } catch (error) {
-        console.error('❌ Error uploading profile photo:', error);
-        // You might want to show a user-friendly error message here
-      } finally {
-        setIsLoading(false);
+    console.log('🔍 handlePhotoUpload called with:', {
+      hasFile: !!file,
+      fileName: file?.name,
+      fileType: file?.type,
+      fileSize: file?.size,
+      hasCurrentUser: !!currentUser,
+      currentUserId: currentUser?.id
+    });
+    
+    if (!file) {
+      console.error('❌ No file selected');
+      alert('No file selected. Please select a file and try again.');
+      return;
+    }
+    
+    if (!currentUser?.id) {
+      console.error('❌ No user ID available');
+      alert('User not authenticated. Please refresh the page and try again.');
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      console.log('🔄 Starting profile photo upload...');
+      
+      // Use the new replaceProfilePhoto method for better management
+      const oldPhotoUrl = currentUser?.profile_photo_url;
+      console.log('🔄 Calling replaceProfilePhoto with:', {
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        userId: currentUser.id,
+        oldPhotoUrl
+      });
+      
+      const result = await storageService.replaceProfilePhoto(file, currentUser.id, oldPhotoUrl);
+      
+      console.log('📤 Storage service result:', result);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Upload failed');
       }
+      
+      if (!result.url) {
+        throw new Error('No URL returned from upload service');
+      }
+      
+      // Update local state
+      setProfilePhoto(result.url);
+      setFormData(prev => ({
+        ...prev,
+        profile_photo_url: result.url
+      }));
+      
+      console.log('✅ Profile photo replaced successfully:', result.url);
+      
+      // Call onSave to update parent component
+      onSave({
+        ...currentUser,
+        profile_photo_url: result.url
+      });
+      
+      alert('Profile photo uploaded successfully!');
+      
+    } catch (error: any) {
+      console.error('❌ Error uploading profile photo:', error);
+      console.error('❌ Error details:', {
+        message: error?.message,
+        stack: error?.stack,
+        name: error?.name
+      });
+      const errorMessage = error?.message || 'Failed to upload profile photo. Please try again.';
+      alert(`Error: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -414,13 +460,17 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 if (hiddenInput) hiddenInput.value = url;
               }}
               onFileSelect={(file) => {
-                const fileInput = fileInputRef.current;
-                if (fileInput) {
-                  const dataTransfer = new DataTransfer();
-                  dataTransfer.items.add(file);
-                  fileInput.files = dataTransfer.files;
-                  handlePhotoUpload({ target: { files: [file] } } as any);
-                }
+                console.log('📤 Profile photo onFileSelect called with file:', file);
+                // Create a proper synthetic event with FileList
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(file);
+                const syntheticEvent = {
+                  target: {
+                    files: dataTransfer.files
+                  }
+                } as React.ChangeEvent<HTMLInputElement>;
+                console.log('🔄 Calling handlePhotoUpload with synthetic event');
+                handlePhotoUpload(syntheticEvent);
               }}
               placeholder="Paste your cloud drive link here..."
               label=""
@@ -429,6 +479,14 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
               documentType="profile photo"
               showPrivacyMessage={false}
               className="w-full text-sm"
+            />
+            <input 
+              type="file"
+              ref={fileInputRef}
+              onChange={handlePhotoUpload}
+              accept="image/*"
+              className="hidden"
+              id="profile-photo-input"
             />
             <input type="hidden" id="profile-photo-url" name="profile-photo-url" />
             <p className="text-xs sm:text-sm text-slate-500 text-center px-2">
@@ -739,7 +797,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                         accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                         maxSize={10}
                         documentType="CA license"
-                        showPrivacyMessage={true}
+                        showPrivacyMessage={false}
                         className="w-full"
                       />
                       <input type="hidden" id="ca-license-url" name="ca-license-url" />
@@ -817,7 +875,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                         accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                         maxSize={10}
                         documentType="CS license"
-                        showPrivacyMessage={true}
+                        showPrivacyMessage={false}
                         className="w-full"
                       />
                       <input type="hidden" id="cs-license-url" name="cs-license-url" />
@@ -964,7 +1022,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                         accept=".jpg,.jpeg,.png,.svg"
                         maxSize={5}
                         documentType="company logo"
-                        showPrivacyMessage={true}
+                        showPrivacyMessage={false}
                         className="w-full"
                       />
                       <input 
@@ -1059,7 +1117,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                         accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                         maxSize={10}
                         documentType="financial license"
-                        showPrivacyMessage={true}
+                        showPrivacyMessage={false}
                         className="w-full"
                       />
                       <input type="hidden" id="financial-license-url" name="financial-license-url" />

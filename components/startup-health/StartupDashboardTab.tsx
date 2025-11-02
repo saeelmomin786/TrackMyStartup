@@ -835,11 +835,12 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
 
       // Load co-investment OFFERS (actual offers made by investors on co-investment opportunities)
       // These are offers that need startup approval after passing Investor Advisor and Lead Investor approval
+      // IMPORTANT: Only show offers that have passed Investor Advisor and Lead Investor approval
       let coInvestmentOffersFormatted: OfferReceived[] = [];
       try {
         console.log('🔍 Fetching co-investment offers for startup:', startup.id);
-        // Fetch all co-investment offers for this startup (pending, accepted, and rejected)
-        // Similar to regular investment offers, we show all offers regardless of status
+        // Fetch co-investment offers that have passed investor advisor and lead investor approval
+        // Only show offers that are ready for startup approval or already accepted/rejected by startup
         const { data: coInvestmentOffersData, error: coInvestmentOffersError } = await supabase
           .from('co_investment_offers')
           .select(`
@@ -849,8 +850,13 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             co_investment_opportunity:co_investment_opportunities(id, investment_amount, equity_percentage)
           `)
           .eq('startup_id', startup.id)
-          // Don't filter by status - show all offers (pending, accepted, rejected)
-          // This matches the behavior of regular investment offers
+          // Show offers where investor advisor has approved OR where investor has no advisor (not_required)
+          .in('investor_advisor_approval_status', ['approved', 'not_required'])
+          // Only show offers where lead investor has approved
+          .eq('lead_investor_approval_status', 'approved')
+          // Only show offers that are ready for startup approval or already processed by startup
+          // Status should be pending_startup_approval (ready for startup), accepted, or rejected (startup already responded)
+          .in('status', ['pending_startup_approval', 'accepted', 'rejected'])
           .order('created_at', { ascending: false });
 
         if (coInvestmentOffersError) {

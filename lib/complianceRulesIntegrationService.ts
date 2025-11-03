@@ -458,7 +458,37 @@ class ComplianceRulesIntegrationService {
     uploadedBy: string
   ): Promise<{ success: boolean; uploadId?: string; error?: string }> {
     try {
-      // Upload file to storage first
+      // Check if this is a cloud drive URL (stored in file object)
+      const cloudDriveUrl = (file as any).cloudDriveUrl;
+      
+      if (cloudDriveUrl && cloudDriveUrl.trim()) {
+        // Handle cloud drive URL - skip storage upload, directly save URL to database
+        console.log('📤 Saving cloud drive URL to database:', cloudDriveUrl);
+        
+        // Insert record into compliance_uploads table with cloud drive URL
+        const { data: insertData, error: insertError } = await supabase
+          .from('compliance_uploads')
+          .insert({
+            startup_id: startupId,
+            task_id: taskId,
+            file_name: file.name || 'cloud-drive-document.pdf',
+            file_url: cloudDriveUrl,
+            uploaded_by: uploadedBy,
+            file_size: file.size || 0,
+            file_type: file.type || 'application/pdf'
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('Error inserting cloud drive URL record:', insertError);
+          return { success: false, error: insertError.message };
+        }
+
+        return { success: true, uploadId: insertData.id };
+      }
+      
+      // Handle regular file upload - upload to storage first
       const fileExt = file.name.split('.').pop();
       const fileName = `${startupId}/${taskId}/${Date.now()}.${fileExt}`;
       

@@ -14,3 +14,8 @@ AND p.proname = 'approve_co_investment_offer_investor_advisor';
 -- If the above returns no rows, the function doesn't exist
 -- Run CREATE_CO_INVESTMENT_OFFERS_TABLE.sql to create it
 
+
+
+
+
+

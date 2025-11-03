@@ -485,24 +485,48 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
     };
 
     const handleFileSelect = (file: File | null) => {
+        console.log('📤 ComplianceTab handleFileSelect called with file:', file);
         setSelectedFile(file);
         setUploadSuccess(false);
+        // Clear cloud drive URL when a file is selected
+        if (file) {
+            setCloudDriveUrl('');
+        }
     };
 
     const handleFileUpload = async () => {
-        if (!selectedTask || !currentUser || !selectedFile) return;
+        if (!selectedTask || !currentUser || !selectedFile) {
+            console.error('Missing required data for upload:', {
+                selectedTask: !!selectedTask,
+                currentUser: !!currentUser,
+                selectedFile: !!selectedFile
+            });
+            messageService.error(
+                'Upload Error',
+                'Missing required information. Please try again.'
+            );
+            return;
+        }
 
         try {
             setUploading(true);
+            console.log('📤 Starting file upload:', {
+                startupId: startup.id,
+                taskId: selectedTask.taskId,
+                fileName: selectedFile.name,
+                fileSize: selectedFile.size,
+                uploadedBy: currentUser.email
+            });
+            
             const result = await complianceRulesIntegrationService.uploadComplianceDocument(
                 startup.id,
                 selectedTask.taskId,
                 selectedFile,
                 currentUser.email || 'unknown'
-                    );
+            );
             
-            if (result) {
-                console.log('Upload successful:', result);
+            if (result && result.success) {
+                console.log('✅ Upload successful:', result);
                 setUploadSuccess(true);
                 setSelectedFile(null);
                 loadComplianceData(); // Refresh data
@@ -514,16 +538,17 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                     setUploadSuccess(false);
                 }, 2000);
             } else {
+                console.error('❌ Upload failed:', result);
                 messageService.error(
-                  'Upload Failed',
-                  'Upload failed. Please check if the database tables are set up correctly.'
+                    'Upload Failed',
+                    result?.error || 'Upload failed. Please check if the database tables are set up correctly.'
                 );
             }
         } catch (error) {
-            console.error('Error uploading file:', error);
+            console.error('❌ Error uploading file:', error);
             messageService.error(
-              'Upload Error',
-              'Error uploading file. Please try again.'
+                'Upload Error',
+                error instanceof Error ? error.message : 'Error uploading file. Please try again.'
             );
         } finally {
             setUploading(false);
@@ -549,8 +574,8 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                 currentUser.email || 'unknown'
             );
             
-            if (result) {
-                console.log('Cloud drive URL saved successfully:', result);
+            if (result && result.success) {
+                console.log('✅ Cloud drive URL saved successfully:', result);
                 setUploadSuccess(true);
                 setCloudDriveUrl('');
                 setUseCloudDrive(false);
@@ -563,7 +588,7 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                     setUploadSuccess(false);
                 }, 2000);
             } else {
-                throw new Error('Failed to save cloud drive URL');
+                throw new Error(result?.error || 'Failed to save cloud drive URL');
             }
         } catch (error) {
             console.error('Cloud drive URL save failed:', error);
@@ -968,7 +993,14 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                             {/* Cloud Drive URL Option */}
                             <CloudDriveInput
                                 value={cloudDriveUrl}
-                                onChange={setCloudDriveUrl}
+                                onChange={(url) => {
+                                    console.log('📤 ComplianceTab CloudDriveInput onChange called with URL:', url);
+                                    setCloudDriveUrl(url);
+                                    // Clear selected file when URL is entered
+                                    if (url && url.trim()) {
+                                        setSelectedFile(null);
+                                    }
+                                }}
                                 onFileSelect={handleFileSelect}
                                 placeholder="Paste your cloud drive link here..."
                                 label="Compliance Document"
@@ -978,6 +1010,18 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                                 documentType="compliance document"
                                 showPrivacyMessage={false}
                             />
+                            
+                            {/* Show selected file info */}
+                            {selectedFile && (
+                                <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                                    <p className="text-sm text-blue-700 flex items-center gap-2">
+                                        <CheckCircle className="w-4 h-4" />
+                                        <span className="font-medium">Selected file:</span>
+                                        <span>{selectedFile.name}</span>
+                                        <span className="text-blue-500">({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                                    </p>
+                                </div>
+                            )}
                             
                             <div className="flex justify-end gap-3">
                                 <Button 
@@ -994,7 +1038,19 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                                     Cancel
                                 </Button>
                                 <Button 
-                                    onClick={cloudDriveUrl.trim() ? handleCloudDriveUpload : handleFileUpload}
+                                    onClick={() => {
+                                        console.log('📤 Upload button clicked:', {
+                                            hasCloudDriveUrl: !!cloudDriveUrl.trim(),
+                                            hasSelectedFile: !!selectedFile,
+                                            cloudDriveUrl: cloudDriveUrl.trim(),
+                                            selectedFileName: selectedFile?.name
+                                        });
+                                        if (cloudDriveUrl.trim()) {
+                                            handleCloudDriveUpload();
+                                        } else if (selectedFile) {
+                                            handleFileUpload();
+                                        }
+                                    }}
                                     disabled={uploading || (!selectedFile && !cloudDriveUrl.trim())}
                                     className={(!selectedFile && !cloudDriveUrl.trim()) ? 'opacity-50 cursor-not-allowed' : ''}
                                 >

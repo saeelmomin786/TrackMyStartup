@@ -47,3 +47,8 @@ COMMENT ON FUNCTION public.get_user_public_info(UUID) IS
 Uses SECURITY DEFINER to bypass RLS restrictions. 
 This allows startups to view lead investor information in co-investment offers.';
 
+
+
+
+
+

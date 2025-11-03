@@ -30,3 +30,8 @@ ORDER BY p.proname, p.oid;
 
 -- Recreate the function to force schema refresh (already in CREATE_CO_INVESTMENT_OFFERS_TABLE.sql)
 
+
+
+
+
+

@@ -774,9 +774,14 @@ const App: React.FC = () => {
           const timeDiff = parseInt(currentTime) - parseInt(lastAuthTimestamp);
           console.log('🔍 Time difference:', timeDiff, 'ms');
           // If less than 5 seconds have passed, it's likely a duplicate event from window focus
+          // BUT do not skip during initial boot while the UI is still loading.
           if (timeDiff < 5000) {
-            console.log('🚫 Duplicate auth event detected (likely from window focus), skipping to prevent refresh');
-            return;
+            if (isLoading) {
+              console.log('ℹ️ Duplicate auth event during initial boot – proceeding to finish initialization');
+            } else {
+              console.log('🚫 Duplicate auth event detected (likely from window focus), skipping to prevent refresh');
+              return;
+            }
           }
         }
         

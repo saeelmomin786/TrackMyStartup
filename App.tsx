@@ -1295,6 +1295,7 @@ const App: React.FC = () => {
       return;
     }
     
+    let didSucceed = false;
     try {
       console.log('Fetching data for authenticated user...', { forceRefresh, hasInitialDataLoaded: hasInitialDataLoadedRef.current });
       
@@ -1469,6 +1470,7 @@ const App: React.FC = () => {
       console.log('Startups loaded:', startupsData.status === 'fulfilled' ? startupsData.value.length : 0);
       console.log('Users loaded:', usersData.status === 'fulfilled' ? usersData.value.length : 0);
       console.log('Current user role:', currentUser?.role);
+      didSucceed = true;
       
       // Fetch assigned investment advisor if user has one
       console.log('🔍 Checking for investment advisor code...');
@@ -1534,8 +1536,10 @@ const App: React.FC = () => {
     } finally {
       // Only set loading to false if we're still in loading state
       setIsLoading(false);
-      // Mark that initial data has been loaded
-      setHasInitialDataLoaded(true);
+      // Mark that initial data has been loaded ONLY on success; leave false on error to allow retries
+      if (didSucceed) {
+        setHasInitialDataLoaded(true);
+      }
     }
   }, [fetchAssignedInvestmentAdvisor]);
 

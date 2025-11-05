@@ -36,6 +36,25 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
         }, timeoutMs);
 
         try {
+            // If a valid session already exists (common on mobile after refresh),
+            // skip password sign-in and continue straight to the app.
+            const existing = await authService.supabase.auth.getSession();
+            if (existing.data?.session) {
+                clearTimeout(timeoutId);
+                const { data: userData } = await authService.supabase.auth.getUser();
+                if (userData?.user) {
+                    const u = userData.user;
+                    onLogin({
+                        id: u.id,
+                        email: u.email || '',
+                        name: u.user_metadata?.name || 'Unknown',
+                        role: u.user_metadata?.role || 'Investor',
+                        registration_date: new Date().toISOString().split('T')[0]
+                    } as AuthUser);
+                    return;
+                }
+            }
+
             const { user, error: loginError } = await authService.signInMinimal({ email, password });
             
             clearTimeout(timeoutId); // Clear timeout if login completes
@@ -160,6 +179,20 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     setTimeout(() => {
                         onNavigateToRegister();
                     }, 3000);
+                }
+            } else {
+                // Edge case: no error and no user returned; try to read current user
+                const { data: userData } = await authService.supabase.auth.getUser();
+                if (userData?.user) {
+                    const u = userData.user;
+                    onLogin({
+                        id: u.id,
+                        email: u.email || '',
+                        name: u.user_metadata?.name || 'Unknown',
+                        role: u.user_metadata?.role || 'Investor',
+                        registration_date: new Date().toISOString().split('T')[0]
+                    } as AuthUser);
+                    return;
                 }
             }
         } catch (err: any) {

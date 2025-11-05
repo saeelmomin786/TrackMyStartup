@@ -665,8 +665,6 @@ const App: React.FC = () => {
       }
     };
 
-    initializeAuth();
-
     // Visibility/focus handlers: only refresh if away >= threshold
     const maybeRefreshAfterAway = () => {
       const now = Date.now();

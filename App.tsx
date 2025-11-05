@@ -276,6 +276,10 @@ const App: React.FC = () => {
   const startupRecoveryAttemptedRef = useRef<boolean>(false);
   const startupRecoveryAttemptsRef = useRef<number>(0);
   const startupRecoveryLastAtRef = useRef<number>(0);
+  
+  // In-memory cache for startup data (reused after refresh)
+  const startupCacheRef = useRef<{ [key: string]: Startup[] }>({});
+  const lastCacheUserIdRef = useRef<string | null>(null);
 
   // Trial control refs (one-shot guard and timers)
   const hasHandledTrialEndRef = useRef(false);
@@ -1292,7 +1296,31 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Fetch data function - simplified without window monitoring
+  // Helper: timeout-wrapped query with 12s timeout
+  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number = 12000): Promise<T> => {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => 
+        setTimeout(() => reject(new Error(`Query timeout after ${timeoutMs}ms`)), timeoutMs)
+      )
+    ]);
+  };
+
+  // Helper: load data in background batches (no delay here, delay is applied in setTimeout)
+  const loadBackgroundBatch = async (batch: Array<() => Promise<any>>) => {
+    // Limit concurrency to 2
+    const results: any[] = [];
+    for (let i = 0; i < batch.length; i += 2) {
+      const chunk = batch.slice(i, i + 2);
+      const chunkResults = await Promise.allSettled(
+        chunk.map(fn => withTimeout(fn(), 12000))
+      );
+      results.push(...chunkResults);
+    }
+    return results;
+  };
+
+  // Fetch data function - optimized with phased loading and caching
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!isAuthenticatedRef.current || !currentUserRef.current) {
       return;
@@ -1303,109 +1331,357 @@ const App: React.FC = () => {
       return;
     }
     
+    // Reset flag at start
+    setHasInitialDataLoaded(false);
+    
     let didSucceed = false;
-    // Phase 0: for Startup role, load startup FIRST and show dashboard immediately
     const cu = currentUserRef.current;
-    if (cu?.role === 'Startup' && !selectedStartupRef.current) {
-      try {
-        const { data: row, error: rowErr } = await authService.supabase
-          .from('startups')
-          .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
-          .eq('user_id', cu.id)
-          .maybeSingle();
-        if (row && !rowErr) {
-          setStartups([row] as any);
-          setSelectedStartup(row as any);
-          setIsLoading(false);
-          setView('startupHealth');
-          // Load other data in background without blocking
-          (async () => {
-            try {
-              const bgOffers = await investmentService.getOffersForStartup(row.id);
-              setInvestmentOffers(bgOffers);
-            } catch {}
-          })();
-          // Mark as loaded so main batch doesn't run for Startup users
-          setHasInitialDataLoaded(true);
-          return;
-        }
-      } catch {}
-    }
+    const userId = cu.id;
+    const userRole = cu.role;
+    
+    // PHASE 0: Ultra-fast minimal load (instant, essential data only)
     try {
-      console.log('Fetching data for authenticated user...', { forceRefresh, hasInitialDataLoaded: hasInitialDataLoadedRef.current });
+      // Check cache first (if same user and not forcing refresh)
+      if (!forceRefresh && lastCacheUserIdRef.current === userId && startupCacheRef.current[userId]) {
+        const cachedStartups = startupCacheRef.current[userId];
+        if (cachedStartups.length > 0) {
+          console.log('✅ Using cached startup data for instant load');
+          setStartups(cachedStartups);
+          if (userRole === 'Startup' && cachedStartups.length === 1) {
+            setSelectedStartup(cachedStartups[0]);
+            setView('startupHealth');
+          }
+          setIsLoading(false);
+          didSucceed = true;
+          setHasInitialDataLoaded(true);
+          // Continue to background loading below (Phase 1 & 2 will run for non-Startup users)
+        }
+      }
       
-      // Fetch data with timeout to detect network issues
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Request timeout - network may be unavailable')), 45000); // 45s timeout for mobile
-      });
+      // For Startup role: load startup by user_id (fastest path)
+      if (userRole === 'Startup' && !selectedStartupRef.current && !didSucceed) {
+        try {
+          const { data: row, error: rowErr } = await withTimeout(
+            authService.supabase
+              .from('startups')
+              .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
+              .eq('user_id', userId)
+              .maybeSingle(),
+            10000
+          );
+          if (row && !rowErr) {
+            const startupArray = [row] as any;
+            setStartups(startupArray);
+            setSelectedStartup(row as any);
+            setIsLoading(false);
+            setView('startupHealth');
+            // Cache it
+            startupCacheRef.current[userId] = startupArray;
+            lastCacheUserIdRef.current = userId;
+            didSucceed = true;
+            // Mark loaded so Phase 1/2 will run
+            setHasInitialDataLoaded(true);
+            
+            // Start Phase 1 & 2 in background (non-blocking)
+            (async () => {
+              try {
+                // Phase 1: Secondary data (1s delay)
+                setTimeout(async () => {
+                  try {
+                    const offers = await withTimeout(investmentService.getOffersForStartup(row.id), 12000);
+                    setInvestmentOffers(offers);
+                  } catch {}
+                }, 1000);
+                
+                // Phase 2: Tertiary data (2s delay) - minimal for Startup users
+                setTimeout(async () => {
+                  try {
+                    await withTimeout(investmentService.getNewInvestments(), 12000).then(setNewInvestments).catch(() => {});
+                  } catch {}
+                }, 2000);
+              } catch {}
+            })();
+            return; // Early return for Startup users
+          }
+        } catch (err) {
+          console.error('Phase 0 startup fetch error:', err);
+        }
+      }
+      
+      // For other roles: Phase 0 - load only essential startups (minimal query)
+      if (!didSucceed) {
+        let phase0Startups: Startup[] = [];
+        
+        if (userRole === 'Investor') {
+          // Investor: load only their portfolio startups + offers
+          try {
+            const [startupsResult, offersResult] = await Promise.allSettled([
+              withTimeout(startupService.getAllStartups(), 12000),
+              withTimeout(investmentService.getUserInvestmentOffers(cu.email), 12000)
+            ]);
+            
+            if (startupsResult.status === 'fulfilled') {
+              phase0Startups = startupsResult.value;
+            }
+            if (offersResult.status === 'fulfilled') {
+              setInvestmentOffers(offersResult.value);
+            }
+          } catch {}
+        } else if (userRole === 'Admin') {
+          const result = await withTimeout(startupService.getAllStartupsForAdmin(), 12000).catch(() => []);
+          phase0Startups = result;
+        } else if (userRole === 'Investment Advisor') {
+          const result = await withTimeout(startupService.getAllStartupsForInvestmentAdvisor(), 12000).catch(() => []);
+          phase0Startups = result;
+        } else if (userRole === 'CA') {
+          const result = await withTimeout(caService.getAssignedStartups(), 12000).catch(() => []);
+          phase0Startups = result.map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            investmentType: 'Seed' as any,
+            investmentValue: s.totalFunding || 0,
+            equityAllocation: 0,
+            currentValuation: s.totalFunding || 0,
+            complianceStatus: s.complianceStatus,
+            sector: s.sector,
+            totalFunding: s.totalFunding,
+            totalRevenue: s.totalRevenue,
+            registrationDate: s.registrationDate,
+            founders: []
+          }));
+        } else if (userRole === 'CS') {
+          const result = await withTimeout(csService.getAssignedStartups(), 12000).catch(() => []);
+          phase0Startups = result.map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            investmentType: 'Seed' as any,
+            investmentValue: s.totalFunding || 0,
+            equityAllocation: 0,
+            currentValuation: s.totalFunding || 0,
+            complianceStatus: s.complianceStatus,
+            sector: s.sector,
+            totalFunding: s.totalFunding,
+            totalRevenue: s.totalRevenue,
+            registrationDate: s.registrationDate,
+            founders: []
+          }));
+        } else {
+          const result = await withTimeout(startupService.getAllStartups(), 12000).catch(() => []);
+          phase0Startups = result;
+        }
+        
+        if (phase0Startups.length > 0) {
+          setStartups(phase0Startups);
+          // Cache it
+          startupCacheRef.current[userId] = phase0Startups;
+          lastCacheUserIdRef.current = userId;
+          setIsLoading(false);
+          didSucceed = true;
+          setHasInitialDataLoaded(true);
+          
+          // Set default view
+          if (userRole === 'Investor') {
+            setView('investor');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Phase 0 error:', error);
+    }
+    
+    // PHASE 1 & 2: Background loading for non-Startup users (or if Phase 0 succeeded)
+    // Only load if Phase 0 succeeded and we're not a Startup user (Startup users already handled above)
+    if (didSucceed && userRole !== 'Startup') {
+      // Phase 1: Secondary data (1s delay) - new investments, requests
+      setTimeout(async () => {
+        try {
+          const phase1Batch = [
+            () => investmentService.getNewInvestments(),
+            () => userService.getStartupAdditionRequests()
+          ];
+          
+          const phase1Results = await loadBackgroundBatch(phase1Batch);
+          
+          if (phase1Results[0]?.status === 'fulfilled') {
+            setNewInvestments(phase1Results[0].value);
+          }
+          if (phase1Results[1]?.status === 'fulfilled') {
+            const requests = phase1Results[1].value;
+            setStartupAdditionRequests(requests);
+            
+            // For Investor: augment portfolio with approved requests
+            if (userRole === 'Investor' && Array.isArray(requests)) {
+              const investorCode = (cu as any)?.investor_code || (cu as any)?.investorCode;
+              const approvedNames = requests
+                .filter((r: any) => {
+                  const status = (r.status || 'pending');
+                  const isApproved = status === 'approved';
+                  const matchesCode = !investorCode || !r?.investor_code || (r.investor_code === investorCode || r.investorCode === investorCode);
+                  return isApproved && matchesCode;
+                })
+                .map((r: any) => r.name)
+                .filter((n: any) => !!n);
+              
+              if (approvedNames.length > 0) {
+                try {
+                  const canonical = await withTimeout(startupService.getStartupsByNames(approvedNames), 12000);
+                  const currentStartups = startupsRef.current;
+                  const byName: Record<string, any> = {};
+                  currentStartups.forEach((s: any) => { 
+                    if (s && s.name) byName[s.name] = s; 
+                  });
+                  canonical.forEach((s: any) => { 
+                    if (s && s.name) byName[s.name] = s; 
+                  });
+                  const augmented = Object.values(byName) as any[];
+                  setStartups(augmented);
+                  // Update cache
+                  startupCacheRef.current[userId] = augmented;
+                } catch {}
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Phase 1 error:', error);
+        }
+      }, 1000);
+      
+      // Phase 2: Tertiary data (2s delay) - users, verification, validation, offers (if not already loaded)
+      setTimeout(async () => {
+        try {
+          const phase2Batch: Array<() => Promise<any>> = [];
+          
+          // Always load users, verification, validation
+          phase2Batch.push(() => userService.getAllUsers());
+          phase2Batch.push(() => verificationService.getVerificationRequests());
+          phase2Batch.push(() => validationService.getAllValidationRequests());
+          
+          // Load offers based on role (if not already loaded in Phase 0)
+          if (userRole === 'Investor' && !investmentOffersRef.current.length) {
+            phase2Batch.push(() => investmentService.getUserInvestmentOffers(cu.email));
+          } else if (userRole === 'Admin') {
+            phase2Batch.push(() => investmentService.getAllInvestmentOffers());
+          }
+          
+          const phase2Results = await loadBackgroundBatch(phase2Batch);
+          
+          let resultIndex = 0;
+          if (phase2Results[resultIndex]?.status === 'fulfilled') {
+            setUsers(phase2Results[resultIndex].value);
+          }
+          resultIndex++;
+          
+          if (phase2Results[resultIndex]?.status === 'fulfilled') {
+            setVerificationRequests(phase2Results[resultIndex].value);
+          }
+          resultIndex++;
+          
+          if (phase2Results[resultIndex]?.status === 'fulfilled') {
+            setValidationRequests(phase2Results[resultIndex].value);
+          }
+          resultIndex++;
+          
+          if (phase2Results[resultIndex]?.status === 'fulfilled') {
+            setInvestmentOffers(phase2Results[resultIndex].value);
+          }
+        } catch (error) {
+          console.error('Phase 2 error:', error);
+        }
+      }, 2000);
+      
+      // For Investment Advisor: load pending relationships (Phase 2, 2.5s delay)
+      if (userRole === 'Investment Advisor' && cu?.id) {
+        setTimeout(async () => {
+          try {
+            const relationships = await withTimeout(
+              investmentService.getPendingInvestmentAdvisorRelationships(cu.id),
+              12000
+            );
+            setPendingRelationships(relationships);
+          } catch (error) {
+            console.error('Error fetching pending relationships:', error);
+            setPendingRelationships([]);
+          }
+        }, 2500);
+      }
+      
+      // For users with investment advisor code: fetch assigned advisor (Phase 2, 2.5s delay)
+      if (cu?.investment_advisor_code_entered) {
+        setTimeout(async () => {
+          try {
+            const advisorResult = await fetchAssignedInvestmentAdvisor(cu.investment_advisor_code_entered);
+            console.log('🔍 Advisor fetch result:', advisorResult);
+          } catch {}
+        }, 2500);
+      }
+    }
+    
+    // Legacy fallback: if Phase 0 didn't succeed, try old batch method (for compatibility)
+    if (!didSucceed) {
+      try {
+        console.log('⚠️ Phase 0 failed, falling back to legacy batch loading...');
+        
+        let startupPromise: Promise<Startup[]>;
+        if (userRole === 'Admin') {
+          startupPromise = withTimeout(startupService.getAllStartupsForAdmin(), 12000);
+        } else if (userRole === 'Investment Advisor') {
+          startupPromise = withTimeout(startupService.getAllStartupsForInvestmentAdvisor(), 12000);
+        } else if (userRole === 'CA') {
+          startupPromise = withTimeout(caService.getAssignedStartups(), 12000).then(startups => 
+            startups.map(s => ({
+              id: s.id,
+              name: s.name,
+              investmentType: 'Seed' as any,
+              investmentValue: s.totalFunding || 0,
+              equityAllocation: 0,
+              currentValuation: s.totalFunding || 0,
+              complianceStatus: s.complianceStatus,
+              sector: s.sector,
+              totalFunding: s.totalFunding,
+              totalRevenue: s.totalRevenue,
+              registrationDate: s.registrationDate,
+              founders: []
+            }))
+          );
+        } else if (userRole === 'CS') {
+          startupPromise = withTimeout(csService.getAssignedStartups(), 12000).then(startups =>
+            startups.map(s => ({
+              id: s.id,
+              name: s.name,
+              investmentType: 'Seed' as any,
+              investmentValue: s.totalFunding || 0,
+              equityAllocation: 0,
+              currentValuation: s.totalFunding || 0,
+              complianceStatus: s.complianceStatus,
+              sector: s.sector,
+              totalFunding: s.totalFunding,
+              totalRevenue: s.totalRevenue,
+              registrationDate: s.registrationDate,
+              founders: []
+            }))
+          );
+        } else {
+          startupPromise = withTimeout(startupService.getAllStartups(), 12000);
+        }
 
-             // Determine startup fetching method based on role (skip if already loaded for Startup)
-         let startupPromise;
-         if (currentUserRef.current?.role === 'Startup' && selectedStartupRef.current) {
-           startupPromise = Promise.resolve([selectedStartupRef.current]);
-         } else if (currentUserRef.current?.role === 'Admin') {
-           console.log('🔍 Using getAllStartupsForAdmin for Admin role');
-           startupPromise = startupService.getAllStartupsForAdmin();
-         } else if (currentUserRef.current?.role === 'Investment Advisor') {
-           console.log('🔍 Using getAllStartupsForInvestmentAdvisor for Investment Advisor role');
-           startupPromise = startupService.getAllStartupsForInvestmentAdvisor();
-         } else if (currentUserRef.current?.role === 'CA') {
-           startupPromise = caService.getAssignedStartups().then(startups => 
-             startups.map(s => ({
-               id: s.id,
-               name: s.name,
-               investmentType: 'Seed' as any,
-               investmentValue: s.totalFunding || 0,
-               equityAllocation: 0,
-               currentValuation: s.totalFunding || 0,
-               complianceStatus: s.complianceStatus,
-               sector: s.sector,
-               totalFunding: s.totalFunding,
-               totalRevenue: s.totalRevenue,
-               registrationDate: s.registrationDate,
-               founders: []
-             }))
-           );
-         } else if (currentUserRef.current?.role === 'CS') {
-           startupPromise = csService.getAssignedStartups().then(startups =>
-             startups.map(s => ({
-               id: s.id,
-               name: s.name,
-               investmentType: 'Seed' as any,
-               investmentValue: s.totalFunding || 0,
-               equityAllocation: 0,
-               currentValuation: s.totalFunding || 0,
-               complianceStatus: s.complianceStatus,
-               sector: s.sector,
-               totalFunding: s.totalFunding,
-               totalRevenue: s.totalRevenue,
-               registrationDate: s.registrationDate,
-               founders: []
-             }))
-           );
-         } else {
-           console.log('🔍 Using default startup fetching for role:', currentUserRef.current?.role);
-           startupPromise = startupService.getAllStartups();
-         }
+        const dataPromise = Promise.allSettled([
+          startupPromise,
+          withTimeout(investmentService.getNewInvestments(), 12000),
+          withTimeout(userService.getStartupAdditionRequests(), 12000),
+          withTimeout(userService.getAllUsers(), 12000),
+          withTimeout(verificationService.getVerificationRequests(), 12000),
+          userRole === 'Investor' 
+            ? withTimeout(investmentService.getUserInvestmentOffers(cu.email), 12000)
+            : userRole === 'Admin'
+              ? withTimeout(investmentService.getAllInvestmentOffers(), 12000)
+              : Promise.resolve([]),
+          withTimeout(validationService.getAllValidationRequests(), 12000)
+        ]);
 
-         const dataPromise = Promise.allSettled([
-           startupPromise,
-           investmentService.getNewInvestments(),
-         userService.getStartupAdditionRequests(),
-         userService.getAllUsers(),
-         verificationService.getVerificationRequests(),
-         currentUserRef.current?.role === 'Investor' 
-           ? investmentService.getUserInvestmentOffers(currentUserRef.current.email)
-           : currentUserRef.current?.role === 'Admin'
-             ? investmentService.getAllInvestmentOffers()
-             : Promise.resolve([]),
-         validationService.getAllValidationRequests()
-       ]);
-
-       const [startupsData, investmentsData, requestsData, usersData, verificationData, offersData, validationData] = await Promise.race([
-         dataPromise,
-         timeoutPromise
-       ]) as any;
+        const [startupsData, investmentsData, requestsData, usersData, verificationData, offersData, validationData] = await Promise.race([
+          dataPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), 45000))
+        ]) as any;
 
              // Set data with fallbacks
        let baseStartups = startupsData.status === 'fulfilled' ? startupsData.value : [];
@@ -1471,112 +1747,104 @@ const App: React.FC = () => {
         }
       }
 
-       setStartups(baseStartups);
-       setNewInvestments(investmentsData.status === 'fulfilled' ? investmentsData.value : []);
-       setStartupAdditionRequests(requests);
-       setUsers(usersData.status === 'fulfilled' ? usersData.value : []);
-       setVerificationRequests(verificationData.status === 'fulfilled' ? verificationData.value : []);
-       setInvestmentOffers(offersData.status === 'fulfilled' ? offersData.value : []);
-       
-       // Debug: Log investment offers data
-       if (process.env.NODE_ENV === 'development') {
-         console.log('🔍 Investment Offers Debug:', {
-           status: offersData.status,
-           count: offersData.status === 'fulfilled' ? offersData.value?.length : 0,
-           sample: offersData.status === 'fulfilled' ? offersData.value?.slice(0, 3) : []
-         });
-       }
-       setValidationRequests(validationData.status === 'fulfilled' ? validationData.value : []);
-
-       // Fetch pending relationships for Investment Advisors
-       if (currentUser?.role === 'Investment Advisor' && currentUser?.id) {
-         try {
-           console.log('🔍 Fetching pending relationships for Investment Advisor:', currentUser.id);
-           const pendingRelationshipsData = await investmentService.getPendingInvestmentAdvisorRelationships(currentUser.id);
-           setPendingRelationships(pendingRelationshipsData);
-           console.log('🔍 Pending relationships loaded:', pendingRelationshipsData.length);
-         } catch (error) {
-           console.error('❌ Error fetching pending relationships:', error);
-           setPendingRelationships([]);
-         }
-       } else {
-         setPendingRelationships([]);
-       }
-
-      console.log('Data fetched successfully!');
-      console.log('Startups loaded:', startupsData.status === 'fulfilled' ? startupsData.value.length : 0);
-      console.log('Users loaded:', usersData.status === 'fulfilled' ? usersData.value.length : 0);
-      console.log('Current user role:', currentUser?.role);
-      didSucceed = true;
-      
-      // Fetch assigned investment advisor if user has one
-      console.log('🔍 Checking for investment advisor code...');
-      console.log('🔍 Current user:', currentUserRef.current);
-      console.log('🔍 Investment advisor code entered:', currentUserRef.current?.investment_advisor_code_entered);
-      
-      if (currentUserRef.current?.investment_advisor_code_entered) {
-        console.log('🔍 User has assigned investment advisor code:', currentUserRef.current.investment_advisor_code_entered);
-        const advisorResult = await fetchAssignedInvestmentAdvisor(currentUserRef.current.investment_advisor_code_entered);
-        console.log('🔍 Advisor fetch result:', advisorResult);
-      } else {
-        console.log('🔍 User has no assigned investment advisor');
-        setAssignedInvestmentAdvisor(null);
-      }
-      
-      // For startup users, automatically find their startup (only if not already set)
-      if (currentUserRef.current?.role === 'Startup' && startupsData.status === 'fulfilled' && !selectedStartupRef.current) {
-        console.log('🔍 Auto-finding startup for user:', currentUserRef.current.email);
-        console.log('🔍 User startup_name:', currentUserRef.current.startup_name);
-        console.log('🔍 Available startups:', startupsData.value.map(s => ({ name: s.name, id: s.id })));
+        setStartups(baseStartups);
+        // Cache it
+        startupCacheRef.current[userId] = baseStartups;
+        lastCacheUserIdRef.current = userId;
+        setNewInvestments(investmentsData.status === 'fulfilled' ? investmentsData.value : []);
+        setStartupAdditionRequests(requests);
+        setUsers(usersData.status === 'fulfilled' ? usersData.value : []);
+        setVerificationRequests(verificationData.status === 'fulfilled' ? verificationData.value : []);
+        setInvestmentOffers(offersData.status === 'fulfilled' ? offersData.value : []);
         
-        // Primary: match by startup_name from user profile
-        let userStartup = startupsData.value.find(startup => startup.name === currentUserRef.current.startup_name);
-
-        // Fallback: if startup_name missing or mismatch, but user has exactly one startup, use it
-        if (!userStartup && startupsData.value.length === 1) {
-          console.log('🔁 Fallback: selecting the only startup available for this user');
-          userStartup = startupsData.value[0];
+        // Debug: Log investment offers data
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🔍 Investment Offers Debug:', {
+            status: offersData.status,
+            count: offersData.status === 'fulfilled' ? offersData.value?.length : 0,
+            sample: offersData.status === 'fulfilled' ? offersData.value?.slice(0, 3) : []
+          });
         }
-        
-        console.log('🔍 Auto-found startup:', userStartup);
-        
-        if (userStartup) {
-          setSelectedStartup(userStartup);
-          // Only set view to startupHealth on initial load, not on subsequent data fetches
-          if (!hasInitialDataLoadedRef.current) {
-            setView('startupHealth');
-          } else {
+        setValidationRequests(validationData.status === 'fulfilled' ? validationData.value : []);
+
+        // Fetch pending relationships for Investment Advisors
+        if (userRole === 'Investment Advisor' && cu?.id) {
+          try {
+            console.log('🔍 Fetching pending relationships for Investment Advisor:', cu.id);
+            const pendingRelationshipsData = await withTimeout(
+              investmentService.getPendingInvestmentAdvisorRelationships(cu.id),
+              12000
+            );
+            setPendingRelationships(pendingRelationshipsData);
+            console.log('🔍 Pending relationships loaded:', pendingRelationshipsData.length);
+          } catch (error) {
+            console.error('❌ Error fetching pending relationships:', error);
+            setPendingRelationships([]);
           }
         } else {
+          setPendingRelationships([]);
         }
-      } else if (currentUserRef.current?.role === 'Startup' && selectedStartupRef.current) {
-        console.log('🔍 Startup user already has selected startup, preserving current state');
-        // Update selectedStartup with fresh data from the startups array
-        if (startupsData.status === 'fulfilled') {
-          const updatedStartup = startupsData.value.find(s => s.id === selectedStartupRef.current?.id);
-          if (updatedStartup) {
-            console.log('🔄 Updating selectedStartup with fresh data from database');
-            setSelectedStartup(updatedStartup);
+
+        console.log('Data fetched successfully (legacy fallback)!');
+        console.log('Startups loaded:', startupsData.status === 'fulfilled' ? startupsData.value.length : 0);
+        console.log('Users loaded:', usersData.status === 'fulfilled' ? usersData.value.length : 0);
+        console.log('Current user role:', userRole);
+        didSucceed = true;
+        
+        // Fetch assigned investment advisor if user has one
+        if (cu?.investment_advisor_code_entered) {
+          try {
+            const advisorResult = await fetchAssignedInvestmentAdvisor(cu.investment_advisor_code_entered);
+            console.log('🔍 Advisor fetch result:', advisorResult);
+          } catch {}
+        } else {
+          setAssignedInvestmentAdvisor(null);
+        }
+        
+        // For startup users, automatically find their startup (only if not already set)
+        if (userRole === 'Startup' && startupsData.status === 'fulfilled' && !selectedStartupRef.current) {
+          const userStartup = startupsData.value.find(startup => startup.name === cu.startup_name) 
+            || (startupsData.value.length === 1 ? startupsData.value[0] : null);
+          
+          if (userStartup) {
+            setSelectedStartup(userStartup);
+            if (!hasInitialDataLoadedRef.current) {
+              setView('startupHealth');
+            }
+          }
+        } else if (userRole === 'Startup' && selectedStartupRef.current) {
+          // Update selectedStartup with fresh data from the startups array
+          if (startupsData.status === 'fulfilled') {
+            const updatedStartup = startupsData.value.find(s => s.id === selectedStartupRef.current?.id);
+            if (updatedStartup) {
+              setSelectedStartup(updatedStartup);
+            }
           }
         }
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      
-      // Set empty arrays if data fetch fails
-      setStartups([]);
-      setNewInvestments([]);
-      setStartupAdditionRequests([]);
-      setUsers([]);
-      setVerificationRequests([]);
-      setInvestmentOffers([]);
-    } finally {
-      // Only set loading to false if we're still in loading state
-      setIsLoading(false);
-      // Mark that initial data has been loaded ONLY on success; leave false on error to allow retries
-      if (didSucceed) {
+        
+        // Set default view
+        if (userRole === 'Investor') {
+          setView('investor');
+        }
+        
+        setIsLoading(false);
         setHasInitialDataLoaded(true);
+      } catch (error) {
+        console.error('Legacy fallback error:', error);
+        // Set empty arrays if data fetch fails
+        setStartups([]);
+        setNewInvestments([]);
+        setStartupAdditionRequests([]);
+        setUsers([]);
+        setVerificationRequests([]);
+        setInvestmentOffers([]);
+        setIsLoading(false);
       }
+    }
+    
+    // Ensure loading state is cleared if we haven't succeeded
+    if (!didSucceed) {
+      setIsLoading(false);
     }
   }, [fetchAssignedInvestmentAdvisor]);
 
@@ -3370,3 +3638,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+

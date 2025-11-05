@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { authService, AuthUser } from '../lib/auth';
 import Card from './ui/Card';
 import Input from './ui/Input';
@@ -21,6 +21,30 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
     const [error, setError] = useState<string | null>(null);
     const [isRedirecting, setIsRedirecting] = useState(false);
     const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+
+    // Auto-restore if a valid session already exists (common on mobile after refresh)
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const { data } = await authService.supabase.auth.getSession();
+                if (data?.session) {
+                    const { data: userData } = await authService.supabase.auth.getUser();
+                    if (!cancelled && userData?.user) {
+                        const u = userData.user;
+                        onLogin({
+                            id: u.id,
+                            email: u.email || '',
+                            name: u.user_metadata?.name || 'Unknown',
+                            role: u.user_metadata?.role || 'Investor',
+                            registration_date: new Date().toISOString().split('T')[0]
+                        } as AuthUser);
+                    }
+                }
+            } catch {}
+        })();
+        return () => { cancelled = true; };
+    }, [onLogin]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

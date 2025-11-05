@@ -707,7 +707,24 @@ const App: React.FC = () => {
     (async () => {
       try {
         const { data } = await authService.supabase.auth.getSession();
-        if (!data?.session) {
+        if (data?.session) {
+          // Immediate session restore for new tabs on mobile/desktop
+          try {
+            const { data: userData } = await authService.supabase.auth.getUser();
+            if (userData?.user) {
+              const u = userData.user;
+              setCurrentUser({
+                id: u.id,
+                email: u.email || '',
+                name: u.user_metadata?.name || 'Unknown',
+                role: u.user_metadata?.role || 'Investor',
+                registration_date: new Date().toISOString().split('T')[0]
+              } as any);
+              setIsAuthenticated(true);
+              setIsLoading(false);
+            }
+          } catch {}
+        } else {
           // Recheck once after a brief delay before scheduling final fallback
           setTimeout(async () => {
             try {

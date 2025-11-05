@@ -894,6 +894,13 @@ const App: React.FC = () => {
                       setStartups(startupsByUser as any);
                       setSelectedStartup(startupsByUser[0] as any);
                       setView('startupHealth');
+                      // Persist startup_name to user profile to make next refresh instant
+                      try {
+                        await authService.supabase
+                          .from('users')
+                          .update({ startup_name: (startupsByUser[0] as any).name })
+                          .eq('id', session.user.id);
+                      } catch {}
                     }
                   }
                 } catch (e) {
@@ -1301,7 +1308,7 @@ const App: React.FC = () => {
       
       // Fetch data with timeout to detect network issues
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Request timeout - network may be unavailable')), 25000); // 25s timeout for mobile
+        setTimeout(() => reject(new Error('Request timeout - network may be unavailable')), 45000); // 45s timeout for mobile
       });
 
              // Determine startup fetching method based on role
@@ -1543,36 +1550,36 @@ const App: React.FC = () => {
     }
   }, [fetchAssignedInvestmentAdvisor]);
 
-  // Fetch data when authenticated - simplified approach
+  // Fetch data when authenticated - with small post-refresh delay for mobile
   useEffect(() => {
     if (isAuthenticated && currentUser && !hasInitialDataLoaded) {
-      fetchData();
+      const t = setTimeout(() => { fetchData(); }, 400); // 400ms debounce after refresh
+      return () => clearTimeout(t);
     }
-  }, [isAuthenticated, currentUser?.id]);
+  }, [isAuthenticated, currentUser?.id, hasInitialDataLoaded]);
 
   // Watchdog: if authenticated but data hasn't loaded within 15s, retry fetch a few times
   useEffect(() => {
     if (!isAuthenticated || !currentUser || hasInitialDataLoaded) return;
     let cancelled = false;
-    let attempts = 0;
-    const start = Date.now();
+    const backoffs = [1000, 2000, 4000, 8000, 16000, 32000]; // ~63s total
+    let idx = 0;
     const schedule = () => {
       if (cancelled || hasInitialDataLoadedRef.current) return;
-      const elapsed = Date.now() - start;
-      if (elapsed >= 15000 && attempts < 5) {
-        attempts += 1;
-        (async () => {
-          try {
-            console.log(`⏳ Data watchdog retry #${attempts} after ${Math.round(elapsed/1000)}s...`);
-            await fetchData(true);
-          } catch {}
-          if (!cancelled && !hasInitialDataLoadedRef.current) setTimeout(schedule, 3000);
-        })();
-      } else if (!hasInitialDataLoadedRef.current) {
-        setTimeout(schedule, 1000);
-      }
+      const delay = backoffs[Math.min(idx, backoffs.length - 1)];
+      setTimeout(async () => {
+        if (cancelled || hasInitialDataLoadedRef.current) return;
+        idx += 1;
+        try {
+          console.log(`⏳ Data watchdog retry (backoff ${delay}ms), attempt ${idx}`);
+          await fetchData(true);
+        } catch {}
+        if (!cancelled && !hasInitialDataLoadedRef.current && idx < backoffs.length) {
+          schedule();
+        }
+      }, delay);
     };
-    setTimeout(schedule, 1000);
+    schedule();
     return () => { cancelled = true; };
   }, [isAuthenticated, currentUser?.id, hasInitialDataLoaded]);
 
@@ -3135,6 +3142,13 @@ const App: React.FC = () => {
                 setStartups(startupsByUser as any);
                 setSelectedStartup(startupsByUser[0] as any);
                 setView('startupHealth');
+                // Persist startup_name for future refreshes
+                try {
+                  await authService.supabase
+                    .from('users')
+                    .update({ startup_name: (startupsByUser[0] as any).name })
+                    .eq('id', currentUser.id);
+                } catch {}
                 return;
               }
               console.log('❌ Recovery: still no startup by user_id');

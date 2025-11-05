@@ -2596,21 +2596,6 @@ const App: React.FC = () => {
                   {loadingProgress && (
                       <p className="text-sm text-slate-600">{loadingProgress}</p>
                   )}
-                  {/* Safety controls so users aren't stuck on mobile */}
-                  <div className="mt-2 flex gap-3">
-                    <button
-                      onClick={() => { try { window.location.reload(); } catch {} }}
-                      className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm"
-                    >
-                      Reload
-                    </button>
-                    <button
-                      onClick={async () => { try { await authService.signOut(); } catch {} finally { setIsLoading(false); setCurrentPage('login'); } }}
-                      className="px-3 py-1.5 bg-slate-200 text-slate-800 rounded-md text-sm"
-                    >
-                      Force Logout
-                    </button>
-                  </div>
               </div>
           </div>
       )

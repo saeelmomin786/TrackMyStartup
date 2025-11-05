@@ -665,6 +665,8 @@ const App: React.FC = () => {
       }
     };
 
+    initializeAuth();
+
     // Visibility/focus handlers: only refresh if away >= threshold
     const maybeRefreshAfterAway = () => {
       const now = Date.now();
@@ -707,24 +709,7 @@ const App: React.FC = () => {
     (async () => {
       try {
         const { data } = await authService.supabase.auth.getSession();
-        if (data?.session) {
-          // Immediate session restore for new tabs on mobile/desktop
-          try {
-            const { data: userData } = await authService.supabase.auth.getUser();
-            if (userData?.user) {
-              const u = userData.user;
-              setCurrentUser({
-                id: u.id,
-                email: u.email || '',
-                name: u.user_metadata?.name || 'Unknown',
-                role: u.user_metadata?.role || 'Investor',
-                registration_date: new Date().toISOString().split('T')[0]
-              } as any);
-              setIsAuthenticated(true);
-              setIsLoading(false);
-            }
-          } catch {}
-        } else {
+        if (!data?.session) {
           // Recheck once after a brief delay before scheduling final fallback
           setTimeout(async () => {
             try {
@@ -744,8 +729,12 @@ const App: React.FC = () => {
       } catch {}
     })();
 
+    // Track if we received any auth event on first load
+    let __initialAuthEventReceived = false;
+
     // Set up auth state listener
     const { data: { subscription } } = authService.onAuthStateChange(async (event, session) => {
+      __initialAuthEventReceived = true;
       // SIMPLE FIX: If we're ignoring auth events, skip everything
       if (ignoreAuthEvents) {
         console.log('🚫 Ignoring auth event because ignoreAuthEvents flag is set');
@@ -789,8 +778,8 @@ const App: React.FC = () => {
         
         // IMPROVED FIX: Only block duplicate auth events, not all auth events
         if (isAuthenticatedRef.current && currentUserRef.current && hasInitialDataLoadedRef.current && session?.user && currentUserRef.current.id === session.user.id) {
-          // Only block if this is a duplicate event (like window focus), not legitimate auth changes
-          if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+          // Only block token refresh duplicates; never block INITIAL_SESSION across tabs
+          if (event === 'TOKEN_REFRESHED') {
             console.log('🚫 IMPROVED FIX: Blocking duplicate auth event to prevent unnecessary refresh');
             return;
           }
@@ -1162,6 +1151,30 @@ const App: React.FC = () => {
 
     // After listener is attached, kick off initialization (prevents mobile race)
     initializeAuth();
+
+    // Fallback: if no auth event arrives shortly but a session exists, bootstrap manually
+    setTimeout(async () => {
+      try {
+        if (!__initialAuthEventReceived && !isAuthenticatedRef.current) {
+          const { data } = await authService.supabase.auth.getSession();
+          if (data?.session) {
+            try {
+              const completeUser = await authService.getCurrentUser();
+              if (completeUser) {
+                setCurrentUser(completeUser);
+                setIsAuthenticated(true);
+                setIsLoading(false);
+                if (!hasInitialDataLoadedRef.current) {
+                  fetchData().catch(() => {});
+                }
+              }
+            } catch (e) {
+              // ignore; normal flow will handle later
+            }
+          }
+        }
+      } catch {}
+    }, 2000);
 
     return () => {
       isMounted = false;

@@ -1301,7 +1301,7 @@ const App: React.FC = () => {
       
       // Fetch data with timeout to detect network issues
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Request timeout - network may be unavailable')), 10000); // 10 second timeout
+        setTimeout(() => reject(new Error('Request timeout - network may be unavailable')), 25000); // 25s timeout for mobile
       });
 
              // Determine startup fetching method based on role
@@ -2596,6 +2596,21 @@ const App: React.FC = () => {
                   {loadingProgress && (
                       <p className="text-sm text-slate-600">{loadingProgress}</p>
                   )}
+                  {/* Safety controls so users aren't stuck on mobile */}
+                  <div className="mt-2 flex gap-3">
+                    <button
+                      onClick={() => { try { window.location.reload(); } catch {} }}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm"
+                    >
+                      Reload
+                    </button>
+                    <button
+                      onClick={async () => { try { await authService.signOut(); } catch {} finally { setIsLoading(false); setCurrentPage('login'); } }}
+                      className="px-3 py-1.5 bg-slate-200 text-slate-800 rounded-md text-sm"
+                    >
+                      Force Logout
+                    </button>
+                  </div>
               </div>
           </div>
       )

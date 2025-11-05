@@ -1372,58 +1372,131 @@ const App: React.FC = () => {
       
       // For Startup role: load startup by user_id (fastest path)
       if (userRole === 'Startup' && !selectedStartupRef.current && !didSucceed) {
-        try {
-          console.log('🚀 Phase 0: Starting startup fetch for Startup user:', userId);
-          const { data: row, error: rowErr } = await withTimeout(
-            authService.supabase
-              .from('startups')
-              .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
-              .eq('user_id', userId)
-              .maybeSingle(),
-            10000
-          );
-          
-          if (row && !rowErr) {
-            console.log('✅ Phase 0: Startup loaded successfully:', row.name);
-            const startupArray = [row] as any;
-            setStartups(startupArray);
-            setSelectedStartup(row as any);
-            setIsLoading(false);
-            setView('startupHealth');
-            // Cache it
-            startupCacheRef.current[userId] = startupArray;
-            lastCacheUserIdRef.current = userId;
-            didSucceed = true;
-            // Mark loaded so Phase 1/2 will run
-            setHasInitialDataLoaded(true);
+        // Retry logic for Phase 0 startup fetch (max 2 retries)
+        let retryCount = 0;
+        const maxRetries = 2;
+        let phase0Succeeded = false;
+        
+        while (retryCount <= maxRetries && !phase0Succeeded) {
+          try {
+            // Verify auth session before querying
+            const { data: sessionData, error: sessionError } = await authService.supabase.auth.getSession();
+            if (sessionError || !sessionData?.session) {
+              console.warn('⚠️ Phase 0: No valid session, retry:', retryCount, { sessionError });
+              if (retryCount < maxRetries) {
+                retryCount++;
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
+                continue;
+              }
+              break;
+            }
             
-            // Start Phase 1 & 2 in background (non-blocking)
-            (async () => {
-              try {
-                // Phase 1: Secondary data (1s delay)
-                setTimeout(async () => {
-                  try {
-                    const offers = await withTimeout(investmentService.getOffersForStartup(row.id), 12000);
-                    setInvestmentOffers(offers);
-                  } catch {}
-                }, 1000);
-                
-                // Phase 2: Tertiary data (2s delay) - minimal for Startup users
-                setTimeout(async () => {
-                  try {
-                    await withTimeout(investmentService.getNewInvestments(), 12000).then(setNewInvestments).catch(() => {});
-                  } catch {}
-                }, 2000);
-              } catch {}
-            })();
-            return; // Early return for Startup users
-          } else {
-            console.warn('⚠️ Phase 0: Startup query returned no data or error:', { row, rowErr });
+            console.log('🚀 Phase 0: Starting startup fetch for Startup user:', userId, `(attempt ${retryCount + 1}/${maxRetries + 1})`);
+            
+            // Increase timeout for mobile networks (15s for first attempt, 20s for retries)
+            const timeoutMs = retryCount === 0 ? 15000 : 20000;
+            
+            const startTime = Date.now();
+            const queryResult = await withTimeout(
+              authService.supabase
+                .from('startups')
+                .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
+                .eq('user_id', userId)
+                .maybeSingle(),
+              timeoutMs
+            );
+            const queryTime = Date.now() - startTime;
+            
+            const { data: row, error: rowErr } = queryResult;
+            
+            if (row && !rowErr) {
+              console.log('✅ Phase 0: Startup loaded successfully:', row.name, `(took ${queryTime}ms)`);
+              const startupArray = [row] as any;
+              setStartups(startupArray);
+              setSelectedStartup(row as any);
+              setIsLoading(false);
+              setView('startupHealth');
+              // Cache it
+              startupCacheRef.current[userId] = startupArray;
+              lastCacheUserIdRef.current = userId;
+              didSucceed = true;
+              phase0Succeeded = true;
+              // Mark loaded so Phase 1/2 will run
+              setHasInitialDataLoaded(true);
+              
+              // Start Phase 1 & 2 in background (non-blocking)
+              (async () => {
+                try {
+                  // Phase 1: Secondary data (1s delay)
+                  setTimeout(async () => {
+                    try {
+                      const offers = await withTimeout(investmentService.getOffersForStartup(row.id), 12000);
+                      setInvestmentOffers(offers);
+                    } catch {}
+                  }, 1000);
+                  
+                  // Phase 2: Tertiary data (2s delay) - minimal for Startup users
+                  setTimeout(async () => {
+                    try {
+                      await withTimeout(investmentService.getNewInvestments(), 12000).then(setNewInvestments).catch(() => {});
+                    } catch {}
+                  }, 2000);
+                } catch {}
+              })();
+              return; // Early return for Startup users
+            } else {
+              console.warn('⚠️ Phase 0: Startup query returned no data or error:', { 
+                row, 
+                rowErr: rowErr ? {
+                  message: rowErr.message,
+                  details: rowErr.details,
+                  hint: rowErr.hint,
+                  code: rowErr.code
+                } : null,
+                queryTime: `${queryTime}ms`,
+                retryCount,
+                maxRetries
+              });
+              
+              // If it's a timeout or network error, retry
+              if (retryCount < maxRetries && (!rowErr || rowErr.code === 'PGRST116' || rowErr.message?.includes('timeout') || rowErr.message?.includes('network'))) {
+                retryCount++;
+                console.log(`🔄 Phase 0: Retrying startup fetch (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
+                continue;
+              }
+              
+              // Don't return here - let it fall through to legacy fallback
+              break;
+            }
+          } catch (err: any) {
+            const errorDetails = {
+              message: err?.message || 'Unknown error',
+              stack: err?.stack,
+              name: err?.name,
+              code: err?.code,
+              timeout: err?.message?.includes('timeout') || err?.message?.includes('Query timeout'),
+              retryCount,
+              maxRetries
+            };
+            
+            console.error('❌ Phase 0 startup fetch error:', errorDetails);
+            
+            // If it's a timeout error and we haven't exceeded max retries, retry
+            if (retryCount < maxRetries && errorDetails.timeout) {
+              retryCount++;
+              console.log(`🔄 Phase 0: Retrying after timeout error (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
+              continue;
+            }
+            
             // Don't return here - let it fall through to legacy fallback
+            break;
           }
-        } catch (err) {
-          console.error('❌ Phase 0 startup fetch error:', err);
-          // Don't return here - let it fall through to legacy fallback
+        }
+        
+        if (!phase0Succeeded) {
+          console.warn('⚠️ Phase 0: All retry attempts exhausted, falling back to legacy method');
         }
       }
       
@@ -1644,19 +1717,53 @@ const App: React.FC = () => {
         if (userRole === 'Startup') {
           // For Startup users, query by user_id (same as Phase 0, but with full batch)
           console.log('🔄 Legacy fallback: Querying startup by user_id for Startup user:', userId);
-          startupPromise = withTimeout(
-            authService.supabase
-              .from('startups')
-              .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
-              .eq('user_id', userId)
-              .maybeSingle(),
-            12000
-          ).then((result: any) => {
-            if (result.data && !result.error) {
-              return [result.data];
-            }
-            return [];
-          }).catch(() => []);
+          
+          // Verify auth session before querying
+          const { data: sessionData, error: sessionError } = await authService.supabase.auth.getSession();
+          if (sessionError || !sessionData?.session) {
+            console.error('❌ Legacy fallback: No valid session:', sessionError);
+            startupPromise = Promise.resolve([]);
+          } else {
+            const startTime = Date.now();
+            startupPromise = withTimeout(
+              authService.supabase
+                .from('startups')
+                .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
+                .eq('user_id', userId)
+                .maybeSingle(),
+              20000 // Increased timeout for legacy fallback
+            ).then((result: any) => {
+              const queryTime = Date.now() - startTime;
+              if (result.data && !result.error) {
+                console.log('✅ Legacy fallback: Startup loaded successfully:', result.data.name, `(took ${queryTime}ms)`);
+                return [result.data];
+              } else {
+                console.warn('⚠️ Legacy fallback: Startup query returned no data or error:', {
+                  hasData: !!result.data,
+                  error: result.error ? {
+                    message: result.error.message,
+                    details: result.error.details,
+                    hint: result.error.hint,
+                    code: result.error.code
+                  } : null,
+                  queryTime: `${queryTime}ms`
+                });
+                return [];
+              }
+            }).catch((err: any) => {
+              const queryTime = Date.now() - startTime;
+              const errorDetails = {
+                message: err?.message || 'Unknown error',
+                stack: err?.stack,
+                name: err?.name,
+                code: err?.code,
+                timeout: err?.message?.includes('timeout') || err?.message?.includes('Query timeout'),
+                queryTime: `${queryTime}ms`
+              };
+              console.error('❌ Legacy fallback: Startup query error:', errorDetails);
+              return [];
+            });
+          }
         } else if (userRole === 'Admin') {
           startupPromise = withTimeout(startupService.getAllStartupsForAdmin(), 12000);
         } else if (userRole === 'Investment Advisor') {
@@ -1883,10 +1990,53 @@ const App: React.FC = () => {
     }
   }, [fetchAssignedInvestmentAdvisor]);
 
-  // Fetch data when authenticated - with small post-refresh delay for mobile
+  // Fetch data when authenticated - with longer post-refresh delay for mobile
   useEffect(() => {
     if (isAuthenticated && currentUser && !hasInitialDataLoaded) {
-      const t = setTimeout(() => { fetchData(); }, 400); // 400ms debounce after refresh
+      // Detect mobile Chrome for longer delay
+      const isMobileChrome = (() => {
+        try {
+          const ua = navigator.userAgent || '';
+          return /Chrome\/\d+/.test(ua) && /Mobile/.test(ua);
+        } catch { return false; }
+      })();
+      
+      // Mobile Chrome needs more time for auth session to be fully ready
+      const delay = isMobileChrome ? 1000 : 400; // 1s for mobile, 400ms for desktop
+      console.log(`⏱️ Scheduling fetchData with ${delay}ms delay (${isMobileChrome ? 'mobile' : 'desktop'})`);
+      
+      const t = setTimeout(async () => {
+        // Verify session is ready before fetching (especially important for mobile)
+        try {
+          const { data: sessionData, error: sessionError } = await authService.supabase.auth.getSession();
+          if (sessionError || !sessionData?.session) {
+            console.warn('⚠️ Session not ready yet, waiting 500ms more...', sessionError);
+            // Wait a bit more and retry
+            setTimeout(async () => {
+              try {
+                const { data: retrySession, error: retryError } = await authService.supabase.auth.getSession();
+                if (!retryError && retrySession?.session) {
+                  console.log('✅ Session ready, fetching data...');
+                  fetchData();
+                } else {
+                  console.warn('⚠️ Session still not ready, proceeding anyway...');
+                  fetchData(); // Proceed anyway
+                }
+              } catch (err) {
+                console.error('❌ Error checking session on retry:', err);
+                fetchData(); // Proceed anyway
+              }
+            }, 500);
+          } else {
+            console.log('✅ Session ready, fetching data...');
+            fetchData();
+          }
+        } catch (err) {
+          console.error('❌ Error checking session:', err);
+          fetchData(); // Proceed anyway
+        }
+      }, delay);
+      
       return () => clearTimeout(t);
     }
   }, [isAuthenticated, currentUser?.id, hasInitialDataLoaded]);

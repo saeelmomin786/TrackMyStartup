@@ -2596,6 +2596,15 @@ const App: React.FC = () => {
                   {loadingProgress && (
                       <p className="text-sm text-slate-600">{loadingProgress}</p>
                   )}
+                  {/* Safety control so users aren't stuck on mobile */}
+                  <div className="mt-2">
+                    <button
+                      onClick={() => { try { window.location.reload(); } catch {} }}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm"
+                    >
+                      Refresh
+                    </button>
+                  </div>
               </div>
           </div>
       )

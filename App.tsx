@@ -704,21 +704,27 @@ const App: React.FC = () => {
     window.addEventListener('blur', onBlur);
 
     // Mobile-safe: proactively check for an existing session and set a
-    // fallback timeout so the app doesn't hang on the loading screen if the
-    // initial auth event is delayed or missed (seen on some mobile browsers).
+    // conservative fallback to avoid premature redirects on slower devices.
     let __initialLoadTimeout: any = null;
     (async () => {
       try {
         const { data } = await authService.supabase.auth.getSession();
         if (!data?.session) {
-          __initialLoadTimeout = setTimeout(() => {
-            if (isMounted && !isAuthenticatedRef.current && !currentUserRef.current) {
-              setIsLoading(false);
-              if (currentPage !== 'login' && currentPage !== 'register') {
-                setCurrentPage('login');
-              }
-            }
-          }, 8000); // 8s fallback
+          // Recheck once after a brief delay before scheduling final fallback
+          setTimeout(async () => {
+            try {
+              const again = await authService.supabase.auth.getSession();
+              if (again.data?.session) return; // session appeared; let listener handle it
+              __initialLoadTimeout = setTimeout(() => {
+                if (isMounted && !isAuthenticatedRef.current && !currentUserRef.current) {
+                  setIsLoading(false);
+                  if (currentPage !== 'login' && currentPage !== 'register') {
+                    setCurrentPage('login');
+                  }
+                }
+              }, 20000); // 20s final fallback for mobile
+            } catch {}
+          }, 2000); // 2s recheck window
         }
       } catch {}
     })();

@@ -29,10 +29,11 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
         setIsRedirecting(false);
 
         // Add timeout to prevent UI from getting stuck
+        const timeoutMs = 30000; // Extended for mobile networks
         const timeoutId = setTimeout(() => {
             setIsLoading(false);
             setError('Login timed out. Please try again.');
-        }, 10000); // 10 second timeout
+        }, timeoutMs);
 
         try {
             const { user, error: loginError } = await authService.signInMinimal({ email, password });

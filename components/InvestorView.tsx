@@ -177,9 +177,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [shuffledPitches, setShuffledPitches] = useState<ActiveFundraisingStartup[]>([]);
     const [playingVideoId, setPlayingVideoId] = useState<number | null>(null);
     
-  // State for contact details modal
-  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
-  const [contactModalOffer, setContactModalOffer] = useState<InvestmentOffer | null>(null);
+    // State for contact details modal
+    const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+    const [contactModalOffer, setContactModalOffer] = useState<InvestmentOffer | null>(null);
   
   // State for co-investment offer details modal
   const [isCoInvestmentDetailsModalOpen, setIsCoInvestmentDetailsModalOpen] = useState(false);
@@ -1665,12 +1665,12 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             {/* Discovery Sub-Tabs */}
             <div className="mb-6 border-b border-gray-200">
               <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Discovery Tabs">
-                <button
-                  onClick={() => {
+                  <button
+                    onClick={() => {
                     setDiscoverySubTab('all');
-                    setShowOnlyValidated(false);
-                    setShowOnlyFavorites(false);
-                  }}
+                      setShowOnlyValidated(false);
+                      setShowOnlyFavorites(false);
+                    }}
                   className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
                     discoverySubTab === 'all'
                       ? 'border-blue-500 text-blue-600'
@@ -1679,14 +1679,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 >
                   <Film className="h-4 w-4" />
                   All
-                </button>
-                
-                <button
-                  onClick={() => {
+                  </button>
+                  
+                  <button
+                    onClick={() => {
                     setDiscoverySubTab('verified');
-                    setShowOnlyValidated(true);
-                    setShowOnlyFavorites(false);
-                  }}
+                      setShowOnlyValidated(true);
+                      setShowOnlyFavorites(false);
+                    }}
                   className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
                     discoverySubTab === 'verified'
                       ? 'border-green-500 text-green-600'
@@ -1695,14 +1695,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 >
                   <CheckCircle className="h-4 w-4" />
                   Verified
-                </button>
-                
-                <button
-                  onClick={() => {
+                  </button>
+                  
+                  <button
+                    onClick={() => {
                     setDiscoverySubTab('favorites');
-                    setShowOnlyValidated(false);
-                    setShowOnlyFavorites(true);
-                  }}
+                      setShowOnlyValidated(false);
+                      setShowOnlyFavorites(true);
+                    }}
                   className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
                     discoverySubTab === 'favorites'
                       ? 'border-red-500 text-red-600'
@@ -1711,7 +1711,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 >
                   <Heart className={`h-4 w-4 ${discoverySubTab === 'favorites' ? 'fill-current' : ''}`} />
                   Favorites
-                </button>
+                  </button>
                 
                 <button
                   onClick={() => {
@@ -1745,11 +1745,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                   Co-Investment Opportunities
                 </button>
               </nav>
-            </div>
-            
+                </div>
+                
             <div className="flex items-center justify-between bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border border-blue-100 gap-4 mb-6">
-              <div className="flex items-center gap-2 text-slate-600">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <div className="flex items-center gap-2 text-slate-600">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                 <span className="text-xs sm:text-sm font-medium">
                   {discoverySubTab === 'recommended' 
                     ? `${recommendations.length} recommended startups`
@@ -2264,13 +2264,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               // Regular pitches display (when not on recommended sub-tab)
               if (isLoadingPitches) {
                 return (
-                  <Card className="text-center py-20">
-                    <div className="max-w-sm mx-auto">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                      <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Pitches...</h3>
-                      <p className="text-slate-500">Fetching active fundraising startups</p>
-                    </div>
-                  </Card>
+              <Card className="text-center py-20">
+                <div className="max-w-sm mx-auto">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Pitches...</h3>
+                  <p className="text-slate-500">Fetching active fundraising startups</p>
+                </div>
+              </Card>
                 );
               }
               
@@ -2621,11 +2621,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             // Regular offer status messages
                             if (((offer as any).stage || 1) >= 2) {
                               return (
-                                <div className="text-xs text-blue-600 mt-1">
-                                  {((offer as any).stage || 1) === 2 && "Awaiting startup advisor approval"}
-                                  {((offer as any).stage || 1) === 3 && "Awaiting startup review"}
-                                  {((offer as any).stage || 1) >= 4 && "Approved by startup"}
-                                </div>
+                            <div className="text-xs text-blue-600 mt-1">
+                              {((offer as any).stage || 1) === 2 && "Awaiting startup advisor approval"}
+                              {((offer as any).stage || 1) === 3 && "Awaiting startup review"}
+                              {((offer as any).stage || 1) >= 4 && "Approved by startup"}
+                            </div>
                               );
                             }
                             return null;
@@ -2648,24 +2648,24 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             // Once approved (status becomes pending_lead_investor_approval or beyond), hide them
                             if (status === 'pending_investor_advisor_approval' && investorAdvisorStatus === 'pending' && !isViewOnly) {
                               return (
-                                <>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => handleEditOffer(offer)}
-                                  >
-                                    <Edit className="h-3 w-3 mr-1" />
-                                    Edit
-                                  </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => handleCancelOffer(offer.id)}
-                                  >
-                                    <X className="h-3 w-3 mr-1" />
-                                    Cancel
-                                  </Button>
-                                </>
+                          <>
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => handleEditOffer(offer)}
+                            >
+                              <Edit className="h-3 w-3 mr-1" />
+                              Edit
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => handleCancelOffer(offer.id)}
+                            >
+                              <X className="h-3 w-3 mr-1" />
+                              Cancel
+                            </Button>
+                          </>
                               );
                             }
                             // After investor advisor approval, don't show edit/cancel
@@ -2719,35 +2719,35 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           // For regular offers or non-accepted co-investment offers
                           if (isAccepted && !isViewOnly) {
                             return (
-                              <div className="flex gap-2">
-                                {offer.contact_details_revealed ? (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => {
-                                      setContactModalOffer(offer);
-                                      setIsContactModalOpen(true);
-                                    }}
-                                  >
-                                    View Contact Details
-                                  </Button>
-                                ) : (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => alert('Contact details will be revealed once the investment advisor approves or if no advisor is assigned.')}
-                                  >
-                                    Contact Details Pending
-                                  </Button>
-                                )}
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={() => alert('Our team will contact you soon')}
-                                >
-                                  Next Steps
-                                </Button>
-                              </div>
+                          <div className="flex gap-2">
+                            {offer.contact_details_revealed ? (
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => {
+                                  setContactModalOffer(offer);
+                                  setIsContactModalOpen(true);
+                                }}
+                              >
+                                View Contact Details
+                              </Button>
+                            ) : (
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => alert('Contact details will be revealed once the investment advisor approves or if no advisor is assigned.')}
+                              >
+                                Contact Details Pending
+                              </Button>
+                            )}
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => alert('Our team will contact you soon')}
+                            >
+                              Next Steps
+                            </Button>
+                          </div>
                             );
                           }
                           
@@ -3085,27 +3085,27 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 
                 {/* Co-investment option - Only show if NOT making offer for existing co-investment opportunity */}
                 {!isCoInvestmentOffer && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                        <div className="flex items-start space-x-3">
-                            <input
-                                type="checkbox"
-                                id="co-investment"
-                                name="co-investment"
-                                checked={wantsCoInvestment}
-                                onChange={(e) => setWantsCoInvestment(e.target.checked)}
-                                className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                            />
-                            <div className="flex-1">
-                                <label htmlFor="co-investment" className="text-sm font-medium text-blue-900 cursor-pointer">
-                                    Looking for Co-Investment Partners
-                                </label>
-                                <p className="text-xs text-blue-700 mt-1">
-                                    Check this if you want to find other investors to complete the funding round. 
-                                    The remaining amount will be listed as a co-investment opportunity for other investors.
-                                </p>
-                            </div>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-start space-x-3">
+                        <input
+                            type="checkbox"
+                            id="co-investment"
+                            name="co-investment"
+                            checked={wantsCoInvestment}
+                            onChange={(e) => setWantsCoInvestment(e.target.checked)}
+                            className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <div className="flex-1">
+                            <label htmlFor="co-investment" className="text-sm font-medium text-blue-900 cursor-pointer">
+                                Looking for Co-Investment Partners
+                            </label>
+                            <p className="text-xs text-blue-700 mt-1">
+                                Check this if you want to find other investors to complete the funding round. 
+                                The remaining amount will be listed as a co-investment opportunity for other investors.
+                            </p>
                         </div>
                     </div>
+                </div>
                 )}
                 
                 {/* Show info message when making offer for existing co-investment opportunity */}

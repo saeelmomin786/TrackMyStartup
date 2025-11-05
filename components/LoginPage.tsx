@@ -46,6 +46,25 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
         return () => { cancelled = true; };
     }, [onLogin]);
 
+    // Also listen for auth events while on the login page and proceed immediately
+    useEffect(() => {
+        const { data: { subscription } } = authService.onAuthStateChange(async (event, session) => {
+            if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+                const u = session?.user;
+                if (u) {
+                    onLogin({
+                        id: u.id,
+                        email: u.email || '',
+                        name: u.user_metadata?.name || 'Unknown',
+                        role: u.user_metadata?.role || 'Investor',
+                        registration_date: new Date().toISOString().split('T')[0]
+                    } as AuthUser);
+                }
+            }
+        });
+        return () => { subscription?.unsubscribe(); };
+    }, [onLogin]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);

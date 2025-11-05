@@ -22,6 +22,21 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
     const [isRedirecting, setIsRedirecting] = useState(false);
     const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
 
+    // Always start a fresh session when arriving at the login page
+    useEffect(() => {
+        (async () => {
+            try {
+                // Explicitly sign out any lingering session
+                await authService.signOut();
+            } catch {}
+            try {
+                // Clear possible persisted auth storage used by Supabase
+                localStorage.removeItem('supabase-auth');
+                sessionStorage.removeItem('supabase-auth');
+              } catch {}
+        })();
+    }, []);
+
     // Auto-restore if a valid session already exists (common on mobile after refresh)
     useEffect(() => {
         let cancelled = false;

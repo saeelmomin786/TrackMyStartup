@@ -877,6 +877,27 @@ const App: React.FC = () => {
               };
               setCurrentUser(minimalUser);
               setIsAuthenticated(true);
+              // Critical: reset data-loaded flag on any fresh auth so initial fetch runs after refresh
+              setHasInitialDataLoaded(false);
+              // Proactively fetch the user's startup by user_id to avoid blank state on mobile refresh
+              (async () => {
+                try {
+                  if ((minimalUser as any).role === 'Startup') {
+                    console.log('🔍 Proactive fetch: loading startup by user_id after auth event...');
+                    const { data: startupsByUser, error: startupsByUserError } = await authService.supabase
+                      .from('startups')
+                      .select('*')
+                      .eq('user_id', session.user.id);
+                    if (!startupsByUserError && startupsByUser && startupsByUser.length > 0) {
+                      setStartups(startupsByUser as any);
+                      setSelectedStartup(startupsByUser[0] as any);
+                      setView('startupHealth');
+                    }
+                  }
+                } catch (e) {
+                  console.warn('⚠️ Proactive startup fetch failed (non-blocking):', e);
+                }
+              })();
             }
 
             // Get complete user data from database

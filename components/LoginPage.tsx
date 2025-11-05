@@ -76,9 +76,30 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
 
         // Add timeout to prevent UI from getting stuck
         const timeoutMs = 30000; // Extended for mobile networks
-        const timeoutId = setTimeout(() => {
+        const timeoutId = setTimeout(async () => {
             setIsLoading(false);
             setError('Login timed out. Please try again.');
+            try {
+                // If a session actually exists, proceed instead of forcing manual refresh
+                const { data } = await authService.supabase.auth.getSession();
+                if (data?.session) {
+                    const { data: userData } = await authService.supabase.auth.getUser();
+                    if (userData?.user) {
+                        const u = userData.user;
+                        onLogin({
+                            id: u.id,
+                            email: u.email || '',
+                            name: u.user_metadata?.name || 'Unknown',
+                            role: u.user_metadata?.role || 'Investor',
+                            registration_date: new Date().toISOString().split('T')[0]
+                        } as AuthUser);
+                        try { (window as any).forceDataRefresh?.(); } catch {}
+                        return;
+                    }
+                }
+            } catch {}
+            // As a last resort, auto-refresh the app after a brief pause
+            setTimeout(() => { try { window.location.reload(); } catch {} }, 1500);
         }, timeoutMs);
 
         try {

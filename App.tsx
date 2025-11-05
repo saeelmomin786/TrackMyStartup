@@ -273,6 +273,7 @@ const App: React.FC = () => {
   const startupsRef = useRef<Startup[]>([]);
   const investmentOffersRef = useRef<InvestmentOffer[]>([]);
   const validationRequestsRef = useRef<ValidationRequest[]>([]);
+  const startupRecoveryAttemptedRef = useRef<boolean>(false);
 
   // Trial control refs (one-shot guard and timers)
   const hasHandledTrialEndRef = useRef(false);
@@ -836,6 +837,19 @@ const App: React.FC = () => {
               return;
             }
             
+            // Optimistic: set minimal user immediately so data hooks can proceed
+            if (isMounted) {
+              const minimalUser: any = {
+                id: session.user.id,
+                email: session.user.email || '',
+                name: (session.user.user_metadata as any)?.name || 'Unknown',
+                role: (session.user.user_metadata as any)?.role || 'Investor',
+                registration_date: new Date().toISOString().split('T')[0]
+              };
+              setCurrentUser(minimalUser);
+              setIsAuthenticated(true);
+            }
+
             // Get complete user data from database
             if (isMounted) {
               console.log('🔄 Fetching complete user data from database...');
@@ -1479,6 +1493,32 @@ const App: React.FC = () => {
       fetchData();
     }
   }, [isAuthenticated, currentUser?.id]);
+
+  // Watchdog: if authenticated but data hasn't loaded within 15s, retry fetch a few times
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser || hasInitialDataLoaded) return;
+    let cancelled = false;
+    let attempts = 0;
+    const start = Date.now();
+    const schedule = () => {
+      if (cancelled || hasInitialDataLoadedRef.current) return;
+      const elapsed = Date.now() - start;
+      if (elapsed >= 15000 && attempts < 3) {
+        attempts += 1;
+        (async () => {
+          try {
+            console.log(`⏳ Data watchdog retry #${attempts} after ${Math.round(elapsed/1000)}s...`);
+            await fetchData(true);
+          } catch {}
+          if (!cancelled && !hasInitialDataLoadedRef.current) setTimeout(schedule, 5000);
+        })();
+      } else if (!hasInitialDataLoadedRef.current) {
+        setTimeout(schedule, 1000);
+      }
+    };
+    setTimeout(schedule, 1000);
+    return () => { cancelled = true; };
+  }, [isAuthenticated, currentUser?.id, hasInitialDataLoaded]);
 
   // Listen for offer stage updates and refresh investor offers
   useEffect(() => {
@@ -3008,6 +3048,32 @@ const App: React.FC = () => {
       // If no startup found, only show the message AFTER initial data has fully loaded.
       // During quick tab switches or initial load, keep the previous UI (no flashing).
       if (hasInitialDataLoaded) {
+        // Recovery for mobile: if startups are empty but user is Startup, try fetching by user_id once
+        if (!startupRecoveryAttemptedRef.current) {
+          startupRecoveryAttemptedRef.current = true;
+          try {
+            (async () => {
+              console.log('🔍 Recovery: attempting to fetch startup by user_id...');
+              const { data: startupsByUser, error: startupsByUserError } = await authService.supabase
+                .from('startups')
+                .select('*')
+                .eq('user_id', currentUser.id);
+              if (!startupsByUserError && startupsByUser && startupsByUser.length > 0) {
+                console.log('✅ Recovery success: found startups by user_id');
+                setStartups(startupsByUser as any);
+                setSelectedStartup(startupsByUser[0] as any);
+                setView('startupHealth');
+                return;
+              }
+              console.log('❌ Recovery failed or no startups found by user_id');
+            })();
+          } catch {}
+          return (
+            <div className="flex items-center justify-center min-h-[200px]">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary" />
+            </div>
+          );
+        }
         console.log('❌ No startup found for user:', currentUser.email);
         return (
           <div className="text-center py-20">

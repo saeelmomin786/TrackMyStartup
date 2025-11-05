@@ -1322,12 +1322,23 @@ const App: React.FC = () => {
 
   // Fetch data function - optimized with phased loading and caching
   const fetchData = useCallback(async (forceRefresh = false) => {
+    console.log('🔍 fetchData called:', { 
+      forceRefresh, 
+      isAuthenticated: isAuthenticatedRef.current, 
+      hasUser: !!currentUserRef.current,
+      userId: currentUserRef.current?.id,
+      role: currentUserRef.current?.role,
+      hasInitialDataLoaded: hasInitialDataLoadedRef.current
+    });
+    
     if (!isAuthenticatedRef.current || !currentUserRef.current) {
+      console.warn('⚠️ fetchData: Not authenticated or no user, returning early');
       return;
     }
     
     // Don't fetch data if we already have it and this isn't a forced refresh
     if (hasInitialDataLoadedRef.current && !forceRefresh) {
+      console.log('✅ fetchData: Data already loaded, skipping');
       return;
     }
     
@@ -1340,6 +1351,7 @@ const App: React.FC = () => {
     const userRole = cu.role;
     
     // PHASE 0: Ultra-fast minimal load (instant, essential data only)
+    console.log('🚀 fetchData called - Phase 0 starting for user:', userId, 'role:', userRole);
     try {
       // Check cache first (if same user and not forcing refresh)
       if (!forceRefresh && lastCacheUserIdRef.current === userId && startupCacheRef.current[userId]) {
@@ -1361,6 +1373,7 @@ const App: React.FC = () => {
       // For Startup role: load startup by user_id (fastest path)
       if (userRole === 'Startup' && !selectedStartupRef.current && !didSucceed) {
         try {
+          console.log('🚀 Phase 0: Starting startup fetch for Startup user:', userId);
           const { data: row, error: rowErr } = await withTimeout(
             authService.supabase
               .from('startups')
@@ -1369,7 +1382,9 @@ const App: React.FC = () => {
               .maybeSingle(),
             10000
           );
+          
           if (row && !rowErr) {
+            console.log('✅ Phase 0: Startup loaded successfully:', row.name);
             const startupArray = [row] as any;
             setStartups(startupArray);
             setSelectedStartup(row as any);
@@ -1402,9 +1417,13 @@ const App: React.FC = () => {
               } catch {}
             })();
             return; // Early return for Startup users
+          } else {
+            console.warn('⚠️ Phase 0: Startup query returned no data or error:', { row, rowErr });
+            // Don't return here - let it fall through to legacy fallback
           }
         } catch (err) {
-          console.error('Phase 0 startup fetch error:', err);
+          console.error('❌ Phase 0 startup fetch error:', err);
+          // Don't return here - let it fall through to legacy fallback
         }
       }
       
@@ -1619,10 +1638,26 @@ const App: React.FC = () => {
     // Legacy fallback: if Phase 0 didn't succeed, try old batch method (for compatibility)
     if (!didSucceed) {
       try {
-        console.log('⚠️ Phase 0 failed, falling back to legacy batch loading...');
+        console.log('⚠️ Phase 0 failed (didSucceed=false), falling back to legacy batch loading for role:', userRole);
         
         let startupPromise: Promise<Startup[]>;
-        if (userRole === 'Admin') {
+        if (userRole === 'Startup') {
+          // For Startup users, query by user_id (same as Phase 0, but with full batch)
+          console.log('🔄 Legacy fallback: Querying startup by user_id for Startup user:', userId);
+          startupPromise = withTimeout(
+            authService.supabase
+              .from('startups')
+              .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
+              .eq('user_id', userId)
+              .maybeSingle(),
+            12000
+          ).then((result: any) => {
+            if (result.data && !result.error) {
+              return [result.data];
+            }
+            return [];
+          }).catch(() => []);
+        } else if (userRole === 'Admin') {
           startupPromise = withTimeout(startupService.getAllStartupsForAdmin(), 12000);
         } else if (userRole === 'Investment Advisor') {
           startupPromise = withTimeout(startupService.getAllStartupsForInvestmentAdvisor(), 12000);

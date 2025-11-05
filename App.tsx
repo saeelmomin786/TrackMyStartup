@@ -510,7 +510,9 @@ const App: React.FC = () => {
     setHasInitialDataLoaded(false);
     hasInitialDataLoadedRef.current = false;
     // Reinitialize auth to reload data
-    initializeAuth();
+    // NOTE: We now attach the auth listener first (below) and then call
+    // initializeAuth() later to avoid a race on mobile browsers where the
+    // INITIAL_SESSION event can fire before the listener is attached.
   };
   
   // Add global function to reset auth state (for debugging)
@@ -700,6 +702,26 @@ const App: React.FC = () => {
     document.addEventListener('visibilitychange', visibilityHandler);
     window.addEventListener('focus', debouncedFocus);
     window.addEventListener('blur', onBlur);
+
+    // Mobile-safe: proactively check for an existing session and set a
+    // fallback timeout so the app doesn't hang on the loading screen if the
+    // initial auth event is delayed or missed (seen on some mobile browsers).
+    let __initialLoadTimeout: any = null;
+    (async () => {
+      try {
+        const { data } = await authService.supabase.auth.getSession();
+        if (!data?.session) {
+          __initialLoadTimeout = setTimeout(() => {
+            if (isMounted && !isAuthenticatedRef.current && !currentUserRef.current) {
+              setIsLoading(false);
+              if (currentPage !== 'login' && currentPage !== 'register') {
+                setCurrentPage('login');
+              }
+            }
+          }, 8000); // 8s fallback
+        }
+      } catch {}
+    })();
 
     // Set up auth state listener
     const { data: { subscription } } = authService.onAuthStateChange(async (event, session) => {
@@ -1117,12 +1139,16 @@ const App: React.FC = () => {
   //   }
   // }, 10000); // 10 seconds timeout
 
+    // After listener is attached, kick off initialization (prevents mobile race)
+    initializeAuth();
+
     return () => {
       isMounted = false;
       subscription?.unsubscribe();
       document.removeEventListener('visibilitychange', visibilityHandler);
       window.removeEventListener('focus', debouncedFocus);
       window.removeEventListener('blur', onBlur);
+      if (__initialLoadTimeout) clearTimeout(__initialLoadTimeout);
     };
   }, []);
 

@@ -208,8 +208,9 @@ export const authService = {
           return !!(profile.government_id && profile.ca_license);
         
         case 'Startup':
-          // Startups need both documents and startup profile (checked separately in startup table)
-          return !!(profile.government_id && profile.ca_license);
+          // Startups should not require CA license; basic identity docs are sufficient
+          // Additional startup profile checks are handled elsewhere (e.g., startups table)
+          return hasBasicDocuments;
         
         case 'Investor':
           // Investors need both documents

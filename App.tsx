@@ -1304,24 +1304,33 @@ const App: React.FC = () => {
     }
     
     let didSucceed = false;
-    // Phase 0: for Startup role, ensure startup is resolved ASAP
-    try {
-      const cu = currentUserRef.current;
-      if (cu?.role === 'Startup' && !selectedStartupRef.current) {
+    // Phase 0: for Startup role, load startup FIRST and show dashboard immediately
+    const cu = currentUserRef.current;
+    if (cu?.role === 'Startup' && !selectedStartupRef.current) {
+      try {
         const { data: row, error: rowErr } = await authService.supabase
           .from('startups')
-          .select('*')
+          .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
           .eq('user_id', cu.id)
           .maybeSingle();
         if (row && !rowErr) {
           setStartups([row] as any);
           setSelectedStartup(row as any);
-          // Drop the full-screen loader as soon as we have the startup
           setIsLoading(false);
           setView('startupHealth');
+          // Load other data in background without blocking
+          (async () => {
+            try {
+              const bgOffers = await investmentService.getOffersForStartup(row.id);
+              setInvestmentOffers(bgOffers);
+            } catch {}
+          })();
+          // Mark as loaded so main batch doesn't run for Startup users
+          setHasInitialDataLoaded(true);
+          return;
         }
-      }
-    } catch {}
+      } catch {}
+    }
     try {
       console.log('Fetching data for authenticated user...', { forceRefresh, hasInitialDataLoaded: hasInitialDataLoadedRef.current });
       
@@ -1330,9 +1339,11 @@ const App: React.FC = () => {
         setTimeout(() => reject(new Error('Request timeout - network may be unavailable')), 45000); // 45s timeout for mobile
       });
 
-             // Determine startup fetching method based on role
+             // Determine startup fetching method based on role (skip if already loaded for Startup)
          let startupPromise;
-         if (currentUserRef.current?.role === 'Admin') {
+         if (currentUserRef.current?.role === 'Startup' && selectedStartupRef.current) {
+           startupPromise = Promise.resolve([selectedStartupRef.current]);
+         } else if (currentUserRef.current?.role === 'Admin') {
            console.log('🔍 Using getAllStartupsForAdmin for Admin role');
            startupPromise = startupService.getAllStartupsForAdmin();
          } else if (currentUserRef.current?.role === 'Investment Advisor') {

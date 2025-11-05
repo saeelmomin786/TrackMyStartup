@@ -22,20 +22,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
     const [isRedirecting, setIsRedirecting] = useState(false);
     const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
 
-    // Always start a fresh session when arriving at the login page
-    useEffect(() => {
-        (async () => {
-            try {
-                // Explicitly sign out any lingering session
-                await authService.signOut();
-            } catch {}
-            try {
-                // Clear possible persisted auth storage used by Supabase
-                localStorage.removeItem('supabase-auth');
-                sessionStorage.removeItem('supabase-auth');
-              } catch {}
-        })();
-    }, []);
+    // Removed forced sign-out on mount to avoid racing with sign-in on mobile
 
     // Auto-restore if a valid session already exists (common on mobile after refresh)
     useEffect(() => {
@@ -74,6 +61,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                         role: u.user_metadata?.role || 'Investor',
                         registration_date: new Date().toISOString().split('T')[0]
                     } as AuthUser);
+                    try { (window as any).forceDataRefresh?.(); } catch {}
                 }
             }
         });
@@ -226,6 +214,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     // User is complete, proceed to dashboard
                     console.log('User complete, proceeding to dashboard');
                     onLogin(user);
+                    try { (window as any).forceDataRefresh?.(); } catch {}
                 }
             } else if (loginError) {
                 setError(loginError);

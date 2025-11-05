@@ -274,6 +274,8 @@ const App: React.FC = () => {
   const investmentOffersRef = useRef<InvestmentOffer[]>([]);
   const validationRequestsRef = useRef<ValidationRequest[]>([]);
   const startupRecoveryAttemptedRef = useRef<boolean>(false);
+  const startupRecoveryAttemptsRef = useRef<number>(0);
+  const startupRecoveryLastAtRef = useRef<number>(0);
 
   // Trial control refs (one-shot guard and timers)
   const hasHandledTrialEndRef = useRef(false);
@@ -299,6 +301,7 @@ const App: React.FC = () => {
   // Additional refs for fetchData dependencies
   const isAuthenticatedRef = useRef<boolean>(false);
   const hasInitialDataLoadedRef = useRef<boolean>(false);
+  const autoReloadGuardRef = useRef<boolean>(false);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -308,6 +311,32 @@ const App: React.FC = () => {
   useEffect(() => {
     hasInitialDataLoadedRef.current = hasInitialDataLoaded;
   }, [hasInitialDataLoaded]);
+
+  // Mobile Chrome safety: if we stay in loading too long, perform a one-time hard refresh
+  useEffect(() => {
+    if (autoReloadGuardRef.current) return;
+    const isMobileChrome = (() => {
+      try {
+        const ua = navigator.userAgent || '';
+        return /Chrome\/\d+/.test(ua) && /Mobile/.test(ua);
+      } catch { return false; }
+    })();
+    if (!isMobileChrome) return;
+    let t: any = null;
+    const arm = () => {
+      if (t) clearTimeout(t);
+      if (isLoading) {
+        t = setTimeout(() => {
+          if (isLoading && !hasInitialDataLoadedRef.current && !autoReloadGuardRef.current) {
+            autoReloadGuardRef.current = true;
+            try { window.location.reload(); } catch {}
+          }
+        }, 20000); // 20s hard-refresh safeguard
+      }
+    };
+    arm();
+    return () => { if (t) clearTimeout(t); };
+  }, [isLoading]);
 
   // Disable any accidental full page reloads in development to prevent refresh loops
   useEffect(() => {
@@ -3048,12 +3077,19 @@ const App: React.FC = () => {
       // If no startup found, only show the message AFTER initial data has fully loaded.
       // During quick tab switches or initial load, keep the previous UI (no flashing).
       if (hasInitialDataLoaded) {
-        // Recovery for mobile: if startups are empty but user is Startup, try fetching by user_id once
-        if (!startupRecoveryAttemptedRef.current) {
+        // Robust mobile recovery: perform up to 3 background attempts before showing the message
+        const now = Date.now();
+        const shouldAttempt =
+          startupRecoveryAttemptsRef.current < 3 &&
+          (now - startupRecoveryLastAtRef.current > 2000); // at most every 2s
+
+        if (shouldAttempt) {
+          startupRecoveryAttemptsRef.current += 1;
+          startupRecoveryLastAtRef.current = now;
           startupRecoveryAttemptedRef.current = true;
-          try {
-            (async () => {
-              console.log('🔍 Recovery: attempting to fetch startup by user_id...');
+          (async () => {
+            try {
+              console.log(`🔍 Recovery attempt #${startupRecoveryAttemptsRef.current}: fetching startup by user_id...`);
               const { data: startupsByUser, error: startupsByUserError } = await authService.supabase
                 .from('startups')
                 .select('*')
@@ -3065,9 +3101,12 @@ const App: React.FC = () => {
                 setView('startupHealth');
                 return;
               }
-              console.log('❌ Recovery failed or no startups found by user_id');
-            })();
-          } catch {}
+              console.log('❌ Recovery: still no startup by user_id');
+            } catch (e) {
+              console.warn('⚠️ Recovery fetch failed (non-blocking):', e);
+            }
+          })();
+          // Keep showing a spinner while recovery is running
           return (
             <div className="flex items-center justify-center min-h-[200px]">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary" />

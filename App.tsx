@@ -894,6 +894,7 @@ const App: React.FC = () => {
                       setStartups(startupsByUser as any);
                       setSelectedStartup(startupsByUser[0] as any);
                       setView('startupHealth');
+                      setIsLoading(false);
                       // Persist startup_name to user profile to make next refresh instant
                       try {
                         await authService.supabase
@@ -1303,6 +1304,24 @@ const App: React.FC = () => {
     }
     
     let didSucceed = false;
+    // Phase 0: for Startup role, ensure startup is resolved ASAP
+    try {
+      const cu = currentUserRef.current;
+      if (cu?.role === 'Startup' && !selectedStartupRef.current) {
+        const { data: row, error: rowErr } = await authService.supabase
+          .from('startups')
+          .select('*')
+          .eq('user_id', cu.id)
+          .maybeSingle();
+        if (row && !rowErr) {
+          setStartups([row] as any);
+          setSelectedStartup(row as any);
+          // Drop the full-screen loader as soon as we have the startup
+          setIsLoading(false);
+          setView('startupHealth');
+        }
+      }
+    } catch {}
     try {
       console.log('Fetching data for authenticated user...', { forceRefresh, hasInitialDataLoaded: hasInitialDataLoadedRef.current });
       
@@ -2588,7 +2607,7 @@ const App: React.FC = () => {
 
 
 
-  if (isLoading && currentPage !== 'login' && currentPage !== 'register') {
+  if (isLoading && !selectedStartup && currentPage !== 'login' && currentPage !== 'register') {
       console.log('Rendering loading screen...', { isAuthenticated, currentUser: !!currentUser });
       return (
           <div className="flex items-center justify-center min-h-screen bg-slate-50 text-brand-primary">

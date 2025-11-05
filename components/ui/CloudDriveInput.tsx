@@ -48,7 +48,8 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
     const cloudDrivePatterns = [
       /^https?:\/\/(drive\.google\.com|onedrive\.live\.com|dropbox\.com|box\.com|icloud\.com|mega\.nz|pcloud\.com|mediafire\.com)/i,
       /^https?:\/\/.*\.(googleapis\.com|microsoft\.com|dropboxusercontent\.com)/i,
-      /^https?:\/\/.*\.(sharepoint\.com|office\.com)/i
+      /^https?:\/\/.*\.(sharepoint\.com|office\.com)/i,
+      /^https?:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/.+/i
     ];
     
     return cloudDrivePatterns.some(pattern => pattern.test(url));
@@ -59,7 +60,7 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
     if (value && value.trim()) {
       const isValid = validateCloudUrl(value);
       setIsValidUrl(isValid);
-      setUrlError(isValid ? null : 'Please provide a valid cloud drive link (Google Drive, OneDrive, Dropbox, etc.)');
+      setUrlError(isValid ? null : 'Please provide a valid cloud drive link (Google Drive, OneDrive, Dropbox, Supabase, etc.)');
       // If there's a value, ensure we're in URL mode
       setInputMode('url');
     } else {
@@ -75,7 +76,7 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
     if (url.trim()) {
       const isValid = validateCloudUrl(url);
       setIsValidUrl(isValid);
-      setUrlError(isValid ? null : 'Please provide a valid cloud drive link (Google Drive, OneDrive, Dropbox, etc.)');
+      setUrlError(isValid ? null : 'Please provide a valid cloud drive link (Google Drive, OneDrive, Dropbox, Supabase, etc.)');
     } else {
       setIsValidUrl(false);
       setUrlError(null);
@@ -230,6 +231,7 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
     if (url.includes('mega.nz')) return 'MEGA';
     if (url.includes('pcloud.com')) return 'pCloud';
     if (url.includes('mediafire.com')) return 'MediaFire';
+    if (url.includes('.supabase.co/storage/')) return 'Supabase Storage';
     return 'Cloud Drive';
   };
 

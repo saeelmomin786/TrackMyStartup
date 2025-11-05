@@ -879,6 +879,8 @@ const App: React.FC = () => {
               setIsAuthenticated(true);
               // Critical: reset data-loaded flag on any fresh auth so initial fetch runs after refresh
               setHasInitialDataLoaded(false);
+              // Kick off an immediate forced data fetch on refresh
+              try { fetchData(true).catch(() => {}); } catch {}
               // Proactively fetch the user's startup by user_id to avoid blank state on mobile refresh
               (async () => {
                 try {
@@ -1553,14 +1555,14 @@ const App: React.FC = () => {
     const schedule = () => {
       if (cancelled || hasInitialDataLoadedRef.current) return;
       const elapsed = Date.now() - start;
-      if (elapsed >= 15000 && attempts < 3) {
+      if (elapsed >= 15000 && attempts < 5) {
         attempts += 1;
         (async () => {
           try {
             console.log(`⏳ Data watchdog retry #${attempts} after ${Math.round(elapsed/1000)}s...`);
             await fetchData(true);
           } catch {}
-          if (!cancelled && !hasInitialDataLoadedRef.current) setTimeout(schedule, 5000);
+          if (!cancelled && !hasInitialDataLoadedRef.current) setTimeout(schedule, 3000);
         })();
       } else if (!hasInitialDataLoadedRef.current) {
         setTimeout(schedule, 1000);

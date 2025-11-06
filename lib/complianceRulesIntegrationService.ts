@@ -175,7 +175,10 @@ class ComplianceRulesIntegrationService {
 
         if (!dbError && dbTasks && dbTasks.length > 0) {
           console.log('🔍 Found compliance tasks from database function:', dbTasks);
-          
+
+          // Load existing uploads once and attach to tasks below
+          const existingUploads = await complianceService.getAllComplianceUploads(startupId);
+
           // Transform database tasks to IntegratedComplianceTask format
           const integratedTasks: IntegratedComplianceTask[] = dbTasks.map((task: any) => {
             // Normalize frequency coming from DB
@@ -197,7 +200,7 @@ class ComplianceRulesIntegrationService {
               csRequired: !!task.cs_required,
               caStatus: 'Pending' as any,
               csStatus: 'Pending' as any,
-              uploads: [],
+              uploads: existingUploads[task.task_id] || [],
               complianceRule: {
                 id: task.task_id,
                 name: task.task_name,

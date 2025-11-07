@@ -4,7 +4,7 @@ import { complianceRulesIntegrationService, IntegratedComplianceTask } from '../
 import { complianceService, ComplianceUpload } from '../../lib/complianceService';
 import { supabase } from '../../lib/supabase';
 import { messageService } from '../../lib/messageService';
-import { getCountryProfessionalTitles, normalizeCountryNameForDisplay } from '../../lib/utils';
+import { getCountryProfessionalTitles, normalizeCountryNameForDisplay, getCountryCodeFromName } from '../../lib/utils';
 import { UploadCloud, Download, Trash2, Eye, X, CheckCircle, AlertCircle, Clock, FileText, Calendar, User } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
@@ -830,10 +830,63 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
 
             {Object.keys(filteredTasks).length > 0 ? (
                 Object.entries(filteredTasks).map(([entityName, tasks]) => {
-                    // Extract country code from entity name (e.g., "Parent Company (AT)" -> "AT")
+                    // Extract country code from entity name (e.g., "Parent Company (IN)" -> "IN", "Parent Company (India)" -> extract from country name)
+                    let countryCode: string | null = null;
+                    
+                    // Try to extract country code from format like "Parent Company (IN)"
                     const countryCodeMatch = entityName.match(/\(([A-Z]{2})\)/);
-                    const countryCode = countryCodeMatch ? countryCodeMatch[1] : 'US';
-                    const professionalTitles = getCountryProfessionalTitles(countryCode);
+                    if (countryCodeMatch) {
+                        countryCode = countryCodeMatch[1];
+                    } else {
+                        // Try to extract from country name format like "Parent Company (India)"
+                        const countryNameMatch = entityName.match(/\((.+?)\)/);
+                        if (countryNameMatch) {
+                            const countryName = countryNameMatch[1];
+                            // Try to convert country name to code
+                            countryCode = getCountryCodeFromName(countryName);
+                            
+                            // If name-to-code conversion failed, get from startup/profile data
+                            if (!countryCode) {
+                                if (entityName.includes('Parent Company')) {
+                                    countryCode = startup.country_of_registration || 'US';
+                                } else if (entityName.includes('Subsidiary')) {
+                                    // Extract subsidiary index and get country from profile data
+                                    const subMatch = entityName.match(/Subsidiary (\d+)/);
+                                    if (subMatch && profileData?.subsidiaries) {
+                                        const subIndex = parseInt(subMatch[1], 10);
+                                        const subsidiary = profileData.subsidiaries[subIndex];
+                                        countryCode = subsidiary?.country || 'US';
+                                    }
+                                } else if (entityName.includes('International Operation')) {
+                                    // For international ops, try to get country from entity name or use parent country
+                                    const intlMatch = entityName.match(/International Operation (\d+)/);
+                                    if (intlMatch && profileData?.internationalOps) {
+                                        const intlIndex = parseInt(intlMatch[1], 10);
+                                        const intlOp = profileData.internationalOps[intlIndex];
+                                        countryCode = intlOp?.country || startup.country_of_registration || 'US';
+                                    } else {
+                                        countryCode = startup.country_of_registration || 'US';
+                                    }
+                                }
+                            }
+                        } else {
+                            // No country in parentheses, use startup data
+                            if (entityName.includes('Parent Company')) {
+                                countryCode = startup.country_of_registration || 'US';
+                            } else if (entityName.includes('Subsidiary')) {
+                                const subMatch = entityName.match(/Subsidiary (\d+)/);
+                                if (subMatch && profileData?.subsidiaries) {
+                                    const subIndex = parseInt(subMatch[1], 10);
+                                    const subsidiary = profileData.subsidiaries[subIndex];
+                                    countryCode = subsidiary?.country || 'US';
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Default to US if country code not found
+                    const finalCountryCode = countryCode || 'US';
+                    const professionalTitles = getCountryProfessionalTitles(finalCountryCode);
                     
                     return (
                         <Card key={entityName}>

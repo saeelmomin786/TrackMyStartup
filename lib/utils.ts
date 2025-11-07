@@ -446,6 +446,92 @@ export function normalizeCountryNameForDisplay(countryCodeOrName: string | null 
   return codeToNameMap[upperCode] || countryCodeOrName;
 }
 
+/**
+ * Converts country name to country code
+ * @param countryName The country name (e.g., "India", "United States")
+ * @returns The country code (e.g., "IN", "US") or null if not found
+ */
+export function getCountryCodeFromName(countryName: string | null | undefined): string | null {
+  if (!countryName) return null;
+  
+  // Country code to full name mapping (reverse lookup)
+  const codeToNameMap: Record<string, string> = {
+    'US': 'United States',
+    'IN': 'India',
+    'GB': 'United Kingdom',
+    'UK': 'United Kingdom',
+    'CA': 'Canada',
+    'AU': 'Australia',
+    'DE': 'Germany',
+    'FR': 'France',
+    'SG': 'Singapore',
+    'JP': 'Japan',
+    'CN': 'China',
+    'BR': 'Brazil',
+    'MX': 'Mexico',
+    'ZA': 'South Africa',
+    'NG': 'Nigeria',
+    'KE': 'Kenya',
+    'EG': 'Egypt',
+    'AE': 'UAE',
+    'SA': 'Saudi Arabia',
+    'IL': 'Israel',
+    'AT': 'Austria',
+    'HK': 'Hong Kong',
+    'NL': 'Netherlands',
+    'FI': 'Finland',
+    'GR': 'Greece',
+    'VN': 'Vietnam',
+    'MM': 'Myanmar',
+    'AZ': 'Azerbaijan',
+    'RS': 'Serbia',
+    'MC': 'Monaco',
+    'PK': 'Pakistan',
+    'PH': 'Philippines',
+    'JO': 'Jordan',
+    'GE': 'Georgia',
+    'BY': 'Belarus',
+    'AM': 'Armenia',
+    'BT': 'Bhutan',
+    'LK': 'Sri Lanka',
+    'RU': 'Russia',
+    'IT': 'Italy',
+    'ES': 'Spain',
+    'PT': 'Portugal',
+    'BE': 'Belgium',
+    'CH': 'Switzerland',
+    'SE': 'Sweden',
+    'NO': 'Norway',
+    'DK': 'Denmark',
+    'IE': 'Ireland',
+    'NZ': 'New Zealand',
+    'KR': 'South Korea',
+    'TH': 'Thailand',
+    'MY': 'Malaysia',
+    'ID': 'Indonesia',
+    'BD': 'Bangladesh',
+    'NP': 'Nepal'
+  };
+  
+  // Create reverse lookup
+  const nameToCodeMap: Record<string, string> = {};
+  Object.entries(codeToNameMap).forEach(([code, name]) => {
+    nameToCodeMap[name.toLowerCase()] = code;
+  });
+  
+  // Try to find by name (case-insensitive)
+  const normalizedName = countryName.trim();
+  const code = nameToCodeMap[normalizedName.toLowerCase()];
+  if (code) return code;
+  
+  // If it's already a 2-letter code, return it
+  if (normalizedName.length === 2 && codeToNameMap[normalizedName.toUpperCase()]) {
+    return normalizedName.toUpperCase();
+  }
+  
+  return null;
+}
+
 export function getCountryProfessionalTitles(countryCode: string): { caTitle: string; csTitle: string } {
   const professionalTitles: Record<string, { caTitle: string; csTitle: string }> = {
     'AT': { caTitle: 'Tax Advisor', csTitle: 'Management' }, // Austria

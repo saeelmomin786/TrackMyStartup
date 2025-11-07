@@ -180,7 +180,7 @@ export const authService = {
     try {
       const { data: profiles, error } = await supabase
         .from('users')
-        .select('government_id, ca_license, verification_documents, role, center_name')
+        .select('government_id, ca_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url')
         .eq('id', userId);
       
       const profile = profiles && profiles.length > 0 ? profiles[0] : null;
@@ -204,8 +204,9 @@ export const authService = {
           return !!(profile.center_name && profile.center_name.trim() !== '');
         
         case 'Investment Advisor':
-          // Investment Advisors need both government_id and ca_license (role-specific document)
-          return !!(profile.government_id && profile.ca_license);
+          // Investment Advisors need government_id, ca_license (role-specific document), and financial_advisor_license_url
+          // Logo is required during initial registration but optional after registration is complete
+          return !!(profile.government_id && profile.ca_license && profile.financial_advisor_license_url);
         
         case 'Startup':
           // Startups need both documents and startup profile (checked separately in startup table)

@@ -7,6 +7,7 @@ import AboutPage from './pages/AboutPage';
 import ContactPage from './pages/ContactPage';
 import ProductsPage from './pages/ProductsPage';
 import DiagnosticPage from './DiagnosticPage';
+import ProgramsPublicPage from './pages/ProgramsPublicPage';
 
 const PageRouter: React.FC = () => {
   const path = window.location.pathname;
@@ -28,6 +29,8 @@ const PageRouter: React.FC = () => {
       return <ProductsPage />;
     case '/diagnostic':
       return <DiagnosticPage />;
+    case '/programs':
+      return <ProgramsPublicPage />;
     default:
       return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center">

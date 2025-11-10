@@ -39,7 +39,7 @@ import { messageService } from './lib/messageService';
 
 const App: React.FC = () => {
   // Check if we're on a standalone page (footer links)
-  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products', '/diagnostic', '/programs'];
+  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products', '/diagnostic'];
   const currentPath = window.location.pathname;
   
   // Check if we're on a public program view page

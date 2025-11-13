@@ -115,3 +115,5 @@ If RLS policies are still blocking access, you may see:
 - The script includes verification queries at the end to confirm policies were created
 
 
+
+

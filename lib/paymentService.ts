@@ -620,6 +620,17 @@ class PaymentService {
     taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number }
   ): Promise<UserSubscription> {
     try {
+      const { data: existing, error: existingError } = await supabase
+        .from('user_subscriptions')
+        .select('id, has_used_trial')
+        .eq('user_id', userId)
+        .eq('plan_id', plan.id)
+        .maybeSingle();
+
+      if (existingError && existingError.code !== 'PGRST116') {
+        console.error('Error checking existing subscription before upsert:', existingError);
+      }
+
       await this.deactivateExistingSubscriptions(userId);
 
       const now = new Date();
@@ -640,7 +651,13 @@ class PaymentService {
         amount: plan.price,
         interval: plan.interval,
         is_in_trial: false,
+        updated_at: now.toISOString(),
       };
+
+      if (existing?.id) {
+        subscriptionData.id = existing.id;
+        subscriptionData.has_used_trial = existing.has_used_trial ?? true;
+      }
 
       // Add tax information if provided
       if (taxInfo) {
@@ -653,7 +670,7 @@ class PaymentService {
       
       const { data, error } = await supabase
         .from('user_subscriptions')
-        .insert(subscriptionData)
+        .upsert(subscriptionData, { onConflict: 'user_id,plan_id' })
         .select()
         .single();
 

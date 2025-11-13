@@ -244,3 +244,5 @@ StartupDashboardTab (default tab)
 4. **Enhanced Permissions:** Consider granular permissions for what investors can view in startup dashboards (e.g., financials, cap table).
 
 
+
+

@@ -141,10 +141,14 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
             isValidFile = (fileMimeType && fileMimeType.startsWith(mimePrefix)) || isValidExtension;
           }
         }
-      } else if (fileExtension === '.pdf' || allowedTypes.includes('.pdf')) {
+      } else if (fileExtension === '.pdf') {
         // For PDF files, be more lenient - accept if extension is .pdf OR MIME type is correct
-        const isValidPdfMime = fileMimeType === 'application/pdf' || fileMimeType === 'application/x-pdf' || !fileMimeType;
-        isValidFile = fileExtension === '.pdf' || isValidPdfMime;
+        const allowsPdf = allowedTypes.includes('.pdf');
+        const isValidPdfMime =
+          fileMimeType === 'application/pdf' ||
+          fileMimeType === 'application/x-pdf' ||
+          !fileMimeType;
+        isValidFile = allowsPdf && (fileExtension === '.pdf' || isValidPdfMime);
       } else if (!isValidExtension) {
         // For other file types, check if MIME type matches any allowed type
         const imageTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'];

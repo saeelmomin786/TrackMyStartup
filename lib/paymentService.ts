@@ -217,8 +217,25 @@ class PaymentService {
               await this.verifyTrialSetup(response, plan, userId, trialMetadata);
               console.log('Trial setup completed successfully');
               
-              // Trigger centralized payment success callback
-              this.triggerPaymentSuccess();
+              // Wait a moment for Supabase to commit the transaction
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Verify subscription was created before triggering success
+              const { data: verifySub } = await supabase
+                .from('user_subscriptions')
+                .select('id, status, is_in_trial')
+                .eq('user_id', userId)
+                .eq('status', 'active')
+                .eq('is_in_trial', true)
+                .limit(1);
+              
+              if (verifySub && verifySub.length > 0) {
+                console.log('✅ Trial subscription verified, triggering success callback');
+                this.triggerPaymentSuccess();
+              } else {
+                console.warn('⚠️ Trial subscription not found yet, triggering success anyway');
+                this.triggerPaymentSuccess();
+              }
               
               resolve(true);
             } catch (error) {
@@ -484,9 +501,24 @@ class PaymentService {
                 { finalAmount, interval: plan.interval, planName: plan.name }
               );
               
-              // IMMEDIATE success callback - no delays
-              console.log('✅ Payment verified, triggering immediate success callback');
-              this.triggerPaymentSuccess();
+              // Wait a moment for Supabase to commit the transaction
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Verify subscription was created before triggering success
+              const { data: verifySub } = await supabase
+                .from('user_subscriptions')
+                .select('id, status')
+                .eq('user_id', userId)
+                .eq('status', 'active')
+                .limit(1);
+              
+              if (verifySub && verifySub.length > 0) {
+                console.log('✅ Payment verified and subscription confirmed, triggering success callback');
+                this.triggerPaymentSuccess();
+              } else {
+                console.warn('⚠️ Payment verified but subscription not found yet, triggering success anyway');
+                this.triggerPaymentSuccess();
+              }
               
               // Background subscription creation (non-blocking) always for Pay Now
               console.log('🔄 Creating subscription for future autopay in background...');
@@ -655,8 +687,11 @@ class PaymentService {
       };
 
       if (existing?.id) {
-        subscriptionData.id = existing.id;
+        // Keep existing has_used_trial flag when updating
         subscriptionData.has_used_trial = existing.has_used_trial ?? true;
+      } else {
+        // New subscription - mark trial as used
+        subscriptionData.has_used_trial = true;
       }
 
       // Add tax information if provided
@@ -668,11 +703,28 @@ class PaymentService {
 
       console.log('Creating user subscription with data:', subscriptionData);
       
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .upsert(subscriptionData, { onConflict: 'user_id,plan_id' })
-        .select()
-        .single();
+      let data, error;
+      
+      if (existing?.id) {
+        // Update existing subscription
+        const { data: updated, error: updateError } = await supabase
+          .from('user_subscriptions')
+          .update(subscriptionData)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        data = updated;
+        error = updateError;
+      } else {
+        // Insert new subscription
+        const { data: inserted, error: insertError } = await supabase
+          .from('user_subscriptions')
+          .insert(subscriptionData)
+          .select()
+          .single();
+        data = inserted;
+        error = insertError;
+      }
 
       if (error) {
         console.error('Error creating user subscription:', error);
@@ -680,7 +732,7 @@ class PaymentService {
         throw error;
       }
 
-      console.log('User subscription created successfully:', data);
+      console.log('✅ User subscription created/updated successfully:', data);
 
       // Record coupon usage if applicable
       if (couponCode) {

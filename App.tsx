@@ -433,6 +433,12 @@ const App: React.FC = () => {
   // Check user access when authenticated
   useEffect(() => {
     const checkAccess = async () => {
+      // Skip check if user already has access (e.g., just completed payment)
+      if (userHasAccess) {
+        console.log('✅ User already has access, skipping access check');
+        return;
+      }
+      
       if (currentUser && currentUser.role === 'Startup' && !isCheckingSubscription) {
         if ((window as any).__rzpAccessCheckInFlight) return; // throttle
         (window as any).__rzpAccessCheckInFlight = true;
@@ -459,11 +465,17 @@ const App: React.FC = () => {
     };
 
     checkAccess();
-  }, [currentUser, checkUserAccess, isCheckingSubscription]);
+  }, [currentUser, checkUserAccess, isCheckingSubscription, userHasAccess]);
 
   // Check payment status for Startup users and redirect to payment if needed
   useEffect(() => {
     const checkPaymentAndRedirect = async () => {
+      // Skip check if user already has access (e.g., just completed payment)
+      if (userHasAccess) {
+        console.log('✅ User already has access, skipping payment check');
+        return;
+      }
+      
       if (isAuthenticated && currentUser && currentUser.role === 'Startup') {
         console.log('🔍 Checking payment status for startup user:', currentUser.email);
         
@@ -475,6 +487,8 @@ const App: React.FC = () => {
             setCurrentPage('payment');
           } else {
             console.log('✅ Active subscription found, allowing dashboard access');
+            setUserHasAccess(true);
+            setShowSubscriptionPage(false);
           }
         } catch (error) {
           console.error('❌ Error checking payment status:', error);
@@ -484,7 +498,7 @@ const App: React.FC = () => {
     };
 
     checkPaymentAndRedirect();
-  }, [isAuthenticated, currentUser, checkPaymentStatus]);
+  }, [isAuthenticated, currentUser, checkPaymentStatus, userHasAccess]);
 
   // Disable trial logic entirely
   useEffect(() => {}, [currentUser]);
@@ -2810,6 +2824,11 @@ const App: React.FC = () => {
               
               // IMMEDIATE dashboard navigation - no delays
               console.log('✅ Payment successful, showing dashboard immediately');
+              
+              // Set access flags to prevent redirect back to payment page
+              setUserHasAccess(true);
+              setShowSubscriptionPage(false);
+              
               setIsAuthenticated(true);
               setCurrentPage('login'); // This will show the main dashboard immediately
               

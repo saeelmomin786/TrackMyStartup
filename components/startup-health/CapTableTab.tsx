@@ -1539,10 +1539,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         const investmentAmount = formData.get('rec-amount') ? parseFloat(formData.get('rec-amount') as string) : undefined;
         const equityAllocated = formData.get('rec-equity') ? parseFloat(formData.get('rec-equity') as string) : undefined;
         const postMoneyValuation = formData.get('rec-postmoney') ? parseFloat(formData.get('rec-postmoney') as string) : undefined;
-        const agreementFile = formData.get('rec-agreement') as File;
+        const agreementFileEntry = formData.get('rec-agreement');
+        const agreementFile = agreementFileEntry instanceof File && agreementFileEntry.size > 0 ? agreementFileEntry : null;
+        const agreementUrlEntry = formData.get('rec-agreement-url-new');
+        const agreementUrl = typeof agreementUrlEntry === 'string' ? agreementUrlEntry.trim() : '';
         
-        if (!programName || !facilitatorName || !facilitatorCode || !incubationType || !feeType || !agreementFile) {
-            setError('Please fill in all required fields');
+        if (!programName || !facilitatorName || !facilitatorCode || !incubationType || !feeType || (!agreementFile && !agreementUrl)) {
+            setError('Please upload the signed agreement file or provide a valid cloud link.');
             return;
         }
         
@@ -1551,8 +1554,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setIsLoading(true);
             
             // Handle file upload for signed agreement
-            let signedAgreementUrl = '';
-            if (agreementFile && agreementFile.size > 0) {
+            let signedAgreementUrl = agreementUrl;
+            if (agreementFile) {
                 try {
                     const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/signed_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
@@ -1648,7 +1651,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         const investmentAmount = formData.get('rec-amount') ? parseFloat(formData.get('rec-amount') as string) : undefined;
         const equityAllocated = formData.get('rec-equity') ? parseFloat(formData.get('rec-equity') as string) : undefined;
         const postMoneyValuation = formData.get('rec-postmoney') ? parseFloat(formData.get('rec-postmoney') as string) : undefined;
-        const agreementFile = formData.get('rec-agreement') as File;
+        const agreementFileEntry = formData.get('rec-agreement');
+        const agreementFile = agreementFileEntry instanceof File && agreementFileEntry.size > 0 ? agreementFileEntry : null;
+        const agreementUrlEntry = formData.get('rec-agreement-url');
+        const agreementUrl = typeof agreementUrlEntry === 'string' ? agreementUrlEntry.trim() : '';
         
         if (!programName || !facilitatorName || !facilitatorCode || !incubationType || !feeType) {
             setError('Please fill in all required fields');
@@ -1660,8 +1666,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setIsLoading(true);
             
             // Handle file upload for signed agreement if a new file is provided
-            let signedAgreementUrl = editingRecognition.signedAgreementUrl;
-            if (agreementFile && agreementFile.size > 0) {
+            let signedAgreementUrl = agreementUrl || editingRecognition.signedAgreementUrl;
+            if (agreementFile) {
                 try {
                     const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/signed_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
@@ -3001,11 +3007,17 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 value={editRecPostMoneyDraft || editingRecognition?.postMoneyValuation || ''}
                                 readOnly 
                             />
-                            <CloudDriveInput
+                                <CloudDriveInput
                                 value=""
                                 onChange={(url) => {
                                     const hiddenInput = document.getElementById('rec-agreement-url') as HTMLInputElement;
                                     if (hiddenInput) hiddenInput.value = url;
+                                    const fileInput = document.getElementById('rec-agreement') as HTMLInputElement;
+                                    if (fileInput) {
+                                        fileInput.value = '';
+                                        const emptyTransfer = new DataTransfer();
+                                        fileInput.files = emptyTransfer.files;
+                                    }
                                 }}
                                 onFileSelect={(file) => {
                                     const fileInput = document.getElementById('rec-agreement') as HTMLInputElement;
@@ -3014,6 +3026,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                         dataTransfer.items.add(file);
                                         fileInput.files = dataTransfer.files;
                                     }
+                                    const hiddenInput = document.getElementById('rec-agreement-url') as HTMLInputElement;
+                                    if (hiddenInput) hiddenInput.value = '';
                                 }}
                                 placeholder="Paste your cloud drive link here..."
                                 label="Upload Signed Agreement"
@@ -3024,6 +3038,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 className="md:col-span-2"
                             />
                             <input type="hidden" id="rec-agreement-url" name="rec-agreement-url" />
+                            <input
+                                type="file"
+                                id="rec-agreement"
+                                name="rec-agreement"
+                                className="hidden"
+                                accept=".pdf,.doc,.docx"
+                            />
                         {editingRecognition?.signedAgreementUrl && (
                                 <div className="md:col-span-2">
                             <p className="text-sm text-slate-500 mt-1">
@@ -3413,6 +3434,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     showPrivacyMessage={false}
                                 />
                                 <input type="hidden" id="inv-proof-url" name="inv-proof-url" />
+                                <input
+                                    type="file"
+                                    id="inv-proof"
+                                    name="inv-proof"
+                                    className="hidden"
+                                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                />
                                 </div>
                             </div>
                         )}
@@ -3485,6 +3513,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     onChange={(url) => {
                                         const hiddenInput = document.getElementById('rec-agreement-url-new') as HTMLInputElement;
                                         if (hiddenInput) hiddenInput.value = url;
+                                        const fileInput = document.getElementById('rec-agreement-new') as HTMLInputElement;
+                                        if (fileInput) {
+                                            fileInput.value = '';
+                                            const emptyTransfer = new DataTransfer();
+                                            fileInput.files = emptyTransfer.files;
+                                        }
                                     }}
                                     onFileSelect={(file) => {
                                         const fileInput = document.getElementById('rec-agreement-new') as HTMLInputElement;
@@ -3493,6 +3527,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             dataTransfer.items.add(file);
                                             fileInput.files = dataTransfer.files;
                                         }
+                                        const hiddenInput = document.getElementById('rec-agreement-url-new') as HTMLInputElement;
+                                        if (hiddenInput) hiddenInput.value = '';
                                     }}
                                     placeholder="Paste your cloud drive link here..."
                                     label="Upload Signed Agreement"
@@ -3503,6 +3539,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     className="md:col-span-2"
                                 />
                                 <input type="hidden" id="rec-agreement-url-new" name="rec-agreement-url-new" />
+                                <input
+                                    type="file"
+                                    id="rec-agreement-new"
+                                    name="rec-agreement"
+                                    className="hidden"
+                                    accept=".pdf,.doc,.docx"
+                                />
                             </div>
                         )}
                         

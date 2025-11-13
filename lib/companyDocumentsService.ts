@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { CompanyDocument, CreateCompanyDocumentData, UpdateCompanyDocumentData } from '../types';
+import { storageService } from './storage';
 
 class CompanyDocumentsService {
   // Get all company documents for a startup
@@ -153,6 +154,26 @@ class CompanyDocumentsService {
       if (error) throw error;
     } catch (error) {
       console.error('Error deleting company document:', error);
+      throw error;
+    }
+  }
+
+  // Upload a file to the company-documents storage bucket
+  async uploadFile(file: File, startupId: number): Promise<string> {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const uniqueId = Math.random().toString(36).substring(2, 10);
+      const path = `${startupId}/company-documents/${timestamp}_${uniqueId}_${file.name}`;
+
+      const uploadResult = await storageService.uploadFile(file, 'company-documents', path);
+
+      if (!uploadResult.success || !uploadResult.url) {
+        throw new Error(uploadResult.error || 'Failed to upload company document');
+      }
+
+      return uploadResult.url;
+    } catch (error) {
+      console.error('Error uploading company document file:', error);
       throw error;
     }
   }

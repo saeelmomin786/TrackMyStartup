@@ -135,6 +135,13 @@ class PaymentService {
       }
 
       const subscription = await response.json();
+
+      if (subscription?.id) {
+        this.attachRazorpaySubscriptionId(userId, subscription.id).catch(error => {
+          console.error('Error attaching Razorpay subscription ID to user record:', error);
+        });
+      }
+
       return subscription;
     } catch (error) {
       console.error('Error creating Razorpay subscription:', error);
@@ -155,6 +162,9 @@ class PaymentService {
         const taxPercentage = (plan as any).tax_percentage || 0;
         const taxAmount = taxPercentage > 0 ? this.calculateTaxAmount(plan.price, taxPercentage) : 0;
         const finalAmount = plan.price + taxAmount;
+
+        // Ensure user is eligible for trial
+        await this.ensureTrialEligibility(userId);
 
         // Create trial subscription with Razorpay
         const response = await fetch(`/api/razorpay/create-trial-subscription`, {
@@ -177,6 +187,15 @@ class PaymentService {
         }
 
         const subscription = await response.json();
+        const nowIso = new Date().toISOString();
+        const trialEndIso = subscription?.start_at
+          ? new Date(subscription.start_at * 1000).toISOString()
+          : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        const trialMetadata = {
+          razorpaySubscriptionId: subscription?.id,
+          trialStart: nowIso,
+          trialEnd: trialEndIso,
+        };
 
         // Open Razorpay checkout for trial setup (no immediate charge)
         const options = {
@@ -195,7 +214,7 @@ class PaymentService {
             try {
               console.log('Trial setup payment response:', response);
               // Verify trial setup
-              await this.verifyTrialSetup(response, plan, userId);
+              await this.verifyTrialSetup(response, plan, userId, trialMetadata);
               console.log('Trial setup completed successfully');
               
               // Trigger centralized payment success callback
@@ -254,6 +273,105 @@ class PaymentService {
   // Calculate tax amount
   calculateTaxAmount(baseAmount: number, taxPercentage: number): number {
     return Math.round((baseAmount * taxPercentage / 100) * 100) / 100; // Round to 2 decimal places
+  }
+
+  private async attachRazorpaySubscriptionId(userId: string, razorpaySubscriptionId: string): Promise<void> {
+    try {
+      const { data, error } = await supabase
+        .from('user_subscriptions')
+        .select('id, razorpay_subscription_id')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .order('current_period_start', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error('Supabase error fetching subscription for Razorpay attachment:', error);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('No active subscription found to attach Razorpay subscription ID for user:', userId);
+        return;
+      }
+
+      const latest = data[0] as { id: string; razorpay_subscription_id: string | null };
+      if (latest.razorpay_subscription_id) {
+        console.log('Skipping Razorpay subscription attachment; already present for subscription:', latest.id);
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from('user_subscriptions')
+        .update({
+          razorpay_subscription_id: razorpaySubscriptionId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', latest.id);
+
+      if (updateError) {
+        console.error('Error updating subscription with Razorpay subscription ID:', updateError);
+      } else {
+        console.log('✅ Razorpay subscription ID attached to subscription:', latest.id);
+      }
+    } catch (error) {
+      console.error('Unexpected error attaching Razorpay subscription ID:', error);
+    }
+  }
+
+  private async deactivateExistingSubscriptions(userId: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('user_subscriptions')
+        .update({
+          status: 'inactive',
+          is_in_trial: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .eq('status', 'active');
+
+      if (error) {
+        console.error('Error deactivating existing subscriptions:', error);
+      }
+    } catch (error) {
+      console.error('Unexpected error deactivating existing subscriptions:', error);
+    }
+  }
+
+  private async ensureTrialEligibility(userId: string): Promise<void> {
+    try {
+      const { data, error } = await supabase
+        .from('user_subscriptions')
+        .select('id, has_used_trial, is_in_trial, status')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error('Error checking trial eligibility:', error);
+        throw new Error('TRIAL_ELIGIBILITY_CHECK_FAILED');
+      }
+
+      if (!data || data.length === 0) {
+        return;
+      }
+
+      const latest = data[0] as { has_used_trial?: boolean; is_in_trial?: boolean; status?: string };
+      if (latest?.has_used_trial) {
+        throw new Error('TRIAL_ALREADY_USED');
+      }
+
+      if (latest?.status === 'active' && latest?.is_in_trial) {
+        throw new Error('TRIAL_ALREADY_ACTIVE');
+      }
+    } catch (error) {
+      if (error instanceof Error && (error.message === 'TRIAL_ALREADY_USED' || error.message === 'TRIAL_ALREADY_ACTIVE' || error.message === 'TRIAL_ELIGIBILITY_CHECK_FAILED')) {
+        throw error;
+      }
+      console.error('Unexpected error validating trial eligibility:', error);
+      throw new Error('TRIAL_ELIGIBILITY_CHECK_FAILED');
+    }
   }
 
   // Process payment with Razorpay
@@ -452,17 +570,23 @@ class PaymentService {
   async verifyTrialSetup(
     paymentResponse: PaymentResponse,
     plan: SubscriptionPlan,
-    userId: string
+    userId: string,
+    metadata?: {
+      razorpaySubscriptionId?: string;
+      trialStart?: string;
+      trialEnd?: string;
+    }
   ): Promise<boolean> {
     try {
       console.log('🔍 Setting up trial subscription...');
       console.log('Trial setup payment response:', paymentResponse);
       console.log('Plan:', plan);
       console.log('User ID:', userId);
+      console.log('Metadata:', metadata);
       
       // For trial setup, we don't need payment verification
       // Just create the trial subscription directly
-      await this.createTrialUserSubscription(plan, userId);
+      await this.createTrialUserSubscription(plan, userId, metadata);
       
       console.log('✅ Trial subscription created successfully');
       return true;
@@ -480,6 +604,8 @@ class PaymentService {
     taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number }
   ): Promise<UserSubscription> {
     try {
+      await this.deactivateExistingSubscriptions(userId);
+
       const now = new Date();
       const periodEnd = new Date();
       
@@ -538,26 +664,46 @@ class PaymentService {
   // Create trial user subscription
   async createTrialUserSubscription(
     plan: SubscriptionPlan,
-    userId: string
+    userId: string,
+    metadata?: {
+      razorpaySubscriptionId?: string;
+      trialStart?: string;
+      trialEnd?: string;
+    }
   ): Promise<UserSubscription> {
     try {
       console.log('🔍 Creating trial user subscription...');
       console.log('Plan:', plan);
       console.log('User ID:', userId);
+      console.log('Metadata:', metadata);
+
+      await this.deactivateExistingSubscriptions(userId);
       
-      const now = new Date();
-      const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 30); // 30-day trial
+      const now = metadata?.trialStart ? new Date(metadata.trialStart) : new Date();
+      const trialEnd = (() => {
+        if (metadata?.trialEnd) {
+          return new Date(metadata.trialEnd);
+        }
+        const fallback = new Date(now);
+        fallback.setDate(fallback.getDate() + 30); // 30-day trial
+        return fallback;
+      })();
+
+      const trialStartIso = now.toISOString();
+      const trialEndIso = trialEnd.toISOString();
 
       const subscriptionData = {
         user_id: userId,
         plan_id: plan.id,
         status: 'active',
-        current_period_start: now.toISOString(),
-        current_period_end: trialEnd.toISOString(),
+        current_period_start: trialStartIso,
+        current_period_end: trialEndIso,
         amount: 0, // Free trial
         interval: plan.interval,
         is_in_trial: true,
+        trial_start: trialStartIso,
+        trial_end: trialEndIso,
+        razorpay_subscription_id: metadata?.razorpaySubscriptionId || null,
       };
 
       console.log('Trial subscription data:', subscriptionData);
@@ -572,6 +718,15 @@ class PaymentService {
         console.error('❌ Error creating trial subscription:', error);
         console.error('Subscription data:', subscriptionData);
         throw error;
+      }
+
+      try {
+        await supabase
+          .from('user_subscriptions')
+          .update({ has_used_trial: true })
+          .eq('id', data.id);
+      } catch (updateError) {
+        console.error('⚠️ Failed to mark trial as used:', updateError);
       }
 
       console.log('✅ Trial subscription created successfully:', data);

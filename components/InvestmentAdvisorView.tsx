@@ -1498,17 +1498,164 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle viewing startup dashboard
   const handleViewStartupDashboard = async (startup: Startup) => {
-    // Load startup's offers using the same logic as App.tsx
+    setIsLoading(true);
     try {
+      // Load startup's offers using the same logic as App.tsx
       const startupOffersData = await investmentService.getOffersForStartup(startup.id);
       setStartupOffers(startupOffersData);
+      
+      // Fetch enriched startup data from database (similar to handleFacilitatorStartupAccess in App.tsx)
+      // This ensures all fields are populated: currency, pitch URLs, shares, founders, profile data, etc.
+      const [startupResult, fundraisingResult, sharesResult, foundersResult, subsidiariesResult, internationalOpsResult] = await Promise.allSettled([
+        supabase
+          .from('startups')
+          .select('*')
+          .eq('id', startup.id)
+          .single(),
+        supabase
+          .from('fundraising_details')
+          .select('value, equity, domain, pitch_deck_url, pitch_video_url, currency')
+          .eq('startup_id', startup.id)
+          .limit(1),
+        supabase
+          .from('startup_shares')
+          .select('total_shares, esop_reserved_shares, price_per_share')
+          .eq('startup_id', startup.id)
+          .single(),
+        supabase
+          .from('founders')
+          .select('name, email, shares, equity_percentage')
+          .eq('startup_id', startup.id),
+        supabase
+          .from('subsidiaries')
+          .select('*')
+          .eq('startup_id', startup.id),
+        // international_operations table may not exist, Promise.allSettled handles errors gracefully
+        supabase
+          .from('international_operations')
+          .select('*')
+          .eq('startup_id', startup.id)
+      ]);
+      
+      const startupData = startupResult.status === 'fulfilled' ? startupResult.value : null;
+      const fundraisingData = fundraisingResult.status === 'fulfilled' ? fundraisingResult.value : null;
+      const sharesData = sharesResult.status === 'fulfilled' ? sharesResult.value : null;
+      const foundersData = foundersResult.status === 'fulfilled' ? foundersResult.value : null;
+      const subsidiariesData = subsidiariesResult.status === 'fulfilled' ? subsidiariesResult.value : null;
+      const internationalOpsData = internationalOpsResult.status === 'fulfilled' ? internationalOpsResult.value : null;
+      
+      if (startupData?.error || !startupData?.data) {
+        console.error('Error fetching enriched startup data, using provided startup:', startupData?.error);
+        // Fallback to provided startup if fetch fails
+        setSelectedStartup(startup);
+        setViewingStartupDashboard(true);
+        return;
+      }
+      
+      const fetchedStartup = startupData.data;
+      const shares = sharesData?.data;
+      const founders = foundersData?.data || [];
+      const subsidiaries = subsidiariesData?.data || [];
+      const internationalOps = internationalOpsData?.data || [];
+      
+      // Map founders data
+      const totalSharesForDerivation = shares?.total_shares || 0;
+      const mappedFounders = founders.map((founder: any) => {
+        const equityPct = Number(founder.equity_percentage) || 0;
+        const sharesFromEquity = totalSharesForDerivation > 0 && equityPct > 0
+          ? Math.round((equityPct / 100) * totalSharesForDerivation)
+          : 0;
+        return {
+          name: founder.name,
+          email: founder.email,
+          shares: Number(founder.shares) || sharesFromEquity,
+          equityPercentage: equityPct
+        };
+      });
+      
+      // Map subsidiaries data
+      const normalizeDate = (value: unknown): string => {
+        if (!value) return '';
+        if (value instanceof Date) return value.toISOString().split('T')[0];
+        const str = String(value);
+        return str.includes('T') ? str.split('T')[0] : str;
+      };
+      
+      const mappedSubsidiaries = subsidiaries.map((sub: any) => ({
+        id: sub.id,
+        country: sub.country,
+        companyType: sub.company_type,
+        registrationDate: normalizeDate(sub.registration_date),
+        caCode: sub.ca_service_code,
+        csCode: sub.cs_service_code,
+      }));
+      
+      // Map international operations data
+      const mappedInternationalOps = internationalOps.map((op: any) => ({
+        id: op.id,
+        country: op.country,
+        companyType: op.company_type,
+        startDate: normalizeDate(op.start_date),
+      }));
+      
+      // Build profile data object
+      const profileData = {
+        country: fetchedStartup.country_of_registration || fetchedStartup.country,
+        companyType: fetchedStartup.company_type,
+        registrationDate: normalizeDate(fetchedStartup.registration_date),
+        currency: fetchedStartup.currency || 'USD',
+        subsidiaries: mappedSubsidiaries,
+        internationalOps: mappedInternationalOps,
+        caServiceCode: fetchedStartup.ca_service_code,
+        csServiceCode: fetchedStartup.cs_service_code,
+        investmentAdvisorCode: fetchedStartup.investment_advisor_code
+      };
+      
+      // Convert database format to Startup interface with all fields
+      const fundraisingRow = (fundraisingData?.data && (fundraisingData as any).data[0]) || null;
+      const enrichedStartup: Startup = {
+        id: fetchedStartup.id,
+        name: fetchedStartup.name,
+        investmentType: fetchedStartup.investment_type,
+        investmentValue: Number(fundraisingRow?.value ?? fetchedStartup.investment_value) || 0,
+        equityAllocation: Number(fundraisingRow?.equity ?? fetchedStartup.equity_allocation) || 0,
+        currentValuation: fetchedStartup.current_valuation,
+        complianceStatus: fetchedStartup.compliance_status,
+        sector: fundraisingRow?.domain || fetchedStartup.sector,
+        totalFunding: fetchedStartup.total_funding,
+        totalRevenue: fetchedStartup.total_revenue,
+        registrationDate: normalizeDate(fetchedStartup.registration_date),
+        currency: fundraisingRow?.currency || fetchedStartup.currency || 'USD',
+        founders: mappedFounders,
+        esopReservedShares: shares?.esop_reserved_shares || 0,
+        totalShares: shares?.total_shares || 0,
+        pricePerShare: shares?.price_per_share || 0,
+        pitchDeckUrl: fundraisingRow?.pitch_deck_url || undefined,
+        pitchVideoUrl: fundraisingRow?.pitch_video_url || undefined,
+        // Add profile data for ComplianceTab and ProfileTab
+        profile: profileData,
+        // Add direct profile fields for compatibility with components that check startup.country_of_registration
+        country_of_registration: fetchedStartup.country_of_registration || fetchedStartup.country,
+        company_type: fetchedStartup.company_type,
+        // Add additional fields for compatibility
+        user_id: fetchedStartup.user_id,
+        investment_advisor_code: fetchedStartup.investment_advisor_code,
+        ca_service_code: fetchedStartup.ca_service_code,
+        cs_service_code: fetchedStartup.cs_service_code
+      } as any;
+      
+      console.log('✅ Enriched startup data fetched for Investment Advisor View:', enrichedStartup);
+      setSelectedStartup(enrichedStartup);
+      setViewingStartupDashboard(true);
     } catch (error) {
-      console.error('Error loading startup offers:', error);
-      setStartupOffers([]);
-    }
-    
+      console.error('Error loading startup dashboard:', error);
+      // Fallback to provided startup if all else fails
     setSelectedStartup(startup);
+      setStartupOffers([]);
     setViewingStartupDashboard(true);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Handle closing investor dashboard
@@ -3847,7 +3994,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             <div className="max-h-[80vh] overflow-y-auto">
               <StartupHealthView
                 startup={selectedStartup}
-                userRole="Startup"
+                userRole={currentUser?.role || 'Investment Advisor'}
                 user={currentUser}
                 onBack={handleCloseStartupDashboard}
                 onActivateFundraising={() => {}}
@@ -3857,17 +4004,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 investmentOffers={startupOffers}
                 onProcessOffer={() => {}}
               />
-              {process.env.NODE_ENV === 'development' && (
-                <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded m-2">
-                  <h4 className="font-bold">🔍 Startup Dashboard Debug:</h4>
-                  <p><strong>Selected Startup:</strong> {selectedStartup?.name}</p>
-                  <p><strong>Startup ID:</strong> {selectedStartup?.id}</p>
-                  <p><strong>Total Offers (All):</strong> {offers?.length || 0}</p>
-                  <p><strong>Loaded Startup Offers:</strong> {startupOffers?.length || 0}</p>
-                  <p><strong>Total Users:</strong> {users?.length || 0}</p>
-                  <p><strong>Startup Advisor Code:</strong> {(selectedStartup as any)?.investment_advisor_code}</p>
-                </div>
-              )}
             </div>
           </div>
         </div>

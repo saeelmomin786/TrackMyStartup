@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Startup, FundraisingDetails, InvestmentRecord, UserRole, Founder, ComplianceStatus, InvestmentOffer } from '../types';
 import { AuthUser } from '../lib/auth';
 import Button from './ui/Button';
@@ -78,6 +78,54 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         console.log('📊 New startup data:', startup);
         setCurrentStartup(startup);
     }, [startup]);
+
+    const viewLabels = useMemo(() => {
+        const name = currentStartup?.name || startup?.name || 'Startup';
+
+        if (isFacilitatorAccess) {
+            return {
+                title: `${name} - Facilitator Access`,
+                subtitle: facilitatorTargetTab === 'full'
+                    ? 'Facilitator view-only access to all tabs (except opportunities)'
+                    : 'Facilitator view-only access to compliance tab only',
+            };
+        }
+
+        if (!isViewOnly) {
+            return {
+                title: name,
+                subtitle: 'Comprehensive startup monitoring dashboard',
+            };
+        }
+
+        switch (userRole) {
+            case 'Investor':
+                return {
+                    title: `${name} - Investor Review`,
+                    subtitle: 'Investor due diligence dashboard',
+                };
+            case 'Investment Advisor':
+                return {
+                    title: `${name} - Advisor Review`,
+                    subtitle: 'Advisor read-only monitoring dashboard',
+                };
+            case 'CA':
+                return {
+                    title: `${name} - CA Review`,
+                    subtitle: 'CA compliance review and monitoring dashboard',
+                };
+            case 'CS':
+                return {
+                    title: `${name} - CS Review`,
+                    subtitle: 'CS compliance review and monitoring dashboard',
+                };
+            default:
+                return {
+                    title: `${name} - Read Only`,
+                    subtitle: 'Read-only monitoring dashboard',
+                };
+        }
+    }, [currentStartup?.name, startup?.name, isFacilitatorAccess, facilitatorTargetTab, isViewOnly, userRole]);
     
     const offersForStartup = (localOffers || investmentOffers || []).filter((o: any) => {
         const matches = (
@@ -297,17 +345,10 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         </div>
                         <div className="flex-1 min-w-0">
                             <h1 className="text-lg sm:text-xl font-semibold text-slate-900 truncate">
-                                {isFacilitatorAccess ? `${currentStartup.name} - Facilitator Access` : isViewOnly ? `${currentStartup.name} - CA Review` : currentStartup.name}
+                                {viewLabels.title}
                             </h1>
                             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                                {isFacilitatorAccess 
-                                    ? facilitatorTargetTab === 'full' 
-                                        ? 'Facilitator view-only access to all tabs (except opportunities)' 
-                                        : 'Facilitator view-only access to compliance tab only'
-                                    : isViewOnly 
-                                        ? 'CA compliance review and monitoring dashboard' 
-                                        : 'Comprehensive startup monitoring dashboard'
-                                }
+                                {viewLabels.subtitle}
                             </p>
                             {isFacilitatorAccess && (
                                 <div className="mt-1">

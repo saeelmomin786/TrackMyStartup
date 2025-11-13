@@ -858,6 +858,46 @@ app.post('/api/subscription/check-expired', async (req, res) => {
 // Helper Functions
 // --------------------
 
+async function resolveUserSubscriptionRecord({ razorpaySubscriptionId, userId }) {
+  try {
+    if (razorpaySubscriptionId) {
+      const { data, error } = await supabase
+        .from('user_subscriptions')
+        .select('id, user_id, is_in_trial, razorpay_subscription_id')
+        .eq('razorpay_subscription_id', razorpaySubscriptionId)
+        .limit(1);
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data[0];
+      }
+      if (error) {
+        console.error('resolveUserSubscriptionRecord: error fetching by Razorpay ID:', error);
+      }
+    }
+
+    if (userId) {
+      const { data, error } = await supabase
+        .from('user_subscriptions')
+        .select('id, user_id, is_in_trial, razorpay_subscription_id')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .order('current_period_start', { ascending: false })
+        .limit(1);
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data[0];
+      }
+
+      if (error) {
+        console.error('resolveUserSubscriptionRecord: error fetching by user ID:', error);
+      }
+    }
+  } catch (error) {
+    console.error('resolveUserSubscriptionRecord: unexpected error:', error);
+  }
+
+  return null;
+}
+
 // Payment event handlers
 async function handlePaymentSuccess(payment) {
   try {
@@ -926,19 +966,40 @@ async function handlePaymentRefund(payment) {
 async function handleSubscriptionActivated(subscription) {
   try {
     console.log('Subscription activated:', subscription.id);
-    
-    // Update subscription status
+
+    const userIdFromNotes = subscription?.notes?.user_id || null;
+    const resolved = await resolveUserSubscriptionRecord({
+      razorpaySubscriptionId: subscription.id,
+      userId: userIdFromNotes
+    });
+
+    if (!resolved) {
+      console.warn('No matching user subscription found for activation event:', subscription.id);
+      return;
+    }
+
+    const updates = {
+      status: 'active',
+      razorpay_subscription_id: subscription.id,
+      updated_at: new Date().toISOString(),
+      is_in_trial: false
+    };
+
+    if (subscription?.current_start) {
+      updates.current_period_start = new Date(subscription.current_start * 1000).toISOString();
+    }
+
+    if (subscription?.current_end) {
+      updates.current_period_end = new Date(subscription.current_end * 1000).toISOString();
+    }
+
     const { error } = await supabase
       .from('user_subscriptions')
-      .update({ 
-        status: 'active',
-        razorpay_subscription_id: subscription.id,
-        updated_at: new Date().toISOString()
-      })
-      .eq('razorpay_subscription_id', subscription.id);
+      .update(updates)
+      .eq('id', resolved.id);
 
     if (error) {
-      console.error('Error updating subscription status:', error);
+      console.error('Error updating subscription status during activation:', error);
     }
   } catch (error) {
     console.error('Error handling subscription activation:', error);
@@ -973,27 +1034,50 @@ async function handleSubscriptionCharged(subscription) {
     
     const subDetails = await response.json();
     console.log('Subscription details:', subDetails);
-    
-    // Update subscription period in database
+
+    const userIdFromNotes = subDetails?.notes?.user_id || subscription?.notes?.user_id || null;
+    const resolved = await resolveUserSubscriptionRecord({
+      razorpaySubscriptionId: subscription.id,
+      userId: userIdFromNotes
+    });
+
+    if (!resolved) {
+      console.warn('No matching subscription row found for charged event:', subscription.id);
+      return;
+    }
+
+    const periodStartIso = subDetails?.current_start
+      ? new Date(subDetails.current_start * 1000).toISOString()
+      : null;
+    const periodEndIso = subDetails?.current_end
+      ? new Date(subDetails.current_end * 1000).toISOString()
+      : null;
+
+    const updatePayload = {
+      updated_at: new Date().toISOString(),
+      razorpay_subscription_id: subscription.id,
+      status: 'active',
+      is_in_trial: false
+    };
+
+    if (periodStartIso) updatePayload.current_period_start = periodStartIso;
+    if (periodEndIso) updatePayload.current_period_end = periodEndIso;
+
     const { error: updateError } = await supabase
       .from('user_subscriptions')
-      .update({ 
-        current_period_start: new Date(subDetails.current_start * 1000).toISOString(),
-        current_period_end: new Date(subDetails.current_end * 1000).toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq('razorpay_subscription_id', subscription.id);
-    
+      .update(updatePayload)
+      .eq('id', resolved.id);
+
     if (updateError) {
-      console.error('Error updating subscription period:', updateError);
+      console.error('Error updating subscription period after charge:', updateError);
     }
     
     // Record the payment
     const { error: paymentError } = await supabase
       .from('payments')
       .insert({
-        user_id: subDetails.notes?.user_id,
-        subscription_id: subscription.id,
+        user_id: resolved.user_id || subDetails.notes?.user_id || null,
+        subscription_id: resolved.id,
         amount: subDetails.plan.amount / 100, // Convert from paise
         currency: subDetails.plan.currency,
         status: 'paid',
@@ -1016,17 +1100,27 @@ async function handleSubscriptionPaused(subscription) {
   try {
     console.log('Subscription paused:', subscription.id);
     
-    // Update subscription status
+    const userIdFromNotes = subscription?.notes?.user_id || null;
+    const resolved = await resolveUserSubscriptionRecord({
+      razorpaySubscriptionId: subscription.id,
+      userId: userIdFromNotes
+    });
+
+    if (!resolved) {
+      console.warn('No matching subscription found to pause for Razorpay ID:', subscription.id);
+      return;
+    }
+
     const { error } = await supabase
       .from('user_subscriptions')
       .update({ 
         status: 'inactive',
         updated_at: new Date().toISOString()
       })
-      .eq('razorpay_subscription_id', subscription.id);
+      .eq('id', resolved.id);
 
     if (error) {
-      console.error('Error updating subscription status:', error);
+      console.error('Error updating subscription status to paused:', error);
     }
   } catch (error) {
     console.error('Error handling subscription pause:', error);
@@ -1037,17 +1131,27 @@ async function handleSubscriptionCancelled(subscription) {
   try {
     console.log('Subscription cancelled:', subscription.id);
     
-    // Update subscription status
+    const userIdFromNotes = subscription?.notes?.user_id || null;
+    const resolved = await resolveUserSubscriptionRecord({
+      razorpaySubscriptionId: subscription.id,
+      userId: userIdFromNotes
+    });
+
+    if (!resolved) {
+      console.warn('No matching subscription found to cancel for Razorpay ID:', subscription.id);
+      return;
+    }
+
     const { error } = await supabase
       .from('user_subscriptions')
       .update({ 
         status: 'cancelled',
         updated_at: new Date().toISOString()
       })
-      .eq('razorpay_subscription_id', subscription.id);
+      .eq('id', resolved.id);
 
     if (error) {
-      console.error('Error updating subscription status:', error);
+      console.error('Error updating subscription status to cancelled:', error);
     } else {
       console.log('✅ Subscription cancelled successfully');
     }

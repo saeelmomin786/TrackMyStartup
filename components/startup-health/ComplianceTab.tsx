@@ -1000,11 +1000,6 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                                 <p className="text-lg font-semibold mb-2">No Profile Data</p>
                                 <p>Please complete your startup profile first to generate compliance tasks.</p>
                                 <p className="text-sm mt-2">Go to the Profile tab and set your country, company type, and registration date.</p>
-                                <p className="text-sm mt-2 text-blue-600">
-                                    Debug Info: Country: {startup.country_of_registration || 'Not set'} | 
-                                    Type: {startup.company_type || 'Not set'} | 
-                                    Date: {startup.registration_date || 'Not set'}
-                                </p>
                             </div>
                         ) : complianceTasks.length === 0 ? (
                             <div>

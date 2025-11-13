@@ -358,7 +358,7 @@ const App: React.FC = () => {
       console.log('🔍 Checking payment status for user:', userId);
       const { data, error } = await supabase
         .from('user_subscriptions')
-        .select('status, current_period_end')
+        .select('status, current_period_end, razorpay_subscription_id')
         .eq('user_id', userId)
         .eq('status', 'active')
         .limit(1);
@@ -380,9 +380,18 @@ const App: React.FC = () => {
       console.log('📅 Current time:', now.toISOString());
       console.log('📅 Period end:', periodEnd.toISOString());
       console.log('⏰ Is expired:', periodEnd < now);
+      console.log('💳 Razorpay subscription ID:', data[0].razorpay_subscription_id || 'NULL (No autopay set up)');
       
       if (periodEnd < now) {
         console.log('❌ Subscription expired');
+        if (data[0].razorpay_subscription_id) {
+          console.log('⚠️ Autopay subscription exists but expired - could mean:');
+          console.log('   1. Autopay was cancelled by user');
+          console.log('   2. Payment method failed');
+          console.log('   3. Razorpay subscription was paused/cancelled');
+        } else {
+          console.log('ℹ️ No Razorpay subscription ID - this was a one-time payment (autopay never set up)');
+        }
         return false;
       }
 
@@ -1818,8 +1827,8 @@ const App: React.FC = () => {
     try {
       console.log('🔍 Fetching startup data for facilitator, ID:', startupId);
       
-      // Fetch startup data, fundraising details, share data, and founders data in parallel
-      const [startupResult, fundraisingResult, sharesResult, foundersResult] = await Promise.allSettled([
+      // Fetch startup data, fundraising details, share data, founders data, subsidiaries, and international operations in parallel
+      const [startupResult, fundraisingResult, sharesResult, foundersResult, subsidiariesResult, internationalOpsResult] = await Promise.allSettled([
         supabase
           .from('startups')
           .select('*')
@@ -1827,7 +1836,7 @@ const App: React.FC = () => {
           .single(),
         supabase
           .from('fundraising_details')
-          .select('value, equity, domain')
+          .select('value, equity, domain, pitch_deck_url, pitch_video_url, currency')
           .eq('startup_id', startupId)
           .limit(1),
         supabase
@@ -1838,6 +1847,15 @@ const App: React.FC = () => {
         supabase
           .from('founders')
           .select('name, email, shares, equity_percentage')
+          .eq('startup_id', startupId),
+        supabase
+          .from('subsidiaries')
+          .select('*')
+          .eq('startup_id', startupId),
+        // international_operations table may not exist, Promise.allSettled handles errors gracefully
+        supabase
+          .from('international_operations')
+          .select('*')
           .eq('startup_id', startupId)
       ]);
       
@@ -1845,6 +1863,8 @@ const App: React.FC = () => {
       const fundraisingData = fundraisingResult.status === 'fulfilled' ? fundraisingResult.value : null;
       const sharesData = sharesResult.status === 'fulfilled' ? sharesResult.value : null;
       const foundersData = foundersResult.status === 'fulfilled' ? foundersResult.value : null;
+      const subsidiariesData = subsidiariesResult.status === 'fulfilled' ? subsidiariesResult.value : null;
+      const internationalOpsData = internationalOpsResult.status === 'fulfilled' ? internationalOpsResult.value : null;
       
       if (startupData.error || !startupData.data) {
         console.error('Error fetching startup from database:', startupData.error);
@@ -1856,11 +1876,13 @@ const App: React.FC = () => {
       }
       
       const fetchedStartup = startupData.data;
-      const shares = sharesData.data;
-      const founders = foundersData.data || [];
+      const shares = sharesData?.data;
+      const founders = foundersData?.data || [];
+      const subsidiaries = subsidiariesData?.data || [];
+      const internationalOps = internationalOpsData?.data || [];
       
       // Map founders data to include shares; if shares are missing, derive from equity percentage
-      const totalSharesForDerivation = (sharesData && (sharesData as any).data && (sharesData as any).data.total_shares) || 0;
+      const totalSharesForDerivation = shares?.total_shares || 0;
       const mappedFounders = founders.map((founder: any) => {
         const equityPct = Number(founder.equity_percentage) || 0;
         const sharesFromEquity = totalSharesForDerivation > 0 && equityPct > 0
@@ -1874,8 +1896,46 @@ const App: React.FC = () => {
         };
       });
       
+      // Map subsidiaries data
+      const normalizeDate = (value: unknown): string => {
+        if (!value) return '';
+        if (value instanceof Date) return value.toISOString().split('T')[0];
+        const str = String(value);
+        return str.includes('T') ? str.split('T')[0] : str;
+      };
+      
+      const mappedSubsidiaries = subsidiaries.map((sub: any) => ({
+        id: sub.id,
+        country: sub.country,
+        companyType: sub.company_type,
+        registrationDate: normalizeDate(sub.registration_date),
+        caCode: sub.ca_service_code,
+        csCode: sub.cs_service_code,
+      }));
+      
+      // Map international operations data
+      const mappedInternationalOps = internationalOps.map((op: any) => ({
+        id: op.id,
+        country: op.country,
+        companyType: op.company_type,
+        startDate: normalizeDate(op.start_date),
+      }));
+      
+      // Build profile data object
+      const profileData = {
+        country: fetchedStartup.country_of_registration || fetchedStartup.country,
+        companyType: fetchedStartup.company_type,
+        registrationDate: normalizeDate(fetchedStartup.registration_date),
+        currency: fetchedStartup.currency || 'USD',
+        subsidiaries: mappedSubsidiaries,
+        internationalOps: mappedInternationalOps,
+        caServiceCode: fetchedStartup.ca_service_code,
+        csServiceCode: fetchedStartup.cs_service_code,
+        investmentAdvisorCode: fetchedStartup.investment_advisor_code
+      };
+      
       // Convert database format to Startup interface
-      const fundraisingRow = (fundraisingData && (fundraisingData as any).data && (fundraisingData as any).data[0]) || null;
+      const fundraisingRow = (fundraisingData?.data && (fundraisingData as any).data[0]) || null;
       const startupObj: Startup = {
         id: fetchedStartup.id,
         name: fetchedStartup.name,
@@ -1888,13 +1948,27 @@ const App: React.FC = () => {
         sector: fundraisingRow?.domain || fetchedStartup.sector,
         totalFunding: fetchedStartup.total_funding,
         totalRevenue: fetchedStartup.total_revenue,
-        registrationDate: fetchedStartup.registration_date,
+        registrationDate: normalizeDate(fetchedStartup.registration_date),
+        currency: fundraisingRow?.currency || fetchedStartup.currency || 'USD',
         founders: mappedFounders,
         // Add share data
         esopReservedShares: shares?.esop_reserved_shares || 0,
         totalShares: shares?.total_shares || 0,
-        pricePerShare: shares?.price_per_share || 0
-      };
+        pricePerShare: shares?.price_per_share || 0,
+        // Add pitch materials from fundraising_details
+        pitchDeckUrl: fundraisingRow?.pitch_deck_url || undefined,
+        pitchVideoUrl: fundraisingRow?.pitch_video_url || undefined,
+        // Add profile data for ComplianceTab and ProfileTab
+        profile: profileData,
+        // Add direct profile fields for compatibility with components that check startup.country_of_registration
+        country_of_registration: fetchedStartup.country_of_registration || fetchedStartup.country,
+        company_type: fetchedStartup.company_type,
+        // Add user_id and investment_advisor_code for compatibility
+        user_id: fetchedStartup.user_id,
+        investment_advisor_code: fetchedStartup.investment_advisor_code,
+        ca_service_code: fetchedStartup.ca_service_code,
+        cs_service_code: fetchedStartup.cs_service_code
+      } as any;
       
       console.log('✅ Startup fetched from database with shares and founders:', startupObj);
       console.log('📊 Share data:', shares);

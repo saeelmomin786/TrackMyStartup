@@ -60,6 +60,7 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
         status: IPStatus.Active
     });
     const [documentType, setDocumentType] = useState<IPDocumentType>(IPDocumentType.RegistrationCertificate);
+    const [documentUrl, setDocumentUrl] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Load IP/trademark records
@@ -128,7 +129,7 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
             setUploading(true);
             
             // Check for cloud drive URL first
-            const cloudDriveUrl = (document.getElementById('ip-document-url') as HTMLInputElement)?.value;
+            const cloudDriveUrl = documentUrl.trim();
             
             if (cloudDriveUrl) {
                 // Use cloud drive URL directly
@@ -155,6 +156,7 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
             setShowUploadModal(false);
             setSelectedFile(null);
             setSelectedRecord(null);
+            setDocumentUrl('');
             loadRecords();
         } catch (error) {
             console.error('Error uploading document:', error);
@@ -195,6 +197,8 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
 
     const openUploadModal = (record: IPTrademarkRecord) => {
         setSelectedRecord(record);
+        setSelectedFile(null);
+        setDocumentUrl('');
         setShowUploadModal(true);
     };
 
@@ -702,11 +706,16 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
                             value=""
                             onChange={(url) => {
                                 // Store cloud drive URL for IP document
+                                setDocumentUrl(url);
+                                setSelectedFile(null);
                                 const hiddenInput = document.getElementById('ip-document-url') as HTMLInputElement;
                                 if (hiddenInput) hiddenInput.value = url;
                             }}
                             onFileSelect={(file) => {
                                 setSelectedFile(file);
+                                setDocumentUrl('');
+                                const hiddenInput = document.getElementById('ip-document-url') as HTMLInputElement;
+                                if (hiddenInput) hiddenInput.value = '';
                             }}
                             placeholder="Paste your cloud drive link here..."
                             label="IP/Trademark Document"
@@ -715,7 +724,7 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
                             documentType="IP/trademark document"
                             showPrivacyMessage={false}
                         />
-                        <input type="hidden" id="ip-document-url" name="ip-document-url" />
+                        <input type="hidden" id="ip-document-url" name="ip-document-url" value={documentUrl} readOnly />
                         {selectedFile && (
                             <div className="p-3 bg-gray-50 rounded-md">
                                 <p className="text-sm text-gray-700">
@@ -733,7 +742,7 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
                         </Button>
                         <Button 
                             onClick={handleFileUpload}
-                            disabled={uploading || (!selectedFile && !(document.getElementById('ip-document-url') as HTMLInputElement)?.value)}
+                            disabled={uploading || (!selectedFile && !documentUrl.trim())}
                         >
                             {uploading ? 'Uploading...' : 'Upload Document'}
                         </Button>

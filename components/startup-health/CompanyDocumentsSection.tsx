@@ -72,6 +72,7 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
 
     const handleUrlChange = (url: string) => {
         const documentType = companyDocumentsService.getDocumentType(url);
+        setSelectedFile(null);
         setFormData(prev => ({
             ...prev,
             documentUrl: url,
@@ -360,7 +361,16 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
                             <CloudDriveInput
                                 value={formData.documentUrl}
                                 onChange={(url) => handleUrlChange(url)}
-                                onFileSelect={(file) => setSelectedFile(file)}
+                                onFileSelect={(file) => {
+                                    setSelectedFile(file);
+                                    const extension = file.name.includes('.') ? file.name.split('.').pop() || '' : '';
+                                    const normalizedType = extension ? `${extension.toUpperCase()} File` : 'Uploaded File';
+                                    setFormData(prev => ({
+                                        ...prev,
+                                        documentUrl: '',
+                                        documentType: normalizedType
+                                    }));
+                                }}
                                 placeholder="Paste your cloud drive link here..."
                                 label="Document"
                                 accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.txt"

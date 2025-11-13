@@ -98,21 +98,35 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (error) {
-        console.error('Error checking trial eligibility:', error);
+      let rows = data;
+      let fetchError = error;
+
+      // Handle legacy schemas where has_used_trial column may not exist
+      if (fetchError && typeof fetchError.message === 'string' && fetchError.message.toLowerCase().includes('has_used_trial')) {
+        const fallback = await supabase
+          .from('user_subscriptions')
+          .select('id, is_in_trial, status')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        rows = fallback.data;
+        fetchError = fallback.error;
+      }
+
+      if (fetchError) {
+        console.error('Error checking trial eligibility:', fetchError);
         setTrialEligibility({
-          canStart: false,
-          reason: 'Unable to confirm trial status. Please continue with payment.'
+          canStart: true
         });
         return;
       }
 
-      if (!data || data.length === 0) {
+      if (!rows || rows.length === 0) {
         setTrialEligibility({ canStart: true });
         return;
       }
 
-      const latest = data[0] as { has_used_trial?: boolean; is_in_trial?: boolean; status?: string };
+      const latest = rows[0] as { has_used_trial?: boolean; is_in_trial?: boolean; status?: string };
 
       if (latest?.has_used_trial) {
         setTrialEligibility({
@@ -133,10 +147,7 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
       setTrialEligibility({ canStart: true });
     } catch (error) {
       console.error('Unexpected error while checking trial eligibility:', error);
-      setTrialEligibility({
-        canStart: false,
-        reason: 'Unable to confirm trial status. Please continue with payment.'
-      });
+      setTrialEligibility({ canStart: true });
     } finally {
       setIsCheckingTrialEligibility(false);
     }

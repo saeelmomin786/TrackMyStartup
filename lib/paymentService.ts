@@ -348,16 +348,30 @@ class PaymentService {
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (error) {
-        console.error('Error checking trial eligibility:', error);
-        throw new Error('TRIAL_ELIGIBILITY_CHECK_FAILED');
+      let rows = data;
+      let fetchError = error;
+
+      if (fetchError && typeof fetchError.message === 'string' && fetchError.message.toLowerCase().includes('has_used_trial')) {
+        const fallback = await supabase
+          .from('user_subscriptions')
+          .select('id, is_in_trial, status')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        rows = fallback.data;
+        fetchError = fallback.error;
       }
 
-      if (!data || data.length === 0) {
+      if (fetchError) {
+        console.error('Error checking trial eligibility:', fetchError);
         return;
       }
 
-      const latest = data[0] as { has_used_trial?: boolean; is_in_trial?: boolean; status?: string };
+      if (!rows || rows.length === 0) {
+        return;
+      }
+
+      const latest = rows[0] as { has_used_trial?: boolean; is_in_trial?: boolean; status?: string };
       if (latest?.has_used_trial) {
         throw new Error('TRIAL_ALREADY_USED');
       }
@@ -366,11 +380,10 @@ class PaymentService {
         throw new Error('TRIAL_ALREADY_ACTIVE');
       }
     } catch (error) {
-      if (error instanceof Error && (error.message === 'TRIAL_ALREADY_USED' || error.message === 'TRIAL_ALREADY_ACTIVE' || error.message === 'TRIAL_ELIGIBILITY_CHECK_FAILED')) {
+      if (error instanceof Error && (error.message === 'TRIAL_ALREADY_USED' || error.message === 'TRIAL_ALREADY_ACTIVE')) {
         throw error;
       }
       console.error('Unexpected error validating trial eligibility:', error);
-      throw new Error('TRIAL_ELIGIBILITY_CHECK_FAILED');
     }
   }
 

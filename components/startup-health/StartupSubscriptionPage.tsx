@@ -144,10 +144,18 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
         return;
       }
 
-      setTrialEligibility({ canStart: true });
+      setTrialEligibility({
+        canStart: false,
+        reason: 'You have already used your free trial. Please proceed with payment to continue using the dashboard.'
+      });
+      return;
+
     } catch (error) {
       console.error('Unexpected error while checking trial eligibility:', error);
-      setTrialEligibility({ canStart: true });
+      setTrialEligibility({
+        canStart: false,
+        reason: 'Unable to confirm trial status. Please proceed with payment.'
+      });
     } finally {
       setIsCheckingTrialEligibility(false);
     }

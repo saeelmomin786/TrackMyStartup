@@ -379,6 +379,9 @@ class PaymentService {
       if (latest?.status === 'active' && latest?.is_in_trial) {
         throw new Error('TRIAL_ALREADY_ACTIVE');
       }
+
+      // Fallback: any historical subscription row counts as trial already consumed
+      throw new Error('TRIAL_ALREADY_USED');
     } catch (error) {
       if (error instanceof Error && (error.message === 'TRIAL_ALREADY_USED' || error.message === 'TRIAL_ALREADY_ACTIVE')) {
         throw error;

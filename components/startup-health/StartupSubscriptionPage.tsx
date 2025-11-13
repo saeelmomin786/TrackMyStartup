@@ -49,6 +49,7 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
   const [showTrialAndCoupon, setShowTrialAndCoupon] = useState(false);
   const [showPaymentSummary, setShowPaymentSummary] = useState(false);
   const [trialEligibility, setTrialEligibility] = useState<{ canStart: boolean; reason?: string }>({ canStart: true });
+  const [hasExistingSubscription, setHasExistingSubscription] = useState(false);
   const [isCheckingTrialEligibility, setIsCheckingTrialEligibility] = useState(false);
 
   useEffect(() => {
@@ -115,26 +116,20 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
 
       if (fetchError) {
         console.error('Error checking trial eligibility:', fetchError);
-        setTrialEligibility({
-          canStart: true
-        });
+        setTrialEligibility({ canStart: true });
+        setHasExistingSubscription(false);
         return;
       }
 
       if (!rows || rows.length === 0) {
         setTrialEligibility({ canStart: true });
+        setHasExistingSubscription(false);
         return;
       }
+
+      setHasExistingSubscription(true);
 
       const latest = rows[0] as { has_used_trial?: boolean; is_in_trial?: boolean; status?: string };
-
-      if (latest?.has_used_trial) {
-        setTrialEligibility({
-          canStart: false,
-          reason: 'You have already used your free trial. Please proceed with payment to continue using the dashboard.'
-        });
-        return;
-      }
 
       if (latest?.status === 'active' && latest?.is_in_trial) {
         setTrialEligibility({
@@ -152,10 +147,8 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
 
     } catch (error) {
       console.error('Unexpected error while checking trial eligibility:', error);
-      setTrialEligibility({
-        canStart: false,
-        reason: 'Unable to confirm trial status. Please proceed with payment.'
-      });
+      setTrialEligibility({ canStart: true });
+      setHasExistingSubscription(false);
     } finally {
       setIsCheckingTrialEligibility(false);
     }
@@ -367,9 +360,9 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
           return;
         }
         if (message.includes('cancelled by user')) {
-          setError('Trial setup was cancelled. Please try again when ready.');
+        setError('Trial setup was cancelled. Please try again when ready.');
           return;
-        }
+      }
       }
       if (currentUser?.id) {
         checkTrialEligibility(currentUser.id);
@@ -672,95 +665,95 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
                   <div className="space-y-4 sm:space-y-6">
                     {/* Option 1: Free Trial */}
                     {trialEligibility.canStart ? (
-                      <Card className="border-2 border-green-200 hover:border-green-300 transition-colors">
-                        <div className="p-4 sm:p-6">
-                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
-                            <div className="flex items-center flex-1">
-                              <div className="bg-green-100 p-2 sm:p-3 rounded-full mr-3 sm:mr-4 flex-shrink-0">
-                                <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6 text-green-600" />
-                              </div>
-                              <div>
-                                <h3 className="text-lg sm:text-xl font-semibold text-slate-900">Start Free Trial</h3>
-                                <p className="text-sm sm:text-base text-slate-600">Try our platform for 30 days at no cost</p>
-                              </div>
+                    <Card className="border-2 border-green-200 hover:border-green-300 transition-colors">
+                      <div className="p-4 sm:p-6">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
+                          <div className="flex items-center flex-1">
+                            <div className="bg-green-100 p-2 sm:p-3 rounded-full mr-3 sm:mr-4 flex-shrink-0">
+                              <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6 text-green-600" />
                             </div>
-                            <div className="bg-green-50 px-2 sm:px-3 py-1 rounded-full self-start sm:self-auto">
-                              <span className="text-xs sm:text-sm font-medium text-green-700">Recommended</span>
+                            <div>
+                              <h3 className="text-lg sm:text-xl font-semibold text-slate-900">Start Free Trial</h3>
+                              <p className="text-sm sm:text-base text-slate-600">Try our platform for 30 days at no cost</p>
                             </div>
                           </div>
-                        
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
-                            <div className="space-y-2">
-                              <h4 className="font-medium text-slate-900 text-sm sm:text-base">What you get:</h4>
-                              <ul className="space-y-1 text-xs sm:text-sm text-slate-600">
-                                <li className="flex items-center">
-                                  <Check className="h-4 w-4 text-green-500 mr-2" />
-                                  Full access to all features
-                                </li>
-                                <li className="flex items-center">
-                                  <Check className="h-4 w-4 text-green-500 mr-2" />
-                                  No charges for 30 days
-                                </li>
-                                <li className="flex items-center">
-                                  <Check className="h-4 w-4 text-green-500 mr-2" />
-                                  Cancel anytime
-                                </li>
-                              </ul>
-                            </div>
-                            <div className="space-y-2">
-                              <h4 className="font-medium text-slate-900 text-sm sm:text-base">After trial:</h4>
-                              <ul className="space-y-1 text-xs sm:text-sm text-slate-600">
-                                <li className="flex items-center">
-                                  <Check className="h-4 w-4 text-green-500 mr-2" />
-                                  Auto-billing starts
-                                </li>
-                                <li className="flex items-center">
-                                  <Check className="h-4 w-4 text-green-500 mr-2" />
-                                  Payment method required
-                                </li>
-                                <li className="flex items-center">
-                                  <Check className="h-4 w-4 text-green-500 mr-2" />
-                                  Secure & encrypted
-                                </li>
-                              </ul>
-                            </div>
+                          <div className="bg-green-50 px-2 sm:px-3 py-1 rounded-full self-start sm:self-auto">
+                            <span className="text-xs sm:text-sm font-medium text-green-700">Recommended</span>
                           </div>
-                          
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-4">
-                            <div className="flex items-center mb-2">
-                              <CreditCard className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 mr-2 flex-shrink-0" />
-                              <span className="font-medium text-blue-800 text-sm sm:text-base">Payment Method Required</span>
-                            </div>
-                            <p className="text-xs sm:text-sm text-blue-700 mb-2">
-                              We'll need to set up your payment method, but you won't be charged until your trial ends.
-                            </p>
-                            <p className="text-xs text-blue-700">
-                              Note: To begin your subscription, a refundable amount of 
-                              <span className="font-semibold"> ₹5</span> may be charged now for verification. 
-                              This ₹5 will be automatically refunded by Razorpay. After the trial, your selected plan amount will be charged.
-                            </p>
-                          </div>
-                        
-                          <Button
-                            onClick={() => handleTrialSetup()}
-                            disabled={isLoading || isCheckingTrialEligibility}
-                            className="w-full"
-                            size="sm"
-                          >
-                            {(isLoading || isCheckingTrialEligibility) ? (
-                              <div className="flex items-center justify-center">
-                                <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-white mr-2"></div>
-                                <span className="text-xs sm:text-sm">Checking trial...</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center">
-                                <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                                <span className="text-xs sm:text-sm">Start Free Trial</span>
-                              </div>
-                            )}
-                          </Button>
                         </div>
-                      </Card>
+                      
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
+                          <div className="space-y-2">
+                            <h4 className="font-medium text-slate-900 text-sm sm:text-base">What you get:</h4>
+                            <ul className="space-y-1 text-xs sm:text-sm text-slate-600">
+                            <li className="flex items-center">
+                              <Check className="h-4 w-4 text-green-500 mr-2" />
+                              Full access to all features
+                            </li>
+                            <li className="flex items-center">
+                              <Check className="h-4 w-4 text-green-500 mr-2" />
+                              No charges for 30 days
+                  </li>
+                            <li className="flex items-center">
+                              <Check className="h-4 w-4 text-green-500 mr-2" />
+                              Cancel anytime
+                  </li>
+                          </ul>
+                          </div>
+                          <div className="space-y-2">
+                            <h4 className="font-medium text-slate-900 text-sm sm:text-base">After trial:</h4>
+                            <ul className="space-y-1 text-xs sm:text-sm text-slate-600">
+                            <li className="flex items-center">
+                              <Check className="h-4 w-4 text-green-500 mr-2" />
+                              Auto-billing starts
+                  </li>
+                            <li className="flex items-center">
+                              <Check className="h-4 w-4 text-green-500 mr-2" />
+                              Payment method required
+                  </li>
+                            <li className="flex items-center">
+                              <Check className="h-4 w-4 text-green-500 mr-2" />
+                              Secure & encrypted
+                  </li>
+                            </ul>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-4">
+                          <div className="flex items-center mb-2">
+                            <CreditCard className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 mr-2 flex-shrink-0" />
+                            <span className="font-medium text-blue-800 text-sm sm:text-base">Payment Method Required</span>
+                          </div>
+                          <p className="text-xs sm:text-sm text-blue-700 mb-2">
+                            We'll need to set up your payment method, but you won't be charged until your trial ends.
+                          </p>
+                          <p className="text-xs text-blue-700">
+                            Note: To begin your subscription, a refundable amount of 
+                            <span className="font-semibold"> ₹5</span> may be charged now for verification. 
+                            This ₹5 will be automatically refunded by Razorpay. After the trial, your selected plan amount will be charged.
+                          </p>
+                        </div>
+                      
+                        <Button
+                          onClick={() => handleTrialSetup()}
+                            disabled={isLoading || isCheckingTrialEligibility}
+                          className="w-full"
+                          size="sm"
+                        >
+                            {(isLoading || isCheckingTrialEligibility) ? (
+                            <div className="flex items-center justify-center">
+                              <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-white mr-2"></div>
+                                <span className="text-xs sm:text-sm">Checking trial...</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-center">
+                              <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                              <span className="text-xs sm:text-sm">Start Free Trial</span>
+                            </div>
+                          )}
+                        </Button>
+                      </div>
+                    </Card>
                     ) : (
                       <Card className="border-2 border-amber-200 bg-amber-50">
                         <div className="p-4 sm:p-6">
@@ -780,6 +773,7 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
                     )}
 
                     {/* Option 2: Pay Now */}
+                    {hasExistingSubscription && (
                     <Card className="border-2 border-blue-200 hover:border-blue-300 transition-colors">
                       <div className="p-4 sm:p-6">
                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
@@ -853,6 +847,7 @@ export default function StartupSubscriptionPage({ currentUser, onPaymentSuccess,
                         </Button>
                       </div>
                     </Card>
+                    )}
                   </div>
 
                   {/* Back Button */}

@@ -320,3 +320,9 @@ URL: https://app.example.com/api/razorpay/verify
 
 *This guide assumes you're deploying to Vercel. Adjust steps if using a different hosting provider.*
 
+
+
+
+
+
+

@@ -464,6 +464,12 @@ class PaymentService {
         }
 
         // Create Razorpay subscription for Pay Now (immediate charge + autopay setup)
+        console.log(`💰 Creating Razorpay subscription for Pay Now:`);
+        console.log(`   Base amount: ₹${baseAmount}`);
+        console.log(`   Tax (${taxPercentage}%): ₹${taxAmount}`);
+        console.log(`   Final amount: ₹${finalAmount}`);
+        console.log(`   Amount in paise: ${Math.round(finalAmount * 100)}`);
+        
         const subscriptionResponse = await fetch(`/api/razorpay/create-subscription`, {
           method: 'POST',
           headers: {

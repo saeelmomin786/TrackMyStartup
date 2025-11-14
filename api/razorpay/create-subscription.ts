@@ -14,12 +14,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { user_id, final_amount, interval = 'monthly', plan_name = 'Startup Plan', customer_notify = 1 } = req.body || {};
     if (!user_id || !final_amount) return res.status(400).json({ error: 'user_id and final_amount are required' });
 
-    // Choose plan id based on interval
-    let plan_id = interval === 'yearly' ? process.env.RAZORPAY_STARTUP_PLAN_ID_YEARLY : process.env.RAZORPAY_STARTUP_PLAN_ID_MONTHLY;
-    if (!plan_id) return res.status(400).json({ error: `Plan ID not configured for ${interval} plan` });
-
     const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
 
+    // Try to use pre-configured plan ID first
+    let plan_id = interval === 'yearly' ? process.env.RAZORPAY_STARTUP_PLAN_ID_YEARLY : process.env.RAZORPAY_STARTUP_PLAN_ID_MONTHLY;
+    
+    // If plan ID is not configured, create a plan dynamically
+    if (!plan_id) {
+      console.log(`Plan ID not configured for ${interval} plan, creating dynamic plan for amount: ${final_amount}`);
+      
+      const period = interval === 'yearly' ? 'yearly' : 'monthly';
+      
+      try {
+        const planResp = await fetch('https://api.razorpay.com/v1/plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          body: JSON.stringify({
+            period,
+            interval: 1,
+            item: {
+              name: `${plan_name} (${interval})`,
+              amount: Math.round(final_amount * 100), // Convert to paise
+              currency: 'INR'
+            }
+          })
+        });
+
+        if (!planResp.ok) {
+          const txt = await planResp.text();
+          console.error('Razorpay plan creation failed:', txt);
+          return res.status(planResp.status).json({ error: `Failed to create Razorpay plan: ${txt}` });
+        }
+        
+        const planJson = await planResp.json();
+        plan_id = planJson?.id;
+        
+        if (!plan_id) {
+          console.error('No plan id in Razorpay response');
+          return res.status(500).json({ error: 'Failed to create Razorpay plan' });
+        }
+        
+        console.log(`✅ Created dynamic Razorpay plan with ID: ${plan_id}`);
+      } catch (planError) {
+        console.error('Error creating Razorpay plan:', planError);
+        return res.status(500).json({ error: 'Failed to create Razorpay plan' });
+      }
+    }
+
+    // Create subscription with the plan ID
     const r = await fetch('https://api.razorpay.com/v1/subscriptions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: authHeader },

@@ -521,20 +521,39 @@ class PaymentService {
               await new Promise(resolve => setTimeout(resolve, 500));
               
               // Verify subscription was created with autopay setup before triggering success
+              // Check the same fields that checkPaymentStatus uses
               const { data: verifySub } = await supabase
                 .from('user_subscriptions')
-                .select('id, status, razorpay_subscription_id')
+                .select('id, status, current_period_end, razorpay_subscription_id')
                 .eq('user_id', userId)
                 .eq('status', 'active')
                 .limit(1);
               
               if (verifySub && verifySub.length > 0) {
-                if (verifySub[0].razorpay_subscription_id) {
-                  console.log('✅ Payment processed and subscription confirmed with autopay setup, triggering success callback');
+                const sub = verifySub[0];
+                const now = new Date();
+                const periodEnd = new Date(sub.current_period_end);
+                const isExpired = periodEnd < now;
+                
+                console.log('🔍 Verification check:', {
+                  subscriptionId: sub.id,
+                  status: sub.status,
+                  periodEnd: periodEnd.toISOString(),
+                  isExpired,
+                  hasRazorpayId: !!sub.razorpay_subscription_id
+                });
+                
+                if (isExpired) {
+                  console.warn('⚠️ Subscription found but already expired, triggering success anyway (should not happen)');
+                  this.triggerPaymentSuccess();
                 } else {
-                  console.log('✅ Payment processed and subscription confirmed (autopay will be attached in background)');
+                  if (sub.razorpay_subscription_id) {
+                    console.log('✅ Payment processed and subscription confirmed with autopay setup, triggering success callback');
+                  } else {
+                    console.log('✅ Payment processed and subscription confirmed (autopay will be attached in background)');
+                  }
+                  this.triggerPaymentSuccess();
                 }
-                this.triggerPaymentSuccess();
               } else {
                 console.warn('⚠️ Payment processed but subscription not found yet, triggering success anyway');
                 this.triggerPaymentSuccess();

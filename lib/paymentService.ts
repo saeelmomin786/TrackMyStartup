@@ -14,9 +14,8 @@ export interface PaymentOrder {
 
 export interface PaymentResponse {
   razorpay_payment_id: string;
-  razorpay_order_id?: string; // Optional for subscription payments
+  razorpay_order_id: string;
   razorpay_signature: string;
-  razorpay_subscription_id?: string; // Present for subscription payments
 }
 
 export interface SubscriptionPlan {
@@ -463,40 +462,17 @@ class PaymentService {
           return;
         }
 
-        // Create Razorpay subscription for Pay Now (immediate charge + autopay setup)
-        console.log(`💰 Creating Razorpay subscription for Pay Now:`);
-        console.log(`   Base amount: ₹${baseAmount}`);
-        console.log(`   Tax (${taxPercentage}%): ₹${taxAmount}`);
-        console.log(`   Final amount: ₹${finalAmount}`);
-        console.log(`   Amount in paise: ${Math.round(finalAmount * 100)}`);
-        
-        const subscriptionResponse = await fetch(`/api/razorpay/create-subscription`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            user_id: userId,
-            final_amount: finalAmount,
-            interval: plan.interval,
-            plan_name: plan.name,
-            customer_notify: 1,
-          }),
-        });
+        // Create one-time order for the discounted amount
+        const order = await this.createOrder(plan, userId, finalAmount);
 
-        if (!subscriptionResponse.ok) {
-          const errorText = await subscriptionResponse.text();
-          throw new Error(`Failed to create subscription: ${errorText}`);
-        }
-
-        const subscription = await subscriptionResponse.json();
-
-        // Razorpay options for subscription checkout (immediate charge + autopay)
+        // Razorpay options for one-time payment
         const options = {
           key: RAZORPAY_KEY_ID,
-          subscription_id: subscription.id,
+          amount: Math.round(finalAmount * 100), // Convert to paise
+          currency: plan.currency,
+          order_id: order.id,
           name: 'Track My Startup',
-          description: `Subscription: ${plan.name} - First payment: ${plan.currency} ${finalAmount.toFixed(2)}`,
+          description: `Subscription: ${plan.name}`,
           prefill: {
             name: currentUser?.name || 'Startup User',
             email: currentUser?.email || 'user@startup.com',
@@ -506,68 +482,53 @@ class PaymentService {
           },
           handler: async (response: PaymentResponse) => {
             try {
-              console.log('Subscription payment handler triggered:', response);
-              console.log('Payment ID:', response.razorpay_payment_id);
-              console.log('Subscription ID:', response.razorpay_subscription_id || subscription.id);
+              console.log('Payment handler triggered:', response);
               
-              // Prepare tax information
+              // Prepare tax information for verification
               const taxInfo = taxPercentage > 0 ? {
                 taxPercentage: taxPercentage,
                 taxAmount: taxAmount,
                 totalAmountWithTax: finalAmount
               } : undefined;
               
-              // Get Razorpay subscription ID for autopay
-              const subscriptionId = response.razorpay_subscription_id || subscription.id;
-              
-              // Create user subscription record with Razorpay subscription ID (payment already processed by Razorpay)
-              await this.createUserSubscription(plan, userId, couponCode, taxInfo, subscriptionId);
+              // Verify the first payment with tax information
+              await this.verifyPayment(
+                response,
+                plan,
+                userId,
+                couponCode,
+                taxInfo,
+                { finalAmount, interval: plan.interval, planName: plan.name }
+              );
               
               // Wait a moment for Supabase to commit the transaction
               await new Promise(resolve => setTimeout(resolve, 500));
               
-              // Verify subscription was created with autopay setup before triggering success
-              // Check the same fields that checkPaymentStatus uses
+              // Verify subscription was created before triggering success
               const { data: verifySub } = await supabase
                 .from('user_subscriptions')
-                .select('id, status, current_period_end, razorpay_subscription_id')
+                .select('id, status')
                 .eq('user_id', userId)
                 .eq('status', 'active')
                 .limit(1);
               
               if (verifySub && verifySub.length > 0) {
-                const sub = verifySub[0];
-                const now = new Date();
-                const periodEnd = new Date(sub.current_period_end);
-                const isExpired = periodEnd < now;
-                
-                console.log('🔍 Verification check:', {
-                  subscriptionId: sub.id,
-                  status: sub.status,
-                  periodEnd: periodEnd.toISOString(),
-                  isExpired,
-                  hasRazorpayId: !!sub.razorpay_subscription_id
-                });
-                
-                if (isExpired) {
-                  console.warn('⚠️ Subscription found but already expired, triggering success anyway (should not happen)');
-                  this.triggerPaymentSuccess();
-                } else {
-                  if (sub.razorpay_subscription_id) {
-                    console.log('✅ Payment processed and subscription confirmed with autopay setup, triggering success callback');
-                  } else {
-                    console.log('✅ Payment processed and subscription confirmed (autopay will be attached in background)');
-                  }
-                  this.triggerPaymentSuccess();
-                }
+                console.log('✅ Payment verified and subscription confirmed, triggering success callback');
+                this.triggerPaymentSuccess();
               } else {
-                console.warn('⚠️ Payment processed but subscription not found yet, triggering success anyway');
+                console.warn('⚠️ Payment verified but subscription not found yet, triggering success anyway');
                 this.triggerPaymentSuccess();
               }
               
+              // Background subscription creation (non-blocking) always for Pay Now
+              console.log('🔄 Creating subscription for future autopay in background...');
+              this.createSubscription(plan, userId).catch(error => {
+                console.error('⚠️ Background subscription creation failed (non-critical):', error);
+              });
+              
               resolve(true);
             } catch (error) {
-              console.error('Payment processing failed:', error);
+              console.error('Payment verification failed:', error);
               reject(error);
             }
           },
@@ -579,7 +540,7 @@ class PaymentService {
           },
         };
 
-        // Open Razorpay subscription checkout (charges immediately + sets up autopay)
+        // Open Razorpay checkout
         const razorpay = new (window as any).Razorpay(options);
         razorpay.open();
 
@@ -688,8 +649,7 @@ class PaymentService {
     plan: SubscriptionPlan,
     userId: string,
     couponCode?: string,
-    taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number },
-    razorpaySubscriptionId?: string
+    taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number }
   ): Promise<UserSubscription> {
     try {
       const { data: existing, error: existingError } = await supabase
@@ -739,11 +699,6 @@ class PaymentService {
         subscriptionData.tax_percentage = taxInfo.taxPercentage;
         subscriptionData.tax_amount = taxInfo.taxAmount;
         subscriptionData.total_amount_with_tax = taxInfo.totalAmountWithTax;
-      }
-
-      // Add Razorpay subscription ID if provided (for autopay setup)
-      if (razorpaySubscriptionId) {
-        subscriptionData.razorpay_subscription_id = razorpaySubscriptionId;
       }
 
       console.log('Creating user subscription with data:', subscriptionData);

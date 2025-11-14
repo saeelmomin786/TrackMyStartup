@@ -52,8 +52,29 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [showOnlyValidated, setShowOnlyValidated] = useState(false);
   const [showOnlyDueDiligence, setShowOnlyDueDiligence] = useState(false);
   const [dueDiligenceStartups, setDueDiligenceStartups] = useState<Set<number>>(new Set<number>());
-  const addStartupToDueDiligenceSet = (startupId: number) => {
+  const [approvedDueDiligenceStartups, setApprovedDueDiligenceStartups] = useState<Set<number>>(new Set<number>());
+  const addStartupToDueDiligenceSet = (startupId: number, isApproved: boolean = false) => {
     setDueDiligenceStartups(prev => {
+      if (prev.has(startupId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.add(startupId);
+      return next;
+    });
+    if (isApproved) {
+      setApprovedDueDiligenceStartups(prev => {
+        if (prev.has(startupId)) {
+          return prev;
+        }
+        const next = new Set(prev);
+        next.add(startupId);
+        return next;
+      });
+    }
+  };
+  const markDueDiligenceApproved = (startupId: number) => {
+    setApprovedDueDiligenceStartups(prev => {
       if (prev.has(startupId)) {
         return prev;
       }
@@ -130,6 +151,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     const loadDueDiligenceAccess = async () => {
       if (!currentUser?.id) {
         setDueDiligenceStartups(new Set<number>());
+        setApprovedDueDiligenceStartups(new Set<number>());
         return;
       }
       try {
@@ -140,15 +162,25 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           .in('status', ['pending', 'completed']);
         if (error) throw error;
 
-        const ids = new Set<number>(
-          (data || [])
-            .map(record => Number(record.startup_id))
-            .filter(id => !Number.isNaN(id))
-        );
-        setDueDiligenceStartups(ids);
+        const all = new Set<number>();
+        const approved = new Set<number>();
+        (data || []).forEach(record => {
+          const startupId = Number(record.startup_id);
+          if (Number.isNaN(startupId)) {
+            return;
+          }
+          all.add(startupId);
+          if ((record.status as string) === 'completed') {
+            approved.add(startupId);
+          }
+        });
+
+        setDueDiligenceStartups(all);
+        setApprovedDueDiligenceStartups(approved);
       } catch (error) {
         console.error('Error loading due diligence access:', error);
         setDueDiligenceStartups(new Set<number>());
+        setApprovedDueDiligenceStartups(new Set<number>());
       }
     };
 
@@ -1814,7 +1846,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       const approved = await paymentService.hasApprovedDueDiligence(currentUser.id, String(startup.id));
       if (approved) {
-        addStartupToDueDiligenceSet(startup.id);
+        addStartupToDueDiligenceSet(startup.id, true);
         (onViewStartup as any)(startup.id, 'dashboard');
         return;
       }
@@ -3500,6 +3532,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               }
               
               return filteredPitches.map(inv => {
+                const hasApprovedDueDiligenceAccess = approvedDueDiligenceStartups.has(inv.id);
+                const dueDiligenceButtonClasses = `flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  hasApprovedDueDiligenceAccess
+                    ? 'border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 hover:text-white hover:border-blue-700'
+                    : 'border border-slate-200 bg-white text-slate-700 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300'
+                }`;
                 const embedUrl = investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
                 return (
                   <div key={inv.id} className="bg-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 overflow-hidden">
@@ -3609,7 +3647,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
                         <button
                           onClick={() => handleDueDiligenceClick(inv)}
-                          className="flex-1 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 transition-all duration-200 border border-slate-200 bg-white px-3 py-2 rounded-lg text-sm font-medium"
+                          className={dueDiligenceButtonClasses}
                         >
                           <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

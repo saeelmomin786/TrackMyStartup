@@ -10,6 +10,7 @@ import { Eye, Users } from 'lucide-react';
 import ProfilePage from './ProfilePage';
 import InvestorView from './InvestorView';
 import StartupHealthView from './StartupHealthView';
+import { paymentService } from '../lib/paymentService';
 
 interface InvestmentAdvisorViewProps {
   currentUser: AuthUser | null;
@@ -49,6 +50,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [favoritedPitches, setFavoritedPitches] = useState<Set<number>>(new Set());
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyValidated, setShowOnlyValidated] = useState(false);
+  const [showOnlyDueDiligence, setShowOnlyDueDiligence] = useState(false);
+  const [dueDiligenceStartups, setDueDiligenceStartups] = useState<Set<number>>(new Set<number>());
+  const addStartupToDueDiligenceSet = (startupId: number) => {
+    setDueDiligenceStartups(prev => {
+      if (prev.has(startupId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.add(startupId);
+      return next;
+    });
+  };
   const [isLoadingPitches, setIsLoadingPitches] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [notifications, setNotifications] = useState<Array<{id: string, message: string, type: 'info' | 'success' | 'warning' | 'error', timestamp: Date}>>([]);
@@ -112,6 +125,35 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
     loadActiveFundraisingStartups();
   }, [activeTab]);
+
+  useEffect(() => {
+    const loadDueDiligenceAccess = async () => {
+      if (!currentUser?.id) {
+        setDueDiligenceStartups(new Set<number>());
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from('due_diligence_requests')
+          .select('startup_id, status')
+          .eq('user_id', currentUser.id)
+          .in('status', ['pending', 'completed']);
+        if (error) throw error;
+
+        const ids = new Set<number>(
+          (data || [])
+            .map(record => Number(record.startup_id))
+            .filter(id => !Number.isNaN(id))
+        );
+        setDueDiligenceStartups(ids);
+      } catch (error) {
+        console.error('Error loading due diligence access:', error);
+        setDueDiligenceStartups(new Set<number>());
+      }
+    };
+
+    loadDueDiligenceAccess();
+  }, [currentUser?.id]);
 
   // Shuffle pitches when discovery tab is active
   useEffect(() => {
@@ -1763,9 +1805,27 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     }
   };
 
-  const handleDueDiligenceClick = (startup: ActiveFundraisingStartup) => {
-    // Open full Startup Dashboard (read-only) for advisor-led due diligence review
-    (onViewStartup as any)(startup.id, 'dashboard');
+  const handleDueDiligenceClick = async (startup: ActiveFundraisingStartup) => {
+    try {
+      if (!currentUser?.id) {
+        alert('Please log in to request due diligence access.');
+        return;
+      }
+
+      const approved = await paymentService.hasApprovedDueDiligence(currentUser.id, String(startup.id));
+      if (approved) {
+        addStartupToDueDiligenceSet(startup.id);
+        (onViewStartup as any)(startup.id, 'dashboard');
+        return;
+      }
+
+      await paymentService.createPendingDueDiligenceIfNeeded(currentUser.id, String(startup.id));
+      addStartupToDueDiligenceSet(startup.id);
+      alert('Due diligence request sent. Access will unlock once the startup approves.');
+    } catch (error) {
+      console.error('Due diligence request failed:', error);
+      alert('Failed to send due diligence request. Please try again.');
+    }
   };
 
   const handleMakeOfferClick = (startup: ActiveFundraisingStartup) => {
@@ -3283,9 +3343,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     onClick={() => {
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(false);
                     }}
                     className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                      !showOnlyValidated && !showOnlyFavorites
+                      !showOnlyValidated && !showOnlyFavorites && !showOnlyDueDiligence
                         ? 'bg-blue-600 text-white shadow-blue-200' 
                         : 'bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-600 border border-slate-200'
                     }`}
@@ -3300,14 +3361,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     onClick={() => {
                       setShowOnlyValidated(true);
                       setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(false);
                     }}
                     className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                      showOnlyValidated && !showOnlyFavorites
+                      showOnlyValidated && !showOnlyFavorites && !showOnlyDueDiligence
                         ? 'bg-green-600 text-white shadow-green-200' 
                         : 'bg-white text-slate-600 hover:bg-green-50 hover:text-green-600 border border-slate-200'
                     }`}
                   >
-                    <svg className={`h-3 w-3 sm:h-4 sm:w-4 ${showOnlyValidated && !showOnlyFavorites ? 'fill-current' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className={`h-3 w-3 sm:h-4 sm:w-4 ${showOnlyValidated && !showOnlyFavorites && !showOnlyDueDiligence ? 'fill-current' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     <span className="hidden sm:inline">Verified</span>
@@ -3317,6 +3379,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     onClick={() => {
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(true);
+                      setShowOnlyDueDiligence(false);
                     }}
                     className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
                       showOnlyFavorites
@@ -3328,6 +3391,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                     </svg>
                     <span className="hidden sm:inline">Favorites</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowOnlyValidated(false);
+                      setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(true);
+                    }}
+                    className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
+                      showOnlyDueDiligence
+                        ? 'bg-purple-600 text-white shadow-purple-200' 
+                        : 'bg-white text-slate-600 hover:bg-purple-50 hover:text-purple-600 border border-slate-200'
+                    }`}
+                  >
+                    <svg className={`h-3 w-3 sm:h-4 sm:w-4 ${showOnlyDueDiligence ? 'fill-current' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <span className="hidden sm:inline">Due Diligence</span>
                   </button>
                 </div>
                 
@@ -3377,6 +3458,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               if (showOnlyFavorites) {
                 filteredPitches = filteredPitches.filter(inv => favoritedPitches.has(inv.id));
               }
+
+              if (showOnlyDueDiligence) {
+                filteredPitches = filteredPitches.filter(inv => dueDiligenceStartups.has(inv.id));
+              }
               
               if (filteredPitches.length === 0) {
                 return (
@@ -3391,8 +3476,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           : showOnlyValidated 
                             ? 'No Verified Startups' 
                             : showOnlyFavorites 
-                              ? 'No Favorited Pitches' 
-                              : 'No Active Fundraising'
+                              ? 'No Favorited Pitches'
+                              : showOnlyDueDiligence
+                                ? 'No Due Diligence Access Yet'
+                                : 'No Active Fundraising'
                         }
                       </h3>
                       <p className="text-slate-500">
@@ -3401,8 +3488,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           : showOnlyValidated
                             ? 'No Startup Nation verified startups are currently fundraising. Try removing the verification filter or check back later.'
                             : showOnlyFavorites 
-                              ? 'Start favoriting pitches to see them here.' 
-                              : 'No startups are currently fundraising. Check back later for new opportunities.'
+                              ? 'Start favoriting pitches to see them here.'
+                              : showOnlyDueDiligence
+                                ? 'Once due diligence access is granted for a startup, it will appear here for quick access.'
+                                : 'No startups are currently fundraising. Check back later for new opportunities.'
                         }
                       </p>
                     </div>
@@ -3525,7 +3614,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                           </svg>
-                          Due Diligence (€150)
+                          Due Diligence
                         </button>
 
                         <button

@@ -188,11 +188,23 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [favoritedPitches, setFavoritedPitches] = useState<Set<number>>(new Set());
     const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
     const [showOnlyValidated, setShowOnlyValidated] = useState(false);
+    const [showOnlyDueDiligence, setShowOnlyDueDiligence] = useState(false);
+    const [dueDiligenceStartups, setDueDiligenceStartups] = useState<Set<number>>(new Set<number>());
+    const addStartupToDueDiligenceSet = (startupId: number) => {
+      setDueDiligenceStartups(prev => {
+        if (prev.has(startupId)) {
+          return prev;
+        }
+        const next = new Set(prev);
+        next.add(startupId);
+        return next;
+      });
+    };
     const [isLoadingPitches, setIsLoadingPitches] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     
     // Discovery sub-tab state
-    const [discoverySubTab, setDiscoverySubTab] = useState<'all' | 'verified' | 'favorites' | 'recommended' | 'co-investment'>('all');
+    const [discoverySubTab, setDiscoverySubTab] = useState<'all' | 'verified' | 'favorites' | 'due-diligence' | 'recommended' | 'co-investment'>('all');
     
     // Co-investment opportunities state (for discover page)
     const [coInvestmentOpportunities, setCoInvestmentOpportunities] = useState<any[]>([]);
@@ -1078,6 +1090,35 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         loadCoInvestmentOpportunities();
     }, [activeTab, discoverySubTab, currentUser?.id]);
 
+    useEffect(() => {
+        const loadDueDiligenceAccess = async () => {
+            if (!currentUser?.id) {
+                setDueDiligenceStartups(new Set<number>());
+                return;
+            }
+            try {
+                const { data, error } = await supabase
+                    .from('due_diligence_requests')
+                    .select('startup_id, status')
+                    .eq('user_id', currentUser.id)
+                    .in('status', ['pending', 'completed']);
+                if (error) throw error;
+
+                const ids = new Set<number>(
+                    (data || [])
+                        .map(record => Number(record.startup_id))
+                        .filter(id => !Number.isNaN(id))
+                );
+                setDueDiligenceStartups(ids);
+            } catch (error) {
+                console.error('Error loading due diligence access:', error);
+                setDueDiligenceStartups(new Set<number>());
+            }
+        };
+
+        loadDueDiligenceAccess();
+    }, [currentUser?.id]);
+
     const totalFunding = startups.reduce((acc, s) => acc + s.totalFunding, 0);
     const totalRevenue = startups.reduce((acc, s) => acc + s.totalRevenue, 0);
     const compliantCount = startups.filter(s => s.complianceStatus === ComplianceStatus.Compliant).length;
@@ -1103,6 +1144,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             // If an approved/completed request already exists, allow access immediately
             const approved = await paymentService.hasApprovedDueDiligence(currentUser.id, String(startup.id));
             if (approved) {
+                addStartupToDueDiligenceSet(startup.id);
                 // Open full Startup Dashboard (read-only) for due diligence review
                 // Pass target tab hint to ensure dashboard is shown first
                 (onViewStartup as any)(startup.id, 'dashboard');
@@ -1110,6 +1152,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             }
             // Otherwise, create a pending request (idempotent)
             await paymentService.createPendingDueDiligenceIfNeeded(currentUser.id, String(startup.id));
+            addStartupToDueDiligenceSet(startup.id);
             alert('Due diligence request sent to the startup. You will gain access once the startup accepts.');
         } catch (e) {
             console.error('Due diligence request failed:', e);
@@ -1670,6 +1713,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setDiscoverySubTab('all');
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(false);
                     }}
                   className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
                     discoverySubTab === 'all'
@@ -1686,6 +1730,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setDiscoverySubTab('verified');
                       setShowOnlyValidated(true);
                       setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(false);
                     }}
                   className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
                     discoverySubTab === 'verified'
@@ -1702,6 +1747,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setDiscoverySubTab('favorites');
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(true);
+                      setShowOnlyDueDiligence(false);
                     }}
                   className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
                     discoverySubTab === 'favorites'
@@ -1715,9 +1761,27 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 
                 <button
                   onClick={() => {
+                    setDiscoverySubTab('due-diligence');
+                    setShowOnlyValidated(false);
+                    setShowOnlyFavorites(false);
+                    setShowOnlyDueDiligence(true);
+                  }}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                    discoverySubTab === 'due-diligence'
+                      ? 'border-purple-500 text-purple-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Shield className="h-4 w-4" />
+                  Due Diligence
+                </button>
+                
+                <button
+                  onClick={() => {
                     setDiscoverySubTab('recommended');
                     setShowOnlyValidated(false);
                     setShowOnlyFavorites(false);
+                    setShowOnlyDueDiligence(false);
                   }}
                   className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
                     discoverySubTab === 'recommended'
@@ -1734,6 +1798,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setDiscoverySubTab('co-investment');
                     setShowOnlyValidated(false);
                     setShowOnlyFavorites(false);
+                    setShowOnlyDueDiligence(false);
                   }}
                   className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
                     discoverySubTab === 'co-investment'
@@ -1753,8 +1818,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 <span className="text-xs sm:text-sm font-medium">
                   {discoverySubTab === 'recommended' 
                     ? `${recommendations.length} recommended startups`
-                    : discoverySubTab === 'co-investment'
-                    ? `${coInvestmentOpportunities.length} co-investment opportunities`
+                  : discoverySubTab === 'co-investment'
+                  ? `${coInvestmentOpportunities.length} co-investment opportunities`
+                  : discoverySubTab === 'due-diligence'
+                    ? `${dueDiligenceStartups.size} due diligence requests`
                     : `${activeFundraisingStartups.length} active pitches`}
                 </span>
               </div>
@@ -2161,7 +2228,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             </div>
                                             
                             {/* Enhanced Action Buttons */}
-                            <div className="flex items-center gap-4 mt-6">
+              <div className="flex items-center gap-4 mt-6">
                               {!isViewOnly && (
                                 <Button
                                   size="sm"
@@ -2295,6 +2362,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               if (showOnlyFavorites) {
                 filteredPitches = filteredPitches.filter(inv => favoritedPitches.has(inv.id));
               }
+
+              if (showOnlyDueDiligence) {
+                filteredPitches = filteredPitches.filter(inv => dueDiligenceStartups.has(inv.id));
+              }
               
               if (filteredPitches.length === 0) {
                 // Check if all pitches have offers submitted
@@ -2315,10 +2386,12 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           : showOnlyValidated 
                             ? 'No Verified Startups' 
                             : showOnlyFavorites 
-                              ? 'No Favorited Pitches' 
-                              : allPitchesHaveOffers 
-                                ? 'All Offers Submitted!' 
-                                : 'No Active Fundraising'
+                              ? 'No Favorited Pitches'
+                              : showOnlyDueDiligence
+                                ? 'No Due Diligence Access Yet'
+                                : allPitchesHaveOffers 
+                                  ? 'All Offers Submitted!' 
+                                  : 'No Active Fundraising'
                         }
                       </h3>
                       <p className="text-slate-500">
@@ -2327,10 +2400,12 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           : showOnlyValidated
                             ? 'No Startup Nation verified startups are currently fundraising. Try removing the verification filter or check back later.'
                             : showOnlyFavorites 
-                              ? 'Start favoriting pitches to see them here.' 
-                              : allPitchesHaveOffers
-                                ? 'You\'ve submitted offers for all available startups. Check your Dashboard → Recent Activity to manage your offers.'
-                                : 'No startups are currently fundraising. Check back later for new opportunities.'
+                              ? 'Start favoriting pitches to see them here.'
+                              : showOnlyDueDiligence
+                                ? 'Due diligence requests you send will appear here immediately, even before startups approve them.'
+                                : allPitchesHaveOffers
+                                  ? 'You\'ve submitted offers for all available startups. Check your Dashboard → Recent Activity to manage your offers.'
+                                  : 'No startups are currently fundraising. Check back later for new opportunities.'
                         }
                       </p>
                       {allPitchesHaveOffers && (

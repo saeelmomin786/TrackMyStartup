@@ -127,6 +127,37 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     loadActiveFundraisingStartups();
   }, [activeTab]);
 
+  // Load investment advisor's own favorites from database
+  useEffect(() => {
+    const loadFavorites = async () => {
+      if (!currentUser?.id) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('investor_favorites')
+          .select('startup_id')
+          .eq('investor_id', currentUser.id);
+        
+        if (error) {
+          // If table doesn't exist yet, silently fail (table will be created by SQL script)
+          if (error.code !== 'PGRST116') {
+            console.error('Error loading favorites:', error);
+          }
+          return;
+        }
+        
+        if (data) {
+          const favoriteIds = new Set(data.map((fav: any) => fav.startup_id));
+          setFavoritedPitches(favoriteIds);
+        }
+      } catch (error) {
+        console.error('Error loading favorites:', error);
+      }
+    };
+
+    loadFavorites();
+  }, [currentUser?.id]);
+
   useEffect(() => {
     const loadDueDiligenceAccess = async () => {
       if (!currentUser?.id) {
@@ -1782,16 +1813,83 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   };
 
   // Discovery tab handlers
-  const handleFavoriteToggle = (startupId: number) => {
-    setFavoritedPitches(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(startupId)) {
-        newSet.delete(startupId);
+  const handleFavoriteToggle = async (startupId: number) => {
+    console.log('❤️ handleFavoriteToggle called for startup ID:', startupId);
+    console.log('❤️ Current user ID:', currentUser?.id);
+    console.log('❤️ Current user role:', currentUser?.role);
+    
+    if (!currentUser?.id) {
+      alert('Please log in to favorite startups.');
+      return;
+    }
+
+    const isCurrentlyFavorited = favoritedPitches.has(startupId);
+    console.log('❤️ Is currently favorited:', isCurrentlyFavorited);
+    
+    try {
+      if (isCurrentlyFavorited) {
+        // Remove favorite
+        console.log('❤️ Removing favorite...');
+        const { error, data } = await supabase
+          .from('investor_favorites')
+          .delete()
+          .eq('investor_id', currentUser.id)
+          .eq('startup_id', startupId)
+          .select();
+        
+        console.log('❤️ Delete result:', { error, data });
+        
+        if (error) {
+          console.error('❤️ Delete error details:', error);
+          throw error;
+        }
+        
+        setFavoritedPitches(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(startupId);
+          console.log('❤️ Updated favoritedPitches after delete:', Array.from(newSet));
+          return newSet;
+        });
+        console.log('❤️ Favorite removed successfully');
       } else {
-        newSet.add(startupId);
+        // Add favorite
+        console.log('❤️ Adding favorite...');
+        const { error, data } = await supabase
+          .from('investor_favorites')
+          .insert([{
+            investor_id: currentUser.id,
+            startup_id: startupId
+          }])
+          .select();
+        
+        console.log('❤️ Insert result:', { error, data });
+        
+        if (error) {
+          console.error('❤️ Insert error details:', error);
+          console.error('❤️ Error code:', error.code);
+          console.error('❤️ Error message:', error.message);
+          console.error('❤️ Error details:', error.details);
+          throw error;
+        }
+        
+        setFavoritedPitches(prev => {
+          const newSet = new Set(prev);
+          newSet.add(startupId);
+          console.log('❤️ Updated favoritedPitches after insert:', Array.from(newSet));
+          return newSet;
+        });
+        console.log('❤️ Favorite added successfully');
       }
-      return newSet;
-    });
+    } catch (error: any) {
+      console.error('❤️ Error toggling favorite:', error);
+      console.error('❤️ Error type:', typeof error);
+      console.error('❤️ Error object:', JSON.stringify(error, null, 2));
+      
+      // Show more detailed error message
+      const errorMessage = error?.message || error?.details || 'Unknown error occurred';
+      const errorCode = error?.code || 'UNKNOWN';
+      alert(`Failed to update favorite. Error: ${errorCode} - ${errorMessage}\n\nPlease make sure you have run the FIX_INVESTMENT_ADVISOR_FAVORITES.sql script in your Supabase database.`);
+    }
   };
 
   const handleShare = async (startup: ActiveFundraisingStartup) => {

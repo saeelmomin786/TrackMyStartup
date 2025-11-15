@@ -64,10 +64,14 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
         investorStartups: Startup[];
         investorInvestments: any[];
         investorStartupAdditionRequests: any[];
+        investorFavorites: number[];
+        dueDiligenceRequests: any[];
     }>({
         investorStartups: [],
         investorInvestments: [],
-        investorStartupAdditionRequests: []
+        investorStartupAdditionRequests: [],
+        investorFavorites: [],
+        dueDiligenceRequests: []
     });
     const [investorOffers, setInvestorOffers] = useState<InvestmentOffer[]>([]);
     const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
@@ -189,6 +193,37 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
                 }
             }
 
+            // Fetch investor's favorites
+            let investorFavoritesList: number[] = [];
+            try {
+                const { data: favoritesData, error: favoritesError } = await supabase
+                    .from('investor_favorites')
+                    .select('startup_id')
+                    .eq('investor_id', investor.id);
+                
+                if (!favoritesError && favoritesData) {
+                    investorFavoritesList = favoritesData.map((fav: any) => fav.startup_id);
+                }
+            } catch (error) {
+                console.error('Error fetching investor favorites:', error);
+            }
+
+            // Fetch investor's due diligence requests
+            let dueDiligenceRequestsList: any[] = [];
+            try {
+                const { data: ddData, error: ddError } = await supabase
+                    .from('due_diligence_requests')
+                    .select('*')
+                    .eq('user_id', investor.id)
+                    .order('created_at', { ascending: false });
+                
+                if (!ddError && ddData) {
+                    dueDiligenceRequestsList = ddData;
+                }
+            } catch (error) {
+                console.error('Error fetching due diligence requests:', error);
+            }
+
             // Format investor for InvestorView
             const formattedInvestor = {
                 id: investor.id,
@@ -204,7 +239,9 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             setInvestorDashboardData({
                 investorStartups: investorStartupsList,
                 investorInvestments: [],
-                investorStartupAdditionRequests: allStartupAdditionRequests
+                investorStartupAdditionRequests: allStartupAdditionRequests,
+                investorFavorites: investorFavoritesList,
+                dueDiligenceRequests: dueDiligenceRequestsList
             });
             setViewingInvestorDashboard(true);
         } catch (error) {
@@ -222,7 +259,9 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             setInvestorDashboardData({
                 investorStartups: [],
                 investorInvestments: [],
-                investorStartupAdditionRequests: []
+                investorStartupAdditionRequests: [],
+                investorFavorites: [],
+                dueDiligenceRequests: []
             });
             setViewingInvestorDashboard(true);
         } finally {
@@ -231,17 +270,67 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
     };
 
     // Handler for viewing investment advisor dashboard
-    const handleViewInvestmentAdvisorDashboard = (advisor: User) => {
-        // Format advisor as AuthUser for InvestmentAdvisorView
-        const formattedAdvisor: AuthUser = {
-            id: advisor.id,
-            email: advisor.email,
-            name: advisor.name,
-            role: advisor.role as any,
-            investment_advisor_code: (advisor as any).investment_advisor_code || (advisor as any).investmentAdvisorCode || null
-        };
-        setSelectedInvestmentAdvisor(formattedAdvisor as any);
-        setViewingInvestmentAdvisorDashboard(true);
+    const handleViewInvestmentAdvisorDashboard = async (advisor: User) => {
+        setIsLoadingDashboard(true);
+        try {
+            // Fetch investment advisor's favorites
+            let advisorFavoritesList: number[] = [];
+            try {
+                const { data: favoritesData, error: favoritesError } = await supabase
+                    .from('investor_favorites')
+                    .select('startup_id')
+                    .eq('investor_id', advisor.id);
+                
+                if (!favoritesError && favoritesData) {
+                    advisorFavoritesList = favoritesData.map((fav: any) => fav.startup_id);
+                    console.log('📊 Admin: Loaded investment advisor favorites:', advisorFavoritesList.length);
+                }
+            } catch (error) {
+                console.error('Error fetching investment advisor favorites:', error);
+            }
+
+            // Fetch investment advisor's due diligence requests
+            let dueDiligenceRequestsList: any[] = [];
+            try {
+                const { data: ddData, error: ddError } = await supabase
+                    .from('due_diligence_requests')
+                    .select('*')
+                    .eq('user_id', advisor.id)
+                    .order('created_at', { ascending: false });
+                
+                if (!ddError && ddData) {
+                    dueDiligenceRequestsList = ddData;
+                    console.log('📊 Admin: Loaded investment advisor due diligence requests:', dueDiligenceRequestsList.length);
+                }
+            } catch (error) {
+                console.error('Error fetching investment advisor due diligence requests:', error);
+            }
+
+            // Format advisor as AuthUser for InvestmentAdvisorView
+            const formattedAdvisor: AuthUser = {
+                id: advisor.id,
+                email: advisor.email,
+                name: advisor.name,
+                role: advisor.role as any,
+                investment_advisor_code: (advisor as any).investment_advisor_code || (advisor as any).investmentAdvisorCode || null
+            };
+            setSelectedInvestmentAdvisor(formattedAdvisor as any);
+            setViewingInvestmentAdvisorDashboard(true);
+        } catch (error) {
+            console.error('Error loading investment advisor dashboard:', error);
+            // Still show the dashboard even if data loading fails
+            const formattedAdvisor: AuthUser = {
+                id: advisor.id,
+                email: advisor.email,
+                name: advisor.name,
+                role: advisor.role as any,
+                investment_advisor_code: (advisor as any).investment_advisor_code || (advisor as any).investmentAdvisorCode || null
+            };
+            setSelectedInvestmentAdvisor(formattedAdvisor as any);
+            setViewingInvestmentAdvisorDashboard(true);
+        } finally {
+            setIsLoadingDashboard(false);
+        }
     };
 
     // Close handlers
@@ -251,7 +340,9 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
         setInvestorDashboardData({
             investorStartups: [],
             investorInvestments: [],
-            investorStartupAdditionRequests: []
+            investorStartupAdditionRequests: [],
+            investorFavorites: [],
+            dueDiligenceRequests: []
         });
         setInvestorOffers([]);
     };

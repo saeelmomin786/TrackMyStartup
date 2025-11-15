@@ -65,3 +65,4 @@ Common errors:
 - The `investor_id` column stores the user's UUID (works for both roles)
 - RLS policies check the user's role to determine permissions
 
+

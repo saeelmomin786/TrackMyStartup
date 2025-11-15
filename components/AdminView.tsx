@@ -13,6 +13,11 @@ import { complianceRulesComprehensiveService } from '../lib/complianceRulesCompr
 import { complianceManagementService, AuditorType, GovernanceType, CompanyType, ComplianceRule } from '../lib/complianceManagementService';
 import ComplianceRulesComprehensiveManager from './ComplianceRulesComprehensiveManager';
 import FinancialModelAdmin from './FinancialModelAdmin';
+import InvestorView from './InvestorView';
+import InvestmentAdvisorView from './InvestmentAdvisorView';
+import { supabase } from '../lib/supabase';
+import { investmentService } from '../lib/database';
+import { AuthUser } from '../lib/auth';
 
 
 interface AdminViewProps {
@@ -49,6 +54,23 @@ const formatCurrency = (value: number, currency: string = 'USD') => new Intl.Num
 const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequests, investmentOffers, validationRequests, onProcessVerification, onProcessOffer, onProcessValidationRequest, onViewStartup }) => {
     const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
     const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
+    
+    // State for viewing investor and investment advisor dashboards
+    const [viewingInvestorDashboard, setViewingInvestorDashboard] = useState(false);
+    const [viewingInvestmentAdvisorDashboard, setViewingInvestmentAdvisorDashboard] = useState(false);
+    const [selectedInvestor, setSelectedInvestor] = useState<User | null>(null);
+    const [selectedInvestmentAdvisor, setSelectedInvestmentAdvisor] = useState<AuthUser | null>(null);
+    const [investorDashboardData, setInvestorDashboardData] = useState<{
+        investorStartups: Startup[];
+        investorInvestments: any[];
+        investorStartupAdditionRequests: any[];
+    }>({
+        investorStartups: [],
+        investorInvestments: [],
+        investorStartupAdditionRequests: []
+    });
+    const [investorOffers, setInvestorOffers] = useState<InvestmentOffer[]>([]);
+    const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
 
     const investorCount = useMemo(() => users.filter(u => u.role === 'Investor').length, [users]);
     const startupCount = useMemo(() => users.filter(u => u.role === 'Startup').length, [users]);
@@ -71,10 +93,178 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
         return users.filter(u => new Date(u.registrationDate) >= cutoffDate);
     }, [users, timeFilter]);
 
+    // Handler for viewing investor dashboard
+    const handleViewInvestorDashboard = async (investor: User) => {
+        setIsLoadingDashboard(true);
+        try {
+            // Load investor's offers
+            const investorOffersData = await investmentService.getUserInvestmentOffers(investor.email);
+            setInvestorOffers(investorOffersData);
+
+            // Fetch all startup addition requests
+            let allStartupAdditionRequests: any[] = [];
+            try {
+                const { data: requestsData, error: requestsError } = await supabase
+                    .from('startup_addition_requests')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                
+                if (!requestsError && requestsData) {
+                    allStartupAdditionRequests = requestsData;
+                }
+            } catch (error) {
+                console.error('Error fetching startup addition requests:', error);
+            }
+
+            // Get investor code
+            const investorCode = (investor as any).investor_code || (investor as any).investorCode;
+
+            // Filter investor's startups
+            const investorStartupIds = new Set<number>();
+            
+            if (investorCode) {
+                // Get startups from investment records
+                const { data: investorInvestments } = await supabase
+                    .from('investment_records')
+                    .select('startup_id')
+                    .eq('investor_code', investorCode);
+                
+                if (investorInvestments) {
+                    investorInvestments.forEach((inv: any) => {
+                        if (inv.startup_id) investorStartupIds.add(inv.startup_id);
+                    });
+                }
+            }
+
+            // Get startups from offers
+            if (investorOffersData.length > 0) {
+                investorOffersData.forEach(offer => {
+                    if (offer.startup_id) investorStartupIds.add(offer.startup_id);
+                });
+            }
+
+            // Augment with approved startup addition requests
+            let investorStartupsList = startups.filter(s => investorStartupIds.has(s.id));
+            
+            if (investorCode && Array.isArray(allStartupAdditionRequests)) {
+                const approvedNames = allStartupAdditionRequests
+                    .filter((r: any) => (r.status || 'pending') === 'approved' && (
+                        !investorCode || !r?.investor_code || (r.investor_code === investorCode || r.investorCode === investorCode)
+                    ))
+                    .map((r: any) => r.name)
+                    .filter((n: any) => !!n);
+                
+                if (approvedNames.length > 0) {
+                    const { data: approvedStartupsData } = await supabase
+                        .from('startups')
+                        .select('*')
+                        .in('name', approvedNames);
+                    
+                    if (approvedStartupsData) {
+                        const mappedApprovedStartups = approvedStartupsData.map((startup: any) => ({
+                            id: startup.id,
+                            name: startup.name,
+                            investmentType: startup.investment_type || 'Unknown',
+                            investmentValue: Number(startup.investment_value) || 0,
+                            equityAllocation: Number(startup.equity_allocation) || 0,
+                            currentValuation: Number(startup.current_valuation) || 0,
+                            complianceStatus: startup.compliance_status || 'Pending',
+                            sector: startup.sector || 'Unknown',
+                            totalFunding: Number(startup.total_funding) || 0,
+                            totalRevenue: Number(startup.total_revenue) || 0,
+                            registrationDate: startup.registration_date || '',
+                            founders: startup.founders || [],
+                            user_id: startup.user_id
+                        }));
+                        
+                        const byName: Record<string, any> = {};
+                        investorStartupsList.forEach((s: any) => {
+                            if (s && s.name) byName[s.name] = s;
+                        });
+                        mappedApprovedStartups.forEach((s: any) => {
+                            if (s && s.name) byName[s.name] = s;
+                        });
+                        investorStartupsList = Object.values(byName) as Startup[];
+                    }
+                }
+            }
+
+            // Format investor for InvestorView
+            const formattedInvestor = {
+                id: investor.id,
+                email: investor.email,
+                name: investor.name,
+                investorCode: investorCode || null,
+                investor_code: investorCode || null,
+                investment_advisor_code_entered: (investor as any).investment_advisor_code_entered || null,
+                role: 'Investor' as const
+            };
+
+            setSelectedInvestor(formattedInvestor as any);
+            setInvestorDashboardData({
+                investorStartups: investorStartupsList,
+                investorInvestments: [],
+                investorStartupAdditionRequests: allStartupAdditionRequests
+            });
+            setViewingInvestorDashboard(true);
+        } catch (error) {
+            console.error('Error loading investor dashboard:', error);
+            const formattedInvestor = {
+                id: investor.id,
+                email: investor.email,
+                name: investor.name,
+                investorCode: (investor as any).investor_code || (investor as any).investorCode || null,
+                investor_code: (investor as any).investor_code || (investor as any).investorCode || null,
+                investment_advisor_code_entered: (investor as any).investment_advisor_code_entered || null,
+                role: 'Investor' as const
+            };
+            setSelectedInvestor(formattedInvestor as any);
+            setInvestorDashboardData({
+                investorStartups: [],
+                investorInvestments: [],
+                investorStartupAdditionRequests: []
+            });
+            setViewingInvestorDashboard(true);
+        } finally {
+            setIsLoadingDashboard(false);
+        }
+    };
+
+    // Handler for viewing investment advisor dashboard
+    const handleViewInvestmentAdvisorDashboard = (advisor: User) => {
+        // Format advisor as AuthUser for InvestmentAdvisorView
+        const formattedAdvisor: AuthUser = {
+            id: advisor.id,
+            email: advisor.email,
+            name: advisor.name,
+            role: advisor.role as any,
+            investment_advisor_code: (advisor as any).investment_advisor_code || (advisor as any).investmentAdvisorCode || null
+        };
+        setSelectedInvestmentAdvisor(formattedAdvisor as any);
+        setViewingInvestmentAdvisorDashboard(true);
+    };
+
+    // Close handlers
+    const handleCloseInvestorDashboard = () => {
+        setViewingInvestorDashboard(false);
+        setSelectedInvestor(null);
+        setInvestorDashboardData({
+            investorStartups: [],
+            investorInvestments: [],
+            investorStartupAdditionRequests: []
+        });
+        setInvestorOffers([]);
+    };
+
+    const handleCloseInvestmentAdvisorDashboard = () => {
+        setViewingInvestmentAdvisorDashboard(false);
+        setSelectedInvestmentAdvisor(null);
+    };
+
     const renderTabContent = () => {
         switch (activeTab) {
             case 'dashboard': return <DashboardTab startups={startups} users={filteredUsers} onViewStartup={onViewStartup} timeFilter={timeFilter} setTimeFilter={setTimeFilter} />;
-            case 'userManagement': return <UserManagementTab users={users} />;
+            case 'userManagement': return <UserManagementTab users={users} onViewInvestor={handleViewInvestorDashboard} onViewInvestmentAdvisor={handleViewInvestmentAdvisorDashboard} />;
             case 'startupManagement': return <StartupManagementTab startups={startups} verificationRequests={verificationRequests} validationRequests={validationRequests} onProcessVerification={onProcessVerification} onProcessValidationRequest={onProcessValidationRequest} onViewStartup={onViewStartup} />;
             case 'investmentFlow': return <InvestmentFlowTab offers={investmentOffers} onProcessOffer={onProcessOffer} />;
             case 'compliance': return <ComplianceTab />;
@@ -138,6 +328,81 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
                     animation: fade-in 0.4s ease-in-out forwards;
                 }
             `}</style>
+
+            {/* Investor Dashboard Modal */}
+            {viewingInvestorDashboard && selectedInvestor && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+                    <div className="relative top-4 mx-auto p-4 border w-full max-w-7xl shadow-lg rounded-md bg-white">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-medium text-gray-900">
+                                Investor Dashboard - {selectedInvestor.name || 'Investor'}
+                            </h3>
+                            <button
+                                onClick={handleCloseInvestorDashboard}
+                                className="text-gray-400 hover:text-gray-600"
+                            >
+                                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="max-h-[80vh] overflow-y-auto">
+                            {isLoadingDashboard ? (
+                                <div className="flex items-center justify-center py-10">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary"></div>
+                                </div>
+                            ) : (
+                                <InvestorView
+                                    startups={investorDashboardData.investorStartups}
+                                    newInvestments={investorDashboardData.investorInvestments}
+                                    startupAdditionRequests={investorDashboardData.investorStartupAdditionRequests}
+                                    investmentOffers={investorOffers}
+                                    currentUser={selectedInvestor as any}
+                                    onViewStartup={() => {}}
+                                    onAcceptRequest={() => {}}
+                                    onMakeOffer={() => {}}
+                                    onUpdateOffer={() => {}}
+                                    onCancelOffer={() => {}}
+                                    isViewOnly={true}
+                                    initialTab="dashboard"
+                                />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Investment Advisor Dashboard Modal */}
+            {viewingInvestmentAdvisorDashboard && selectedInvestmentAdvisor && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+                    <div className="relative top-4 mx-auto p-4 border w-full max-w-7xl shadow-lg rounded-md bg-white">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-medium text-gray-900">
+                                Investment Advisor Dashboard - {selectedInvestmentAdvisor.name || 'Investment Advisor'}
+                            </h3>
+                            <button
+                                onClick={handleCloseInvestmentAdvisorDashboard}
+                                className="text-gray-400 hover:text-gray-600"
+                            >
+                                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="max-h-[80vh] overflow-y-auto">
+                            <InvestmentAdvisorView
+                                currentUser={selectedInvestmentAdvisor as AuthUser}
+                                users={users}
+                                startups={startups}
+                                investments={[]}
+                                offers={investmentOffers}
+                                interests={[]}
+                                onViewStartup={() => {}}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 };
@@ -235,7 +500,11 @@ const DashboardTab: React.FC<{
 );
 
 
-const UserManagementTab: React.FC<{ users: User[] }> = ({ users }) => {
+const UserManagementTab: React.FC<{ 
+    users: User[];
+    onViewInvestor?: (investor: User) => void;
+    onViewInvestmentAdvisor?: (advisor: User) => void;
+}> = ({ users, onViewInvestor, onViewInvestmentAdvisor }) => {
     const [roleFilter, setRoleFilter] = useState<UserRole | 'All'>('All');
     const [searchTerm, setSearchTerm] = useState('');
 
@@ -250,6 +519,14 @@ const UserManagementTab: React.FC<{ users: User[] }> = ({ users }) => {
         acc[user.role] = (acc[user.role] || 0) + 1;
         return acc;
     }, {} as Record<UserRole, number>);
+
+    const handleViewUser = (user: User) => {
+        if (user.role === 'Investor' && onViewInvestor) {
+            onViewInvestor(user);
+        } else if (user.role === 'Investment Advisor' && onViewInvestmentAdvisor) {
+            onViewInvestmentAdvisor(user);
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -324,10 +601,21 @@ const UserManagementTab: React.FC<{ users: User[] }> = ({ users }) => {
                                     </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{u.registrationDate}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <Button size="sm" variant="outline">
-                                            <Eye className="h-4 w-4 mr-1" />
-                                            View
-                                        </Button>
+                                        {(u.role === 'Investor' || u.role === 'Investment Advisor') ? (
+                                            <Button 
+                                                size="sm" 
+                                                variant="outline" 
+                                                onClick={() => handleViewUser(u)}
+                                            >
+                                                <Eye className="h-4 w-4 mr-1" />
+                                                View Dashboard
+                                            </Button>
+                                        ) : (
+                                            <Button size="sm" variant="outline" disabled>
+                                                <Eye className="h-4 w-4 mr-1" />
+                                                View
+                                            </Button>
+                                        )}
                                     </td>
                         </tr>
                     ))}

@@ -1516,9 +1516,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       {/* Header */}
       <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 py-4 sm:py-6">
             <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-gray-900">Investor Dashboard</h1>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Investor Dashboard</h1>
             </div>
             <div className="flex items-center">
               {!isViewOnly && (
@@ -1527,17 +1527,17 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                   console.log('🔍 InvestorView: Profile button clicked, setting showProfilePage to true');
                   setShowProfilePage(true);
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg transition-all duration-200 font-medium"
+                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg transition-all duration-200 font-medium text-sm sm:text-base"
                 title="View Profile"
               >
-                <User className="h-5 w-5" />
-                <span>Profile</span>
+                <User className="h-4 w-4 sm:h-5 sm:w-5" />
+                <span className="hidden sm:inline">Profile</span>
               </button>
               )}
             </div>
-            </div>
           </div>
-              </div>
+        </div>
+      </div>
 
       {/* Navigation Tabs */}
       <div className="bg-white rounded-lg shadow mb-6">
@@ -1600,15 +1600,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             <div className="lg:col-span-2 space-y-8">
                 {/* Approve Startup Requests */}
                  <Card>
-                    <h3 className="text-lg font-semibold mb-4 text-slate-700">Approve Startup Requests</h3>
+                    <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700">Approve Startup Requests</h3>
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Value</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Equity</th>
-                                    <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Status / Action</th>
+                                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Value</th>
+                                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Equity</th>
+                                    <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Status / Action</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-slate-200">
@@ -1622,10 +1622,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                     })
                                     .map(req => (
                                     <tr key={req.id}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{req.name}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatCurrency(req.investmentValue)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{req.equityAllocation}%</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-slate-900">{req.name}</td>
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">{formatCurrency(req.investmentValue)}</td>
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">{req.equityAllocation}%</td>
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
                                             {!isViewOnly && (
                                             <Button size="sm" onClick={() => onAcceptRequest(req.id)}>
                                                 <PlusCircle className="mr-2 h-4 w-4"/> Approve
@@ -1653,27 +1653,27 @@ const InvestorView: React.FC<InvestorViewProps> = ({
 
                 {/* My Startups Table */}
                 <Card>
-                    <h3 className="text-lg font-semibold mb-4 text-slate-700">My Startups</h3>
+                    <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700">My Startups</h3>
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Current Valuation</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Compliance Status</th>
-                                    <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Current Valuation</th>
+                                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Compliance Status</th>
+                                    <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-slate-200">
                                 {startups.map(startup => (
                                     <tr key={startup.id}>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="text-sm font-medium text-slate-900">{startup.name}</div>
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                                            <div className="text-xs sm:text-sm font-medium text-slate-900">{startup.name}</div>
                                             <div className="text-xs text-slate-500">{startup.sector}</div>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatCurrency(startup.currentValuation)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">{formatCurrency(startup.currentValuation)}</td>
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
                                             {!isViewOnly && (
                                                 <Button size="sm" variant="outline" onClick={() => onViewStartup(startup)}><Eye className="mr-2 h-4 w-4" /> View</Button>
                                             )}
@@ -1717,7 +1717,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             
             {/* Discovery Sub-Tabs */}
             <div className="mb-6 border-b border-gray-200">
-              <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Discovery Tabs">
+              <nav className="-mb-px flex space-x-2 sm:space-x-4 md:space-x-8 overflow-x-auto pb-2" aria-label="Discovery Tabs">
                   <button
                     onClick={() => {
                     setDiscoverySubTab('all');
@@ -1725,13 +1725,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                       setShowOnlyFavorites(false);
                       setShowOnlyDueDiligence(false);
                     }}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                     discoverySubTab === 'all'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  <Film className="h-4 w-4" />
+                  <Film className="h-3 w-3 sm:h-4 sm:w-4" />
                   All
                   </button>
                   
@@ -1742,14 +1742,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                       setShowOnlyFavorites(false);
                       setShowOnlyDueDiligence(false);
                     }}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                     discoverySubTab === 'verified'
                       ? 'border-green-500 text-green-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  <CheckCircle className="h-4 w-4" />
-                  Verified
+                  <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden xs:inline">Verified</span>
+                  <span className="xs:hidden">Ver</span>
                   </button>
                   
                   <button
@@ -1759,14 +1760,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                       setShowOnlyFavorites(true);
                       setShowOnlyDueDiligence(false);
                     }}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                     discoverySubTab === 'favorites'
                       ? 'border-red-500 text-red-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  <Heart className={`h-4 w-4 ${discoverySubTab === 'favorites' ? 'fill-current' : ''}`} />
-                  Favorites
+                  <Heart className={`h-3 w-3 sm:h-4 sm:w-4 ${discoverySubTab === 'favorites' ? 'fill-current' : ''}`} />
+                  <span className="hidden sm:inline">Favorites</span>
+                  <span className="sm:hidden">Fav</span>
                   </button>
                 
                 <button
@@ -1776,14 +1778,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setShowOnlyFavorites(false);
                     setShowOnlyDueDiligence(true);
                   }}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                     discoverySubTab === 'due-diligence'
                       ? 'border-purple-500 text-purple-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  <Shield className="h-4 w-4" />
-                  Due Diligence
+                  <Shield className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden md:inline">Due Diligence</span>
+                  <span className="md:hidden">DD</span>
                 </button>
                 
                 <button
@@ -1793,14 +1796,16 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setShowOnlyFavorites(false);
                     setShowOnlyDueDiligence(false);
                   }}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                     discoverySubTab === 'recommended'
                       ? 'border-purple-500 text-purple-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  <Star className="h-4 w-4" />
-                  Recommended Startups
+                  <Star className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden lg:inline">Recommended Startups</span>
+                  <span className="lg:hidden hidden md:inline">Recommended</span>
+                  <span className="md:hidden">Rec</span>
                 </button>
                 
                 <button
@@ -1810,22 +1815,23 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setShowOnlyFavorites(false);
                     setShowOnlyDueDiligence(false);
                   }}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                     discoverySubTab === 'co-investment'
                       ? 'border-orange-500 text-orange-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  <Users className="h-4 w-4" />
-                  Co-Investment Opportunities
+                  <Users className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="hidden md:inline">Co-Investment</span>
+                  <span className="md:hidden">Co-Invest</span>
                 </button>
               </nav>
                 </div>
                 
-            <div className="flex items-center justify-between bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border border-blue-100 gap-4 mb-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-gradient-to-r from-blue-50 to-purple-50 p-3 sm:p-4 rounded-xl border border-blue-100 gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div className="flex items-center gap-2 text-slate-600">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-xs sm:text-sm font-medium">
+                  <span className="text-xs sm:text-sm font-medium">
                   {discoverySubTab === 'recommended' 
                     ? `${recommendations.length} recommended startups`
                   : discoverySubTab === 'co-investment'
@@ -1843,7 +1849,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             </div>
           </div>
                 
-          <div className="space-y-8">
+          <div className="space-y-6 sm:space-y-8">
             {(() => {
               // Show co-investment opportunities if co-investment sub-tab is active
               if (discoverySubTab === 'co-investment') {
@@ -2197,11 +2203,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           </div>
 
                           {/* Enhanced Content Section */}
-                          <div className="p-6">
-                            <div className="flex items-start justify-between mb-4">
-                              <div className="flex-1">
-                                <h3 className="text-2xl font-bold text-slate-800 mb-2">{inv.name}</h3>
-                                <p className="text-slate-600 font-medium">{inv.sector}</p>
+                          <div className="p-4 sm:p-6">
+                            <div className="flex flex-col sm:flex-row items-start justify-between mb-4 gap-3">
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2 break-words">{inv.name}</h3>
+                                <p className="text-sm sm:text-base text-slate-600 font-medium">{inv.sector}</p>
                                 {rec?.advisor_name && rec.advisor_name !== '—' && (
                                   <p className="text-sm text-purple-600 mt-1">
                                     <Star className="h-3 w-3 inline mr-1" />
@@ -2238,19 +2244,19 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             </div>
                                             
                             {/* Enhanced Action Buttons */}
-              <div className="flex items-center gap-4 mt-6">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-6">
                               {!isViewOnly && (
                                 <Button
                                   size="sm"
                                   variant="secondary"
-                                  className={`!rounded-full !p-3 transition-all duration-200 ${
+                                  className={`!rounded-full !p-2 sm:!p-3 transition-all duration-200 ${
                                     favoritedPitches.has(inv.id)
                                       ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
                                       : 'hover:bg-red-50 hover:text-red-600 border border-slate-200'
                                   }`}
                                   onClick={() => handleFavoriteToggle(inv.id)}
                                 >
-                                  <Heart className={`h-5 w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
+                                  <Heart className={`h-4 w-4 sm:h-5 sm:w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
                                 </Button>
                               )}
 
@@ -2258,31 +2264,32 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleShare(inv)}
-                                className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
+                                className="!rounded-full !p-2 sm:!p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
                               >
-                                <Share2 className="h-5 w-5" />
+                                <Share2 className="h-4 w-4 sm:h-5 sm:w-5" />
                               </Button>
 
                               {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
-                                <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
-                                  <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200">
-                                    <FileText className="h-4 w-4 mr-2" /> View Deck
+                                <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[120px]">
+                                  <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 text-xs sm:text-sm">
+                                    <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden xs:inline">View </span>Deck
                                   </Button>
                                 </a>
                               )}
 
                               <button
                                 onClick={() => handleDueDiligenceClick(inv)}
-                                className={`flex-1 transition-all duration-200 border px-3 py-2 rounded-lg text-sm font-medium ${
+                                className={`flex-1 min-w-[140px] transition-all duration-200 border px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${
                                   approvedDueDiligenceStartups.has(inv.id)
                                     ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
                                     : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
                                 }`}
                               >
-                                <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                 </svg>
-                                {approvedDueDiligenceStartups.has(inv.id) ? 'Due Diligence Accepted' : 'Due Diligence'}
+                                <span className="hidden sm:inline">{approvedDueDiligenceStartups.has(inv.id) ? 'Due Diligence Accepted' : 'Due Diligence'}</span>
+                                <span className="sm:hidden">DD</span>
                               </button>
 
                               {(() => {
@@ -2313,9 +2320,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                       size="sm"
                                       variant="primary"
                                       onClick={() => handleMakeOfferClick(inv)}
-                                      className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg shadow-blue-200"
+                                      className="flex-1 min-w-[140px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg shadow-blue-200 text-xs sm:text-sm"
                                     >
-                                      <DollarSign className="h-4 w-4 mr-2" /> Make Offer
+                                      <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden sm:inline">Make </span>Offer
                                     </Button>
                                   ) : null;
                                 }
@@ -2324,13 +2331,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           </div>
 
                           {/* Enhanced Investment Details Footer */}
-                          <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-6 py-4 flex justify-between items-center border-t border-slate-200">
-                            <div className="text-base">
+                          <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 border-t border-slate-200">
+                            <div className="text-sm sm:text-base">
                               <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(inv.investmentValue)} for <span className="font-semibold text-purple-600">{inv.equityAllocation}%</span> equity
                             </div>
                             {inv.complianceStatus === ComplianceStatus.Compliant && (
                               <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
-                                <CheckCircle className="h-4 w-4" />
+                                <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
                                 <span className="text-xs font-semibold">Verified</span>
                               </div>
                             )}

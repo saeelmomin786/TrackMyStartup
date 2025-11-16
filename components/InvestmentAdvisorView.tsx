@@ -2023,20 +2023,20 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       {/* Header */}
       <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 py-4 sm:py-6">
             <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-gray-900">Investment Advisor Dashboard</h1>
+              <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-900">Investment Advisor Dashboard</h1>
             </div>
             <div className="flex items-center">
               <button
                 onClick={() => setShowProfilePage(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg transition-all duration-200 font-medium"
+                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg transition-all duration-200 font-medium text-sm sm:text-base"
                 title="View Profile"
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
-                <span>Profile</span>
+                <span className="hidden sm:inline">Profile</span>
               </button>
             </div>
           </div>
@@ -2147,7 +2147,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         <div className="space-y-6">
           {/* Dashboard Overview */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
                   <div className="w-8 h-8 bg-blue-100 rounded-md flex items-center justify-center">
@@ -2156,14 +2156,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </svg>
                   </div>
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">Total Investors</p>
-                  <p className="text-2xl font-semibold text-gray-900">{myInvestors.length}</p>
+                <div className="ml-3 sm:ml-4">
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">Total Investors</p>
+                  <p className="text-xl sm:text-2xl font-semibold text-gray-900">{myInvestors.length}</p>
                 </div>
               </div>
             </div>
             
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
                   <div className="w-8 h-8 bg-green-100 rounded-md flex items-center justify-center">
@@ -2172,14 +2172,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </svg>
                   </div>
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">Total Startups</p>
-                  <p className="text-2xl font-semibold text-gray-900">{myStartups.length}</p>
+                <div className="ml-3 sm:ml-4">
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">Total Startups</p>
+                  <p className="text-xl sm:text-2xl font-semibold text-gray-900">{myStartups.length}</p>
                 </div>
               </div>
             </div>
             
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
                   <div className="w-8 h-8 bg-yellow-100 rounded-md flex items-center justify-center">
@@ -2188,14 +2188,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </svg>
                   </div>
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">Pending Requests</p>
-                  <p className="text-2xl font-semibold text-gray-900">{serviceRequests.length}</p>
+                <div className="ml-3 sm:ml-4">
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">Pending Requests</p>
+                  <p className="text-xl sm:text-2xl font-semibold text-gray-900">{serviceRequests.length}</p>
                 </div>
               </div>
             </div>
             
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
                   <div className="w-8 h-8 bg-purple-100 rounded-md flex items-center justify-center">
@@ -2204,9 +2204,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </svg>
                   </div>
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">Active Offers</p>
-                  <p className="text-2xl font-semibold text-gray-900">{offersMade.length}</p>
+                <div className="ml-3 sm:ml-4">
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">Active Offers</p>
+                  <p className="text-xl sm:text-2xl font-semibold text-gray-900">{offersMade.length}</p>
                 </div>
               </div>
             </div>
@@ -2214,26 +2214,26 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           
           {/* Service Requests Section */}
           <div className="bg-white rounded-lg shadow">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Service Requests</h3>
-              <p className="text-sm text-gray-600 mb-4">
+            <div className="p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">Service Requests</h3>
+              <p className="text-xs sm:text-sm text-gray-600 mb-4">
                 Investors and Startups who have requested your services using your Investment Advisor Code
               </p>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Request Date</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Request Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {serviceRequests.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={5} className="px-3 sm:px-6 py-8 text-center text-gray-500">
                           <div className="flex flex-col items-center">
                             <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -2246,23 +2246,23 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     ) : (
                       serviceRequests.map((request) => (
                         <tr key={request.id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                             {request.name || 'N/A'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {request.email}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                               request.type === 'investor' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
                             }`}>
                               {request.type === 'investor' ? 'Investor' : 'Startup'}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {new Date(request.created_at || Date.now()).toLocaleDateString()}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
                             <button
                               onClick={() => handleAcceptRequest(request)}
                               disabled={isLoading}
@@ -2284,17 +2284,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           
           {/* Investor Offers Section */}
           <div className="bg-white rounded-lg shadow">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Investor Offers</h3>
-                  <p className="text-sm text-gray-600">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">Investor Offers</h3>
+                  <p className="text-xs sm:text-sm text-gray-600">
                     Investment offers made by your assigned investors
               </p>
                 </div>
                 <div className="text-right">
-                  <div className="text-2xl font-bold text-green-600">{investorOffersList.length}</div>
-                  <div className="text-sm text-gray-500">Investor Offers</div>
+                  <div className="text-xl sm:text-2xl font-bold text-green-600">{investorOffersList.length}</div>
+                  <div className="text-xs sm:text-sm text-gray-500">Investor Offers</div>
                 </div>
               </div>
               
@@ -2302,31 +2302,31 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Startup</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Investor</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Offer Details</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Startup Ask</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">Approval Status</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Date</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
+                      <th className="px-2 sm:px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Startup</th>
+                      <th className="px-2 sm:px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Investor</th>
+                      <th className="px-2 sm:px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Offer Details</th>
+                      <th className="px-2 sm:px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Startup Ask</th>
+                      <th className="px-2 sm:px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">Approval Status</th>
+                      <th className="px-2 sm:px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Date</th>
+                      <th className="px-2 sm:px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {loadingOffersMade ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
+                        <td colSpan={7} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                           Loading offers...
                         </td>
                       </tr>
                     ) : investorOffersList.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={7} className="px-3 sm:px-6 py-8 text-center text-gray-500">
                           <div className="flex flex-col items-center">
-                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="h-10 w-10 sm:h-12 sm:w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Investor Offers Found</h3>
-                            <p className="text-sm text-gray-500 mb-4">
+                            <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">No Investor Offers Found</h3>
+                            <p className="text-xs sm:text-sm text-gray-500 mb-4">
                               No investment offers from your assigned investors at this time.
                             </p>
                           </div>
@@ -2340,7 +2340,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         
                         return (
                           <tr key={offer.id}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            <td className="px-2 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                               <div className="flex flex-col">
                                 <span>{offer.startup_name || 'Unknown Startup'}</span>
                                 {((offer as any).isCoInvestment || (offer as any).is_co_investment) && (
@@ -2351,11 +2351,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 )}
                               </div>
                             </td>
-                            <td className="px-3 py-4 text-sm text-gray-500">
-                              <span className="text-sm font-medium text-gray-900">{offer.investor_name || 'Unknown Investor'}</span>
+                            <td className="px-2 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
+                              <span className="text-xs sm:text-sm font-medium text-gray-900">{offer.investor_name || 'Unknown Investor'}</span>
                             </td>
-                            <td className="px-3 py-4 text-sm text-gray-500">
-                                <div className="text-sm font-medium text-gray-900">
+                            <td className="px-2 sm:px-6 py-4 text-xs sm:text-sm text-gray-500">
+                                <div className="text-xs sm:text-sm font-medium text-gray-900">
                                   {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
                                   {(offer as any).isCoInvestment && (offer as any).minimum_co_investment && (
                                     <div className="text-xs text-gray-500 mt-1">
@@ -2364,8 +2364,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                   )}
                               </div>
                             </td>
-                            <td className="px-3 py-4 text-sm text-gray-500">
-                              <div className="text-sm font-medium text-gray-900">
+                            <td className="px-2 sm:px-6 py-4 text-xs sm:text-sm text-gray-500">
+                              <div className="text-xs sm:text-sm font-medium text-gray-900">
                                 {(() => {
                                   // Use the correct column names from fundraising_details table
                                   const investmentValue = Number(offer.fundraising?.value) || 0;
@@ -2582,12 +2582,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 );
                               })()}
                             </td>
-                            <td className="px-3 py-4 text-sm text-gray-500">
+                            <td className="px-2 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                               <div className="text-xs">
                                 {offer.created_at ? new Date(offer.created_at).toLocaleDateString() : 'N/A'}
                               </div>
                             </td>
-                            <td className="px-3 py-4 text-sm font-medium">
+                            <td className="px-2 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
                               {(() => {
                                 // Check if this is a co-investment offer
                                 const isCoInvestment = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
@@ -3420,16 +3420,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       {/* Discovery Tab */}
       {activeTab === 'discovery' && (
-        <div className="animate-fade-in max-w-4xl mx-auto w-full">
+        <div className="animate-fade-in max-w-4xl mx-auto w-full px-4 sm:px-0">
           {/* Enhanced Header */}
-          <div className="mb-8">
-            <div className="text-center mb-6">
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 mb-2">Discover Pitches</h2>
-              <p className="text-sm text-slate-600">Watch startup videos and explore opportunities for your investors</p>
+          <div className="mb-6 sm:mb-8">
+            <div className="text-center mb-4 sm:mb-6">
+              <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-800 mb-2">Discover Pitches</h2>
+              <p className="text-xs sm:text-sm text-slate-600">Watch startup videos and explore opportunities for your investors</p>
             </div>
             
             {/* Search Bar */}
-            <div className="mb-6">
+            <div className="mb-4 sm:mb-6">
               <div className="relative">
                 <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -3535,13 +3535,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
           </div>
                 
-          <div className="space-y-8">
+          <div className="space-y-6 sm:space-y-8">
             {isLoadingPitches ? (
-              <div className="bg-white rounded-lg shadow text-center py-20">
-                <div className="max-w-sm mx-auto">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                  <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Pitches...</h3>
-                  <p className="text-slate-500">Fetching active fundraising startups</p>
+              <div className="bg-white rounded-lg shadow text-center py-12 sm:py-20">
+                <div className="max-w-sm mx-auto px-4">
+                  <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <h3 className="text-lg sm:text-xl font-semibold text-slate-800 mb-2">Loading Pitches...</h3>
+                  <p className="text-sm sm:text-base text-slate-500">Fetching active fundraising startups</p>
                 </div>
               </div>
             ) : (() => {
@@ -3662,97 +3662,99 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </div>
 
                     {/* Enhanced Content Section */}
-                    <div className="p-6">
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-1">
-                          <h3 className="text-2xl font-bold text-slate-800 mb-2">{inv.name}</h3>
-                          <p className="text-slate-600 font-medium">{inv.sector}</p>
+                    <div className="p-4 sm:p-6">
+                      <div className="flex flex-col sm:flex-row items-start justify-between mb-4 gap-3">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2 break-words">{inv.name}</h3>
+                          <p className="text-sm sm:text-base text-slate-600 font-medium">{inv.sector}</p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-shrink-0">
                           {inv.isStartupNationValidated && (
-                            <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
+                            <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-medium shadow-sm">
                               <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                               </svg>
-                              Verified
+                              <span className="hidden xs:inline">Verified</span>
                             </div>
                           )}
                         </div>
                       </div>
                                         
                       {/* Enhanced Action Buttons */}
-                      <div className="flex items-center gap-4 mt-6">
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-6">
                         <button
                           onClick={() => handleFavoriteToggle(inv.id)}
-                          className={`!rounded-full !p-3 transition-all duration-200 ${
+                          className={`!rounded-full !p-2 sm:!p-3 transition-all duration-200 ${
                             favoritedPitches.has(inv.id)
                               ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
                               : 'hover:bg-red-50 hover:text-red-600 border border-slate-200 bg-white'
-                          } px-3 py-2 rounded-lg text-sm font-medium`}
+                          }`}
                         >
-                          <svg className={`h-5 w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className={`h-4 w-4 sm:h-5 sm:w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                           </svg>
                         </button>
 
                         <button
                           onClick={() => handleShare(inv)}
-                          className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200 bg-white px-3 py-2 rounded-lg text-sm font-medium"
+                          className="!rounded-full !p-2 sm:!p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200 bg-white"
                         >
-                          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
                           </svg>
                         </button>
 
                         {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
-                          <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
-                            <button className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 bg-white px-3 py-2 rounded-lg text-sm font-medium">
-                              <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[120px]">
+                            <button className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 bg-white px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium">
+                              <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
-                              View Deck
+                              <span className="hidden xs:inline">View </span>Deck
                             </button>
                           </a>
                         )}
 
                         <button
                           onClick={() => handleDueDiligenceClick(inv)}
-                          className={`flex-1 transition-all duration-200 border px-3 py-2 rounded-lg text-sm font-medium ${
+                          className={`flex-1 min-w-[140px] transition-all duration-200 border px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${
                             approvedDueDiligenceStartups.has(inv.id)
                               ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
                               : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
                           }`}
                         >
-                          <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                           </svg>
-                          {approvedDueDiligenceStartups.has(inv.id) ? 'Due Diligence Accepted' : 'Due Diligence'}
+                          <span className="hidden sm:inline">{approvedDueDiligenceStartups.has(inv.id) ? 'Due Diligence Accepted' : 'Due Diligence'}</span>
+                          <span className="sm:hidden">DD</span>
                         </button>
 
                         <button
                           onClick={() => handleRecommendCoInvestment(inv.id)}
-                          className={`flex-1 transition-all duration-200 shadow-lg text-white px-3 py-2 rounded-lg text-sm font-medium ${
+                          className={`flex-1 min-w-[140px] transition-all duration-200 shadow-lg text-white px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${
                             recommendedStartups.has(inv.id)
                               ? 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-blue-200'
                               : 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-green-200'
                           }`}
                         >
-                          <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                           </svg>
-                          {recommendedStartups.has(inv.id) ? 'Recommended ✓' : 'Recommend to Investors'}
+                          <span className="hidden sm:inline">{recommendedStartups.has(inv.id) ? 'Recommended ✓' : 'Recommend to Investors'}</span>
+                          <span className="sm:hidden">{recommendedStartups.has(inv.id) ? 'Rec ✓' : 'Recommend'}</span>
                         </button>
                       </div>
                     </div>
 
                     {/* Enhanced Investment Details Footer */}
-                    <div className="bg-gradient-to-r from-slate-50 to-blue-50 px-6 py-4 flex justify-between items-center border-t border-slate-200">
-                      <div className="text-base">
+                    <div className="bg-gradient-to-r from-slate-50 to-blue-50 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 border-t border-slate-200">
+                      <div className="text-sm sm:text-base">
                         <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(inv.investmentValue, inv.currency || 'USD')} for <span className="font-semibold text-blue-600">{inv.equityAllocation}%</span> equity
                       </div>
                       {inv.complianceStatus === ComplianceStatus.Compliant && (
                         <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="h-3 w-3 sm:h-4 sm:w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
                           <span className="text-xs font-semibold">Verified</span>

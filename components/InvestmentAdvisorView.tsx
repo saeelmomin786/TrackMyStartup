@@ -223,9 +223,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     }
   }, [activeTab, activeFundraisingStartups]);
 
+  const advisorCode = useMemo(() => {
+    const trimmed = currentUser?.investment_advisor_code?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : null;
+  }, [currentUser?.investment_advisor_code]);
+
   // Get pending startup requests - FIXED VERSION
   const pendingStartupRequests = useMemo(() => {
-    if (!startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
+    if (!advisorCode || !startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
       return [];
     }
 
@@ -242,36 +247,36 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
 
       // Check if this user has entered the investment advisor code
-      const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
+      const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === advisorCode;
       const isNotAccepted = !(startupUser as any).advisor_accepted;
 
       return hasEnteredCode && isNotAccepted;
     });
 
     return pendingStartups;
-  }, [startups, users, currentUser?.investment_advisor_code]);
+  }, [advisorCode, startups, users]);
 
   // Get pending investor requests - FIXED VERSION
   const pendingInvestorRequests = useMemo(() => {
-    if (!users || !Array.isArray(users)) {
+    if (!advisorCode || !users || !Array.isArray(users)) {
       return [];
     }
 
     // Find investors who have entered the investment advisor code but haven't been accepted
     const pendingInvestors = users.filter(user => {
       const hasEnteredCode = user.role === 'Investor' && 
-        (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
+        (user as any).investment_advisor_code_entered === advisorCode;
       const isNotAccepted = !(user as any).advisor_accepted;
 
       return hasEnteredCode && isNotAccepted;
     });
 
     return pendingInvestors;
-  }, [users, currentUser?.investment_advisor_code]);
+  }, [advisorCode, users]);
 
   // Get accepted startups - FIXED VERSION
   const myStartups = useMemo(() => {
-    if (!startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
+    if (!advisorCode || !startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
       return [];
     }
 
@@ -288,35 +293,39 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
 
       // Check if this user has entered the investment advisor code and has been accepted
-      const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
+      const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === advisorCode;
       const isAccepted = (startupUser as any).advisor_accepted === true;
 
       return hasEnteredCode && isAccepted;
     });
 
     return acceptedStartups;
-  }, [startups, users, currentUser?.investment_advisor_code]);
+  }, [advisorCode, startups, users]);
 
   // Get accepted investors - FIXED VERSION
   const myInvestors = useMemo(() => {
-    if (!users || !Array.isArray(users)) {
+    if (!advisorCode || !users || !Array.isArray(users)) {
       return [];
     }
 
     // Find investors who have entered the investment advisor code AND have been accepted
     const acceptedInvestors = users.filter(user => {
       const hasEnteredCode = user.role === 'Investor' && 
-        (user as any).investment_advisor_code_entered === currentUser?.investment_advisor_code;
+        (user as any).investment_advisor_code_entered === advisorCode;
       const isAccepted = (user as any).advisor_accepted === true;
 
       return hasEnteredCode && isAccepted; // Only include investors who have been accepted
     });
 
     return acceptedInvestors;
-  }, [users, currentUser?.investment_advisor_code]);
+  }, [advisorCode, users]);
 
   // Create serviceRequests by combining pending startups and investors - FIXED VERSION
   const serviceRequests = useMemo(() => {
+    if (!advisorCode) {
+      return [];
+    }
+
     const startupRequests = pendingStartupRequests.map(startup => {
       const startupUser = users.find(user => user.id === startup.user_id);
       return {
@@ -339,7 +348,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     const allRequests = [...startupRequests, ...investorRequests];
 
     return allRequests;
-  }, [pendingStartupRequests, pendingInvestorRequests, users]);
+  }, [advisorCode, pendingStartupRequests, pendingInvestorRequests, users]);
 
   // Offers Made - Fetch directly from database based on advisor code and stages
   const [offersMade, setOffersMade] = useState<any[]>([]);

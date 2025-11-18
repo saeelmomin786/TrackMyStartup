@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { authService, AuthUser } from '../lib/auth';
 import Card from './ui/Card';
 import Input from './ui/Input';
@@ -22,6 +22,19 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
     const [isRedirecting, setIsRedirecting] = useState(false);
     const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
 
+    const resolveAndLogin = useCallback(async (fallbackUser: AuthUser) => {
+        try {
+            const refreshedUser = await authService.getCurrentUser();
+            if (refreshedUser) {
+                onLogin(refreshedUser);
+                return;
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to fetch full profile after auth, using fallback user', error);
+        }
+        onLogin(fallbackUser);
+    }, [onLogin]);
+
     // Removed forced sign-out on mount to avoid racing with sign-in on mobile
 
     // Auto-restore if a valid session already exists (common on mobile after refresh)
@@ -34,7 +47,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     const { data: userData } = await authService.supabase.auth.getUser();
                     if (!cancelled && userData?.user) {
                         const u = userData.user;
-                        onLogin({
+                        resolveAndLogin({
                             id: u.id,
                             email: u.email || '',
                             name: u.user_metadata?.name || 'Unknown',
@@ -54,7 +67,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
             if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
                 const u = session?.user;
                 if (u) {
-                    onLogin({
+                    resolveAndLogin({
                         id: u.id,
                         email: u.email || '',
                         name: u.user_metadata?.name || 'Unknown',
@@ -86,7 +99,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     const { data: userData } = await authService.supabase.auth.getUser();
                     if (userData?.user) {
                         const u = userData.user;
-                        onLogin({
+                        resolveAndLogin({
                             id: u.id,
                             email: u.email || '',
                             name: u.user_metadata?.name || 'Unknown',
@@ -111,7 +124,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 const { data: userData } = await authService.supabase.auth.getUser();
                 if (userData?.user) {
                     const u = userData.user;
-                    onLogin({
+                    resolveAndLogin({
                         id: u.id,
                         email: u.email || '',
                         name: u.user_metadata?.name || 'Unknown',
@@ -224,7 +237,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     // In this case, let them proceed to dashboard and the system will handle the missing startup record
                     if (userProfile?.startup_name) {
                         console.log('✅ User has startup_name in profile, allowing dashboard access');
-                        onLogin(user);
+                        resolveAndLogin(user);
                         return;
                     }
                     
@@ -234,7 +247,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 } else {
                     // User is complete, proceed to dashboard
                     console.log('User complete, proceeding to dashboard');
-                    onLogin(user);
+                        resolveAndLogin(user);
                     try { (window as any).forceDataRefresh?.(); } catch {}
                 }
             } else if (loginError) {
@@ -253,7 +266,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 const { data: userData } = await authService.supabase.auth.getUser();
                 if (userData?.user) {
                     const u = userData.user;
-                    onLogin({
+                    resolveAndLogin({
                         id: u.id,
                         email: u.email || '',
                         name: u.user_metadata?.name || 'Unknown',

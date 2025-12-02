@@ -12,6 +12,7 @@ import { toDirectImageUrl } from '../lib/imageUrl';
 import { authService, AuthUser } from '../lib/auth';
 import { paymentService } from '../lib/paymentService';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
+import LogoTMS from './public/logoTMS.svg';
 
 const PublicStartupPage: React.FC = () => {
   const [startup, setStartup] = useState<Startup | null>(null);
@@ -124,12 +125,12 @@ const PublicStartupPage: React.FC = () => {
           const { data: fundraisingData, error: fundraisingError } = await supabase
             .from(fundraisingTableName)
             .select('*')
-            .eq('startup_id', startupData.id)
+            .eq('startup_id', (startupData as any).id)
             .order('created_at', { ascending: false })
             .limit(1);
 
-          if (!fundraisingError && fundraisingData && fundraisingData.length > 0) {
-            const fd = fundraisingData[0];
+          if (!fundraisingError && fundraisingData && (fundraisingData as any[]).length > 0) {
+            const fd = (fundraisingData as any[])[0] as any;
             // Map to FundraisingDetails format
             // Note: domain and validationRequested are not in public view, so they'll be undefined
             setFundraisingDetails({
@@ -237,6 +238,12 @@ const PublicStartupPage: React.FC = () => {
     const authCheck = await authService.isAuthenticated();
     const currentAuthUser = authCheck ? await authService.getCurrentUser() : null;
     
+    // Check if user is Startup role - they cannot make offers
+    if (currentAuthUser?.role === 'Startup' || currentUser?.role === 'Startup') {
+      messageService.error('Access Restricted', 'Please login as investor to view due diligence or make offer.', 4000);
+      return;
+    }
+    
     if (!authCheck || !currentAuthUser) {
       // Show message and redirect to login page immediately
       messageService.error('Login Required', 'You must be logged in to make an offer. Please log in to continue.', 3000);
@@ -294,6 +301,12 @@ const PublicStartupPage: React.FC = () => {
     // Double-check authentication status before proceeding
     const authCheck = await authService.isAuthenticated();
     const currentAuthUser = authCheck ? await authService.getCurrentUser() : null;
+    
+    // Check if user is Startup role - they cannot access due diligence
+    if (currentAuthUser?.role === 'Startup' || currentUser?.role === 'Startup') {
+      messageService.error('Access Restricted', 'Please login as investor to view due diligence or make offer.', 4000);
+      return;
+    }
     
     if (!authCheck || !currentAuthUser?.id) {
       // Show message and redirect to login page immediately
@@ -369,10 +382,84 @@ const PublicStartupPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-        <div className="flex items-center gap-2 text-slate-500">
-          <span className="inline-block h-6 w-6 border-2 border-b-transparent border-slate-400 rounded-full animate-spin" />
-          Loading startup details...
+      <div className="min-h-screen bg-slate-100">
+        {/* Header */}
+        <header className="bg-white shadow-sm sticky top-0 z-50">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex justify-between items-center">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <img 
+                src={LogoTMS} 
+                alt="TrackMyStartup" 
+                className="h-7 w-7 sm:h-8 sm:w-8 scale-[5] sm:scale-[5] origin-left cursor-pointer hover:opacity-80 transition-opacity" 
+                onClick={() => {
+                  const url = new URL(window.location.origin + window.location.pathname);
+                  url.searchParams.delete('view');
+                  url.searchParams.delete('startupId');
+                  url.searchParams.delete('id');
+                  url.searchParams.set('page', 'landing');
+                  window.location.href = url.toString();
+                }}
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:gap-4">
+              {!isAuthenticated ? (
+                <>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => {
+                      const url = new URL(window.location.origin + window.location.pathname);
+                      url.searchParams.delete('view');
+                      url.searchParams.delete('startupId');
+                      url.searchParams.delete('id');
+                      url.searchParams.set('page', 'login');
+                      window.location.href = url.toString();
+                    }}
+                    className="hidden sm:inline-flex"
+                  >
+                    Login
+                  </Button>
+                  <Button 
+                    variant="primary" 
+                    size="sm" 
+                    onClick={() => {
+                      const url = new URL(window.location.origin + window.location.pathname);
+                      url.searchParams.delete('view');
+                      url.searchParams.delete('startupId');
+                      url.searchParams.delete('id');
+                      url.searchParams.set('page', 'register');
+                      window.location.href = url.toString();
+                    }}
+                    className="px-3 py-1.5"
+                  >
+                    Get Started
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    const url = new URL(window.location.origin + window.location.pathname);
+                    url.searchParams.delete('view');
+                    url.searchParams.delete('startupId');
+                    url.searchParams.delete('id');
+                    url.searchParams.set('page', 'login');
+                    window.location.href = url.toString();
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  Dashboard
+                </Button>
+              )}
+            </div>
+          </div>
+        </header>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="flex items-center gap-2 text-slate-500">
+            <span className="inline-block h-6 w-6 border-2 border-b-transparent border-slate-400 rounded-full animate-spin" />
+            Loading startup details...
+          </div>
         </div>
       </div>
     );
@@ -380,16 +467,97 @@ const PublicStartupPage: React.FC = () => {
 
   if (error || !startup) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-        <Card className="p-8 text-center max-w-md">
-          <Building2 className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-slate-900 mb-2">Startup Not Found</h2>
-          <p className="text-slate-600 mb-4">{error || 'This startup may have been removed or is no longer available.'}</p>
-          <Button onClick={() => window.location.href = '/'} variant="outline">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Go to Home
-          </Button>
-        </Card>
+      <div className="min-h-screen bg-slate-100">
+        {/* Header */}
+        <header className="bg-white shadow-sm sticky top-0 z-50">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex justify-between items-center">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <img 
+                src={LogoTMS} 
+                alt="TrackMyStartup" 
+                className="h-7 w-7 sm:h-8 sm:w-8 scale-[5] sm:scale-[5] origin-left cursor-pointer hover:opacity-80 transition-opacity" 
+                onClick={() => {
+                  const url = new URL(window.location.origin + window.location.pathname);
+                  url.searchParams.delete('view');
+                  url.searchParams.delete('startupId');
+                  url.searchParams.delete('id');
+                  url.searchParams.set('page', 'landing');
+                  window.location.href = url.toString();
+                }}
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:gap-4">
+              {!isAuthenticated ? (
+                <>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => {
+                      const url = new URL(window.location.origin + window.location.pathname);
+                      url.searchParams.delete('view');
+                      url.searchParams.delete('startupId');
+                      url.searchParams.delete('id');
+                      url.searchParams.set('page', 'login');
+                      window.location.href = url.toString();
+                    }}
+                    className="hidden sm:inline-flex"
+                  >
+                    Login
+                  </Button>
+                  <Button 
+                    variant="primary" 
+                    size="sm" 
+                    onClick={() => {
+                      const url = new URL(window.location.origin + window.location.pathname);
+                      url.searchParams.delete('view');
+                      url.searchParams.delete('startupId');
+                      url.searchParams.delete('id');
+                      url.searchParams.set('page', 'register');
+                      window.location.href = url.toString();
+                    }}
+                    className="px-3 py-1.5"
+                  >
+                    Get Started
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    const url = new URL(window.location.origin + window.location.pathname);
+                    url.searchParams.delete('view');
+                    url.searchParams.delete('startupId');
+                    url.searchParams.delete('id');
+                    url.searchParams.set('page', 'login');
+                    window.location.href = url.toString();
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  Dashboard
+                </Button>
+              )}
+            </div>
+          </div>
+        </header>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Card className="p-8 text-center max-w-md">
+            <Building2 className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-slate-900 mb-2">Startup Not Found</h2>
+            <p className="text-slate-600 mb-4">{error || 'This startup may have been removed or is no longer available.'}</p>
+            <Button onClick={() => {
+              const url = new URL(window.location.origin + window.location.pathname);
+              url.searchParams.delete('view');
+              url.searchParams.delete('startupId');
+              url.searchParams.delete('id');
+              url.searchParams.set('page', 'landing');
+              window.location.href = url.toString();
+            }} variant="outline">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Go to Home
+            </Button>
+          </Card>
+        </div>
       </div>
     );
   }
@@ -424,26 +592,90 @@ const PublicStartupPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <div className="max-w-4xl mx-auto px-4 py-6 sm:py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+      {/* Header */}
+      <header className="bg-white shadow-sm sticky top-0 z-50">
+        <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4 flex justify-between items-center">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <img 
+              src={LogoTMS} 
+              alt="TrackMyStartup" 
+              className="h-7 w-7 sm:h-8 sm:w-8 scale-[5] sm:scale-[5] origin-left cursor-pointer hover:opacity-80 transition-opacity" 
+              onClick={() => {
+                const url = new URL(window.location.origin + window.location.pathname);
+                url.searchParams.delete('view');
+                url.searchParams.delete('startupId');
+                url.searchParams.delete('id');
+                url.searchParams.set('page', 'landing');
+                window.location.href = url.toString();
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-2 sm:gap-4">
+            {!isAuthenticated ? (
+              <>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    const url = new URL(window.location.origin + window.location.pathname);
+                    url.searchParams.delete('view');
+                    url.searchParams.delete('startupId');
+                    url.searchParams.delete('id');
+                    url.searchParams.set('page', 'login');
+                    window.location.href = url.toString();
+                  }}
+                  className="hidden sm:inline-flex"
+                >
+                  Login
+                </Button>
+                <Button 
+                  variant="primary" 
+                  size="sm" 
+                  onClick={() => {
+                    const url = new URL(window.location.origin + window.location.pathname);
+                    url.searchParams.delete('view');
+                    url.searchParams.delete('startupId');
+                    url.searchParams.delete('id');
+                    url.searchParams.set('page', 'register');
+                    window.location.href = url.toString();
+                  }}
+                  className="px-3 py-1.5"
+                >
+                  Get Started
+                </Button>
+              </>
+            ) : (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => {
+                  const url = new URL(window.location.origin + window.location.pathname);
+                  url.searchParams.delete('view');
+                  url.searchParams.delete('startupId');
+                  url.searchParams.delete('id');
+                  url.searchParams.set('page', 'login');
+                  window.location.href = url.toString();
+                }}
+                className="flex items-center gap-2"
+              >
+                Dashboard
+              </Button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+        {/* Back row */}
+        <div className="flex mb-6">
           <Button
             onClick={() => window.location.href = '/'}
             variant="outline"
             size="sm"
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 w-full sm:w-auto justify-center"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
-          </Button>
-          <Button
-            onClick={handleShare}
-            variant="outline"
-            size="sm"
-            className="flex items-center gap-2"
-          >
-            <Share2 className="h-4 w-4" />
-            Share
           </Button>
         </div>
 
@@ -473,9 +705,9 @@ const PublicStartupPage: React.FC = () => {
           </div>
 
           {/* Content Section */}
-          <div className="p-6">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex-1">
+          <div className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+              <div className="flex-1 min-w-0">
                 <h3 className="text-2xl font-bold text-slate-800 mb-2">{startup?.name}</h3>
                 <p className="text-slate-600 font-medium mb-2">{startup?.sector || fundraisingDetails?.domain || 'Not specified'}</p>
                 {(fundraisingDetails?.type || fundraisingDetails?.stage) && (
@@ -496,7 +728,7 @@ const PublicStartupPage: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 {fundraisingDetails?.active && (
                   <div className="flex items-center gap-1 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
                     <CheckCircle className="h-3 w-3" />
@@ -513,19 +745,28 @@ const PublicStartupPage: React.FC = () => {
             </div>
 
             {/* Action Buttons */}
-            <div className="flex items-center gap-4 mt-6">
+            <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
               <Button
                 size="sm"
                 variant="outline"
                 onClick={handleShare}
-                className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
+                className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200 self-start sm:self-auto"
               >
                 <Share2 className="h-5 w-5" />
               </Button>
 
               {fundraisingDetails?.pitchDeckUrl && fundraisingDetails?.pitchDeckUrl !== '#' && (
-                <a href={fundraisingDetails?.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
-                  <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200">
+                <a
+                  href={fundraisingDetails?.pitchDeckUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1"
+                >
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200"
+                  >
                     <FileText className="h-4 w-4 mr-2" /> View Deck
                   </Button>
                 </a>
@@ -534,11 +775,15 @@ const PublicStartupPage: React.FC = () => {
               {/* Due Diligence Button - Always visible, redirects to login if needed */}
               <button
                 onClick={handleDueDiligence}
-                className={`flex-1 transition-all duration-200 border px-3 py-2 rounded-lg text-sm font-medium ${
-                  isAuthenticated && hasDueDiligenceAccess
+                disabled={currentUser?.role === 'Startup'}
+                className={`flex-1 transition-all duration-200 border px-3 py-2 rounded-lg text-sm font-medium text-center ${
+                  currentUser?.role === 'Startup'
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                    : isAuthenticated && hasDueDiligenceAccess
                     ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
                     : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
                 }`}
+                title={currentUser?.role === 'Startup' ? 'Please login as investor to view due diligence or make offer' : ''}
               >
                 <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -551,7 +796,13 @@ const PublicStartupPage: React.FC = () => {
                 size="sm"
                 variant="primary"
                 onClick={handleMakeOffer}
-                className="flex-1 min-w-[140px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg shadow-blue-200 text-xs sm:text-sm"
+                disabled={currentUser?.role === 'Startup'}
+                className={`flex-1 min-w-[140px] transition-all duration-200 text-xs sm:text-sm text-center ${
+                  currentUser?.role === 'Startup'
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60 shadow-none'
+                    : 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg shadow-blue-200'
+                }`}
+                title={currentUser?.role === 'Startup' ? 'Please login as investor to view due diligence or make offer' : ''}
               >
                 <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden sm:inline">Make </span>Offer
               </Button>

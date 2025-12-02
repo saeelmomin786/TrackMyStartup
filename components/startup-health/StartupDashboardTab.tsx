@@ -2142,7 +2142,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Investor</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
               </tr>
@@ -2150,24 +2149,38 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             <tbody className="bg-white divide-y divide-slate-200">
               {diligenceRequests.map(r => (
                 <tr key={r.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{r.investor?.name || 'Investor'}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{r.investor?.email || ''}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                    {r.investor?.name || 'Investor'}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      r.status === 'completed' ? 'bg-green-100 text-green-800' :
-                      r.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-red-100 text-red-800'
-                    }`}>
+                    <span
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        r.status === 'completed'
+                          ? 'bg-green-100 text-green-800'
+                          : r.status === 'pending'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}
+                    >
                       {r.status}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     {r.status === 'pending' ? (
                       <div className="flex gap-2">
-                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => approveDiligenceRequest(r.id)}>
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => approveDiligenceRequest(r.id)}
+                        >
                           <Check className="h-4 w-4 mr-1" /> Approve
                         </Button>
-                        <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50" onClick={() => rejectDiligenceRequest(r.id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-red-300 text-red-600 hover:bg-red-50"
+                          onClick={() => rejectDiligenceRequest(r.id)}
+                        >
                           <X className="h-4 w-4 mr-1" /> Reject
                         </Button>
                       </div>
@@ -2179,7 +2192,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
               ))}
               {diligenceRequests.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">No due diligence requests yet.</td>
+                  <td colSpan={3} className="px-6 py-8 text-center text-slate-500">
+                    No due diligence requests yet.
+                  </td>
                 </tr>
               )}
             </tbody>

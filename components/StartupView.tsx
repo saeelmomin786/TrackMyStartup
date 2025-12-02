@@ -76,22 +76,27 @@ const StartupView: React.FC<StartupViewProps> = ({
     : 0;
 
   const handleShare = async (startup: Startup) => {
-    const details = `Startup: ${startup.name}\nSector: ${startup.sector}\nValuation: ₹${startup.current_valuation}L\nFunding: ₹${startup.total_funding}L\nRevenue: ₹${startup.total_revenue}L`;
+    // Create clean public shareable link
+    const url = new URL(window.location.origin + window.location.pathname);
+    url.searchParams.set('view', 'startup');
+    url.searchParams.set('startupId', String(startup.id));
+    const shareUrl = url.toString();
+    const details = `Startup: ${startup.name}\nSector: ${startup.sector}\nValuation: ₹${startup.current_valuation}L\nFunding: ₹${startup.total_funding}L\nRevenue: ₹${startup.total_revenue}L\n\nView startup: ${shareUrl}`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: startup.name, text: details });
+        await navigator.share({ title: startup.name, text: details, url: shareUrl });
       } else if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(details);
-        alert('Startup details copied to clipboard');
+        await navigator.clipboard.writeText(shareUrl);
+        alert('Startup link copied to clipboard');
       } else {
         // Fallback: hidden textarea copy
         const textarea = document.createElement('textarea');
-        textarea.value = details;
+        textarea.value = shareUrl;
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        alert('Startup details copied to clipboard');
+        alert('Startup link copied to clipboard');
       }
     } catch (err) {
       console.error('Share failed', err);
@@ -362,7 +367,12 @@ const StartupView: React.FC<StartupViewProps> = ({
                     
                     <div className="flex gap-2">
                       <Button 
-                        onClick={() => onViewStartup(startup)}
+                        onClick={() => {
+                          const url = new URL(window.location.href);
+                          url.searchParams.set('view', 'startup');
+                          url.searchParams.set('startupId', String(startup.id));
+                          window.location.href = url.toString();
+                        }}
                         className="flex-1 flex items-center justify-center gap-2"
                         size="sm"
                       >

@@ -73,12 +73,12 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const handleShare = async (startup: ActiveFundraisingStartup) => {
         console.log('Share button clicked for startup:', startup.name);
         console.log('Startup object:', startup);
-        // Build a deep link to this pitch in Discover (reels) tab
-        const url = new URL(window.location.href);
-        url.searchParams.set('tab', 'reels');
-        url.searchParams.set('pitchId', String(startup.id));
+        // Build a public shareable link to the startup page
+        const url = new URL(window.location.origin + window.location.pathname);
+        url.searchParams.set('view', 'startup');
+        url.searchParams.set('startupId', String(startup.id));
         const shareUrl = url.toString();
-        const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\n\nOpen pitch: ${shareUrl}`;
+        const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\n\nView startup: ${shareUrl}`;
         console.log('Share details:', details);
         try {
             if (navigator.share) {
@@ -91,18 +91,18 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 await navigator.share(shareData);
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
                 console.log('Using clipboard API');
-                await navigator.clipboard.writeText(details);
-                alert('Startup details copied to clipboard');
+                await navigator.clipboard.writeText(shareUrl);
+                alert('Startup link copied to clipboard');
             } else {
                 console.log('Using fallback copy method');
                 // Fallback: hidden textarea copy
                 const textarea = document.createElement('textarea');
-                textarea.value = details;
+                textarea.value = shareUrl;
                 document.body.appendChild(textarea);
                 textarea.select();
                 document.execCommand('copy');
                 document.body.removeChild(textarea);
-                alert('Startup details copied to clipboard');
+                alert('Startup link copied to clipboard');
             }
         } catch (err) {
             console.error('Share failed', err);
@@ -1675,7 +1675,18 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
                                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
                                             {!isViewOnly && (
-                                                <Button size="sm" variant="outline" onClick={() => onViewStartup(startup)}><Eye className="mr-2 h-4 w-4" /> View</Button>
+                                                <Button 
+                                                    size="sm" 
+                                                    variant="outline" 
+                                                    onClick={() => {
+                                                        const url = new URL(window.location.href);
+                                                        url.searchParams.set('view', 'startup');
+                                                        url.searchParams.set('startupId', String(startup.id));
+                                                        window.location.href = url.toString();
+                                                    }}
+                                                >
+                                                    <Eye className="mr-2 h-4 w-4" /> View
+                                                </Button>
                                             )}
                                         </td>
                                     </tr>

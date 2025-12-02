@@ -1903,14 +1903,22 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   const handleShare = async (startup: ActiveFundraisingStartup) => {
     try {
+      // Create clean public shareable link
+      const url = new URL(window.location.origin + window.location.pathname);
+      url.searchParams.set('view', 'startup');
+      url.searchParams.set('startupId', String(startup.id));
+      const shareUrl = url.toString();
       const shareData = {
         title: `${startup.name} - Investment Opportunity`,
-        text: `Check out this startup: ${startup.name} in ${startup.sector}`,
-        url: window.location.href
+        text: `Check out this startup: ${startup.name} in ${startup.sector}\n\nView startup: ${shareUrl}`,
+        url: shareUrl
       };
 
       if (navigator.share) {
         await navigator.share(shareData);
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        alert('Startup link copied to clipboard');
       } else {
         await navigator.clipboard.writeText(`${shareData.title}\n${shareData.text}\n${shareData.url}`);
         alert('Startup details copied to clipboard');

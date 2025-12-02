@@ -15,6 +15,7 @@ import ComplianceTab from './startup-health/ComplianceTab';
 import FinancialsTab from './startup-health/FinancialsTab';
 import EmployeesTab from './startup-health/EmployeesTab';
 import CapTableTab from './startup-health/CapTableTab';
+import FundraisingTab from './startup-health/FundraisingTab';
 import StartupProfilePage from './StartupProfilePage';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 
@@ -33,7 +34,7 @@ interface StartupHealthViewProps {
   onTrialButtonClick?: () => void; // Add trial button click handler
 }
 
-type TabId = 'dashboard' | 'opportunities' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable';
+type TabId = 'dashboard' | 'opportunities' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable' | 'fundraising';
 
 const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole, user, onBack, onActivateFundraising, onInvestorAdded, onUpdateFounders, isViewOnly = false, investmentOffers = [], onProcessOffer, onTrialButtonClick }) => {
     // Check if this is a facilitator accessing the startup
@@ -236,6 +237,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
           ]
         : [
             // Regular startup users see all tabs; offers are now inside dashboard
@@ -246,6 +248,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
           ];
 
     const renderTabContent = () => {
@@ -270,15 +273,27 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             case 'employees':
                 return <EmployeesTab startup={currentStartup} userRole={userRole} isViewOnly={isViewOnly} onEsopUpdated={handleEsopUpdate} />;
             case 'capTable':
-                return <CapTableTab 
-                            startup={currentStartup}
-                            userRole={userRole}
-                            user={user}
-                            onActivateFundraising={onActivateFundraising}
-                            onInvestorAdded={onInvestorAdded}
-                            onUpdateFounders={onUpdateFounders}
-                            isViewOnly={isViewOnly}
-                        />;
+                return (
+                  <CapTableTab 
+                    startup={currentStartup}
+                    userRole={userRole}
+                    user={user}
+                    onActivateFundraising={onActivateFundraising}
+                    onInvestorAdded={onInvestorAdded}
+                    onUpdateFounders={onUpdateFounders}
+                    isViewOnly={isViewOnly}
+                  />
+                );
+            case 'fundraising':
+                return (
+                  <FundraisingTab
+                    startup={currentStartup}
+                    userRole={userRole}
+                    user={user}
+                    isViewOnly={isViewOnly}
+                    onActivateFundraising={onActivateFundraising}
+                  />
+                );
             default:
                 return null;
         }

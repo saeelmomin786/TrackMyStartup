@@ -28,6 +28,7 @@ import { getQueryParam, setQueryParam } from './lib/urlState';
 import Footer from './components/Footer';
 import PageRouter from './components/PageRouter';
 import PublicProgramView from './components/PublicProgramView';
+import PublicStartupPage from './components/PublicStartupPage';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
 import DiagnosticPage from './components/DiagnosticPage';
 
@@ -44,6 +45,20 @@ const App: React.FC = () => {
   
   // Check if we're on a public program view page
   const isPublicProgramView = getQueryParam('view') === 'program' && getQueryParam('opportunityId');
+  
+  // Check if we're on a public startup page (ignore page parameter)
+  // This should work even when user is authenticated - it's a public view of a startup
+  const isPublicStartupPage = (getQueryParam('view') === 'startup' || getQueryParam('startupId') || getQueryParam('id')) && (getQueryParam('startupId') || getQueryParam('id'));
+  
+  // Clean up page=landing from public startup URLs to avoid routing conflicts
+  // Do this in useEffect to avoid side effects during render
+  useEffect(() => {
+    if (isPublicStartupPage && getQueryParam('page') === 'landing') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('page');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [isPublicStartupPage]);
   
   
   
@@ -260,14 +275,8 @@ const App: React.FC = () => {
   const [isTrialModalOpen, setIsTrialModalOpen] = useState(false);
   const [showTrialBanner, setShowTrialBanner] = useState(false);
   
-  // Subscription access control
-  const [userHasAccess, setUserHasAccess] = useState<boolean | null>(null);
-  const [isCheckingSubscription, setIsCheckingSubscription] = useState(false);
-  
-  // 5-minute trial system
+  // 5-minute trial system (visual only; no dashboard lock)
   const [trialStatus, setTrialStatus] = useState<any>(null);
-  const [showSubscriptionPage, setShowSubscriptionPage] = useState(false); // will be forced off below
-  const [trialEnded, setTrialEnded] = useState(false);
 
   // Refs for state variables to avoid dependency issues
   const startupsRef = useRef<Startup[]>([]);
@@ -352,153 +361,7 @@ const App: React.FC = () => {
     } catch {}
   }, []);
 
-  // Check if user has active subscription
-  const checkPaymentStatus = useCallback(async (userId: string) => {
-    try {
-      console.log('🔍 Checking payment status for user:', userId);
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select('status, current_period_end, razorpay_subscription_id')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .limit(1);
-
-      if (error && error.code !== 'PGRST116') {
-        console.error('❌ Error checking payment status:', error);
-        return false;
-      }
-
-      if (!data || data.length === 0) {
-        console.log('❌ No active subscription found');
-        return false;
-      }
-
-      // Check if subscription is still valid
-      const now = new Date();
-      const periodEnd = new Date(data[0].current_period_end);
-      
-      console.log('📅 Current time:', now.toISOString());
-      console.log('📅 Period end:', periodEnd.toISOString());
-      console.log('⏰ Is expired:', periodEnd < now);
-      console.log('💳 Razorpay subscription ID:', data[0].razorpay_subscription_id || 'NULL (No autopay set up)');
-      
-      if (periodEnd < now) {
-        console.log('❌ Subscription expired');
-        if (data[0].razorpay_subscription_id) {
-          console.log('⚠️ Autopay subscription exists but expired - could mean:');
-          console.log('   1. Autopay was cancelled by user');
-          console.log('   2. Payment method failed');
-          console.log('   3. Razorpay subscription was paused/cancelled');
-        } else {
-          console.log('ℹ️ No Razorpay subscription ID - this was a one-time payment (autopay never set up)');
-        }
-        return false;
-      }
-
-      console.log('✅ Active subscription found:', data[0]);
-      return true;
-    } catch (error) {
-      console.error('❌ Error checking payment status:', error);
-      return false;
-    }
-  }, []);
-
-  // Check user access with real payment status
-  const checkUserAccess = useCallback(async (userId: string) => {
-    console.log('🔍 Checking user access for:', userId);
-    
-    try {
-      // Check if user has active subscription
-      const hasActiveSubscription = await checkPaymentStatus(userId);
-      
-      if (hasActiveSubscription) {
-        console.log('✅ User has active subscription - granting access');
-        setUserHasAccess(true);
-        setShowSubscriptionPage(false);
-        return { hasAccess: true, isTrial: false, subscription: null };
-      } else {
-        console.log('❌ User has no active subscription - showing payment page');
-        setUserHasAccess(false);
-        setShowSubscriptionPage(true);
-        return { hasAccess: false, isTrial: false, subscription: null };
-      }
-    } catch (error) {
-      console.error('❌ Error checking user access:', error);
-      setUserHasAccess(false);
-      setShowSubscriptionPage(true);
-      return { hasAccess: false, isTrial: false, subscription: null };
-    }
-  }, [checkPaymentStatus]);
-
-  // Check user access when authenticated
-  useEffect(() => {
-    const checkAccess = async () => {
-      // Skip check if user already has access (e.g., just completed payment)
-      if (userHasAccess) {
-        console.log('✅ User already has access, skipping access check');
-        return;
-      }
-      
-      if (currentUser && currentUser.role === 'Startup' && !isCheckingSubscription) {
-        if ((window as any).__rzpAccessCheckInFlight) return; // throttle
-        (window as any).__rzpAccessCheckInFlight = true;
-        setIsCheckingSubscription(true);
-        console.log('🔍 Checking access for startup user:', currentUser.email);
-        
-        try {
-          const accessResult = await checkUserAccess(currentUser.id);
-          setUserHasAccess(accessResult.hasAccess);
-          
-          if (accessResult.isTrial) {
-            setShowTrialBanner(true);
-          }
-          
-          console.log('🔍 Access check result:', accessResult);
-        } catch (error) {
-          console.error('❌ Access check failed:', error);
-          setShowSubscriptionPage(true);
-        } finally {
-          setIsCheckingSubscription(false);
-          setTimeout(() => { (window as any).__rzpAccessCheckInFlight = false; }, 1000);
-        }
-      }
-    };
-
-    checkAccess();
-  }, [currentUser, checkUserAccess, isCheckingSubscription, userHasAccess]);
-
-  // Check payment status for Startup users and redirect to payment if needed
-  useEffect(() => {
-    const checkPaymentAndRedirect = async () => {
-      // Skip check if user already has access (e.g., just completed payment)
-      if (userHasAccess) {
-        console.log('✅ User already has access, skipping payment check');
-        return;
-      }
-      
-      if (isAuthenticated && currentUser && currentUser.role === 'Startup') {
-        console.log('🔍 Checking payment status for startup user:', currentUser.email);
-        
-        try {
-          const hasActiveSubscription = await checkPaymentStatus(currentUser.id);
-          
-          if (!hasActiveSubscription) {
-            console.log('💳 No active subscription found, redirecting to payment page');
-            setCurrentPage('payment');
-          } else {
-            console.log('✅ Active subscription found, allowing dashboard access');
-            setUserHasAccess(true);
-            setShowSubscriptionPage(false);
-          }
-        } catch (error) {
-          console.error('❌ Error checking payment status:', error);
-          // On error, allow access to avoid blocking users
-        }
-      }
-    };
-
-    checkPaymentAndRedirect();
-  }, [isAuthenticated, currentUser, checkPaymentStatus, userHasAccess]);
+  // (Payment/subscription gating removed – dashboard access is not blocked by payment status)
 
   // Disable trial logic entirely
   useEffect(() => {}, [currentUser]);
@@ -638,25 +501,7 @@ const App: React.FC = () => {
                   setCurrentUser(user);
                   setIsAuthenticated(true);
                   
-                  // Check payment status for Startup users after email confirmation
-                  if (user.role === 'Startup') {
-                    console.log('🔍 Checking payment status for startup user after email confirmation:', user.email);
-                    
-                    try {
-                      const hasActiveSubscription = await checkPaymentStatus(user.id);
-                      
-                      if (!hasActiveSubscription) {
-                        console.log('💳 No active subscription found, redirecting to payment page');
-                        setCurrentPage('payment');
-                        return; // Don't proceed to dashboard
-                      } else {
-                        console.log('✅ Active subscription found, allowing dashboard access');
-                      }
-                    } catch (error) {
-                      console.error('❌ Error checking payment status after email confirmation:', error);
-                      // On error, allow access to avoid blocking users
-                    }
-                  }
+              // (Payment lock after email confirmation removed – user can proceed directly)
                 } else if (profileError) {
                   console.error('Email confirmation failed:', profileError);
                   // If profile creation failed, try to create it manually
@@ -670,25 +515,7 @@ const App: React.FC = () => {
                     setCurrentUser(createdUser);
                     setIsAuthenticated(true);
                     
-                    // Check payment status for Startup users after manual profile creation
-                    if (createdUser.role === 'Startup') {
-                      console.log('🔍 Checking payment status for startup user after manual profile creation:', createdUser.email);
-                      
-                      try {
-                        const hasActiveSubscription = await checkPaymentStatus(createdUser.id);
-                        
-                        if (!hasActiveSubscription) {
-                          console.log('💳 No active subscription found, redirecting to payment page');
-                          setCurrentPage('payment');
-                          return; // Don't proceed to dashboard
-                        } else {
-                          console.log('✅ Active subscription found, allowing dashboard access');
-                        }
-                      } catch (error) {
-                        console.error('❌ Error checking payment status after manual profile creation:', error);
-                        // On error, allow access to avoid blocking users
-                      }
-                    }
+                    // (Payment lock after manual profile creation removed – user can proceed directly)
                   } else {
                     console.error('Manual profile creation failed:', createError);
                   }
@@ -1079,27 +906,6 @@ const App: React.FC = () => {
                 setCurrentUser(basicUser);
                 setIsAuthenticated(true);
                 setIsLoading(false);
-              }
-              
-              // Check payment status for Startup users after authentication
-              const userForPaymentCheck = currentUser;
-              if (userForPaymentCheck?.role === 'Startup') {
-                console.log('🔍 Checking payment status for startup user during auth initialization:', userForPaymentCheck.email);
-                
-                try {
-                  const hasActiveSubscription = await checkPaymentStatus(userForPaymentCheck.id);
-                  
-                  if (!hasActiveSubscription) {
-                    console.log('💳 No active subscription found, redirecting to payment page');
-                    setCurrentPage('payment');
-                    return; // Don't proceed to dashboard
-                  } else {
-                    console.log('✅ Active subscription found, allowing dashboard access');
-                  }
-                } catch (error) {
-                  console.error('❌ Error checking payment status during auth init:', error);
-                  // On error, allow access to avoid blocking users
-                }
               }
               
               // Only reset data loading flag if this is a truly new user
@@ -1687,6 +1493,14 @@ const App: React.FC = () => {
 
 
   const handleLogin = useCallback(async (user: AuthUser) => {
+    // Check if there's a redirect URL stored (e.g., from public startup page)
+    const redirectUrl = sessionStorage.getItem('redirectAfterLogin');
+    if (redirectUrl) {
+      sessionStorage.removeItem('redirectAfterLogin');
+      // Redirect to the stored URL (e.g., public startup page)
+      window.location.href = redirectUrl;
+      return;
+    }
     console.log(`User ${user.email} logged in as ${user.role}`);
     setIsAuthenticated(true);
     setCurrentUser(user);
@@ -1699,31 +1513,11 @@ const App: React.FC = () => {
       return;
     }
     
-    // Check payment status for all users (especially Startup users)
-    if (user.role === 'Startup') {
-      console.log('🔍 Checking payment status for startup user:', user.email);
-      
-      try {
-        const hasActiveSubscription = await checkPaymentStatus(user.id);
-        
-        if (!hasActiveSubscription) {
-          console.log('💳 No active subscription found, redirecting to payment page');
-          setCurrentPage('payment');
-          return; // Don't proceed to dashboard
-        } else {
-          console.log('✅ Active subscription found, allowing dashboard access');
-        }
-      } catch (error) {
-        console.error('❌ Error checking payment status:', error);
-        // On error, allow access to avoid blocking users
-      }
-    }
-    
     // For non-startup users, set the view after data is loaded
     if (user.role !== 'Startup') {
       setView('investor'); // Default view for non-startup users
     }
-  }, [checkPaymentStatus]);
+  }, []);
 
   const handleRegister = useCallback((user: AuthUser, foundersData: Founder[], startupName?: string, investmentAdvisorCode?: string) => {
     console.log(`User ${user.email} registered as ${user.role}`);
@@ -2102,18 +1896,6 @@ const App: React.FC = () => {
   }, [startupAdditionRequests, fetchData]);
 
   const handleSubscriptionSuccess = useCallback(async () => {
-    // Handle trial subscription success
-    if (showSubscriptionPage) {
-      console.log('🔍 Trial subscription successful - granting access');
-      try { localStorage.removeItem('subscription_required'); } catch {}
-      setShowSubscriptionPage(false);
-      setUserHasAccess(true);
-      setTrialEnded(false);
-      // Refresh data
-      fetchData();
-      return;
-    }
-
     // Handle regular subscription success (for startup requests)
     if (!pendingStartupRequest) return;
 
@@ -2139,7 +1921,7 @@ const App: React.FC = () => {
         'Failed to accept startup request. Please try again.'
       );
     }
-  }, [pendingStartupRequest, showSubscriptionPage, fetchData]);
+  }, [pendingStartupRequest, fetchData]);
 
   const handleSubscriptionModalClose = useCallback(() => {
     setPendingStartupRequest(null);
@@ -2757,18 +2539,8 @@ const App: React.FC = () => {
                   console.log('✅ User data refreshed after Form 2 completion:', refreshedUser);
                   setCurrentUser(refreshedUser);
                   setIsAuthenticated(true);
-                  
-                  // Now check payment status with fresh data
-                  console.log('🔄 Checking payment status with refreshed data...');
-                  const hasActiveSubscription = await checkPaymentStatus(refreshedUser.id);
-                  
-                  if (hasActiveSubscription) {
-                    console.log('✅ Active subscription found, navigating to dashboard');
-                    setCurrentPage('login'); // This will show the main dashboard
-                  } else {
-                    console.log('💳 No active subscription found, redirecting to payment page');
-                    setCurrentPage('payment');
-                  }
+                  // Directly open dashboard after Form 2, without any payment checks
+                  setCurrentPage('login'); // This will show the main dashboard
                 } else {
                   console.error('❌ Failed to refresh user data after Form 2 completion');
                   // Fallback: still try to navigate
@@ -2840,15 +2612,6 @@ const App: React.FC = () => {
                   if (refreshedUser) {
                     console.log('✅ User data refreshed in background:', refreshedUser);
                     setCurrentUser(refreshedUser);
-                    
-                    // Background verification (non-blocking)
-                    const hasActiveSubscription = await checkPaymentStatus(refreshedUser.id);
-                    console.log('🔍 Background payment status check:', hasActiveSubscription);
-                    
-                    if (!hasActiveSubscription) {
-                      console.log('⚠️ Background check: No active subscription found, but dashboard already shown');
-                      // Dashboard is already shown, so this is just a warning
-                    }
                   } else if (retryCount < 3) {
                     // Retry after a short delay if profile not found
                     console.log(`⚠️ Profile not found, retrying in 2 seconds (attempt ${retryCount + 1}/3)`);
@@ -2905,6 +2668,11 @@ const App: React.FC = () => {
   // Show public program view if on /program with opportunityId (BEFORE auth check)
   if (isPublicProgramView) {
     return <PublicProgramView />;
+  }
+  
+  // Show public startup page if on /startup with startupId (BEFORE auth check)
+  if (isPublicStartupPage) {
+    return <PublicStartupPage />;
   }
   
   if (!isAuthenticated) {
@@ -3142,49 +2910,6 @@ const App: React.FC = () => {
       // Show subscription page if user needs to subscribe
       // Subscription page removed entirely
 
-      // SIMPLIFIED: Skip loading check for faster access
-      // TODO: Re-enable once database is working properly
-      /*
-      if (userHasAccess === null || isCheckingSubscription) {
-        return (
-          <div className="min-h-screen flex items-center justify-center bg-gray-50">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-              <p className="text-gray-600">Checking access...</p>
-              <p className="text-sm text-gray-500 mt-2">Setting up your 5-minute free trial</p>
-            </div>
-          </div>
-        );
-      }
-      */
-
-      // Show access denied if user doesn't have access
-      if (userHasAccess === false) {
-        return (
-          <div className="min-h-screen flex items-center justify-center bg-gray-50">
-            <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
-              <div className="mb-6">
-                <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                  </svg>
-                </div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Restricted</h2>
-                <p className="text-gray-600 mb-6">
-                  You need an active subscription to access the dashboard.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowSubscriptionPage(true)}
-                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                Subscribe Now
-              </button>
-            </div>
-          </div>
-        );
-      }
-      
       // If user's startup is found, show the health view
       if (userStartup) {
         console.log('✅ Rendering StartupHealthView for startup:', userStartup.name);

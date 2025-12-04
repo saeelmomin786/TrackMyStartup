@@ -230,7 +230,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Get pending startup requests - FIXED VERSION
   const pendingStartupRequests = useMemo(() => {
-    if (!advisorCode || !startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
+    // Strict validation: advisorCode must be a non-empty string
+    if (!advisorCode || typeof advisorCode !== 'string' || advisorCode.trim() === '' || !startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
       return [];
     }
 
@@ -246,8 +247,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return false;
       }
 
+      const enteredCode = (startupUser as any).investment_advisor_code_entered;
+      
+      // CRITICAL FIX: Only match if enteredCode is a non-empty string that exactly matches advisorCode
+      // This prevents null, undefined, empty string, or random values from matching
+      if (!enteredCode || typeof enteredCode !== 'string' || enteredCode.trim() === '') {
+        return false;
+      }
+
       // Check if this user has entered the investment advisor code
-      const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === advisorCode;
+      const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
       const isNotAccepted = !(startupUser as any).advisor_accepted;
 
       return hasEnteredCode && isNotAccepted;
@@ -258,14 +267,28 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Get pending investor requests - FIXED VERSION
   const pendingInvestorRequests = useMemo(() => {
-    if (!advisorCode || !users || !Array.isArray(users)) {
+    // Strict validation: advisorCode must be a non-empty string
+    if (!advisorCode || typeof advisorCode !== 'string' || advisorCode.trim() === '' || !users || !Array.isArray(users)) {
       return [];
     }
 
     // Find investors who have entered the investment advisor code but haven't been accepted
+    // CRITICAL: Only match if investment_advisor_code_entered is explicitly set and matches exactly
     const pendingInvestors = users.filter(user => {
-      const hasEnteredCode = user.role === 'Investor' && 
-        (user as any).investment_advisor_code_entered === advisorCode;
+      // Must be an investor
+      if (user.role !== 'Investor') {
+        return false;
+      }
+
+      const enteredCode = (user as any).investment_advisor_code_entered;
+      
+      // CRITICAL FIX: Only match if enteredCode is a non-empty string that exactly matches advisorCode
+      // This prevents null, undefined, empty string, or random values from matching
+      if (!enteredCode || typeof enteredCode !== 'string' || enteredCode.trim() === '') {
+        return false;
+      }
+
+      const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
       const isNotAccepted = !(user as any).advisor_accepted;
 
       return hasEnteredCode && isNotAccepted;
@@ -276,7 +299,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Get accepted startups - FIXED VERSION
   const myStartups = useMemo(() => {
-    if (!advisorCode || !startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
+    // Strict validation: advisorCode must be a non-empty string
+    if (!advisorCode || typeof advisorCode !== 'string' || advisorCode.trim() === '' || !startups || !Array.isArray(startups) || !users || !Array.isArray(users)) {
       return [];
     }
 
@@ -292,8 +316,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return false;
       }
 
+      const enteredCode = (startupUser as any).investment_advisor_code_entered;
+      
+      // CRITICAL FIX: Only match if enteredCode is a non-empty string that exactly matches advisorCode
+      if (!enteredCode || typeof enteredCode !== 'string' || enteredCode.trim() === '') {
+        return false;
+      }
+
       // Check if this user has entered the investment advisor code and has been accepted
-      const hasEnteredCode = (startupUser as any).investment_advisor_code_entered === advisorCode;
+      const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
       const isAccepted = (startupUser as any).advisor_accepted === true;
 
       return hasEnteredCode && isAccepted;
@@ -304,14 +335,26 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Get accepted investors - FIXED VERSION
   const myInvestors = useMemo(() => {
-    if (!advisorCode || !users || !Array.isArray(users)) {
+    // Strict validation: advisorCode must be a non-empty string
+    if (!advisorCode || typeof advisorCode !== 'string' || advisorCode.trim() === '' || !users || !Array.isArray(users)) {
       return [];
     }
 
     // Find investors who have entered the investment advisor code AND have been accepted
     const acceptedInvestors = users.filter(user => {
-      const hasEnteredCode = user.role === 'Investor' && 
-        (user as any).investment_advisor_code_entered === advisorCode;
+      // Must be an investor
+      if (user.role !== 'Investor') {
+        return false;
+      }
+
+      const enteredCode = (user as any).investment_advisor_code_entered;
+      
+      // CRITICAL FIX: Only match if enteredCode is a non-empty string that exactly matches advisorCode
+      if (!enteredCode || typeof enteredCode !== 'string' || enteredCode.trim() === '') {
+        return false;
+      }
+
+      const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
       const isAccepted = (user as any).advisor_accepted === true;
 
       return hasEnteredCode && isAccepted; // Only include investors who have been accepted
@@ -619,7 +662,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             console.log('⚠️ Co-investment offer skipped - investor not found:', offer.investor_email);
             return false;
           }
-          const investorHasThisAdvisor = investor.investment_advisor_code_entered === currentUser?.investment_advisor_code;
+          // CRITICAL FIX: Strict validation to prevent random matches
+          const enteredCode = investor.investment_advisor_code_entered;
+          const advisorCode = currentUser?.investment_advisor_code;
+          const investorHasThisAdvisor = advisorCode && 
+            enteredCode && 
+            typeof enteredCode === 'string' && 
+            enteredCode.trim() !== '' && 
+            enteredCode.trim() === advisorCode.trim();
           // Show co-investment offers that need approval OR have been approved/rejected by this advisor
           const needsApproval = offer.status === 'pending_investor_advisor_approval' || 
                                offer.investor_advisor_approval_status === 'pending';
@@ -1162,10 +1212,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         type: 'success',
         timestamp: new Date()
       }]);
-      // Auto-remove notification after 5 seconds
+      
+      // Refresh the page to update the service requests list
       setTimeout(() => {
-        setNotifications(prev => prev.slice(1));
-      }, 5000);
+        window.location.reload();
+      }, 1000); // Small delay to show success message
     } catch (error) {
       console.error('Error accepting request:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -3728,6 +3779,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
                               <span className="hidden xs:inline">View </span>Deck
+                            </button>
+                          </a>
+                        )}
+
+                        {inv.onePagerUrl && inv.onePagerUrl !== '#' && (
+                          <a href={inv.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[140px]">
+                            <button className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 bg-white px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium">
+                              <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              <span className="hidden xs:inline">Business </span>Plan
                             </button>
                           </a>
                         )}

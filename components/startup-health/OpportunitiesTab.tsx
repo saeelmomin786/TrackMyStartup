@@ -219,6 +219,31 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
         }
     };
 
+    const handleShareAdminProgram = async (program: AdminProgramPost) => {
+        try {
+            const url = new URL(window.location.origin);
+            url.searchParams.set('view', 'admin-program');
+            url.searchParams.set('programId', program.id);
+            const shareUrl = url.toString();
+            const text = `${program.programName}\nDeadline: ${program.deadline || '—'}`;
+            if (navigator.share) {
+                await navigator.share({ title: program.programName, text, url: shareUrl });
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(`${text}\n\n${shareUrl}`);
+                messageService.success('Copied', 'Shareable link copied to clipboard', 2000);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = `${text}\n\n${shareUrl}`;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                messageService.success('Copied', 'Shareable link copied to clipboard', 2000);
+            }
+        } catch (e) {
+            messageService.error('Share Failed', 'Unable to share link.');
+        }
+    };
 
     const handlePaymentSuccess = () => {
         // Refresh applications to show updated payment status
@@ -532,8 +557,23 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                 )}
                                 <div className="p-4 flex flex-col flex-grow">
                                     <div className="flex-grow">
-                                        <p className="text-sm font-medium text-brand-primary">{p.incubationCenter}</p>
-                                        <h3 className="text-lg font-semibold text-slate-800 mt-1">{p.programName}</h3>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div>
+                                                <p className="text-sm font-medium text-brand-primary">{p.incubationCenter}</p>
+                                                <h3 className="text-lg font-semibold text-slate-800 mt-1">{p.programName}</h3>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                title="Share program"
+                                                onClick={() => handleShareAdminProgram(p)}
+                                            >
+                                                <Share2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                        <p className="text-xs text-slate-500 mt-2 line-clamp-3">
+                                            {p.description || 'Admin curated program'}
+                                        </p>
                                         <p className="text-xs text-slate-500 mt-2">Deadline: <span className="font-semibold">{p.deadline}</span></p>
                                     </div>
                                     <div className="border-t pt-4 mt-4">

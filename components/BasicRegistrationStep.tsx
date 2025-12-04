@@ -43,7 +43,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
   const [emailSent, setEmailSent] = useState(false);
   
   // Role selection state
-  const [availableRoles, setAvailableRoles] = useState<string[]>(['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Admin']);
+  const [availableRoles, setAvailableRoles] = useState<string[]>(['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Mentor', 'Admin']);
   
   // New state for email validation
   const [emailValidation, setEmailValidation] = useState<{

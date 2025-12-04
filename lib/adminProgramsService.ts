@@ -6,6 +6,7 @@ export interface AdminProgramPost {
   incubationCenter: string;
   deadline: string; // ISO date string (YYYY-MM-DD)
   applicationLink: string;
+  description?: string;
   posterUrl?: string;
   createdAt: string;
   createdBy?: string | number | null;
@@ -16,6 +17,7 @@ export interface CreateAdminProgramPostInput {
   incubationCenter: string;
   deadline: string; // YYYY-MM-DD
   applicationLink: string;
+  description?: string;
   posterUrl?: string;
 }
 
@@ -30,6 +32,10 @@ class AdminProgramsService {
       deadline: post.deadline,
       application_link: post.applicationLink
     };
+
+    if (post.description && post.description.trim().length > 0) {
+      baseInsert.description = post.description.trim();
+    }
 
     if (post.posterUrl && post.posterUrl.trim().length > 0) {
       baseInsert.poster_url = post.posterUrl.trim();
@@ -64,14 +70,14 @@ class AdminProgramsService {
     // Prefer explicit column list for better compatibility with schema cache
     let { data, error } = await supabase
       .from(this.table)
-      .select('id, program_name, incubation_center, deadline, application_link, poster_url, created_at, created_by')
+      .select('id, program_name, incubation_center, deadline, application_link, description, poster_url, created_at, created_by')
       .order('created_at', { ascending: false });
 
     // If schema cache complains about poster_url, retry without it
     if (error && String(error.message || '').toLowerCase().includes('poster_url')) {
       const retry = await supabase
         .from(this.table)
-        .select('id, program_name, incubation_center, deadline, application_link, created_at, created_by')
+        .select('id, program_name, incubation_center, deadline, application_link, description, created_at, created_by')
         .order('created_at', { ascending: false });
       data = retry.data as any;
       error = retry.error as any;
@@ -96,6 +102,7 @@ class AdminProgramsService {
     incubationCenter: row.incubation_center,
     deadline: row.deadline,
     applicationLink: row.application_link,
+    description: row.description || undefined,
     posterUrl: row.poster_url || undefined,
     createdAt: row.created_at,
     createdBy: row.created_by ?? null

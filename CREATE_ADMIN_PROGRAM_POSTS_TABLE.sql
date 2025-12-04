@@ -11,6 +11,7 @@ create table if not exists public.admin_program_posts (
   incubation_center text not null,
   deadline date not null,
   application_link text not null,
+  description text null,
   poster_url text null,
   created_at timestamptz not null default now(),
   created_by uuid null

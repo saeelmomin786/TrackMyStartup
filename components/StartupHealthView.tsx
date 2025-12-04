@@ -47,12 +47,12 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     // If facilitator is accessing, use the target tab or default to compliance
     const [activeTab, setActiveTab] = useState<TabId>(() => {
         if (isFacilitatorAccess) {
-            if (facilitatorTargetTab === 'full') {
-                return 'dashboard'; // Full access - start with dashboard
+            if (facilitatorTargetTab === 'full' || facilitatorTargetTab === 'dashboard') {
+                return 'dashboard'; // Full access or dashboard access - start with dashboard
             } else if (facilitatorTargetTab === 'compliance') {
                 return 'compliance'; // Only compliance access
             }
-            return 'compliance'; // Default fallback
+            return 'dashboard'; // Default to dashboard for investors/advisors viewing portfolio
         }
         
         // Prefer URL param if provided; otherwise default to dashboard

@@ -1,0 +1,136 @@
+-- =====================================================
+-- MENTOR RLS POLICY OPTIONS - SAFE TO RUN
+-- =====================================================
+-- Based on your current policies, Mentors ALREADY have read access
+-- through "startups_authenticated_read" (qual = true)
+-- 
+-- Choose ONE of the options below based on your needs
+-- =====================================================
+
+-- =====================================================
+-- OPTION 1: NO CHANGES NEEDED (RECOMMENDED FOR NOW)
+-- =====================================================
+-- Current status: Mentors can already view all startups
+-- The "startups_authenticated_read" policy with qual = true
+-- gives ALL authenticated users (including Mentors) read access
+-- 
+-- ✅ NO ACTION REQUIRED - Mentors already have access
+-- =====================================================
+
+-- =====================================================
+-- OPTION 2: RESTRICT MENTORS TO ASSIGNED STARTUPS ONLY
+-- =====================================================
+-- Use this if you want Mentors to only see startups they're assigned to
+-- 
+-- IMPORTANT: This requires a mentor_startup_assignments table first!
+-- 
+-- Step 1: Create assignment table (if not exists)
+-- CREATE TABLE IF NOT EXISTS mentor_startup_assignments (
+--     id BIGSERIAL PRIMARY KEY,
+--     mentor_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+--     startup_id INTEGER NOT NULL REFERENCES public.startups(id) ON DELETE CASCADE,
+--     assigned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+--     UNIQUE(mentor_id, startup_id)
+-- );
+-- 
+-- Step 2: Create restrictive policy for Mentors
+-- CREATE POLICY "Mentors view assigned startups only" ON public.startups
+--     FOR SELECT USING (
+--         -- Allow if user is not a Mentor (other roles use existing policies)
+--         NOT EXISTS (
+--             SELECT 1 FROM public.users 
+--             WHERE id = auth.uid() 
+--             AND role = 'Mentor'
+--         )
+--         OR
+--         -- OR if Mentor is assigned to this startup
+--         EXISTS (
+--             SELECT 1 FROM public.users u
+--             JOIN mentor_startup_assignments msa ON u.id = msa.mentor_id
+--             WHERE u.id = auth.uid()
+--             AND u.role = 'Mentor'
+--             AND msa.startup_id = startups.id
+--         )
+--     );
+-- 
+-- ⚠️ WARNING: This will override the "startups_authenticated_read" policy for Mentors
+-- =====================================================
+
+-- =====================================================
+-- OPTION 3: ADD MENTOR UPDATE ACCESS (READ + WRITE)
+-- =====================================================
+-- Use this if Mentors should be able to update startup data
+-- 
+-- CREATE POLICY "Mentors can update assigned startups" ON public.startups
+--     FOR UPDATE USING (
+--         EXISTS (
+--             SELECT 1 FROM public.users u
+--             JOIN mentor_startup_assignments msa ON u.id = msa.mentor_id
+--             WHERE u.id = auth.uid()
+--             AND u.role = 'Mentor'
+--             AND msa.startup_id = startups.id
+--         )
+--     )
+--     WITH CHECK (
+--         EXISTS (
+--             SELECT 1 FROM public.users u
+--             JOIN mentor_startup_assignments msa ON u.id = msa.mentor_id
+--             WHERE u.id = auth.uid()
+--             AND u.role = 'Mentor'
+--             AND msa.startup_id = startups.id
+--         )
+--     );
+-- =====================================================
+
+-- =====================================================
+-- OPTION 4: ADD MENTOR TO DUE DILIGENCE POLICY
+-- =====================================================
+-- Use this if Mentors should have same access as Investors/Advisors with due diligence
+-- 
+-- This is more complex - you'd need to update the existing policy
+-- which is NOT recommended. Instead, create a separate policy:
+-- 
+-- CREATE POLICY "Mentors can view startups" ON public.startups
+--     FOR SELECT USING (
+--         EXISTS (
+--             SELECT 1 FROM public.users 
+--             WHERE id = auth.uid() 
+--             AND role = 'Mentor'
+--         )
+--     );
+-- 
+-- Note: This is redundant since "startups_authenticated_read" already covers it
+-- =====================================================
+
+-- =====================================================
+-- RECOMMENDATION
+-- =====================================================
+-- Based on your current setup:
+-- 
+-- ✅ OPTION 1 (NO CHANGES) is recommended for now
+--    - Mentors already have read access
+--    - No risk of breaking existing functionality
+--    - You can add restrictions later if needed
+-- 
+-- If you want to restrict access later:
+-- 1. Create mentor_startup_assignments table
+-- 2. Assign mentors to specific startups
+-- 3. Then run OPTION 2 to restrict access
+-- =====================================================
+
+-- =====================================================
+-- VERIFICATION QUERY
+-- =====================================================
+-- Run this to verify Mentor access after any changes:
+-- 
+-- SELECT 
+--     'Current Mentor Access' as check_type,
+--     policyname,
+--     cmd,
+--     qual
+-- FROM pg_policies 
+-- WHERE tablename = 'startups'
+-- AND (qual LIKE '%Mentor%' OR qual = 'true')
+-- ORDER BY policyname;
+-- =====================================================
+

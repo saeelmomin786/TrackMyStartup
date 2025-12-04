@@ -65,7 +65,7 @@ export enum FeeType {
     Hybrid = 'Hybrid',
 }
 
-export type UserRole = 'Investor' | 'Startup' | 'CA' | 'CS' | 'Admin' | 'Startup Facilitation Center' | 'Investment Advisor';
+export type UserRole = 'Investor' | 'Startup' | 'CA' | 'CS' | 'Admin' | 'Startup Facilitation Center' | 'Investment Advisor' | 'Mentor';
 
 export interface Founder {
   name: string;
@@ -306,6 +306,7 @@ export interface RecognitionRecord {
 }
 
 export interface FundraisingDetails {
+    id?: number; // Database ID for update operations
     active: boolean;
     type: InvestmentType;
     value: number;
@@ -316,6 +317,27 @@ export interface FundraisingDetails {
     validationRequested: boolean;
     pitchDeckUrl?: string;
     pitchVideoUrl?: string;
+    onePagerUrl?: string;
+    // One‑pager stored fields
+    onePagerDate?: string;
+    onePagerOneLiner?: string;
+    problemStatement?: string;
+    solutionText?: string;
+    growthChallenge?: string;
+    uspText?: string;
+    competitionText?: string;
+    teamText?: string;
+    tamText?: string;
+    samText?: string;
+    somText?: string;
+    tractionText?: string;
+    askUtilizationText?: string;
+    revenueThisYear?: string;
+    revenueLastYear?: string;
+    revenueNextMonth?: string;
+    grossProfitMargin?: string;
+    netProfitMargin?: string;
+    fixedCostLast3Months?: string;
 }
 
 // Admin Panel Types

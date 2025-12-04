@@ -12,6 +12,7 @@ const AdminProgramsTab: React.FC = () => {
     incubationCenter: '',
     deadline: '',
     applicationLink: '',
+    description: '',
     posterUrl: ''
   });
   const [loading, setLoading] = useState(false);
@@ -41,9 +42,10 @@ const AdminProgramsTab: React.FC = () => {
         incubationCenter: form.incubationCenter.trim(),
         deadline: form.deadline,
         applicationLink: form.applicationLink.trim(),
+        description: form.description.trim(),
         posterUrl: normalizedPoster || undefined
       });
-      setForm({ programName: '', incubationCenter: '', deadline: '', applicationLink: '', posterUrl: '' });
+      setForm({ programName: '', incubationCenter: '', deadline: '', applicationLink: '', description: '', posterUrl: '' });
       await loadPosts();
     } catch (e: any) {
       console.error('Failed to create admin program post', e);
@@ -105,6 +107,16 @@ const AdminProgramsTab: React.FC = () => {
             onChange={e => setForm(prev => ({ ...prev, applicationLink: e.target.value }))}
             required
           />
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Description (optional)</label>
+            <textarea
+              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows={3}
+              placeholder="Short description about the program..."
+              value={form.description}
+              onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))}
+            />
+          </div>
         <Input
           label="Poster URL (optional)"
           placeholder="https://.../poster.jpg"

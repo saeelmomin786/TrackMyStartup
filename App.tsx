@@ -18,6 +18,7 @@ import CAView from './components/CAView';
 import CSView from './components/CSView';
 import FacilitatorView from './components/FacilitatorView';
 import InvestmentAdvisorView from './components/InvestmentAdvisorView';
+import MentorView from './components/MentorView';
 import TrialStatusBanner from './components/TrialStatusBanner';
 import LoginPage from './components/LoginPage';
 import { TwoStepRegistration } from './components/TwoStepRegistration';
@@ -28,6 +29,7 @@ import { getQueryParam, setQueryParam } from './lib/urlState';
 import Footer from './components/Footer';
 import PageRouter from './components/PageRouter';
 import PublicProgramView from './components/PublicProgramView';
+import PublicAdminProgramView from './components/PublicAdminProgramView';
 import PublicStartupPage from './components/PublicStartupPage';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
 import DiagnosticPage from './components/DiagnosticPage';
@@ -45,6 +47,7 @@ const App: React.FC = () => {
   
   // Check if we're on a public program view page
   const isPublicProgramView = getQueryParam('view') === 'program' && getQueryParam('opportunityId');
+  const isPublicAdminProgramView = getQueryParam('view') === 'admin-program' && getQueryParam('programId');
   
   // Check if we're on a public startup page (ignore page parameter)
   // This should work even when user is authenticated - it's a public view of a startup
@@ -1788,8 +1791,10 @@ const App: React.FC = () => {
       setView('startupHealth');
       
       // Store the target tab for the StartupHealthView to use
-      if (targetTab) {
-        (window as any).facilitatorTargetTab = targetTab;
+      // Default to 'dashboard' for investors/advisors if no targetTab specified
+      const finalTargetTab = targetTab || (currentUser?.role === 'Investor' || currentUser?.role === 'Investment Advisor' ? 'dashboard' : targetTab);
+      if (finalTargetTab) {
+        (window as any).facilitatorTargetTab = finalTargetTab;
       }
       
       setViewKey(prev => prev + 1); // Force re-render
@@ -2669,6 +2674,10 @@ const App: React.FC = () => {
   if (isPublicProgramView) {
     return <PublicProgramView />;
   }
+
+  if (isPublicAdminProgramView) {
+    return <PublicAdminProgramView />;
+  }
   
   // Show public startup page if on /startup with startupId (BEFORE auth check)
   if (isPublicStartupPage) {
@@ -2762,7 +2771,8 @@ const App: React.FC = () => {
 
   const MainContent = () => {
     // Wait for user role to be loaded before showing role-based views
-    if (isAuthenticated && currentUser && !currentUser.role) {
+    // Also wait if still loading to prevent race condition where default role shows before correct role loads
+    if (isLoading || (isAuthenticated && currentUser && !currentUser.role)) {
       return (
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
@@ -2861,6 +2871,17 @@ const App: React.FC = () => {
           offers={investmentOffers}
           interests={[]} // TODO: Add investment interests data
           pendingRelationships={pendingRelationships}
+          onViewStartup={handleViewStartup}
+        />
+      );
+    }
+
+    if (currentUser?.role === 'Mentor') {
+      return (
+        <MentorView
+          currentUser={currentUser}
+          users={users}
+          startups={startups}
           onViewStartup={handleViewStartup}
         />
       );
@@ -3125,6 +3146,14 @@ const App: React.FC = () => {
                   <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
                       Advisor Code: <span className="font-semibold text-brand-primary">
                           {(currentUser as any)?.investment_advisor_code || 'IA-XXXXXX'}
+                      </span>
+                  </div>
+              )}
+
+              {currentUser?.role === 'Mentor' && (
+                  <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
+                      Mentor Code: <span className="font-semibold text-brand-primary">
+                          {(currentUser as any)?.mentor_code || 'MEN-XXXXXX'}
                       </span>
                   </div>
               )}

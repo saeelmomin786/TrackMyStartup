@@ -11,6 +11,7 @@ export interface ActiveFundraisingStartup {
   complianceStatus: ComplianceStatus;
   pitchDeckUrl?: string;
   pitchVideoUrl?: string;
+  onePagerUrl?: string;
   fundraisingType: InvestmentType;
   description?: string;
   createdAt: string;
@@ -115,8 +116,28 @@ class InvestorService {
         console.error('Background sector update failed:', error);
       });
 
+      // Deduplicate by startup_id - keep only the most recent fundraising record per startup
+      const startupMap = new Map<number, typeof filteredData[0]>();
+      filteredData.forEach(item => {
+        const startupId = item.startups.id;
+        const existing = startupMap.get(startupId);
+        
+        // Use fundraising_details.created_at (from the fundraising record itself) for comparison
+        const itemDate = item.created_at ? new Date(item.created_at) : new Date(0);
+        const existingDate = existing?.created_at ? new Date(existing.created_at) : new Date(0);
+        
+        // If no existing record, or this one is more recent, use this one
+        if (!existing || itemDate > existingDate) {
+          startupMap.set(startupId, item);
+        }
+      });
+
+      // Convert map values to array and map to ActiveFundraisingStartup format
+      const uniqueStartups = Array.from(startupMap.values());
+      console.log(`🔍 Deduplicated: ${filteredData.length} records -> ${uniqueStartups.length} unique startups`);
+
       // Show ALL active fundraising startups, but mark their validation status
-      return filteredData.map(item => {
+      return uniqueStartups.map(item => {
         // Use domain from applications/fundraising, fallback to startup sector, then to 'Unknown'
         const finalSector = domainMap[item.startups.id] || item.startups.sector || 'Unknown';
         console.log(`🔍 Startup ${item.startups.name} (ID: ${item.startups.id}): original sector=${item.startups.sector}, domain=${domainMap[item.startups.id]}, final sector=${finalSector}`);
@@ -130,6 +151,7 @@ class InvestorService {
           complianceStatus: item.startups.compliance_status as ComplianceStatus,
           pitchDeckUrl: item.pitch_deck_url,
           pitchVideoUrl: item.pitch_video_url,
+          onePagerUrl: item.one_pager_url,
           fundraisingType: item.type as InvestmentType,
           description: item.startups.description || `${item.startups.name} - ${finalSector} startup`,
           createdAt: item.startups.created_at,
@@ -199,6 +221,7 @@ class InvestorService {
         complianceStatus: data.startups.compliance_status as ComplianceStatus,
         pitchDeckUrl: data.pitch_deck_url,
         pitchVideoUrl: data.pitch_video_url,
+        onePagerUrl: data.one_pager_url,
         fundraisingType: data.type as InvestmentType,
         description: data.startups.description || `${data.startups.name} - ${finalSector} startup`,
         createdAt: data.startups.created_at,

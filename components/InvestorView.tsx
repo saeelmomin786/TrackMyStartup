@@ -1679,10 +1679,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                                     size="sm" 
                                                     variant="outline" 
                                                     onClick={() => {
-                                                        const url = new URL(window.location.href);
-                                                        url.searchParams.set('view', 'startup');
-                                                        url.searchParams.set('startupId', String(startup.id));
-                                                        window.location.href = url.toString();
+                                                        onViewStartup(startup, 'dashboard');
                                                     }}
                                                 >
                                                     <Eye className="mr-2 h-4 w-4" /> View
@@ -1760,8 +1757,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                   }`}
                 >
                   <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden xs:inline">Verified</span>
-                  <span className="xs:hidden">Ver</span>
+                  <span>Verified</span>
                   </button>
                   
                   <button
@@ -2288,6 +2284,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                 </a>
                               )}
 
+                              {inv.onePagerUrl && inv.onePagerUrl !== '#' && (
+                                <a href={inv.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[140px]">
+                                  <Button size="sm" variant="secondary" className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 text-xs sm:text-sm">
+                                    <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden xs:inline">Business </span>Plan
+                                  </Button>
+                                </a>
+                              )}
+
                               <button
                                 onClick={() => handleDueDiligenceClick(inv)}
                                 className={`flex-1 min-w-[140px] transition-all duration-200 border px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${
@@ -2567,6 +2571,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
                             <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200">
                               <FileText className="h-4 w-4 mr-2" /> View Deck
+                            </Button>
+                          </a>
+                        )}
+
+                        {inv.onePagerUrl && inv.onePagerUrl !== '#' && (
+                          <a href={inv.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
+                            <Button size="sm" variant="secondary" className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200">
+                              <FileText className="h-4 w-4 mr-2" /> Business Plan
                             </Button>
                           </a>
                         )}
@@ -2875,8 +2887,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         (offer.startup && s.id === offer.startup.id) || s.name === offer.startupName
                       );
                       const deckUrl = matchedPitch?.pitchDeckUrl;
+                      const onePagerUrl = matchedPitch?.onePagerUrl;
                       const videoUrl = investorService.getYoutubeEmbedUrl(matchedPitch?.pitchVideoUrl);
-                      if (!deckUrl && !videoUrl) return null;
+                      if (!deckUrl && !onePagerUrl && !videoUrl) return null;
                       return (
                         <div className="mt-3 flex flex-col gap-3">
                           <div className="flex flex-wrap items-center gap-2">
@@ -2884,6 +2897,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                               <a href={deckUrl} target="_blank" rel="noopener noreferrer">
                                 <Button size="sm" variant="secondary">
                                   <FileText className="h-4 w-4 mr-2" /> View Deck
+                                </Button>
+                              </a>
+                            )}
+                            {onePagerUrl && onePagerUrl !== '#' && (
+                              <a href={onePagerUrl} target="_blank" rel="noopener noreferrer">
+                                <Button size="sm" variant="secondary" className="hover:bg-purple-50 hover:text-purple-600">
+                                  <FileText className="h-4 w-4 mr-2" /> Business Plan
                                 </Button>
                               </a>
                             )}

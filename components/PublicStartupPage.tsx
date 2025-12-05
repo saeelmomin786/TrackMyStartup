@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import { ArrowLeft, Share2, Building2, TrendingUp, DollarSign, Users, FileText, Video, ExternalLink, CheckCircle } from 'lucide-react';
@@ -13,7 +13,6 @@ import { authService, AuthUser } from '../lib/auth';
 import { paymentService } from '../lib/paymentService';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import LogoTMS from './public/logoTMS.svg';
-import html2canvas from 'html2canvas';
 
 const PublicStartupPage: React.FC = () => {
   const [startup, setStartup] = useState<Startup | null>(null);
@@ -23,84 +22,8 @@ const PublicStartupPage: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasDueDiligenceAccess, setHasDueDiligenceAccess] = useState(false);
-  const shareCardRef = useRef<HTMLDivElement>(null);
 
   const startupId = getQueryParam('startupId') || getQueryParam('id');
-
-  const buildShareUrl = () => {
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.set('view', 'startup');
-    url.searchParams.set('startupId', String(startup?.id || startupId || ''));
-    return url.toString();
-  };
-
-  const updateMetaTag = (key: 'name' | 'property', id: string, content: string) => {
-    if (!content) return;
-    let tag = document.head.querySelector(`meta[${key}="${id}"]`) as HTMLMetaElement | null;
-    if (!tag) {
-      tag = document.createElement('meta');
-      tag.setAttribute(key, id);
-      document.head.appendChild(tag);
-    }
-    tag.setAttribute('content', content);
-  };
-
-  // Best-effort: keep OG/Twitter tags in sync so shares have a card preview where crawlers allow JS-rendered head updates
-  useEffect(() => {
-    if (!startup) return;
-    const title = startup.name ? `${startup.name} | TrackMyStartup` : 'TrackMyStartup';
-    const description = (fundraisingDetails as any)?.onePagerOneLiner
-      ? (fundraisingDetails as any).onePagerOneLiner
-      : (startup as any)?.description || `Discover ${startup.name || 'this startup'} on TrackMyStartup`;
-    const shareUrl = buildShareUrl();
-    const fallbackImg = new URL(LogoTMS, window.location.origin).toString();
-    
-    // Extract YouTube video ID and use thumbnail as OG image (priority: YouTube thumbnail > Logo > Default)
-    const getYoutubeVideoId = (url?: string): string | null => {
-      if (!url) return null;
-      try {
-        if (url.includes('youtube.com/watch')) {
-          const urlObj = new URL(url);
-          return urlObj.searchParams.get('v');
-        }
-        if (url.includes('youtu.be/')) {
-          const urlObj = new URL(url);
-          return urlObj.pathname.slice(1).split('?')[0];
-        }
-        if (url.includes('youtube.com/embed/')) {
-          const match = url.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/);
-          return match ? match[1] : null;
-        }
-        if (url.includes('youtube.com/shorts/')) {
-          const match = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/);
-          return match ? match[1] : null;
-        }
-      } catch {
-        return null;
-      }
-      return null;
-    };
-
-    let image = fallbackImg;
-    const videoId = getYoutubeVideoId((fundraisingDetails as any)?.pitchVideoUrl);
-    if (videoId) {
-      // Use YouTube thumbnail (maxresdefault.jpg is highest quality, 1280x720)
-      image = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-    } else if ((startup as any)?.logo_url) {
-      image = toDirectImageUrl((startup as any).logo_url) || fallbackImg;
-    }
-
-    document.title = title;
-    updateMetaTag('property', 'og:type', 'website');
-    updateMetaTag('property', 'og:title', title);
-    updateMetaTag('property', 'og:description', description);
-    updateMetaTag('property', 'og:image', image);
-    updateMetaTag('property', 'og:url', shareUrl);
-    updateMetaTag('name', 'twitter:card', 'summary_large_image');
-    updateMetaTag('name', 'twitter:title', title);
-    updateMetaTag('name', 'twitter:description', description);
-    updateMetaTag('name', 'twitter:image', image);
-  }, [startup, fundraisingDetails]);
 
   // Check authentication - re-check when URL changes or component mounts
   // Also check periodically to catch auth state changes from App.tsx
@@ -259,46 +182,35 @@ const PublicStartupPage: React.FC = () => {
   const handleShare = async () => {
     if (!startup) return;
 
-    const shareUrl = buildShareUrl();
+    // Create clean public shareable link (ensure it's the public format)
+    const url = new URL(window.location.origin + window.location.pathname);
+    url.searchParams.set('view', 'startup');
+    url.searchParams.set('startupId', String(startup.id));
+    const shareUrl = url.toString();
+    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nValuation: ${formatCurrency(startup.current_valuation || 0, startup.currency || 'INR')}\n\nView startup: ${shareUrl}`;
 
     try {
-      // PRIORITY: Share ONLY URL - this forces WhatsApp to fetch OG tags and show preview card
-      // When you include both text and URL, WhatsApp might show text instead of fetching preview
-      // Sharing only URL ensures WhatsApp fetches OG tags and shows the card with YouTube thumbnail
       if (navigator.share) {
-        const shareData: ShareData = {
+        await navigator.share({
           title: startup.name || 'Startup Profile',
-          url: shareUrl, // URL ONLY - WhatsApp will fetch OG tags and show preview card
-        };
-        await navigator.share(shareData);
-        messageService.success('Shared', 'Link shared! WhatsApp will show preview card.', 2000);
-        return;
-      }
-
-      // Fallback: Copy URL to clipboard (user can paste in WhatsApp)
-      // When they paste the URL, WhatsApp will show a clickable preview card
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+          text: details,
+          url: shareUrl,
+        });
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(shareUrl);
-        messageService.success('Link Copied', 'Startup link copied! Paste in WhatsApp to share with preview card.', 2000);
+        messageService.success('Link Copied', 'Startup link copied to clipboard!', 2000);
       } else {
-        // Final fallback
+        // Fallback
         const textarea = document.createElement('textarea');
         textarea.value = shareUrl;
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        messageService.success('Link Copied', 'Startup link copied! Paste in WhatsApp to share.', 2000);
+        messageService.success('Link Copied', 'Startup link copied to clipboard!', 2000);
       }
     } catch (err) {
       console.error('Error sharing:', err);
-      // Final fallback: copy to clipboard
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        messageService.success('Link Copied', 'Startup link copied to clipboard!', 2000);
-      } catch (clipErr) {
-        messageService.error('Share Failed', 'Unable to share. Please copy the link manually.');
-      }
     }
   };
 
@@ -768,7 +680,6 @@ const PublicStartupPage: React.FC = () => {
         </div>
 
         {/* Discover Page Style Card */}
-        <div ref={shareCardRef}>
         <Card className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white">
           {/* Video Section */}
           <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -932,7 +843,6 @@ const PublicStartupPage: React.FC = () => {
             </div>
           )}
         </Card>
-        </div>
       </div>
     </div>
   );

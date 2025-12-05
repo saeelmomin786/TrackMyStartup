@@ -5,7 +5,6 @@ import Button from './ui/Button';
 import Input from './ui/Input';
 import AddStartupModal from './AddStartupModal';
 import AdvisorAwareLogo from './AdvisorAwareLogo';
-import { formatCurrency } from '../lib/utils';
 import { 
   Building2, 
   TrendingUp, 
@@ -82,18 +81,13 @@ const StartupView: React.FC<StartupViewProps> = ({
     url.searchParams.set('view', 'startup');
     url.searchParams.set('startupId', String(startup.id));
     const shareUrl = url.toString();
-    
+    const details = `Startup: ${startup.name}\nSector: ${startup.sector}\nValuation: ₹${startup.current_valuation}L\nFunding: ₹${startup.total_funding}L\nRevenue: ₹${startup.total_revenue}L\n\nView startup: ${shareUrl}`;
     try {
-      // Share ONLY URL - this forces WhatsApp to fetch OG tags and show preview card
-      // When you include text, WhatsApp might show text message instead of fetching preview
       if (navigator.share) {
-        await navigator.share({ 
-          title: startup.name, 
-          url: shareUrl // URL ONLY - WhatsApp will fetch OG tags and show preview card
-        });
+        await navigator.share({ title: startup.name, text: details, url: shareUrl });
       } else if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(shareUrl);
-        alert('Startup link copied to clipboard! Paste in WhatsApp to see preview card.');
+        alert('Startup link copied to clipboard');
       } else {
         // Fallback: hidden textarea copy
         const textarea = document.createElement('textarea');
@@ -102,7 +96,7 @@ const StartupView: React.FC<StartupViewProps> = ({
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        alert('Startup link copied to clipboard! Paste in WhatsApp to see preview card.');
+        alert('Startup link copied to clipboard');
       }
     } catch (err) {
       console.error('Share failed', err);

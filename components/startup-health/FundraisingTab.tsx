@@ -913,29 +913,22 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   size="sm"
                   variant="outline"
                   onClick={async () => {
-                    // Create clean public shareable link that will show clickable preview card in WhatsApp
+                    // Create clean public shareable link
                     const url = new URL(window.location.origin + window.location.pathname);
                     url.searchParams.set('view', 'startup');
                     url.searchParams.set('startupId', String(startup.id));
                     const shareUrl = url.toString();
                     
-                    // Format matches WhatsApp share format exactly as shown in image
-                    const shareText = `Check out ${startup.name}'s fundraising round`;
-                    
                     try {
-                      // Share ONLY URL - this forces WhatsApp to fetch OG tags and show preview card
-                      // When you include text, WhatsApp might show text message instead of fetching preview
-                      // Sharing only URL ensures WhatsApp shows the card with YouTube thumbnail
                       if (navigator.share) {
                         await navigator.share({
                           title: `${startup.name} - Fundraising`,
-                          url: shareUrl, // URL ONLY - WhatsApp will fetch OG tags and show preview card
+                          text: `Check out ${startup.name}'s fundraising round`,
+                          url: shareUrl,
                         });
-                        messageService.success('Shared', 'Link shared! WhatsApp will show preview card.', 2000);
                       } else if (navigator.clipboard && navigator.clipboard.writeText) {
-                        // Copy URL - when pasted in WhatsApp, it will show clickable preview card
                         await navigator.clipboard.writeText(shareUrl);
-                        messageService.success('Link Copied', 'Paste in WhatsApp to share with clickable preview card!', 2000);
+                        messageService.success('Link Copied', 'Public startup link copied to clipboard!', 2000);
                       } else {
                         // Fallback
                         const textarea = document.createElement('textarea');
@@ -944,17 +937,10 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                         textarea.select();
                         document.execCommand('copy');
                         document.body.removeChild(textarea);
-                        messageService.success('Link Copied', 'Paste in WhatsApp to share with preview card!', 2000);
+                        messageService.success('Link Copied', 'Public startup link copied to clipboard!', 2000);
                       }
                     } catch (err) {
                       console.error('Share failed', err);
-                      // Fallback: copy to clipboard
-                      try {
-                        await navigator.clipboard.writeText(shareUrl);
-                        messageService.success('Link Copied', 'Startup link copied to clipboard!', 2000);
-                      } catch (clipErr) {
-                        messageService.error('Share Failed', 'Unable to share. Please copy the link manually.');
-                      }
                     }
                   }}
                   className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"

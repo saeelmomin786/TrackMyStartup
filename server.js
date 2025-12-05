@@ -855,8 +855,101 @@ app.post('/api/subscription/check-expired', async (req, res) => {
 });
 
 // --------------------
+// Public startup share preview (SSR meta for crawlers)
+// --------------------
+const crawlerRegex = /(bot|crawler|spider|facebookexternalhit|linkedinbot|slackbot|twitterbot|whatsapp|telegram|discord|preview)/i;
+
+app.get('*', async (req, res, next) => {
+  try {
+    const { view, startupId, id } = req.query || {};
+    const ua = (req.headers['user-agent'] || '').toLowerCase();
+    const isCrawler = crawlerRegex.test(ua);
+    const targetId = startupId || id;
+
+    if (!(view === 'startup' && targetId && isCrawler)) {
+      return next();
+    }
+
+    // Fetch public startup data
+    const { data: startup, error: startupErr } = await supabase
+      .from('startups_public')
+      .select('id,name,sector,current_valuation,currency,description,logo_url,compliance_status')
+      .eq('id', targetId)
+      .single();
+
+    if (startupErr || !startup) {
+      console.warn('OG preview: startup not found', targetId, startupErr?.message);
+      return next();
+    }
+
+    // Fetch fundraising details (public)
+    const { data: fundraisingRows } = await supabase
+      .from('fundraising_details_public')
+      .select('pitch_video_url,pitch_deck_url,one_pager_one_liner,value,equity,stage,type')
+      .eq('startup_id', targetId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    const fundraising = Array.isArray(fundraisingRows) && fundraisingRows.length > 0 ? fundraisingRows[0] : null;
+
+    const title = startup.name ? `${startup.name} | TrackMyStartup` : 'TrackMyStartup';
+    const description = fundraising?.one_pager_one_liner
+      ? fundraising.one_pager_one_liner
+      : startup.description || `Discover ${startup.name || 'this startup'} on TrackMyStartup`;
+
+    const host = req.get('host');
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const shareUrl = `${protocol}://${host}${req.originalUrl}`;
+
+    const fallbackImg = `${protocol}://${host}/Track.png`;
+    const image = startup.logo_url || fallbackImg;
+
+    const html = `
+      <!doctype html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>${title}</title>
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="${escapeHtml(title)}" />
+        <meta property="og:description" content="${escapeHtml(description)}" />
+        <meta property="og:image" content="${escapeHtml(image)}" />
+        <meta property="og:url" content="${escapeHtml(shareUrl)}" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="${escapeHtml(title)}" />
+        <meta name="twitter:description" content="${escapeHtml(description)}" />
+        <meta name="twitter:image" content="${escapeHtml(image)}" />
+        <meta name="robots" content="index,follow" />
+      </head>
+      <body>
+        <p>Redirecting to startup page...</p>
+        <script>
+          window.location.href = ${JSON.stringify(shareUrl)};
+        </script>
+      </body>
+      </html>
+    `;
+
+    res.status(200).send(html);
+  } catch (err) {
+    console.error('OG preview handler failed', err);
+    return next();
+  }
+});
+
+// --------------------
 // Helper Functions
 // --------------------
+
+function escapeHtml(str = '') {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 async function resolveUserSubscriptionRecord({ razorpaySubscriptionId, userId }) {
   try {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import { ArrowLeft, Share2, Building2, TrendingUp, DollarSign, Users, FileText, Video, ExternalLink, CheckCircle } from 'lucide-react';
@@ -13,6 +13,7 @@ import { authService, AuthUser } from '../lib/auth';
 import { paymentService } from '../lib/paymentService';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import LogoTMS from './public/logoTMS.svg';
+import html2canvas from 'html2canvas';
 
 const PublicStartupPage: React.FC = () => {
   const [startup, setStartup] = useState<Startup | null>(null);
@@ -22,8 +23,52 @@ const PublicStartupPage: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasDueDiligenceAccess, setHasDueDiligenceAccess] = useState(false);
+  const shareCardRef = useRef<HTMLDivElement>(null);
 
   const startupId = getQueryParam('startupId') || getQueryParam('id');
+
+  const buildShareUrl = () => {
+    const url = new URL(window.location.origin + window.location.pathname);
+    url.searchParams.set('view', 'startup');
+    url.searchParams.set('startupId', String(startup?.id || startupId || ''));
+    return url.toString();
+  };
+
+  const updateMetaTag = (key: 'name' | 'property', id: string, content: string) => {
+    if (!content) return;
+    let tag = document.head.querySelector(`meta[${key}="${id}"]`) as HTMLMetaElement | null;
+    if (!tag) {
+      tag = document.createElement('meta');
+      tag.setAttribute(key, id);
+      document.head.appendChild(tag);
+    }
+    tag.setAttribute('content', content);
+  };
+
+  // Best-effort: keep OG/Twitter tags in sync so shares have a card preview where crawlers allow JS-rendered head updates
+  useEffect(() => {
+    if (!startup) return;
+    const title = startup.name ? `${startup.name} | TrackMyStartup` : 'TrackMyStartup';
+    const description = (fundraisingDetails as any)?.onePagerOneLiner
+      ? (fundraisingDetails as any).onePagerOneLiner
+      : (startup as any)?.description || `Discover ${startup.name || 'this startup'} on TrackMyStartup`;
+    const shareUrl = buildShareUrl();
+    const fallbackImg = new URL(LogoTMS, window.location.origin).toString();
+    const image = (startup as any)?.logo_url
+      ? toDirectImageUrl((startup as any).logo_url)
+      : fallbackImg;
+
+    document.title = title;
+    updateMetaTag('property', 'og:type', 'website');
+    updateMetaTag('property', 'og:title', title);
+    updateMetaTag('property', 'og:description', description);
+    updateMetaTag('property', 'og:image', image);
+    updateMetaTag('property', 'og:url', shareUrl);
+    updateMetaTag('name', 'twitter:card', 'summary_large_image');
+    updateMetaTag('name', 'twitter:title', title);
+    updateMetaTag('name', 'twitter:description', description);
+    updateMetaTag('name', 'twitter:image', image);
+  }, [startup, fundraisingDetails]);
 
   // Check authentication - re-check when URL changes or component mounts
   // Also check periodically to catch auth state changes from App.tsx
@@ -182,20 +227,38 @@ const PublicStartupPage: React.FC = () => {
   const handleShare = async () => {
     if (!startup) return;
 
-    // Create clean public shareable link (ensure it's the public format)
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.set('view', 'startup');
-    url.searchParams.set('startupId', String(startup.id));
-    const shareUrl = url.toString();
+    const shareUrl = buildShareUrl();
     const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nValuation: ${formatCurrency(startup.current_valuation || 0, startup.currency || 'INR')}\n\nView startup: ${shareUrl}`;
+    let shareFile: File | null = null;
+
+    // Try to capture the card so the share includes a visual preview (when supported)
+    if (shareCardRef.current) {
+      try {
+        const canvas = await html2canvas(shareCardRef.current, {
+          useCORS: true,
+          backgroundColor: '#f8fafc',
+          scale: 2,
+        });
+        const blob = await new Promise<Blob | null>(resolve =>
+          canvas.toBlob(b => resolve(b), 'image/png', 0.9)
+        );
+        if (blob) {
+          shareFile = new File([blob], `${startup.name || 'startup'}-card.png`, { type: 'image/png' });
+        }
+      } catch (err) {
+        console.warn('Card capture failed, sharing without image', err);
+      }
+    }
 
     try {
+      const canShareFile = shareFile && navigator.canShare?.({ files: [shareFile] });
+      const shareData: ShareData = shareFile && canShareFile
+        ? { title: startup.name || 'Startup Profile', text: details, url: shareUrl, files: [shareFile] }
+        : { title: startup.name || 'Startup Profile', text: details, url: shareUrl };
+
       if (navigator.share) {
-        await navigator.share({
-          title: startup.name || 'Startup Profile',
-          text: details,
-          url: shareUrl,
-        });
+        await navigator.share(shareData);
+        messageService.success('Shared', shareFile ? 'Shared with startup card!' : 'Link shared successfully', 2000);
       } else if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(shareUrl);
         messageService.success('Link Copied', 'Startup link copied to clipboard!', 2000);
@@ -680,6 +743,7 @@ const PublicStartupPage: React.FC = () => {
         </div>
 
         {/* Discover Page Style Card */}
+        <div ref={shareCardRef}>
         <Card className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white">
           {/* Video Section */}
           <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -843,6 +907,7 @@ const PublicStartupPage: React.FC = () => {
             </div>
           )}
         </Card>
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,699 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from '../../lib/supabase';
+import Card from '../ui/Card';
+import Button from '../ui/Button';
+import Input from '../ui/Input';
+import Select from '../ui/Select';
+import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X } from 'lucide-react';
+
+interface InvestorProfile {
+  id?: string;
+  user_id: string;
+  firm_type?: string;
+  global_hq?: string;
+  investor_name?: string;
+  website?: string;
+  linkedin_link?: string;
+  email?: string;
+  geography?: string[];
+  ticket_size_min?: number;
+  ticket_size_max?: number;
+  investment_stages?: string[];
+  investment_thesis?: string;
+  funding_requirements?: string;
+  funding_stages?: string[];
+  target_countries?: string[];
+  company_size?: string;
+  logo_url?: string;
+  video_url?: string;
+  media_type?: 'logo' | 'video';
+}
+
+interface InvestorProfileFormProps {
+  currentUser: { id: string; email: string; investorCode?: string; investor_code?: string };
+  onSave?: (profile: InvestorProfile) => void;
+  onProfileChange?: (profile: InvestorProfile) => void;
+  isViewOnly?: boolean;
+}
+
+const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({ 
+  currentUser, 
+  onSave,
+  onProfileChange,
+  isViewOnly = false 
+}) => {
+  const [isEditing, setIsEditing] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [profile, setProfile] = useState<InvestorProfile>({
+    user_id: currentUser.id,
+    media_type: 'logo',
+    geography: [],
+    investment_stages: [],
+    funding_stages: [],
+    target_countries: []
+  });
+  const [isGeographyOpen, setIsGeographyOpen] = useState(false);
+  const [isInvestmentStagesOpen, setIsInvestmentStagesOpen] = useState(false);
+  const [isFundingStagesOpen, setIsFundingStagesOpen] = useState(false);
+  const [isTargetCountriesOpen, setIsTargetCountriesOpen] = useState(false);
+  const geographyRef = useRef<HTMLDivElement>(null);
+  const investmentStagesRef = useRef<HTMLDivElement>(null);
+  const fundingStagesRef = useRef<HTMLDivElement>(null);
+  const targetCountriesRef = useRef<HTMLDivElement>(null);
+
+  const firmTypes = ['VC', 'Angel Investor', 'Corporate VC', 'Family Office', 'PE Firm', 'Government', 'Other'];
+  const investmentStages = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Bridge', 'Growth'];
+  const fundingStages = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Bridge', 'Growth'];
+  const companySizes = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+'];
+  const countries = ['India', 'USA', 'UK', 'Singapore', 'UAE', 'Germany', 'France', 'Canada', 'Australia', 'Japan', 'China', 'Other'];
+
+  useEffect(() => {
+    loadProfile();
+  }, [currentUser.id]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (geographyRef.current && !geographyRef.current.contains(event.target as Node)) {
+        setIsGeographyOpen(false);
+      }
+      if (investmentStagesRef.current && !investmentStagesRef.current.contains(event.target as Node)) {
+        setIsInvestmentStagesOpen(false);
+      }
+      if (fundingStagesRef.current && !fundingStagesRef.current.contains(event.target as Node)) {
+        setIsFundingStagesOpen(false);
+      }
+      if (targetCountriesRef.current && !targetCountriesRef.current.contains(event.target as Node)) {
+        setIsTargetCountriesOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const loadProfile = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('investor_profiles')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading profile:', error);
+        return;
+      }
+
+      if (data) {
+        const loadedProfile = {
+          ...data,
+          geography: data.geography || [],
+          investment_stages: data.investment_stages || [],
+          funding_stages: data.funding_stages || [],
+          target_countries: data.target_countries || []
+        };
+        setProfile(loadedProfile);
+        if (onProfileChange) {
+          onProfileChange(loadedProfile);
+        }
+      } else {
+        // Set initial preview with default values
+        if (onProfileChange) {
+          onProfileChange(profile);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading investor profile:', error);
+    }
+  };
+
+  const handleChange = (field: keyof InvestorProfile, value: any) => {
+    setProfile(prev => {
+      const updated = { ...prev, [field]: value };
+      if (onProfileChange) {
+        onProfileChange(updated);
+      }
+      return updated;
+    });
+  };
+
+  const handleArrayChange = (field: 'geography' | 'investment_stages' | 'funding_stages' | 'target_countries', value: string) => {
+    setProfile(prev => {
+      const currentArray = prev[field] || [];
+      const newArray = currentArray.includes(value)
+        ? currentArray.filter(item => item !== value)
+        : [...currentArray, value];
+      const updated = { ...prev, [field]: newArray };
+      if (onProfileChange) {
+        onProfileChange(updated);
+      }
+      return updated;
+    });
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${currentUser.id}-${Date.now()}.${fileExt}`;
+      const filePath = `investor-logos/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('investor-assets')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        alert('Failed to upload logo');
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('investor-assets')
+        .getPublicUrl(filePath);
+
+      handleChange('logo_url', publicUrl);
+      handleChange('media_type', 'logo');
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      alert('Failed to upload logo');
+    }
+  };
+
+  const handleSave = async () => {
+    if (!profile.investor_name) {
+      alert('Please enter investor name');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const profileData = {
+        ...profile,
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('investor_profiles')
+        .upsert(profileData, {
+          onConflict: 'user_id'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving profile:', error);
+        alert('Failed to save profile');
+        return;
+      }
+
+      setProfile(data);
+      setIsEditing(false);
+      if (onSave) {
+        onSave(data);
+      }
+      alert('Profile saved successfully!');
+    } catch (error) {
+      console.error('Error saving investor profile:', error);
+      alert('Failed to save profile');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        {!isViewOnly && (
+          <Button
+            size="sm"
+            variant={isEditing ? "secondary" : "primary"}
+            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+            disabled={isSaving}
+            className="ml-auto"
+          >
+            {isSaving ? 'Saving...' : isEditing ? <><Save className="h-4 w-4 mr-2" /> Save</> : 'Edit Profile'}
+          </Button>
+        )}
+      </div>
+
+      <div className="space-y-6">
+        {/* Basic Information */}
+        <div className="space-y-4">
+          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Basic Information</h4>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Investor Name / Firm Name"
+              value={profile.investor_name || ''}
+              onChange={(e) => handleChange('investor_name', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              required
+            />
+            
+            <Select
+              label="Firm Type"
+              value={profile.firm_type || ''}
+              onChange={(e) => handleChange('firm_type', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+            >
+              <option value="">Select Firm Type</option>
+              {firmTypes.map(type => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </Select>
+
+            <Input
+              label="Global HQ"
+              value={profile.global_hq || ''}
+              onChange={(e) => handleChange('global_hq', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              placeholder="e.g., San Francisco, CA"
+            />
+
+            <Input
+              label="Website"
+              type="url"
+              value={profile.website || ''}
+              onChange={(e) => handleChange('website', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              placeholder="https://example.com"
+            />
+
+            <Input
+              label="LinkedIn Link"
+              type="url"
+              value={profile.linkedin_link || ''}
+              onChange={(e) => handleChange('linkedin_link', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              placeholder="https://linkedin.com/in/..."
+            />
+
+            <Input
+              label="Email"
+              type="email"
+              value={profile.email || ''}
+              onChange={(e) => handleChange('email', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              placeholder="contact@example.com"
+            />
+          </div>
+        </div>
+
+        {/* Investment Preferences */}
+        <div className="space-y-4">
+          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Investment Preferences</h4>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="relative" ref={geographyRef}>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Where do you want to invest?</label>
+              <div
+                onClick={() => !isViewOnly && isEditing && setIsGeographyOpen(!isGeographyOpen)}
+                className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm cursor-pointer ${
+                  !isEditing || isViewOnly ? 'disabled:bg-slate-50 disabled:text-slate-500 disabled:border-slate-200 disabled:shadow-none disabled:cursor-not-allowed' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                    {profile.geography && profile.geography.length > 0 ? (
+                      profile.geography.map((country) => (
+                        <span
+                          key={country}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+                        >
+                          {country}
+                          {isEditing && !isViewOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleChange('geography', profile.geography?.filter(c => c !== country) || []);
+                              }}
+                              className="hover:bg-blue-200 rounded-full p-0.5"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-500 text-sm">Select countries...</span>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isGeographyOpen ? 'transform rotate-180' : ''}`} />
+                </div>
+              </div>
+              {isGeographyOpen && isEditing && !isViewOnly && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                  {countries.map(country => (
+                    <div
+                      key={country}
+                      onClick={() => {
+                        const current = profile.geography || [];
+                        if (current.includes(country)) {
+                          handleChange('geography', current.filter(c => c !== country));
+                        } else {
+                          handleChange('geography', [...current, country]);
+                        }
+                      }}
+                      className={`px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm ${
+                        profile.geography?.includes(country) ? 'bg-blue-100 font-medium' : ''
+                      }`}
+                    >
+                      {country}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="relative" ref={investmentStagesRef}>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Investment Stages</label>
+              <div
+                onClick={() => !isViewOnly && isEditing && setIsInvestmentStagesOpen(!isInvestmentStagesOpen)}
+                className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm cursor-pointer ${
+                  !isEditing || isViewOnly ? 'disabled:bg-slate-50 disabled:text-slate-500 disabled:border-slate-200 disabled:shadow-none disabled:cursor-not-allowed' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                    {profile.investment_stages && profile.investment_stages.length > 0 ? (
+                      profile.investment_stages.map((stage) => (
+                        <span
+                          key={stage}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+                        >
+                          {stage}
+                          {isEditing && !isViewOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleChange('investment_stages', profile.investment_stages?.filter(s => s !== stage) || []);
+                              }}
+                              className="hover:bg-blue-200 rounded-full p-0.5"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-500 text-sm">Select stages...</span>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isInvestmentStagesOpen ? 'transform rotate-180' : ''}`} />
+                </div>
+              </div>
+              {isInvestmentStagesOpen && isEditing && !isViewOnly && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                  {investmentStages.map(stage => (
+                    <div
+                      key={stage}
+                      onClick={() => {
+                        const current = profile.investment_stages || [];
+                        if (current.includes(stage)) {
+                          handleChange('investment_stages', current.filter(s => s !== stage));
+                        } else {
+                          handleChange('investment_stages', [...current, stage]);
+                        }
+                      }}
+                      className={`px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm ${
+                        profile.investment_stages?.includes(stage) ? 'bg-blue-100 font-medium' : ''
+                      }`}
+                    >
+                      {stage}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Ticket Size (Min) - USD"
+              type="number"
+              value={profile.ticket_size_min?.toString() || ''}
+              onChange={(e) => handleChange('ticket_size_min', e.target.value ? parseFloat(e.target.value) : null)}
+              disabled={!isEditing || isViewOnly}
+              placeholder="e.g., 100000"
+            />
+            
+            <Input
+              label="Ticket Size (Max) - USD"
+              type="number"
+              value={profile.ticket_size_max?.toString() || ''}
+              onChange={(e) => handleChange('ticket_size_max', e.target.value ? parseFloat(e.target.value) : null)}
+              disabled={!isEditing || isViewOnly}
+              placeholder="e.g., 5000000"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Investment Thesis</label>
+            <textarea
+              value={profile.investment_thesis || ''}
+              onChange={(e) => handleChange('investment_thesis', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              rows={4}
+              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Describe your investment thesis, focus areas, and what you look for in startups..."
+            />
+          </div>
+        </div>
+
+        {/* Funding Requirements */}
+        <div className="space-y-4">
+          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Funding Requirements</h4>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="relative" ref={fundingStagesRef}>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Funding Stages</label>
+              <div
+                onClick={() => !isViewOnly && isEditing && setIsFundingStagesOpen(!isFundingStagesOpen)}
+                className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm cursor-pointer ${
+                  !isEditing || isViewOnly ? 'disabled:bg-slate-50 disabled:text-slate-500 disabled:border-slate-200 disabled:shadow-none disabled:cursor-not-allowed' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                    {profile.funding_stages && profile.funding_stages.length > 0 ? (
+                      profile.funding_stages.map((stage) => (
+                        <span
+                          key={stage}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+                        >
+                          {stage}
+                          {isEditing && !isViewOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleChange('funding_stages', profile.funding_stages?.filter(s => s !== stage) || []);
+                              }}
+                              className="hover:bg-blue-200 rounded-full p-0.5"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-500 text-sm">Select stages...</span>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isFundingStagesOpen ? 'transform rotate-180' : ''}`} />
+                </div>
+              </div>
+              {isFundingStagesOpen && isEditing && !isViewOnly && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                  {fundingStages.map(stage => (
+                    <div
+                      key={stage}
+                      onClick={() => {
+                        const current = profile.funding_stages || [];
+                        if (current.includes(stage)) {
+                          handleChange('funding_stages', current.filter(s => s !== stage));
+                        } else {
+                          handleChange('funding_stages', [...current, stage]);
+                        }
+                      }}
+                      className={`px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm ${
+                        profile.funding_stages?.includes(stage) ? 'bg-blue-100 font-medium' : ''
+                      }`}
+                    >
+                      {stage}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="relative" ref={targetCountriesRef}>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Target Countries</label>
+              <div
+                onClick={() => !isViewOnly && isEditing && setIsTargetCountriesOpen(!isTargetCountriesOpen)}
+                className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm cursor-pointer ${
+                  !isEditing || isViewOnly ? 'disabled:bg-slate-50 disabled:text-slate-500 disabled:border-slate-200 disabled:shadow-none disabled:cursor-not-allowed' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                    {profile.target_countries && profile.target_countries.length > 0 ? (
+                      profile.target_countries.map((country) => (
+                        <span
+                          key={country}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+                        >
+                          {country}
+                          {isEditing && !isViewOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleChange('target_countries', profile.target_countries?.filter(c => c !== country) || []);
+                              }}
+                              className="hover:bg-blue-200 rounded-full p-0.5"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-500 text-sm">Select countries...</span>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isTargetCountriesOpen ? 'transform rotate-180' : ''}`} />
+                </div>
+              </div>
+              {isTargetCountriesOpen && isEditing && !isViewOnly && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                  {countries.map(country => (
+                    <div
+                      key={country}
+                      onClick={() => {
+                        const current = profile.target_countries || [];
+                        if (current.includes(country)) {
+                          handleChange('target_countries', current.filter(c => c !== country));
+                        } else {
+                          handleChange('target_countries', [...current, country]);
+                        }
+                      }}
+                      className={`px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm ${
+                        profile.target_countries?.includes(country) ? 'bg-blue-100 font-medium' : ''
+                      }`}
+                    >
+                      {country}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Select
+            label="Company Size"
+            value={profile.company_size || ''}
+            onChange={(e) => handleChange('company_size', e.target.value)}
+            disabled={!isEditing || isViewOnly}
+          >
+            <option value="">Select Company Size</option>
+            {companySizes.map(size => (
+              <option key={size} value={size}>{size} employees</option>
+            ))}
+          </Select>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Funding Requirements</label>
+            <textarea
+              value={profile.funding_requirements || ''}
+              onChange={(e) => handleChange('funding_requirements', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              rows={3}
+              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Describe specific funding requirements, criteria, or preferences..."
+            />
+          </div>
+        </div>
+
+        {/* Media Section */}
+        <div className="space-y-4">
+          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Logo / Video</h4>
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Media Type</label>
+            <div className="flex gap-4">
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="media_type"
+                  value="logo"
+                  checked={profile.media_type === 'logo'}
+                  onChange={() => handleChange('media_type', 'logo')}
+                  disabled={!isEditing || isViewOnly}
+                  className="mr-2"
+                />
+                <ImageIcon className="h-4 w-4 mr-1" />
+                <span className="text-sm text-slate-600">Logo</span>
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="media_type"
+                  value="video"
+                  checked={profile.media_type === 'video'}
+                  onChange={() => handleChange('media_type', 'video')}
+                  disabled={!isEditing || isViewOnly}
+                  className="mr-2"
+                />
+                <Video className="h-4 w-4 mr-1" />
+                <span className="text-sm text-slate-600">YouTube Video</span>
+              </label>
+            </div>
+          </div>
+
+          {profile.media_type === 'logo' ? (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Logo</label>
+              {profile.logo_url ? (
+                <div className="mb-2">
+                  <img src={profile.logo_url} alt="Logo" className="h-24 w-24 object-contain border border-slate-200 rounded" />
+                </div>
+              ) : null}
+              {isEditing && !isViewOnly && (
+                <label className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md cursor-pointer hover:bg-blue-700">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Logo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
+          ) : (
+            <Input
+              label="YouTube Video URL"
+              value={profile.video_url || ''}
+              onChange={(e) => handleChange('video_url', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              placeholder="https://www.youtube.com/watch?v=..."
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default InvestorProfileForm;
+

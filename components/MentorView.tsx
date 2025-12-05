@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AuthUser, User, Startup, InvestmentType, ComplianceStatus } from '../types';
-import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy } from 'lucide-react';
+import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2 } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
@@ -11,6 +11,8 @@ import Badge from './ui/Badge';
 import ProfilePage from './ProfilePage';
 import StartupHealthView from './StartupHealthView';
 import MentorDataForm from './MentorDataForm';
+import MentorProfileForm from './mentor/MentorProfileForm';
+import MentorCard from './mentor/MentorCard';
 
 interface MentorViewProps {
   currentUser: AuthUser | null;
@@ -25,9 +27,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   startups,
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'myStartups' | 'discover'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discover' | 'portfolio'>(() => {
     const fromUrl = (getQueryParam('tab') as any) || 'dashboard';
-    const valid = ['dashboard', 'myStartups', 'discover'];
+    const valid = ['dashboard', 'discover', 'portfolio'];
     return valid.includes(fromUrl) ? fromUrl : 'dashboard';
   });
 
@@ -40,7 +42,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   const [activeFundraisingStartups, setActiveFundraisingStartups] = useState<ActiveFundraisingStartup[]>([]);
   const [isLoadingPitches, setIsLoadingPitches] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [discoverySubTab, setDiscoverySubTab] = useState<'all' | 'verified' | 'favorites'>('all');
+  const [discoverySubTab, setDiscoverySubTab] = useState<'all' | 'verified' | 'favorites' | 'due-diligence'>('all');
+  const [showOnlyDueDiligence, setShowOnlyDueDiligence] = useState(false);
+  const [dueDiligenceStartups, setDueDiligenceStartups] = useState<Set<number>>(new Set());
   const [favoritedPitches, setFavoritedPitches] = useState<Set<number>>(new Set());
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyValidated, setShowOnlyValidated] = useState(false);
@@ -51,6 +55,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   const [mentorMetrics, setMentorMetrics] = useState<MentorMetrics | null>(null);
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  
+  // Mentor profile state
+  const [previewProfile, setPreviewProfile] = useState<any>(null);
 
   // Fetch mentor metrics
   const fetchMetrics = async () => {
@@ -68,20 +75,10 @@ const MentorView: React.FC<MentorViewProps> = ({
   };
 
   useEffect(() => {
-    if (activeTab === 'dashboard') {
+    if (activeTab === 'dashboard' || activeTab === 'portfolio') {
       fetchMetrics();
     }
   }, [currentUser?.id, activeTab]);
-
-  // Get startups assigned to this mentor from metrics
-  const myStartups = useMemo(() => {
-    if (mentorMetrics) {
-      const activeStartupIds = new Set(mentorMetrics.activeAssignments.map(a => a.startup_id));
-      return startups.filter(startup => activeStartupIds.has(startup.id));
-    }
-    // Fallback: show all startups if metrics not loaded
-    return startups;
-  }, [startups, mentorMetrics]);
 
   // Fetch active fundraising startups for discover section
   useEffect(() => {
@@ -122,8 +119,12 @@ const MentorView: React.FC<MentorViewProps> = ({
       filtered = filtered.filter(pitch => pitch.isStartupNationValidated);
     }
 
+    if (showOnlyDueDiligence) {
+      filtered = filtered.filter(pitch => dueDiligenceStartups.has(pitch.id));
+    }
+
     return filtered;
-  }, [activeFundraisingStartups, searchTerm, showOnlyFavorites, showOnlyValidated, favoritedPitches]);
+  }, [activeFundraisingStartups, searchTerm, showOnlyFavorites, showOnlyValidated, showOnlyDueDiligence, favoritedPitches, dueDiligenceStartups]);
 
   const handleViewStartup = (startup: Startup | ActiveFundraisingStartup) => {
     if ('id' in startup && typeof startup.id === 'number') {
@@ -151,6 +152,39 @@ const MentorView: React.FC<MentorViewProps> = ({
       }
       return next;
     });
+  };
+
+  const handleShare = (pitch: ActiveFundraisingStartup) => {
+    const url = window.location.href.split('?')[0] + `?startup=${pitch.id}`;
+    if (navigator.share) {
+      navigator.share({
+        title: `Check out ${pitch.name}`,
+        text: `${pitch.name} - ${pitch.sector}`,
+        url: url
+      }).catch(() => {
+        navigator.clipboard.writeText(url);
+        alert('Link copied to clipboard!');
+      });
+    } else {
+      navigator.clipboard.writeText(url);
+      alert('Link copied to clipboard!');
+    }
+  };
+
+  const handleDueDiligenceClick = (pitch: ActiveFundraisingStartup) => {
+    if (dueDiligenceStartups.has(pitch.id)) {
+      setDueDiligenceStartups(prev => {
+        const next = new Set(prev);
+        next.delete(pitch.id);
+        return next;
+      });
+    } else {
+      setDueDiligenceStartups(prev => {
+        const next = new Set(prev);
+        next.add(pitch.id);
+        return next;
+      });
+    }
   };
 
   const handleInviteToTMS = (startupName: string, emailId?: string) => {
@@ -214,17 +248,17 @@ ${mentorName}`;
             <div>
               <h1 className="text-2xl font-bold text-slate-900">Mentor Dashboard</h1>
               <p className="text-sm text-slate-600 mt-1">Welcome back, {currentUser?.name || 'Mentor'}</p>
-              {(currentUser as any)?.mentor_code && (
+              {currentUser?.mentor_code && (
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-xs text-slate-500">Your Mentor Code:</span>
                   <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-md border border-blue-200">
                     <span className="text-sm font-mono font-semibold text-blue-700">
-                      {(currentUser as any).mentor_code}
+                      {currentUser.mentor_code}
                     </span>
                     <button
                       onClick={async () => {
                         try {
-                          await navigator.clipboard.writeText((currentUser as any).mentor_code);
+                          await navigator.clipboard.writeText(currentUser.mentor_code || '');
                           alert('Mentor code copied to clipboard!');
                         } catch (error) {
                           console.error('Failed to copy code:', error);
@@ -265,17 +299,6 @@ ${mentorName}`;
               Dashboard
             </button>
             <button
-              onClick={() => setActiveTab('myStartups')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
-                activeTab === 'myStartups'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <Building2 className="h-5 w-5 mr-2" />
-              My Startup
-            </button>
-            <button
               onClick={() => setActiveTab('discover')}
               className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
                 activeTab === 'discover'
@@ -285,6 +308,17 @@ ${mentorName}`;
             >
               <Film className="h-5 w-5 mr-2" />
               Discover Pitches
+            </button>
+            <button
+              onClick={() => setActiveTab('portfolio')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
+                activeTab === 'portfolio'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <Briefcase className="h-5 w-5 mr-2" />
+              Portfolio
             </button>
           </div>
         </div>
@@ -746,50 +780,8 @@ ${mentorName}`;
           </div>
         )}
 
-        {activeTab === 'myStartups' && (
-          <Card>
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">My Startups</h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Startup Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Sector</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Total Funding</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Compliance Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-slate-200">
-                  {myStartups.map(startup => (
-                    <tr key={startup.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{startup.name}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{startup.sector}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                        {formatCurrency(startup.totalFunding || 0, startup.currency || 'USD')}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                        <Badge status={startup.complianceStatus} />
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleViewStartup(startup)}
-                        >
-                          <Eye className="h-4 w-4 mr-2" /> View
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-
         {activeTab === 'discover' && (
-          <div className="animate-fade-in max-w-4xl mx-auto w-full">
+          <div className="animate-fade-in max-w-3xl mx-auto w-full px-4">
             {/* Enhanced Header */}
             <div className="mb-8">
               <div className="text-center mb-6">
@@ -819,6 +811,7 @@ ${mentorName}`;
                       setDiscoverySubTab('all');
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(false);
                     }}
                     className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                       discoverySubTab === 'all'
@@ -835,6 +828,7 @@ ${mentorName}`;
                       setDiscoverySubTab('verified');
                       setShowOnlyValidated(true);
                       setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(false);
                     }}
                     className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                       discoverySubTab === 'verified'
@@ -851,6 +845,7 @@ ${mentorName}`;
                       setDiscoverySubTab('favorites');
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(true);
+                      setShowOnlyDueDiligence(false);
                     }}
                     className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
                       discoverySubTab === 'favorites'
@@ -862,6 +857,24 @@ ${mentorName}`;
                     <span className="hidden sm:inline">Favorites</span>
                     <span className="sm:hidden">Fav</span>
                   </button>
+                  
+                  <button
+                    onClick={() => {
+                      setDiscoverySubTab('due-diligence');
+                      setShowOnlyValidated(false);
+                      setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(true);
+                    }}
+                    className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
+                      discoverySubTab === 'due-diligence'
+                        ? 'border-purple-500 text-purple-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <Shield className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden md:inline">Due Diligence</span>
+                    <span className="md:hidden">DD</span>
+                  </button>
                 </nav>
               </div>
               
@@ -869,7 +882,9 @@ ${mentorName}`;
                 <div className="flex items-center gap-2 text-slate-600">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                   <span className="text-xs sm:text-sm font-medium">
-                    {filteredPitches.length} active pitches
+                    {discoverySubTab === 'due-diligence'
+                      ? `${dueDiligenceStartups.size} due diligence requests`
+                      : `${activeFundraisingStartups.length} active pitches`}
                   </span>
                 </div>
                 
@@ -880,8 +895,8 @@ ${mentorName}`;
               </div>
             </div>
             
-            {/* Pitches List */}
-            <div className="space-y-6 sm:space-y-8">
+            {/* Pitches Reels */}
+            <div className="space-y-4">
               {isLoadingPitches ? (
                 <Card className="text-center py-20">
                   <div className="max-w-sm mx-auto">
@@ -904,18 +919,10 @@ ${mentorName}`;
                 filteredPitches.map(pitch => {
                   const embedUrl = investorService.getYoutubeEmbedUrl(pitch.pitchVideoUrl);
                   return (
-                    <Card key={pitch.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white relative">
-                      {/* Favorite Button */}
-                      <button
-                        onClick={() => toggleFavorite(pitch.id)}
-                        className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur-sm rounded-full p-2 hover:bg-white transition-all duration-200 shadow-lg"
-                        title={favoritedPitches.has(pitch.id) ? 'Remove from favorites' : 'Add to favorites'}
-                      >
-                        <Heart className={`h-5 w-5 ${favoritedPitches.has(pitch.id) ? 'fill-red-500 text-red-500' : 'text-slate-400'}`} />
-                      </button>
+                    <Card key={pitch.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 border-0 bg-white relative max-w-4xl mx-auto">
 
-                      {/* Video Section */}
-                      <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+                      {/* Video Section - Reels Style */}
+                      <div className="relative w-full aspect-video bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
                         {embedUrl ? (
                           playingVideoId === pitch.id ? (
                             <div className="relative w-full h-full">
@@ -962,65 +969,158 @@ ${mentorName}`;
                         )}
                       </div>
 
-                      {/* Startup Info Section */}
-                      <div className="p-6 bg-white">
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex-1">
-                            <h3 className="text-2xl font-bold text-slate-800 mb-2">{pitch.name}</h3>
-                            <p className="text-slate-600 font-medium">{pitch.sector}</p>
+                      {/* Content Section - Compact Reels Style */}
+                      <div className="p-4 sm:p-5">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-1 break-words">{pitch.name}</h3>
+                            <p className="text-sm text-slate-600 font-medium">{pitch.sector}</p>
                           </div>
                           {pitch.isStartupNationValidated && (
-                            <div className="flex items-center gap-1 bg-green-100 text-green-700 px-3 py-1.5 rounded-full text-xs font-medium">
+                            <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2.5 py-1 rounded-full text-xs font-medium shadow-sm ml-2">
                               <CheckCircle className="h-3 w-3" />
                               Verified
                             </div>
                           )}
                         </div>
+                                            
+                        {/* Action Buttons - Compact */}
+                        <div className="flex flex-wrap items-center gap-2 mt-4">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className={`!rounded-full !p-2 transition-all duration-200 ${
+                              favoritedPitches.has(pitch.id)
+                                ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
+                                : 'hover:bg-red-50 hover:text-red-600 border border-slate-200'
+                            }`}
+                            onClick={() => toggleFavorite(pitch.id)}
+                          >
+                            <Heart className={`h-4 w-4 ${favoritedPitches.has(pitch.id) ? 'fill-current' : ''}`} />
+                          </Button>
 
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                          <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
-                            <div className="text-xs text-slate-600 mb-1">Investment Ask</div>
-                            <div className="text-lg font-bold text-blue-700">
-                              {investorService.formatCurrency(pitch.investmentValue || 0, 'USD')}
-                            </div>
-                          </div>
-                          <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
-                            <div className="text-xs text-slate-600 mb-1">Equity</div>
-                            <div className="text-lg font-bold text-purple-700">
-                              {pitch.equityAllocation || 0}%
-                            </div>
-                          </div>
-                        </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleShare(pitch)}
+                            className="!rounded-full !p-2 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
+                          >
+                            <Share2 className="h-4 w-4" />
+                          </Button>
 
-                        <div className="flex items-center gap-3">
                           {pitch.pitchDeckUrl && pitch.pitchDeckUrl !== '#' && (
-                            <a href={pitch.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[140px]">
-                              <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 text-xs sm:text-sm">
-                                <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> View Deck
+                            <a href={pitch.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px]">
+                              <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 text-xs">
+                                <FileText className="h-3 w-3 mr-1.5" /> Deck
                               </Button>
                             </a>
                           )}
-                          {pitch.onePagerUrl && pitch.onePagerUrl !== '#' && (
-                            <a href={pitch.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[140px]">
-                              <Button size="sm" variant="secondary" className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 text-xs sm:text-sm">
-                                <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden xs:inline">Business </span>Plan
-                              </Button>
-                            </a>
-                          )}
+
+                          <button
+                            onClick={() => handleDueDiligenceClick(pitch)}
+                            className={`flex-1 min-w-[120px] transition-all duration-200 border px-2.5 py-2 rounded-lg text-xs font-medium ${
+                              dueDiligenceStartups.has(pitch.id)
+                                ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
+                                : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
+                            }`}
+                          >
+                            <svg className="h-3 w-3 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            Due Diligence
+                          </button>
+
                           <Button
                             size="sm"
                             variant="primary"
                             onClick={() => handleViewStartup(pitch)}
-                            className="flex-1 min-w-[140px]"
+                            className="flex-1 min-w-[120px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg shadow-blue-200 text-xs"
                           >
-                            <Eye className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> View Details
+                            <Eye className="h-3 w-3 mr-1.5" /> View Details
                           </Button>
                         </div>
+                      </div>
+
+                      {/* Investment Details Footer - Compact */}
+                      <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-4 sm:px-5 py-2.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-t border-slate-200">
+                        <div className="text-sm">
+                          <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(pitch.investmentValue || 0)} for <span className="font-semibold text-purple-600">{pitch.equityAllocation || 0}%</span> equity
+                        </div>
+                        {pitch.isStartupNationValidated && (
+                          <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
+                            <CheckCircle className="h-3 w-3" />
+                            <span className="text-xs font-semibold">Verified</span>
+                          </div>
+                        )}
                       </div>
                     </Card>
                   );
                 })
               )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'portfolio' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Two-column layout: Form on left, Preview on right */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 xl:gap-6 items-stretch">
+              {/* Left: Mentor Profile Form */}
+              {currentUser && (
+                <Card className="p-4 sm:p-6 h-full">
+                  <div className="mb-4">
+                    <h2 className="text-lg font-semibold text-slate-900">Mentor Profile</h2>
+                    <p className="text-xs sm:text-sm text-slate-500">
+                      Fill out your mentor profile details. Changes will be reflected in the preview.
+                    </p>
+                  </div>
+                  <MentorProfileForm
+                    currentUser={currentUser}
+                    mentorMetrics={mentorMetrics}
+                    onSave={(profile) => {
+                      console.log('Profile saved:', profile);
+                    }}
+                    onProfileChange={(profile) => {
+                      setPreviewProfile(profile);
+                    }}
+                    isViewOnly={false}
+                  />
+                </Card>
+              )}
+
+              {/* Right: Mentor Profile Card Preview */}
+              <div className="flex flex-col h-full max-w-xl w-full mx-auto xl:mx-0">
+                <div className="mb-3">
+                  <h3 className="text-lg font-semibold text-slate-900">Your Mentor Card</h3>
+                  <p className="text-xs text-slate-500">
+                    This is how your profile will appear to startups on the Discover page
+                  </p>
+                </div>
+                {previewProfile && currentUser ? (
+                  <MentorCard
+                    mentor={{
+                      ...previewProfile,
+                      user: {
+                        name: currentUser.name || currentUser.email?.split('@')[0],
+                        email: currentUser.email
+                      }
+                    }}
+                    onView={undefined}
+                  />
+                ) : (
+                  <Card className="flex-1 !p-0 overflow-hidden shadow-lg border-0 bg-white">
+                    <div className="w-full aspect-[16/9] bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
+                      <div className="text-center text-slate-400">
+                        <Briefcase className="h-16 w-16 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">Fill out the form to see preview</p>
+                      </div>
+                    </div>
+                    <div className="p-4 sm:p-6">
+                      <div className="h-32 bg-slate-50 rounded"></div>
+                    </div>
+                  </Card>
+                )}
+              </div>
             </div>
           </div>
         )}

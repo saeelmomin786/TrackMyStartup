@@ -305,6 +305,33 @@ export interface RecognitionRecord {
     };
 }
 
+export interface MentorRecord {
+    id: string;
+    startupId: number;
+    mentorName: string;
+    mentorCode: string;
+    feeType: FeeType;
+    feeAmount?: number;
+    shares?: number;
+    pricePerShare?: number;
+    investmentAmount?: number;
+    equityAllocated?: number;
+    postMoneyValuation?: number;
+    signedAgreementUrl: string;
+    status?: string;
+    dateAdded: string;
+    startup?: {
+        id: number;
+        name: string;
+        sector: string;
+        current_valuation: number;
+        compliance_status: string;
+        total_funding: number;
+        total_revenue: number;
+        registration_date: string;
+    };
+}
+
 export interface FundraisingDetails {
     id?: number; // Database ID for update operations
     active: boolean;

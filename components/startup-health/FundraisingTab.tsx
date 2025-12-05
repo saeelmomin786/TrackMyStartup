@@ -13,6 +13,8 @@ import { validationService } from '../../lib/validationService';
 import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import FundraisingCRM from './FundraisingCRM';
+import OpportunitiesTab from './OpportunitiesTab';
 
 interface FundraisingTabProps {
   startup: Startup;
@@ -21,6 +23,8 @@ interface FundraisingTabProps {
   isViewOnly?: boolean;
   onActivateFundraising?: (details: FundraisingDetails, startup: Startup) => void;
 }
+
+type FundraisingSubTab = 'portfolio' | 'programs' | 'investors' | 'crm';
 
 const FundraisingTab: React.FC<FundraisingTabProps> = ({
   startup,
@@ -31,6 +35,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 }) => {
   const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
 
+  const [activeSubTab, setActiveSubTab] = useState<FundraisingSubTab>('portfolio');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [existingRounds, setExistingRounds] = useState<FundraisingDetails[]>([]);
@@ -290,8 +295,9 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
       pdf.addImage(imgData, 'PNG', 10, yOffset, imgWidth, finalImgHeight);
       
-      // Add TrackMyStartup watermark
-      pdf.setGState(pdf.GState({ opacity: 0.15 })); // Semi-transparent watermark
+      // Add TrackMyStartup watermark (cast to any to access advanced API)
+      const pdfAny: any = pdf;
+      pdfAny.setGState(pdfAny.GState({ opacity: 0.15 })); // Semi-transparent watermark
       pdf.setTextColor(150, 150, 150); // Medium gray color (visible on white background)
       pdf.setFontSize(40);
       pdf.setFont('helvetica', 'normal');
@@ -305,7 +311,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       });
       
       // Reset opacity for any future content
-      pdf.setGState(pdf.GState({ opacity: 1 }));
+      pdfAny.setGState(pdfAny.GState({ opacity: 1 }));
       
       pdf.save(`${startup.name || 'startup'}-one-pager.pdf`);
     } catch (err) {
@@ -409,8 +415,9 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
       pdf.addImage(imgData, 'PNG', 10, yOffset, imgWidth, finalImgHeight);
       
-      // Add TrackMyStartup watermark
-      pdf.setGState(pdf.GState({ opacity: 0.15 }));
+      // Add TrackMyStartup watermark (cast to any to access advanced API)
+      const pdfAny2: any = pdf;
+      pdfAny2.setGState(pdfAny2.GState({ opacity: 0.15 }));
       pdf.setTextColor(150, 150, 150);
       pdf.setFontSize(40);
       pdf.setFont('helvetica', 'normal');
@@ -422,7 +429,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         align: 'center',
       });
       
-      pdf.setGState(pdf.GState({ opacity: 1 }));
+      pdfAny2.setGState(pdfAny2.GState({ opacity: 1 }));
 
       // Convert PDF to Blob
       const pdfBlob = pdf.output('blob');
@@ -617,12 +624,68 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Top-level sub-tabs inside Fundraising */}
+      <div className="border-b border-slate-200">
+        <nav
+          className="-mb-px flex flex-wrap justify-center gap-2 sm:gap-4 px-2"
+          aria-label="Fundraising sub tabs"
+        >
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('portfolio')}
+            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeSubTab === 'portfolio'
+                ? 'border-brand-primary text-brand-primary'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Portfolio
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('programs')}
+            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeSubTab === 'programs'
+                ? 'border-brand-primary text-brand-primary'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Grant / Incubation Programs
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('investors')}
+            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeSubTab === 'investors'
+                ? 'border-brand-primary text-brand-primary'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Investor List
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('crm')}
+            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeSubTab === 'crm'
+                ? 'border-brand-primary text-brand-primary'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            CRM
+          </button>
+        </nav>
+      </div>
+
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-800 text-sm px-3 py-2 rounded">
           {error}
         </div>
       )}
 
+      {/* Portfolio sub-tab = existing Fundraising UI */}
+      {activeSubTab === 'portfolio' && !isLoading && (
+      <>
       {/* Current Fundraising + Preview side by side */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 xl:gap-6 items-stretch">
         {/* Left: Current Fundraising Round */}
@@ -1788,6 +1851,38 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             ))}
           </div>
         </Card>
+      )}
+      </>
+      )}
+
+      {/* Grant / Incubation Programs: reuse existing Programs/Opportunities UI */}
+      {activeSubTab === 'programs' && !isLoading && (
+        <div className="space-y-4">
+          <OpportunitiesTab startup={{ id: startup.id, name: startup.name }} />
+        </div>
+      )}
+
+      {/* Investor List placeholder */}
+      {activeSubTab === 'investors' && !isLoading && (
+        <Card className="p-4 sm:p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-2">
+            Investor List
+          </h2>
+          <p className="text-sm text-slate-600">
+            English: This section will track angels, VCs and other investors you are in touch with for this round.
+          </p>
+          <p className="text-sm text-slate-600 mt-1">
+            हिन्दी: यहाँ आप इस round के लिए जुड़े angels, VCs और बाकी investors की list और status track कर पाएँगे।
+          </p>
+          <p className="text-sm text-slate-600 mt-1">
+            मराठी: इथे या फेरीसाठी संपर्कात असलेल्या angels, VCs आणि इतर investors ची यादी आणि status तुम्ही track करू शकता.
+          </p>
+        </Card>
+      )}
+
+      {/* CRM - Full Kanban Board */}
+      {activeSubTab === 'crm' && !isLoading && (
+        <FundraisingCRM startupId={startup.id} />
       )}
     </div>
   );

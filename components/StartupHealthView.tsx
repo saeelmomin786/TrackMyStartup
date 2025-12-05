@@ -3,11 +3,10 @@ import { Startup, FundraisingDetails, InvestmentRecord, UserRole, Founder, Compl
 import { AuthUser } from '../lib/auth';
 import Button from './ui/Button';
 import Card from './ui/Card';
-import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell } from 'lucide-react';
+import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench } from 'lucide-react';
 import { investmentService } from '../lib/database';
 
 import StartupDashboardTab from './startup-health/StartupDashboardTab';
-import OpportunitiesTab from './startup-health/OpportunitiesTab';
 import NotificationBadge from './startup-health/NotificationBadge';
 import NotificationsView from './startup-health/NotificationsView';
 import ProfileTab from './startup-health/ProfileTab';
@@ -34,7 +33,7 @@ interface StartupHealthViewProps {
   onTrialButtonClick?: () => void; // Add trial button click handler
 }
 
-type TabId = 'dashboard' | 'opportunities' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable' | 'fundraising';
+type TabId = 'dashboard' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable' | 'fundraising' | 'services';
 
 const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole, user, onBack, onActivateFundraising, onInvestorAdded, onUpdateFounders, isViewOnly = false, investmentOffers = [], onProcessOffer, onTrialButtonClick }) => {
     // Check if this is a facilitator accessing the startup
@@ -238,25 +237,24 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
+            { id: 'services', name: 'Services', icon: <Wrench className="w-4 h-4" /> },
           ]
         : [
-            // Regular startup users see all tabs; offers are now inside dashboard
+            // Regular startup users see all tabs; programs moved under Fundraising → Grant / Incubation Programs
             { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-            { id: 'opportunities', name: 'Programs', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
             { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
             { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
+            { id: 'services', name: 'Services', icon: <Wrench className="w-4 h-4" /> },
           ];
 
     const renderTabContent = () => {
         switch (activeTab) {
             case 'dashboard':
                 return <StartupDashboardTab startup={currentStartup} isViewOnly={isViewOnly} offers={offersForStartup} onProcessOffer={onProcessOffer} currentUser={user} onTrialButtonClick={onTrialButtonClick} />;
-            case 'opportunities':
-                return <OpportunitiesTab startup={{ id: currentStartup.id, name: currentStartup.name }} />;
             case 'profile':
                 return <ProfileTab startup={currentStartup} userRole={userRole} onProfileUpdate={handleProfileUpdate} isViewOnly={isViewOnly} />;
             case 'compliance':
@@ -293,6 +291,23 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                     isViewOnly={isViewOnly}
                     onActivateFundraising={onActivateFundraising}
                   />
+                );
+            case 'services':
+                return (
+                  <Card className="p-4 sm:p-6">
+                    <h2 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">
+                      Services
+                    </h2>
+                    <p className="text-sm text-slate-600">
+                      English: This section will list additional services and tools available for your startup (CA/CS, advisory, compliance support, and more).
+                    </p>
+                    <p className="text-sm text-slate-600 mt-1">
+                      हिन्दी: यहाँ आपकी startup के लिए उपलब्ध extra services और tools (CA/CS, advisory, compliance support आदि) दिखाए जाएँगे।
+                    </p>
+                    <p className="text-sm text-slate-600 mt-1">
+                      मराठी: इथे तुमच्या startup साठी उपलब्ध अतिरिक्त services आणि tools (CA/CS, advisory, compliance support वगैरे) दाखवले जातील.
+                    </p>
+                  </Card>
                 );
             default:
                 return null;

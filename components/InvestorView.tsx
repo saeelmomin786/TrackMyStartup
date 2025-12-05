@@ -6,7 +6,7 @@ import Badge from './ui/Badge';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { TrendingUp, DollarSign, CheckSquare, Eye, PlusCircle, Activity, FileText, Video, Users, Heart, CheckCircle, LayoutGrid, Film, Edit, X, Clock, CheckCircle2, Shield, Menu, User, Settings, LogOut, Star, Search, Share2 } from 'lucide-react';
+import { TrendingUp, DollarSign, CheckSquare, Eye, PlusCircle, Activity, FileText, Video, Users, Heart, CheckCircle, LayoutGrid, Film, Edit, X, Clock, CheckCircle2, Shield, Menu, User, Settings, LogOut, Star, Search, Share2, Briefcase } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { investmentService } from '../lib/database';
@@ -16,6 +16,8 @@ import AdvisorAwareLogo from './AdvisorAwareLogo';
 import ContactDetailsModal from './ContactDetailsModal';
 import { supabase } from '../lib/supabase';
 import { paymentService } from '../lib/paymentService';
+import InvestorProfileForm from './investor/InvestorProfileForm';
+import InvestorCard from './investor/InvestorCard';
 
 interface InvestorViewProps {
   startups: Startup[];
@@ -29,6 +31,7 @@ interface InvestorViewProps {
   onUpdateOffer?: (offerId: number, offerAmount: number, equityPercentage: number) => void;
   onCancelOffer?: (offerId: number) => void;
   isViewOnly?: boolean;
+  initialTab?: 'dashboard' | 'reels' | 'offers' | 'portfolio';
 }
 
 const SummaryCard: React.FC<{ title: string; value: string; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -152,14 +155,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       const fromUrl = getQueryParam('pitchId');
       return fromUrl ? Number(fromUrl) : null;
     });
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'reels' | 'offers'>(() => {
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'reels' | 'offers' | 'portfolio'>(() => {
       // If initialTab is provided (e.g., from modal), use it
       if (initialTab) {
         return initialTab;
       }
       // Otherwise, try to get from URL, default to 'dashboard'
       const fromUrl = (getQueryParam('tab') as any) || 'dashboard';
-      const valid = ['dashboard','reels','offers'];
+      const valid = ['dashboard','reels','offers','portfolio'];
       return valid.includes(fromUrl) ? fromUrl : 'dashboard';
     });
     useEffect(() => {
@@ -226,6 +229,41 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     // Recommendations state
     const [recommendations, setRecommendations] = useState<any[]>([]);
     const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
+
+    // Investor profiles state
+    const [investorProfiles, setInvestorProfiles] = useState<any[]>([]);
+    const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
+    const [showInvestorCards, setShowInvestorCards] = useState(false);
+    const [previewProfile, setPreviewProfile] = useState<any>(null);
+
+    // Load all investor profiles
+    const loadInvestorProfiles = async () => {
+      setIsLoadingProfiles(true);
+      try {
+        const { data, error } = await supabase
+          .from('investor_profiles')
+          .select(`
+            *,
+            user:users!investor_profiles_user_id_fkey (
+              id,
+              name,
+              email
+            )
+          `)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Error loading investor profiles:', error);
+          return;
+        }
+
+        setInvestorProfiles(data || []);
+      } catch (error) {
+        console.error('Error loading investor profiles:', error);
+      } finally {
+        setIsLoadingProfiles(false);
+      }
+    };
   // Co-investment opportunities created by this investor
   const [myCoInvestmentOpps, setMyCoInvestmentOpps] = useState<any[]>([]);
   const [startupNames, setStartupNames] = useState<Record<number, string>>({});
@@ -1580,6 +1618,19 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               <div className="flex items-center">
                 <DollarSign className="h-5 w-5 mr-2" />
                     Offers
+              </div>
+                </button>
+                <button
+                    onClick={() => setActiveTab('portfolio')}
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+                        activeTab === 'portfolio'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <Briefcase className="h-5 w-5 mr-2" />
+                    Portfolio
               </div>
                 </button>
             </nav>
@@ -3166,6 +3217,69 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               </div>
             )}
           </Card>
+        </div>
+      )}
+
+      {activeTab === 'portfolio' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Two-column layout: Form on left, Preview on right */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 xl:gap-6 items-stretch">
+            {/* Left: Investor Profile Form */}
+            {currentUser && (
+              <Card className="p-4 sm:p-6 h-full">
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold text-slate-900">Investor Profile</h2>
+                  <p className="text-xs sm:text-sm text-slate-500">
+                    Fill out your investor profile details. Changes will be reflected in the preview.
+                  </p>
+                </div>
+                <InvestorProfileForm
+                  currentUser={currentUser}
+                  onSave={(profile) => {
+                    console.log('Profile saved:', profile);
+                  }}
+                  onProfileChange={(profile) => {
+                    setPreviewProfile(profile);
+                  }}
+                  isViewOnly={isViewOnly}
+                />
+              </Card>
+            )}
+
+            {/* Right: Investor Profile Card Preview */}
+            <div className="flex flex-col h-full max-w-xl w-full mx-auto xl:mx-0">
+              <div className="mb-3">
+                <h3 className="text-lg font-semibold text-slate-900">Your Investor Card</h3>
+                <p className="text-xs text-slate-500">
+                  This is how your profile will appear to startups on the Discover page
+                </p>
+              </div>
+              {previewProfile && currentUser ? (
+                <InvestorCard
+                  investor={{
+                    ...previewProfile,
+                    user: {
+                      name: currentUser.name || currentUser.email?.split('@')[0],
+                      email: currentUser.email
+                    }
+                  }}
+                  onView={undefined}
+                />
+              ) : (
+                <Card className="flex-1 !p-0 overflow-hidden shadow-lg border-0 bg-white">
+                  <div className="w-full aspect-[16/9] bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
+                    <div className="text-center text-slate-400">
+                      <Briefcase className="h-16 w-16 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">Fill out the form to see preview</p>
+                    </div>
+                  </div>
+                  <div className="p-4 sm:p-6">
+                    <div className="h-32 bg-slate-50 rounded"></div>
+                  </div>
+                </Card>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

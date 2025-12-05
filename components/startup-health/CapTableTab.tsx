@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Startup, InvestmentRecord, InvestorType, InvestmentRoundType, Founder, FundraisingDetails, UserRole, InvestmentType, IncubationProgram, AddIncubationProgramData, RecognitionRecord, IncubationType, FeeType, StartupDomain, StartupStage } from '../../types';
+import { Startup, InvestmentRecord, InvestorType, InvestmentRoundType, Founder, FundraisingDetails, UserRole, InvestmentType, IncubationProgram, AddIncubationProgramData, RecognitionRecord, MentorRecord, IncubationType, FeeType, StartupDomain, StartupStage } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -18,6 +18,7 @@ import { incubationProgramsService } from '../../lib/incubationProgramsService';
 import { financialsService } from '../../lib/financialsService';
 import { validationService } from '../../lib/validationService';
 import { recognitionService } from '../../lib/recognitionService';
+import { mentorEquityService } from '../../lib/mentorEquityService';
 import { storageService } from '../../lib/storage';
 import { employeesService } from '../../lib/employeesService';
 import { AuthUser } from '../../lib/auth';
@@ -135,6 +136,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     // Real data states
     const [investmentRecords, setInvestmentRecords] = useState<InvestmentRecord[]>([]);
     const [recognitionRecords, setRecognitionRecords] = useState<RecognitionRecord[]>([]);
+    const [mentorRecords, setMentorRecords] = useState<MentorRecord[]>([]);
     const [founders, setFounders] = useState<Founder[]>([]);
     const [fundraisingDetails, setFundraisingDetails] = useState<FundraisingDetails[]>([]);
     const [valuationHistory, setValuationHistory] = useState<ValuationHistoryData[]>([]);
@@ -149,7 +151,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     });
 
     // Toggle system state
-    const [entryType, setEntryType] = useState<'investment' | 'recognition'>('investment');
+    const [entryType, setEntryType] = useState<'investment' | 'recognition' | 'mentor'>('investment');
     const [feeType, setFeeType] = useState<FeeType>(FeeType.Free);
 
     const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
@@ -212,6 +214,25 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [editRecEquityDraft, setEditRecEquityDraft] = useState<string>('');
     const [editRecPostMoneyDraft, setEditRecPostMoneyDraft] = useState<string>('');
 
+    // Mentor form state for equity calculations
+    const [mentorSharesDraft, setMentorSharesDraft] = useState<string>('');
+    const [mentorPricePerShareDraft, setMentorPricePerShareDraft] = useState<string>('');
+    const [mentorAmountDraft, setMentorAmountDraft] = useState<string>('');
+    const [mentorEquityDraft, setMentorEquityDraft] = useState<string>('');
+    const [mentorPostMoneyDraft, setMentorPostMoneyDraft] = useState<string>('');
+
+    // Edit mentor form state for auto-calculations
+    const [editMentorSharesDraft, setEditMentorSharesDraft] = useState<string>('');
+    const [editMentorPricePerShareDraft, setEditMentorPricePerShareDraft] = useState<string>('');
+    const [editMentorAmountDraft, setEditMentorAmountDraft] = useState<string>('');
+    const [editMentorEquityDraft, setEditMentorEquityDraft] = useState<string>('');
+    const [editMentorPostMoneyDraft, setEditMentorPostMoneyDraft] = useState<string>('');
+
+    const [isEditMentorModalOpen, setIsEditMentorModalOpen] = useState(false);
+    const [editingMentor, setEditingMentor] = useState<MentorRecord | null>(null);
+    const [isDeleteMentorModalOpen, setIsDeleteMentorModalOpen] = useState(false);
+    const [mentorToDelete, setMentorToDelete] = useState<MentorRecord | null>(null);
+
     // Always keep local price per share synced with the most recent investment
     useEffect(() => {
         try {
@@ -267,8 +288,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         const totalRecognitionShares = recognitionRecords
             .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
             .reduce((sum, rec) => sum + (rec.shares || 0), 0);
+        const totalMentorShares = mentorRecords
+            .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
+            .reduce((sum, rec) => sum + (rec.shares || 0), 0);
         
-        const totalShares = totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares;
+        const totalShares = totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares + totalMentorShares;
         
         console.log('📊 RECREATED Total Shares Calculation:', {
             totalFounderShares,
@@ -463,6 +487,140 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         }
     }, [recSharesDraft, recPricePerShareDraft, founders, investmentRecords, startup.esopReservedShares, recognitionRecords]);
 
+    // Auto-calc mentor amount, equity, and post-money when shares or price changes
+    useEffect(() => {
+        const shares = Number(mentorSharesDraft);
+        const pricePerShare = Number(mentorPricePerShareDraft);
+        
+        console.log('🔄 Mentor auto-calculation triggered:', { shares, pricePerShare, mentorSharesDraft, mentorPricePerShareDraft });
+        
+        if (Number.isFinite(shares) && shares > 0 && Number.isFinite(pricePerShare) && pricePerShare > 0) {
+            // Calculate investment amount
+            const amount = shares * pricePerShare;
+            setMentorAmountDraft(String(amount));
+            
+            // Calculate equity percentage based on shares
+            const currentTotalShares = calculateTotalShares();
+            
+            // Include the new shares in the total for post-money calculation
+            const postMoneyTotalShares = currentTotalShares + shares;
+            
+            console.log('📊 Mentor share calculation details:', {
+                currentTotalShares,
+                postMoneyTotalShares,
+                shares
+            });
+            
+            if (postMoneyTotalShares > 0) {
+                const equityPercentage = (shares / postMoneyTotalShares) * 100;
+                setMentorEquityDraft(String(equityPercentage.toFixed(2)));
+                
+                // Calculate post-money valuation
+                const postMoney = (amount * 100) / equityPercentage;
+                setMentorPostMoneyDraft(String(postMoney.toFixed(2)));
+                
+                console.log('✅ Mentor calculations completed:', {
+                    amount,
+                    equityPercentage: equityPercentage.toFixed(2),
+                    postMoney: postMoney.toFixed(2),
+                    shares,
+                    pricePerShare
+                });
+            } else {
+                // Fallback: if no existing shares, use a reasonable default
+                console.log('⚠️ No existing shares found for mentor, using fallback calculation');
+                
+                // Use a reasonable assumption: if this is the first investment, 
+                // assume founders will have 80% and this mentor gets 20%
+                const assumedFounderShares = shares * 4; // 4x the mentor shares
+                const totalSharesWithFounders = assumedFounderShares + shares;
+                const equityPercentage = (shares / totalSharesWithFounders) * 100;
+                
+                setMentorEquityDraft(String(equityPercentage.toFixed(2)));
+                setMentorPostMoneyDraft(String(amount.toFixed(2)));
+                
+                console.log('📊 Mentor fallback calculation:', {
+                    assumedFounderShares,
+                    totalSharesWithFounders,
+                    equityPercentage: equityPercentage.toFixed(2),
+                    amount
+                });
+            }
+        } else if (shares === 0 || pricePerShare === 0) {
+            // Clear calculations if either field is empty
+            setMentorAmountDraft('');
+            setMentorEquityDraft('');
+            setMentorPostMoneyDraft('');
+        }
+    }, [mentorSharesDraft, mentorPricePerShareDraft, founders, investmentRecords, startup.esopReservedShares, recognitionRecords, mentorRecords]);
+
+    // Auto-calc edit mentor amount, equity, and post-money when shares or price changes
+    useEffect(() => {
+        const shares = Number(editMentorSharesDraft);
+        const pricePerShare = Number(editMentorPricePerShareDraft);
+        
+        console.log('🔄 Edit Mentor auto-calculation triggered:', { shares, pricePerShare, editMentorSharesDraft, editMentorPricePerShareDraft });
+        
+        if (Number.isFinite(shares) && shares > 0 && Number.isFinite(pricePerShare) && pricePerShare > 0) {
+            // Calculate investment amount
+            const amount = shares * pricePerShare;
+            setEditMentorAmountDraft(String(amount));
+            
+            // Calculate equity percentage based on shares
+            const currentTotalShares = calculateTotalShares();
+            
+            // Include the new shares in the total for post-money calculation
+            const postMoneyTotalShares = currentTotalShares + shares;
+            
+            console.log('📊 Edit Mentor share calculation details:', {
+                currentTotalShares,
+                postMoneyTotalShares,
+                shares
+            });
+            
+            if (postMoneyTotalShares > 0) {
+                const equityPercentage = (shares / postMoneyTotalShares) * 100;
+                setEditMentorEquityDraft(String(equityPercentage.toFixed(2)));
+                
+                // Calculate post-money valuation
+                const postMoney = (amount * 100) / equityPercentage;
+                setEditMentorPostMoneyDraft(String(postMoney.toFixed(2)));
+                
+                console.log('✅ Edit Mentor calculations completed:', {
+                    amount,
+                    equityPercentage: equityPercentage.toFixed(2),
+                    postMoney: postMoney.toFixed(2),
+                    shares,
+                    pricePerShare
+                });
+            } else {
+                // Fallback: if no existing shares, use a reasonable default
+                console.log('⚠️ No existing shares found for edit mentor, using fallback calculation');
+                
+                // Use a reasonable assumption: if this is the first investment, 
+                // assume founders will have 80% and this mentor gets 20%
+                const assumedFounderShares = shares * 4; // 4x the mentor shares
+                const totalSharesWithFounders = assumedFounderShares + shares;
+                const equityPercentage = (shares / totalSharesWithFounders) * 100;
+                
+                setEditMentorEquityDraft(String(equityPercentage.toFixed(2)));
+                setEditMentorPostMoneyDraft(String(amount.toFixed(2)));
+                
+                console.log('📊 Edit Mentor fallback calculation:', {
+                    assumedFounderShares,
+                    totalSharesWithFounders,
+                    equityPercentage: equityPercentage.toFixed(2),
+                    amount
+                });
+            }
+        } else if (shares === 0 || pricePerShare === 0) {
+            // Clear calculations if either field is empty
+            setEditMentorAmountDraft('');
+            setEditMentorEquityDraft('');
+            setEditMentorPostMoneyDraft('');
+        }
+    }, [editMentorSharesDraft, editMentorPricePerShareDraft, founders, investmentRecords, startup.esopReservedShares, recognitionRecords, mentorRecords]);
+
     // Auto-calc edit recognition amount, equity, and post-money when shares or price changes
     useEffect(() => {
         const shares = Number(editRecSharesDraft);
@@ -619,6 +777,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         // Refresh recognition records when they change
                         const recognitionData = await recognitionService.getRecognitionRecordsByStartupId(startup.id);
                         setRecognitionRecords(recognitionData);
+                        const mentorData = await mentorEquityService.getMentorRecordsByStartupId(startup.id);
+                        setMentorRecords(mentorData);
                     })
                     .subscribe((status) => {
                         console.log('📡 Recognition records real-time subscription status:', status);
@@ -657,6 +817,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 popularProgramsData,
                 financialRecordsData,
                 recognitionData,
+                mentorData,
                 startupData,
                 employeesData
             ] = await Promise.allSettled([
@@ -671,6 +832,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 incubationProgramsService.getPopularPrograms(),
                 financialsService.getFinancialRecords(startup.id),
                 recognitionService.getRecognitionRecordsByStartupId(startup.id),
+                mentorEquityService.getMentorRecordsByStartupId(startup.id),
                 // Load startup data to get country, registration info, and profile data (all from startups table)
                 supabase.from('startups').select('country_of_registration, company_type, registration_date, currency, country, total_shares, price_per_share').eq('id', startup.id).single(),
                 employeesService.getEmployees(startup.id)
@@ -886,6 +1048,14 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 console.log('✅ Recognition records loaded:', recognitionData.value.length);
             } else {
                 console.error('Failed to load recognition records:', recognitionData.reason);
+            }
+
+            // Handle mentor records
+            if (mentorData.status === 'fulfilled') {
+                setMentorRecords(mentorData.value);
+                console.log('✅ Mentor records loaded:', mentorData.value.length);
+            } else {
+                console.error('Failed to load mentor records:', mentorData.reason);
             }
 
             // Handle startup profile data (without ESOP data - that comes from startup_shares)
@@ -1730,9 +1900,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             if (entryType === 'investment') {
                 console.log('📈 Calling handleAddInvestment...');
                 await handleAddInvestment(e);
-            } else {
+            } else if (entryType === 'recognition') {
                 console.log('🏆 Calling handleAddRecognition...');
                 await handleAddRecognition(e);
+            } else if (entryType === 'mentor') {
+                console.log('👨‍🏫 Calling handleAddMentor...');
+                await handleAddMentor(e);
             }
         } catch (error) {
             console.error('❌ Error in handleEntrySubmit:', error);
@@ -1756,6 +1929,128 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         console.log('🔧 Editing recognition:', recognition);
         setEditingRecognition(recognition);
         setIsEditRecognitionModalOpen(true);
+    };
+
+    const handleAddMentor = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        if (!startup?.id) return;
+        
+        const formData = new FormData(e.currentTarget);
+        const mentorName = formData.get('mentor-name') as string;
+        const mentorCode = formData.get('mentor-code') as string;
+        const feeType = formData.get('mentor-fee-type') as FeeType;
+        const feeAmount = formData.get('mentor-fee-amount') ? parseFloat(formData.get('mentor-fee-amount') as string) : undefined;
+        const shares = formData.get('mentor-shares') ? parseInt(formData.get('mentor-shares') as string) : undefined;
+        const pricePerShare = formData.get('mentor-price-per-share') ? parseFloat(formData.get('mentor-price-per-share') as string) : undefined;
+        const investmentAmount = formData.get('mentor-amount') ? parseFloat(formData.get('mentor-amount') as string) : undefined;
+        const equityAllocated = formData.get('mentor-equity') ? parseFloat(formData.get('mentor-equity') as string) : undefined;
+        const postMoneyValuation = formData.get('mentor-postmoney') ? parseFloat(formData.get('mentor-postmoney') as string) : undefined;
+        const agreementFileEntry = formData.get('mentor-agreement');
+        const agreementFile = agreementFileEntry instanceof File && agreementFileEntry.size > 0 ? agreementFileEntry : null;
+        const agreementUrlEntry = formData.get('mentor-agreement-url-new');
+        const agreementUrl = typeof agreementUrlEntry === 'string' ? agreementUrlEntry.trim() : '';
+        
+        if (!mentorName || !mentorCode || !feeType || (!agreementFile && !agreementUrl)) {
+            setError('Please fill in all required fields and upload the signed agreement file or provide a valid cloud link.');
+            return;
+        }
+        
+        try {
+            setError(null);
+            setIsLoading(true);
+            
+            // Handle file upload for signed agreement
+            let signedAgreementUrl = agreementUrl;
+            if (agreementFile) {
+                try {
+                    const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/mentor_agreement_' + Date.now() + '_' + agreementFile.name);
+                    if (uploadResult.success && uploadResult.url) {
+                        signedAgreementUrl = uploadResult.url;
+                    } else {
+                        throw new Error(uploadResult.error || 'Upload failed');
+                    }
+                } catch (uploadErr) {
+                    console.error('Failed to upload agreement file:', uploadErr);
+                    setError('Failed to upload agreement file');
+                    return;
+                }
+            }
+            
+            // Create mentor record using the service
+            const newMentorRecord = await mentorEquityService.createMentorRecord({
+                startupId: startup.id,
+                mentorName,
+                mentorCode,
+                feeType,
+                feeAmount,
+                shares,
+                pricePerShare,
+                investmentAmount,
+                equityAllocated,
+                postMoneyValuation,
+                signedAgreementUrl
+            });
+            
+            // Add to local state
+            setMentorRecords(prev => [newMentorRecord, ...prev]);
+            
+            // Reset form
+            if (e.currentTarget) {
+                e.currentTarget.reset();
+            }
+            setError(null);
+            setFeeType(FeeType.Free);
+            
+            // Reset mentor form fields
+            setMentorSharesDraft('');
+            setMentorPricePerShareDraft('');
+            setMentorAmountDraft('');
+            setMentorEquityDraft('');
+            setMentorPostMoneyDraft('');
+            
+            console.log('✅ Mentor record added successfully to backend');
+            console.log('📋 New record:', newMentorRecord);
+        } catch (err) {
+            console.error('❌ Error adding mentor record:', err);
+            setError(err instanceof Error ? err.message : 'Failed to add mentor record. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleEditMentor = (mentor: MentorRecord) => {
+        console.log('🔧 Editing mentor:', mentor);
+        setEditingMentor(mentor);
+        setIsEditMentorModalOpen(true);
+    };
+
+    const handleDeleteMentor = (mentor: MentorRecord) => {
+        console.log('🗑️ Deleting mentor:', mentor);
+        setMentorToDelete(mentor);
+        setIsDeleteMentorModalOpen(true);
+    };
+
+    const handleDeleteMentorRecord = async (recordId: string) => {
+        try {
+            setIsLoading(true);
+            
+            // Delete from database
+            await mentorEquityService.deleteMentorRecord(recordId);
+
+            // Update local state
+            setMentorRecords(prev => prev.filter(rec => rec.id !== recordId));
+            
+            // Close modal
+            setIsDeleteMentorModalOpen(false);
+            setMentorToDelete(null);
+            
+            messageService.success('Mentor Record Deleted', 'The mentor record has been successfully deleted.', 3000);
+        } catch (error) {
+            console.error('Error deleting mentor record:', error);
+            setError('Failed to delete mentor record. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleDeleteRecognition = (recognition: RecognitionRecord) => {
@@ -3089,6 +3384,31 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     </Button>
                 </div>
             </Modal>
+
+            {/* Delete Mentor Confirmation Modal */}
+            <Modal isOpen={isDeleteMentorModalOpen} onClose={() => setIsDeleteMentorModalOpen(false)} title="Delete Mentor Record">
+                <div className="space-y-4">
+                    <p className="text-slate-600">
+                        Are you sure you want to delete the mentor record for{' '}
+                        <span className="font-semibold">{mentorToDelete?.mentorName}</span>?
+                    </p>
+                    <p className="text-sm text-slate-500">
+                        This action cannot be undone. The mentor record will be permanently removed.
+                    </p>
+                </div>
+                <div className="flex justify-end gap-3 pt-6 border-t mt-4">
+                    <Button type="button" variant="secondary" onClick={() => setIsDeleteMentorModalOpen(false)}>
+                        Cancel
+                    </Button>
+                    <Button 
+                        type="button" 
+                        variant="destructive" 
+                        onClick={() => mentorToDelete && handleDeleteMentorRecord(mentorToDelete.id)}
+                    >
+                        Delete Mentor Record
+                    </Button>
+                </div>
+            </Modal>
  
             {/* Recognition and Incubation */}
             <Card>
@@ -3295,6 +3615,82 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 </div>
             </Card>
 
+            {/* Mentor List */}
+            <Card>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold text-slate-700">Mentor List</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                        <thead className="bg-slate-50">
+                            <tr>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Date</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Mentor Name</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Mentor Code</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Fee Type</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Fee Amount</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Price/Share</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Shares</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Equity</th>
+                                <th className="px-4 py-2 text-left font-medium text-slate-500">Post-Money</th>
+                                <th className="px-4 py-2 text-right font-medium text-slate-500">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-slate-200">
+                            {[...mentorRecords].sort((a, b) => new Date(b.dateAdded).getTime() - new Date(a.dateAdded).getTime()).map(mentor => (
+                                <tr key={mentor.id}>
+                                    <td className="px-4 py-2 text-slate-500">{new Date(mentor.dateAdded).toLocaleDateString()}</td>
+                                    <td className="px-4 py-2 font-medium text-slate-900">{mentor.mentorName}</td>
+                                    <td className="px-4 py-2 text-slate-500 font-mono text-xs">
+                                        {mentor.mentorCode ? (
+                                            <span className="bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-200">
+                                                {mentor.mentorCode}
+                                            </span>
+                                        ) : (
+                                            <span className="text-slate-400">No code</span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-2 text-slate-500">{mentor.feeType}</td>
+                                    <td className="px-4 py-2 text-slate-500">{mentor.feeAmount ? formatCurrency(mentor.feeAmount, startupCurrency) : '-'}</td>
+                                    <td className="px-4 py-2 text-slate-500">{mentor.pricePerShare ? formatCurrency(mentor.pricePerShare, startupCurrency) : '-'}</td>
+                                    <td className="px-4 py-2 text-slate-500">{mentor.shares ? mentor.shares.toLocaleString() : '-'}</td>
+                                    <td className="px-4 py-2 text-slate-500">{mentor.equityAllocated ? `${mentor.equityAllocated}%` : '-'}</td>
+                                    <td className="px-4 py-2 text-slate-500">{mentor.postMoneyValuation ? formatCurrency(mentor.postMoneyValuation, startupCurrency) : '-'}</td>
+                                    <td className="px-4 py-2 text-right">
+                                        <div className="flex items-center justify-end gap-2">
+                                            <Button 
+                                                size="sm" 
+                                                variant="outline" 
+                                                disabled={!canEdit}
+                                                onClick={() => handleEditMentor(mentor)}
+                                            >
+                                                <Edit3 className="h-4 w-4" />
+                                            </Button>
+                                            {canEdit && (
+                                                <Button 
+                                                    size="sm" 
+                                                    variant="outline" 
+                                                    className="text-red-600 border-red-300 hover:bg-red-50"
+                                                    onClick={() => {
+                                                        setMentorToDelete(mentor);
+                                                        setIsDeleteMentorModalOpen(true);
+                                                    }}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            {mentorRecords.length === 0 && (
+                                <tr><td colSpan={10} className="text-center py-6 text-slate-500">No mentors added yet.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </Card>
+
 
             {/* Add Entry Form (Unified) */}
             <Card>
@@ -3330,6 +3726,14 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     className={'flex-1 border-2 ' + (entryType === 'recognition' ? 'border-blue-600' : 'border-slate-300')}
                                 >
                                     Recognition / Incubation
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant={entryType === 'mentor' ? 'default' : 'outline'}
+                                    onClick={() => setEntryType('mentor')}
+                                    className={'flex-1 border-2 ' + (entryType === 'mentor' ? 'border-blue-600' : 'border-slate-300')}
+                                >
+                                    Mentor
                                 </Button>
                             </div>
                         </div>
@@ -3543,6 +3947,106 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     type="file"
                                     id="rec-agreement-new"
                                     name="rec-agreement"
+                                    className="hidden"
+                                    accept=".pdf,.doc,.docx"
+                                />
+                            </div>
+                        )}
+
+                        {entryType === 'mentor' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                                <Input label="Mentor Name" name="mentor-name" id="mentor-name" required containerClassName="md:col-span-2"/>
+                                <Input label="Mentor Code" name="mentor-code" id="mentor-code" placeholder="e.g., MEN-D4E5F6" required />
+                                <Select label="Fee Type" name="mentor-fee-type" id="mentor-fee-type" value={feeType} onChange={e => setFeeType(e.target.value as FeeType)} required>
+                                   {Object.values(FeeType).map(t => <option key={t} value={t}>{t}</option>)}
+                                </Select>
+                                {(feeType === FeeType.Fees || feeType === FeeType.Hybrid) && (
+                                    <Input label="Fee Amount" name="mentor-fee-amount" id="mentor-fee-amount" type="number" required />
+                                )}
+                                {(feeType === FeeType.Equity || feeType === FeeType.Hybrid) && (
+                                    <>
+                                        <Input 
+                                            label="Number of Shares" 
+                                            name="mentor-shares" 
+                                            id="mentor-shares" 
+                                            type="number" 
+                                            required
+                                            value={mentorSharesDraft}
+                                            onChange={(e) => setMentorSharesDraft(e.target.value)}
+                                            placeholder="e.g., 10000"
+                                        />
+                                        <Input 
+                                            label={'Price per Share (' + startupCurrency + ')'} 
+                                            name="mentor-price-per-share" 
+                                            id="mentor-price-per-share" 
+                                            type="number" 
+                                            step="0.01"
+                                            required
+                                            value={mentorPricePerShareDraft}
+                                            onChange={(e) => setMentorPricePerShareDraft(e.target.value)}
+                                            placeholder="e.g., 1.50"
+                                        />
+                                        <Input 
+                                            label="Investment Amount (auto)" 
+                                            name="mentor-amount" 
+                                            id="mentor-amount" 
+                                            type="number" 
+                                            readOnly 
+                                            value={mentorAmountDraft}
+                                        />
+                                        <Input 
+                                            label="Equity Allocated (%) (auto)" 
+                                            name="mentor-equity" 
+                                            id="mentor-equity" 
+                                            type="number" 
+                                            readOnly 
+                                            value={mentorEquityDraft}
+                                        />
+                                        <Input 
+                                            label="Post-Money Valuation (auto)" 
+                                            name="mentor-postmoney" 
+                                            id="mentor-postmoney" 
+                                            type="number" 
+                                            readOnly 
+                                            value={mentorPostMoneyDraft}
+                                        />
+                                    </>
+                                )}
+                                <CloudDriveInput
+                                    value=""
+                                    onChange={(url) => {
+                                        const hiddenInput = document.getElementById('mentor-agreement-url-new') as HTMLInputElement;
+                                        if (hiddenInput) hiddenInput.value = url;
+                                        const fileInput = document.getElementById('mentor-agreement-new') as HTMLInputElement;
+                                        if (fileInput) {
+                                            fileInput.value = '';
+                                            const emptyTransfer = new DataTransfer();
+                                            fileInput.files = emptyTransfer.files;
+                                        }
+                                    }}
+                                    onFileSelect={(file) => {
+                                        const fileInput = document.getElementById('mentor-agreement-new') as HTMLInputElement;
+                                        if (fileInput) {
+                                            const dataTransfer = new DataTransfer();
+                                            dataTransfer.items.add(file);
+                                            fileInput.files = dataTransfer.files;
+                                        }
+                                        const hiddenInput = document.getElementById('mentor-agreement-url-new') as HTMLInputElement;
+                                        if (hiddenInput) hiddenInput.value = '';
+                                    }}
+                                    placeholder="Paste your cloud drive link here..."
+                                    label="Upload Signed Agreement"
+                                    accept=".pdf,.doc,.docx"
+                                    maxSize={10}
+                                    documentType="signed agreement"
+                                    showPrivacyMessage={false}
+                                    className="md:col-span-2"
+                                />
+                                <input type="hidden" id="mentor-agreement-url-new" name="mentor-agreement-url-new" />
+                                <input
+                                    type="file"
+                                    id="mentor-agreement-new"
+                                    name="mentor-agreement"
                                     className="hidden"
                                     accept=".pdf,.doc,.docx"
                                 />

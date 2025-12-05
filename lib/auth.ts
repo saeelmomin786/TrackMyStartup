@@ -13,6 +13,7 @@ export interface AuthUser {
   investor_code?: string
   ca_code?: string
   cs_code?: string
+  mentor_code?: string
   registration_date: string
   // Profile fields
   phone?: string
@@ -317,6 +318,7 @@ export const authService = {
         investment_advisor_code_entered: profile.investment_advisor_code_entered,
         ca_code: profile.ca_code,
         cs_code: profile.cs_code,
+        mentor_code: profile.mentor_code,
         registration_date: profile.registration_date,
         phone: profile.phone,
         address: profile.address,

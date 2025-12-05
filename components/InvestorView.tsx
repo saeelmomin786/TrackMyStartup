@@ -94,31 +94,31 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         const calculatedValuation = startup.equityAllocation > 0 
           ? (startup.investmentValue / (startup.equityAllocation / 100))
           : startup.investmentValue;
-        const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nValuation: ${formatCurrencyFull(calculatedValuation, startup.currency || 'INR')}\n\nView startup: ${shareUrl}\nView startup: ${shareUrl}`;
-        console.log('Share details:', details);
+        console.log('Share URL:', shareUrl);
         try {
+            // Share ONLY URL - this forces WhatsApp to fetch OG tags and show preview card
+            // When you include text, WhatsApp might show text message instead of fetching preview
             if (navigator.share) {
-                console.log('Using native share API');
+                console.log('Using native share API - URL only');
                 const shareData = {
                     title: startup.name || 'Startup Pitch',
-                    text: details,
-                    url: shareUrl
+                    url: shareUrl // URL ONLY - WhatsApp will fetch OG tags and show preview card
                 };
                 await navigator.share(shareData);
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
                 console.log('Using clipboard API');
-                await navigator.clipboard.writeText(details);
-                alert('Startup details copied to clipboard');
+                await navigator.clipboard.writeText(shareUrl);
+                alert('Startup link copied! Paste in WhatsApp to see preview card.');
             } else {
                 console.log('Using fallback copy method');
                 // Fallback: hidden textarea copy
                 const textarea = document.createElement('textarea');
-                textarea.value = details;
+                textarea.value = shareUrl;
                 document.body.appendChild(textarea);
                 textarea.select();
                 document.execCommand('copy');
                 document.body.removeChild(textarea);
-                alert('Startup details copied to clipboard');
+                alert('Startup link copied! Paste in WhatsApp to see preview card.');
             }
         } catch (err) {
             console.error('Share failed', err);

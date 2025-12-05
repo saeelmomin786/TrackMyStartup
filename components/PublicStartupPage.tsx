@@ -260,21 +260,18 @@ const PublicStartupPage: React.FC = () => {
     if (!startup) return;
 
     const shareUrl = buildShareUrl();
-    // Format matches WhatsApp share format exactly as shown in image
-    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nValuation: ${formatCurrency(startup.current_valuation || 0, startup.currency || 'INR')}\n\nView startup: ${shareUrl}`;
 
     try {
-      // PRIORITY: Share as URL first - this creates a clickable link preview card
-      // When someone clicks the preview, it opens in browser (Chrome)
-      // WhatsApp and other apps will fetch OG tags and show a nice card preview
+      // PRIORITY: Share ONLY URL - this forces WhatsApp to fetch OG tags and show preview card
+      // When you include both text and URL, WhatsApp might show text instead of fetching preview
+      // Sharing only URL ensures WhatsApp fetches OG tags and shows the card with YouTube thumbnail
       if (navigator.share) {
         const shareData: ShareData = {
           title: startup.name || 'Startup Profile',
-          text: details,
-          url: shareUrl, // URL is primary - creates clickable preview
+          url: shareUrl, // URL ONLY - WhatsApp will fetch OG tags and show preview card
         };
         await navigator.share(shareData);
-        messageService.success('Shared', 'Link shared! Click the preview to open in browser.', 2000);
+        messageService.success('Shared', 'Link shared! WhatsApp will show preview card.', 2000);
         return;
       }
 

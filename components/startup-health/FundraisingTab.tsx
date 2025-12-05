@@ -923,15 +923,15 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     const shareText = `Check out ${startup.name}'s fundraising round`;
                     
                     try {
-                      // Share URL - WhatsApp will fetch OG tags and show clickable preview card
-                      // When user clicks the preview card, it opens the startup page in browser
+                      // Share ONLY URL - this forces WhatsApp to fetch OG tags and show preview card
+                      // When you include text, WhatsApp might show text message instead of fetching preview
+                      // Sharing only URL ensures WhatsApp shows the card with YouTube thumbnail
                       if (navigator.share) {
                         await navigator.share({
                           title: `${startup.name} - Fundraising`,
-                          text: shareText,
-                          url: shareUrl, // URL creates clickable preview card in WhatsApp
+                          url: shareUrl, // URL ONLY - WhatsApp will fetch OG tags and show preview card
                         });
-                        messageService.success('Shared', 'Link shared! Click the preview card to open in browser.', 2000);
+                        messageService.success('Shared', 'Link shared! WhatsApp will show preview card.', 2000);
                       } else if (navigator.clipboard && navigator.clipboard.writeText) {
                         // Copy URL - when pasted in WhatsApp, it will show clickable preview card
                         await navigator.clipboard.writeText(shareUrl);

@@ -82,23 +82,27 @@ const StartupView: React.FC<StartupViewProps> = ({
     url.searchParams.set('view', 'startup');
     url.searchParams.set('startupId', String(startup.id));
     const shareUrl = url.toString();
-    // Format matches WhatsApp share format exactly as shown in image
-    const details = `Startup: ${startup.name}\nSector: ${startup.sector}\nValuation: ${formatCurrency(startup.current_valuation || 0, startup.currency || 'INR')}\n\nView startup: ${shareUrl}\nView startup: ${shareUrl}`;
+    
     try {
+      // Share ONLY URL - this forces WhatsApp to fetch OG tags and show preview card
+      // When you include text, WhatsApp might show text message instead of fetching preview
       if (navigator.share) {
-        await navigator.share({ title: startup.name, text: details, url: shareUrl });
+        await navigator.share({ 
+          title: startup.name, 
+          url: shareUrl // URL ONLY - WhatsApp will fetch OG tags and show preview card
+        });
       } else if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(details);
-        alert('Startup details copied to clipboard');
+        await navigator.clipboard.writeText(shareUrl);
+        alert('Startup link copied to clipboard! Paste in WhatsApp to see preview card.');
       } else {
         // Fallback: hidden textarea copy
         const textarea = document.createElement('textarea');
-        textarea.value = details;
+        textarea.value = shareUrl;
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        alert('Startup details copied to clipboard');
+        alert('Startup link copied to clipboard! Paste in WhatsApp to see preview card.');
       }
     } catch (err) {
       console.error('Share failed', err);

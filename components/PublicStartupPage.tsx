@@ -54,9 +54,41 @@ const PublicStartupPage: React.FC = () => {
       : (startup as any)?.description || `Discover ${startup.name || 'this startup'} on TrackMyStartup`;
     const shareUrl = buildShareUrl();
     const fallbackImg = new URL(LogoTMS, window.location.origin).toString();
-    const image = (startup as any)?.logo_url
-      ? toDirectImageUrl((startup as any).logo_url)
-      : fallbackImg;
+    
+    // Extract YouTube video ID and use thumbnail as OG image (priority: YouTube thumbnail > Logo > Default)
+    const getYoutubeVideoId = (url?: string): string | null => {
+      if (!url) return null;
+      try {
+        if (url.includes('youtube.com/watch')) {
+          const urlObj = new URL(url);
+          return urlObj.searchParams.get('v');
+        }
+        if (url.includes('youtu.be/')) {
+          const urlObj = new URL(url);
+          return urlObj.pathname.slice(1).split('?')[0];
+        }
+        if (url.includes('youtube.com/embed/')) {
+          const match = url.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/);
+          return match ? match[1] : null;
+        }
+        if (url.includes('youtube.com/shorts/')) {
+          const match = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/);
+          return match ? match[1] : null;
+        }
+      } catch {
+        return null;
+      }
+      return null;
+    };
+
+    let image = fallbackImg;
+    const videoId = getYoutubeVideoId((fundraisingDetails as any)?.pitchVideoUrl);
+    if (videoId) {
+      // Use YouTube thumbnail (maxresdefault.jpg is highest quality, 1280x720)
+      image = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+    } else if ((startup as any)?.logo_url) {
+      image = toDirectImageUrl((startup as any).logo_url) || fallbackImg;
+    }
 
     document.title = title;
     updateMetaTag('property', 'og:type', 'website');
@@ -228,52 +260,48 @@ const PublicStartupPage: React.FC = () => {
     if (!startup) return;
 
     const shareUrl = buildShareUrl();
+    // Format matches WhatsApp share format exactly as shown in image
     const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nValuation: ${formatCurrency(startup.current_valuation || 0, startup.currency || 'INR')}\n\nView startup: ${shareUrl}`;
-    let shareFile: File | null = null;
-
-    // Try to capture the card so the share includes a visual preview (when supported)
-    if (shareCardRef.current) {
-      try {
-        const canvas = await html2canvas(shareCardRef.current, {
-          useCORS: true,
-          backgroundColor: '#f8fafc',
-          scale: 2,
-        });
-        const blob = await new Promise<Blob | null>(resolve =>
-          canvas.toBlob(b => resolve(b), 'image/png', 0.9)
-        );
-        if (blob) {
-          shareFile = new File([blob], `${startup.name || 'startup'}-card.png`, { type: 'image/png' });
-        }
-      } catch (err) {
-        console.warn('Card capture failed, sharing without image', err);
-      }
-    }
 
     try {
-      const canShareFile = shareFile && navigator.canShare?.({ files: [shareFile] });
-      const shareData: ShareData = shareFile && canShareFile
-        ? { title: startup.name || 'Startup Profile', text: details, url: shareUrl, files: [shareFile] }
-        : { title: startup.name || 'Startup Profile', text: details, url: shareUrl };
-
+      // PRIORITY: Share as URL first - this creates a clickable link preview card
+      // When someone clicks the preview, it opens in browser (Chrome)
+      // WhatsApp and other apps will fetch OG tags and show a nice card preview
       if (navigator.share) {
+        const shareData: ShareData = {
+          title: startup.name || 'Startup Profile',
+          text: details,
+          url: shareUrl, // URL is primary - creates clickable preview
+        };
         await navigator.share(shareData);
-        messageService.success('Shared', shareFile ? 'Shared with startup card!' : 'Link shared successfully', 2000);
-      } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        messageService.success('Shared', 'Link shared! Click the preview to open in browser.', 2000);
+        return;
+      }
+
+      // Fallback: Copy URL to clipboard (user can paste in WhatsApp)
+      // When they paste the URL, WhatsApp will show a clickable preview card
+      if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(shareUrl);
-        messageService.success('Link Copied', 'Startup link copied to clipboard!', 2000);
+        messageService.success('Link Copied', 'Startup link copied! Paste in WhatsApp to share with preview card.', 2000);
       } else {
-        // Fallback
+        // Final fallback
         const textarea = document.createElement('textarea');
         textarea.value = shareUrl;
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        messageService.success('Link Copied', 'Startup link copied to clipboard!', 2000);
+        messageService.success('Link Copied', 'Startup link copied! Paste in WhatsApp to share.', 2000);
       }
     } catch (err) {
       console.error('Error sharing:', err);
+      // Final fallback: copy to clipboard
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        messageService.success('Link Copied', 'Startup link copied to clipboard!', 2000);
+      } catch (clipErr) {
+        messageService.error('Share Failed', 'Unable to share. Please copy the link manually.');
+      }
     }
   };
 

@@ -81,7 +81,20 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         url.searchParams.set('view', 'startup');
         url.searchParams.set('startupId', String(startup.id));
         const shareUrl = url.toString();
-        const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\n\nView startup: ${shareUrl}`;
+        // Format matches WhatsApp share format exactly as shown in image
+        // Use full currency format (not compact) to match ₹1,33,33,333.00 format
+        const formatCurrencyFull = (value: number, currency: string = 'INR') => {
+          try {
+            return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+          } catch (error) {
+            return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+          }
+        };
+        // Calculate valuation from investment ask: valuation = investmentValue / (equityAllocation / 100)
+        const calculatedValuation = startup.equityAllocation > 0 
+          ? (startup.investmentValue / (startup.equityAllocation / 100))
+          : startup.investmentValue;
+        const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nValuation: ${formatCurrencyFull(calculatedValuation, startup.currency || 'INR')}\n\nView startup: ${shareUrl}\nView startup: ${shareUrl}`;
         console.log('Share details:', details);
         try {
             if (navigator.share) {
@@ -94,18 +107,18 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 await navigator.share(shareData);
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
                 console.log('Using clipboard API');
-                await navigator.clipboard.writeText(shareUrl);
-                alert('Startup link copied to clipboard');
+                await navigator.clipboard.writeText(details);
+                alert('Startup details copied to clipboard');
             } else {
                 console.log('Using fallback copy method');
                 // Fallback: hidden textarea copy
                 const textarea = document.createElement('textarea');
-                textarea.value = shareUrl;
+                textarea.value = details;
                 document.body.appendChild(textarea);
                 textarea.select();
                 document.execCommand('copy');
                 document.body.removeChild(textarea);
-                alert('Startup link copied to clipboard');
+                alert('Startup details copied to clipboard');
             }
         } catch (err) {
             console.error('Share failed', err);

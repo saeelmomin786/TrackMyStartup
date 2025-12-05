@@ -5,6 +5,7 @@ import Button from './ui/Button';
 import Input from './ui/Input';
 import AddStartupModal from './AddStartupModal';
 import AdvisorAwareLogo from './AdvisorAwareLogo';
+import { formatCurrency } from '../lib/utils';
 import { 
   Building2, 
   TrendingUp, 
@@ -81,22 +82,23 @@ const StartupView: React.FC<StartupViewProps> = ({
     url.searchParams.set('view', 'startup');
     url.searchParams.set('startupId', String(startup.id));
     const shareUrl = url.toString();
-    const details = `Startup: ${startup.name}\nSector: ${startup.sector}\nValuation: ₹${startup.current_valuation}L\nFunding: ₹${startup.total_funding}L\nRevenue: ₹${startup.total_revenue}L\n\nView startup: ${shareUrl}`;
+    // Format matches WhatsApp share format exactly as shown in image
+    const details = `Startup: ${startup.name}\nSector: ${startup.sector}\nValuation: ${formatCurrency(startup.current_valuation || 0, startup.currency || 'INR')}\n\nView startup: ${shareUrl}\nView startup: ${shareUrl}`;
     try {
       if (navigator.share) {
         await navigator.share({ title: startup.name, text: details, url: shareUrl });
       } else if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(shareUrl);
-        alert('Startup link copied to clipboard');
+        await navigator.clipboard.writeText(details);
+        alert('Startup details copied to clipboard');
       } else {
         // Fallback: hidden textarea copy
         const textarea = document.createElement('textarea');
-        textarea.value = shareUrl;
+        textarea.value = details;
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        alert('Startup link copied to clipboard');
+        alert('Startup details copied to clipboard');
       }
     } catch (err) {
       console.error('Share failed', err);

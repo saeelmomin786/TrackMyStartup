@@ -1,4 +1,30 @@
 {
+  "routes": [
+    {
+      "src": "/",
+      "continue": true
+    },
+    {
+      "src": "/",
+      "has": [
+        { "type": "query", "key": "view", "value": "startup" },
+        { "type": "query", "key": "startupId" },
+        { "type": "header", "key": "user-agent", "value": "(?i)(bot|crawler|spider|facebookexternalhit|linkedinbot|slackbot|twitterbot|whatsapp|telegram|discord|preview)" }
+      ],
+      "dest": "/api/share-startup"
+    },
+    {
+      "src": "/",
+      "has": [
+        { "type": "query", "key": "view", "value": "startup" },
+        { "type": "query", "key": "id" },
+        { "type": "header", "key": "user-agent", "value": "(?i)(bot|crawler|spider|facebookexternalhit|linkedinbot|slackbot|twitterbot|whatsapp|telegram|discord|preview)" }
+      ],
+      "dest": "/api/share-startup"
+    }
+  ]
+}
+{
   "headers": [
     {
       "source": "/(.*)",

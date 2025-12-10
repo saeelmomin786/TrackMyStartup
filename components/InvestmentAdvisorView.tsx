@@ -6,7 +6,7 @@ import { formatCurrency, formatCurrencyCompact, getCurrencySymbol } from '../lib
 import { useInvestmentAdvisorCurrency } from '../lib/hooks/useInvestmentAdvisorCurrency';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { AuthUser, authService } from '../lib/auth';
-import { Eye, Users } from 'lucide-react';
+import { Eye, Users, FileText, Globe, ExternalLink, Linkedin, HelpCircle, Heart, Share2, CheckCircle, Video } from 'lucide-react';
 import ProfilePage from './ProfilePage';
 import InvestorView from './InvestorView';
 import StartupHealthView from './StartupHealthView';
@@ -27,6 +27,7 @@ import { generalDataService } from '../lib/generalDataService';
 import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../lib/advisorConnectionRequestService';
 import { advisorMandateService, AdvisorMandate, CreateAdvisorMandate } from '../lib/advisorMandateService';
 import { PlusCircle, Edit, Trash2, Filter, X } from 'lucide-react';
+import { getVideoEmbedUrl } from '../lib/videoUtils';
 
 interface InvestmentAdvisorViewProps {
   currentUser: AuthUser | null;
@@ -49,13 +50,22 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   pendingRelationships = [],
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'portfolio' | 'collaboration' | 'mandate'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'management' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'portfolio' | 'collaboration' | 'mandate'>('dashboard');
+  const [managementSubTab, setManagementSubTab] = useState<'myInvestments' | 'myInvestors' | 'myStartups'>('myInvestments');
   const [showProfilePage, setShowProfilePage] = useState(false);
   const [agreementFile, setAgreementFile] = useState<File | null>(null);
   const [coInvestmentListings, setCoInvestmentListings] = useState<Set<number>>(new Set());
   
   // Track recommended startups to change button color
   const [recommendedStartups, setRecommendedStartups] = useState<Set<number>>(new Set());
+  
+  // Recommendation modal state
+  const [showRecommendModal, setShowRecommendModal] = useState(false);
+  const [selectedStartupForRecommendation, setSelectedStartupForRecommendation] = useState<number | null>(null);
+  const [selectedInvestors, setSelectedInvestors] = useState<Set<string>>(new Set());
+  const [selectedCollaborators, setSelectedCollaborators] = useState<Set<string>>(new Set());
+  const [existingRecommendations, setExistingRecommendations] = useState<Set<string>>(new Set()); // Track recipients who already have recommendations
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
   
   const [isLoading, setIsLoading] = useState(false);
   
@@ -206,7 +216,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Load advisor-added investors
   useEffect(() => {
     const loadAdvisorAddedInvestors = async () => {
-      if (activeTab === 'myInvestors' && currentUser?.id) {
+      if ((activeTab === 'myInvestors' || (activeTab === 'management' && managementSubTab === 'myInvestors')) && currentUser?.id) {
         setLoadingAddedInvestors(true);
         try {
           const investors = await advisorAddedInvestorService.getInvestorsByAdvisor(currentUser.id);
@@ -224,7 +234,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Load advisor-added startups
   useEffect(() => {
     const loadAdvisorAddedStartups = async () => {
-      if (activeTab === 'myStartups' && currentUser?.id) {
+      if ((activeTab === 'myStartups' || (activeTab === 'management' && managementSubTab === 'myStartups')) && currentUser?.id) {
         setLoadingAddedStartups(true);
         try {
           const startups = await advisorAddedStartupService.getStartupsByAdvisor(currentUser.id);
@@ -239,15 +249,29 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     loadAdvisorAddedStartups();
   }, [activeTab, currentUser?.id]);
 
-  // Load collaboration requests
+  // Load accepted collaborators (needed for recommendation modal)
   useEffect(() => {
-    const loadCollaborationRequests = async () => {
+    const loadAcceptedCollaborators = async () => {
+      if (currentUser?.id) {
+        try {
+          const requests = await advisorConnectionRequestService.getCollaboratorRequests(currentUser.id);
+          setAcceptedCollaborators(requests.filter(r => r.status === 'accepted'));
+        } catch (error) {
+          console.error('Error loading accepted collaborators:', error);
+        }
+      }
+    };
+    loadAcceptedCollaborators();
+  }, [currentUser?.id]);
+
+  // Load pending collaboration requests (only when on collaboration tab)
+  useEffect(() => {
+    const loadPendingCollaborationRequests = async () => {
       if (activeTab === 'collaboration' && currentUser?.id) {
         setLoadingCollaborationRequests(true);
         try {
           const requests = await advisorConnectionRequestService.getCollaboratorRequests(currentUser.id);
           setCollaborationRequests(requests.filter(r => r.status === 'pending'));
-          setAcceptedCollaborators(requests.filter(r => r.status === 'accepted'));
         } catch (error) {
           console.error('Error loading collaboration requests:', error);
         } finally {
@@ -255,7 +279,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
       }
     };
-    loadCollaborationRequests();
+    loadPendingCollaborationRequests();
   }, [activeTab, currentUser?.id]);
 
   // Load collaborator profiles with full data
@@ -840,10 +864,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     checkAuthHealth();
   }, []);
 
-  // Fetch active fundraising startups for Discovery tab and Investment Interests tab
+  // Fetch active fundraising startups for Discovery tab, Investment Interests tab, and Mandate tab
   useEffect(() => {
     const loadActiveFundraisingStartups = async () => {
-      if (activeTab === 'discovery' || activeTab === 'interests') {
+      if (activeTab === 'discovery' || activeTab === 'interests' || activeTab === 'mandate') {
         setIsLoadingPitches(true);
         try {
           const startups = await investorService.getActiveFundraisingStartups();
@@ -1663,7 +1687,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Force refresh offers when activeTab changes to myInvestments
   useEffect(() => {
-    if (activeTab === 'myInvestments') {
+    if (activeTab === 'myInvestments' || (activeTab === 'management' && managementSubTab === 'myInvestments')) {
       fetchOffersMade();
     }
   }, [activeTab]);
@@ -2037,19 +2061,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const getFilteredMandateStartups = (mandate: AdvisorMandate | null): ActiveFundraisingStartup[] => {
     if (!mandate) return [];
     
+    // If no active fundraising startups are loaded, return empty array
+    if (activeFundraisingStartups.length === 0) {
+      return [];
+    }
+    
     let filtered = [...activeFundraisingStartups];
 
     // Filter by round type (fundraisingType)
-    if (mandate.round_type) {
+    if (mandate.round_type && mandate.round_type.trim() !== '') {
       filtered = filtered.filter(startup => 
         startup.fundraisingType === mandate.round_type
       );
     }
 
     // Filter by domain (sector)
-    if (mandate.domain) {
+    if (mandate.domain && mandate.domain.trim() !== '') {
       filtered = filtered.filter(startup => 
-        startup.sector.toLowerCase() === mandate.domain!.toLowerCase()
+        startup.sector && startup.sector.toLowerCase() === mandate.domain!.toLowerCase()
       );
     }
 
@@ -2256,22 +2285,132 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     }
   };
 
-  // Handle co-investment recommendations
+  // Open recommendation modal and load existing recommendations
   const handleRecommendCoInvestment = async (startupId: number) => {
-    try {
-      setIsLoading(true);
-      
-      if (myInvestors.length === 0) {
+    setSelectedStartupForRecommendation(startupId);
+    setSelectedInvestors(new Set()); // Reset selection
+    setSelectedCollaborators(new Set()); // Reset collaborator selection
+    setExistingRecommendations(new Set()); // Reset existing recommendations
+    
+    // Ensure collaborators are loaded before opening modal
+    if (currentUser?.id) {
+      try {
+        const requests = await advisorConnectionRequestService.getCollaboratorRequests(currentUser.id);
+        const accepted = requests.filter(r => r.status === 'accepted');
+        setAcceptedCollaborators(accepted);
+        console.log('📋 Loaded collaborators for recommendation modal:', accepted.length);
+      } catch (error) {
+        console.error('Error loading collaborators:', error);
+      }
+    }
+    
+    // Debug: Log investors and collaborators
+    console.log('👥 My Investors count:', myInvestors.length);
+    console.log('🤝 Accepted Collaborators count:', acceptedCollaborators.length);
+    console.log('🔑 Advisor Code:', advisorCode);
+    
+    setShowRecommendModal(true);
+    
+    // Fetch existing recommendations for this startup (both investors and collaborators)
+    if (currentUser?.id) {
+      setIsLoadingRecommendations(true);
+      try {
+        const { data, error } = await supabase
+          .from('investment_advisor_recommendations')
+          .select('investor_id')
+          .eq('investment_advisor_id', currentUser.id)
+          .eq('startup_id', startupId);
+        
+        if (error) {
+          console.error('Error fetching existing recommendations:', error);
+        } else if (data) {
+          // Create a set of recipient IDs who already have recommendations
+          // Note: investor_id field stores both investor IDs and collaborator IDs
+          const existingRecipientIds = new Set(data.map((rec: any) => rec.investor_id));
+          setExistingRecommendations(existingRecipientIds);
+        }
+      } catch (error) {
+        console.error('Error loading existing recommendations:', error);
+      } finally {
+        setIsLoadingRecommendations(false);
+      }
+    }
+  };
+
+  // Toggle investor selection (only if not already recommended)
+  const toggleInvestorSelection = (investorId: string) => {
+    // Don't allow selection if already recommended
+    if (existingRecommendations.has(investorId)) {
+      return;
+    }
+    
+    setSelectedInvestors(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(investorId)) {
+        newSet.delete(investorId);
+      } else {
+        newSet.add(investorId);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle collaborator selection (only if not already recommended)
+  const toggleCollaboratorSelection = (collaboratorId: string) => {
+    // Don't allow selection if already recommended
+    if (existingRecommendations.has(collaboratorId)) {
+      return;
+    }
+    
+    setSelectedCollaborators(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(collaboratorId)) {
+        newSet.delete(collaboratorId);
+      } else {
+        newSet.add(collaboratorId);
+      }
+      return newSet;
+    });
+  };
+
+  // Select all available recipients (investors and collaborators who don't already have recommendations)
+  const selectAllAvailable = () => {
+    const availableInvestorIds = myInvestors
+      .filter(inv => !existingRecommendations.has(inv.id))
+      .map(inv => inv.id);
+    setSelectedInvestors(new Set(availableInvestorIds));
+    
+    const availableCollaboratorIds = acceptedCollaborators
+      .filter(collab => !existingRecommendations.has(collab.requester_id))
+      .map(collab => collab.requester_id);
+    setSelectedCollaborators(new Set(availableCollaboratorIds));
+  };
+
+  // Deselect all recipients
+  const deselectAllRecipients = () => {
+    setSelectedInvestors(new Set());
+    setSelectedCollaborators(new Set());
+  };
+
+  // Submit recommendations to selected investors and collaborators
+  const handleSubmitRecommendations = async () => {
+    if (!selectedStartupForRecommendation) return;
+    
+    const totalSelected = selectedInvestors.size + selectedCollaborators.size;
+    if (totalSelected === 0) {
         setNotifications(prev => [...prev, {
           id: Date.now().toString(),
-          message: 'You have no assigned investors to recommend this startup to. Please accept investor requests first.',
+        message: 'Please select at least one investor or collaborator to recommend this startup to.',
           type: 'warning',
           timestamp: new Date()
         }]);
         return;
       }
       
-      const startup = startups.find(s => s.id === startupId);
+    try {
+      setIsLoading(true);
+      
+      const startup = startups.find(s => s.id === selectedStartupForRecommendation);
       if (!startup) {
         setNotifications(prev => [...prev, {
           id: Date.now().toString(),
@@ -2282,16 +2421,59 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return;
       }
       
-      const investorIds = myInvestors.map(investor => investor.id);
+      // Combine investors and collaborators
+      const allRecipientIds = [
+        ...Array.from(selectedInvestors),
+        ...Array.from(selectedCollaborators)
+      ];
       
-      // Create recommendations in the database
-      const recommendationPromises = investorIds.map(investorId => 
+      // Filter out recipients who already have recommendations
+      const newRecipientIds = allRecipientIds.filter(recipientId => 
+        !existingRecommendations.has(recipientId)
+      );
+      
+      if (newRecipientIds.length === 0) {
+        setNotifications(prev => [...prev, {
+          id: Date.now().toString(),
+          message: 'All selected recipients already have recommendations for this startup.',
+          type: 'warning',
+          timestamp: new Date()
+        }]);
+        setIsLoading(false);
+        return;
+      }
+      
+      // Check for duplicates before inserting
+      const { data: existingData } = await supabase
+        .from('investment_advisor_recommendations')
+        .select('investor_id')
+        .eq('investment_advisor_id', currentUser?.id || '')
+        .eq('startup_id', selectedStartupForRecommendation)
+        .in('investor_id', newRecipientIds);
+      
+      const existingRecipientIdsSet = new Set((existingData || []).map((rec: any) => rec.investor_id));
+      const finalNewRecipientIds = newRecipientIds.filter(id => !existingRecipientIdsSet.has(id));
+      
+      if (finalNewRecipientIds.length === 0) {
+        setNotifications(prev => [...prev, {
+          id: Date.now().toString(),
+          message: 'All selected recipients already have recommendations for this startup.',
+          type: 'warning',
+          timestamp: new Date()
+        }]);
+        setIsLoading(false);
+        return;
+      }
+      
+      // Create recommendations in the database for new recipients only
+      // Note: investor_id field is used for both investors and collaborators
+      const recommendationPromises = finalNewRecipientIds.map(recipientId => 
         supabase
           .from('investment_advisor_recommendations')
           .insert({
             investment_advisor_id: currentUser?.id || '',
-            startup_id: startupId,
-            investor_id: investorId,
+            startup_id: selectedStartupForRecommendation,
+            investor_id: recipientId,
             recommended_deal_value: 0,
             recommended_valuation: 0,
             recommendation_notes: `Recommended by ${currentUser?.name || 'Investment Advisor'} - Co-investment opportunity`,
@@ -2313,15 +2495,40 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return;
       }
       
+      // Update existing recommendations set
+      setExistingRecommendations(prev => {
+        const updated = new Set(prev);
+        finalNewRecipientIds.forEach(id => updated.add(id));
+        return updated;
+      });
+      
       // Add to recommended startups set to change button color
-      setRecommendedStartups(prev => new Set([...prev, startupId]));
+      setRecommendedStartups(prev => new Set([...prev, selectedStartupForRecommendation]));
+      
+      const skippedCount = allRecipientIds.length - finalNewRecipientIds.length;
+      const investorCount = finalNewRecipientIds.filter(id => selectedInvestors.has(id)).length;
+      const collaboratorCount = finalNewRecipientIds.filter(id => selectedCollaborators.has(id)).length;
+      
+      let message = `Successfully recommended "${startup.name}" to `;
+      const parts = [];
+      if (investorCount > 0) parts.push(`${investorCount} investor${investorCount > 1 ? 's' : ''}`);
+      if (collaboratorCount > 0) parts.push(`${collaboratorCount} collaborator${collaboratorCount > 1 ? 's' : ''}`);
+      message += parts.join(' and ') + '!';
+      
+      if (skippedCount > 0) {
+        message += ` (${skippedCount} already had recommendations)`;
+      }
       
       setNotifications(prev => [...prev, {
         id: Date.now().toString(),
-        message: `Successfully recommended "${startup.name}" to ${myInvestors.length} investors!`,
+        message,
         type: 'success',
         timestamp: new Date()
       }]);
+      
+      // Clear selection but keep modal open to allow more selections
+      setSelectedInvestors(new Set());
+      setSelectedCollaborators(new Set());
       
     } catch (error) {
       console.error('Error recommending startup:', error);
@@ -3050,52 +3257,68 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     <div className="min-h-screen bg-gray-50">
       {/* Notifications */}
       {notifications.length > 0 && (
-        <div className="fixed top-4 right-4 z-50 space-y-2">
+        <div className="fixed top-4 right-4 z-50 space-y-3 max-w-md">
           {notifications.map((notification) => (
             <div
               key={notification.id}
-              className={`max-w-sm w-full bg-white shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${
-                notification.type === 'success' ? 'border-l-4 border-green-400' :
-                notification.type === 'error' ? 'border-l-4 border-red-400' :
-                notification.type === 'warning' ? 'border-l-4 border-yellow-400' :
-                'border-l-4 border-blue-400'
+              className={`bg-white shadow-xl rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden animate-in slide-in-from-top-5 ${
+                notification.type === 'success' ? 'border-l-4 border-green-500' :
+                notification.type === 'error' ? 'border-l-4 border-red-500' :
+                notification.type === 'warning' ? 'border-l-4 border-yellow-500' :
+                'border-l-4 border-blue-500'
               }`}
             >
               <div className="p-4">
-                <div className="flex items-start">
-                  <div className="flex-shrink-0">
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 mt-0.5">
                     {notification.type === 'success' && (
-                      <svg className="h-6 w-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-green-100">
+                        <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
+                      </div>
                     )}
                     {notification.type === 'error' && (
-                      <svg className="h-6 w-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-red-100">
+                        <svg className="h-5 w-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
+                      </div>
                     )}
                     {notification.type === 'warning' && (
-                      <svg className="h-6 w-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-yellow-100">
+                        <svg className="h-5 w-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
                       </svg>
+                      </div>
                     )}
                     {notification.type === 'info' && (
-                      <svg className="h-6 w-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100">
+                        <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
+                      </div>
                     )}
                   </div>
-                  <div className="ml-3 w-0 flex-1 pt-0.5">
-                    <p className="text-sm font-medium text-gray-900">{notification.message}</p>
-                    <p className="mt-1 text-sm text-gray-500">{notification.timestamp.toLocaleTimeString()}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 leading-relaxed break-words">
+                      {notification.message}
+                    </p>
+                    <p className="mt-1.5 text-xs text-gray-500">
+                      {notification.timestamp.toLocaleTimeString('en-US', { 
+                        hour: 'numeric', 
+                        minute: '2-digit',
+                        hour12: true 
+                      })}
+                    </p>
                   </div>
-                  <div className="ml-4 flex-shrink-0 flex">
+                  <div className="flex-shrink-0 ml-2">
                     <button
                       onClick={() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}
-                      className="bg-white rounded-md inline-flex text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                      className="inline-flex items-center justify-center rounded-md p-1.5 text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                      aria-label="Close notification"
                     >
-                      <span className="sr-only">Close</span>
-                      <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                         <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                       </svg>
                     </button>
@@ -3165,48 +3388,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               </div>
             </button>
             <button
-              onClick={() => setActiveTab('myInvestments')}
+              onClick={() => {
+                setActiveTab('management');
+                setManagementSubTab('myInvestments');
+              }}
               className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
-                activeTab === 'myInvestments'
+                activeTab === 'management'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
               <div className="flex items-center">
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                 </svg>
-                My Investments
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('myInvestors')}
-              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
-                activeTab === 'myInvestors'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-                </svg>
-                My Investors
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('myStartups')}
-              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
-                activeTab === 'myStartups'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                </svg>
-                My Startups
+                Management
               </div>
             </button>
             <button
@@ -3353,7 +3549,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Request Date</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -3362,7 +3557,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   <tbody className="bg-white divide-y divide-gray-200">
                     {serviceRequests.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-3 sm:px-6 py-8 text-center text-gray-500">
+                        <td colSpan={4} className="px-3 sm:px-6 py-8 text-center text-gray-500">
                           <div className="flex flex-col items-center">
                             <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -3377,9 +3572,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         <tr key={request.id}>
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                             {request.name || 'N/A'}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
-                            {request.email}
                           </td>
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -4750,14 +4942,28 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               }
               
               return filteredPitches.map(inv => {
-                const embedUrl = investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
+                const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
+                const embedUrl = videoEmbedInfo?.embedUrl || null;
+                const videoSource = videoEmbedInfo?.source || null;
                 return (
                   <div key={inv.id} className="bg-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 overflow-hidden">
-                    {/* Enhanced Video Section */}
+                    {/* Enhanced Video/Logo Section */}
                     <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
                       {embedUrl ? (
                         playingVideoId === inv.id ? (
                           <div className="relative w-full h-full">
+                            {videoSource === 'direct' ? (
+                              <video
+                                src={embedUrl}
+                                controls
+                                autoPlay
+                                muted
+                                playsInline
+                                className="absolute top-0 left-0 w-full h-full object-cover"
+                              >
+                                Your browser does not support the video tag.
+                              </video>
+                            ) : (
                             <iframe
                               src={embedUrl}
                               title={`Pitch video for ${inv.name}`}
@@ -4766,6 +4972,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                               allowFullScreen
                               className="absolute top-0 left-0 w-full h-full"
                             ></iframe>
+                            )}
                             <button
                               onClick={() => setPlayingVideoId(null)}
                               className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"
@@ -4791,13 +4998,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </div>
                           </div>
                         )
+                      ) : inv.logoUrl ? (
+                        <div className="w-full h-full flex items-center justify-center bg-slate-100">
+                          <img 
+                            src={inv.logoUrl} 
+                            alt={`${inv.name} Logo`} 
+                            className="object-contain w-full h-full" 
+                          />
+                        </div>
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-slate-400">
                           <div className="text-center">
-                            <svg className="h-16 w-16 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                            <p className="text-sm">No video available</p>
+                            <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No video or logo available</p>
                           </div>
                         </div>
                       )}
@@ -4808,108 +5021,154 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       <div className="flex flex-col sm:flex-row items-start justify-between mb-4 gap-3">
                         <div className="flex-1 min-w-0">
                           <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2 break-words">{inv.name}</h3>
-                          <p className="text-sm sm:text-base text-slate-600 font-medium">{inv.sector}</p>
+                          {/* Domain, Round, Stage in one line */}
+                          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                            {inv.domain && (
+                              <span>
+                                <span className="font-medium text-slate-700">Domain:</span> {inv.domain}
+                              </span>
+                            )}
+                            {inv.fundraisingType && (
+                              <>
+                                {inv.domain && <span className="text-slate-300">•</span>}
+                                <span>
+                                  <span className="font-medium text-slate-700">Round:</span> {inv.fundraisingType}
+                                </span>
+                              </>
+                            )}
+                            {inv.stage && (
+                              <>
+                                {(inv.domain || inv.fundraisingType) && <span className="text-slate-300">•</span>}
+                                <span>
+                                  <span className="font-medium text-slate-700">Stage:</span> {inv.stage}
+                                </span>
+                              </>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           {inv.isStartupNationValidated && (
                             <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-medium shadow-sm">
-                              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
+                              <CheckCircle className="h-3 w-3" />
                               <span className="hidden xs:inline">Verified</span>
                             </div>
                           )}
-                        </div>
-                      </div>
-                                        
-                      {/* Enhanced Action Buttons */}
-                      <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-6">
-                        <button
-                          onClick={() => handleFavoriteToggle(inv.id)}
-                          className={`!rounded-full !p-2 sm:!p-3 transition-all duration-200 ${
-                            favoritedPitches.has(inv.id)
-                              ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
-                              : 'hover:bg-red-50 hover:text-red-600 border border-slate-200 bg-white'
-                          }`}
-                        >
-                          <svg className={`h-4 w-4 sm:h-5 sm:w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                          </svg>
-                        </button>
-
                         <button
                           onClick={() => handleShare(inv)}
-                          className="!rounded-full !p-2 sm:!p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200 bg-white"
+                            className="!rounded-full !p-2 sm:!p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
                         >
-                          <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
-                          </svg>
+                            <Share2 className="h-4 w-4 sm:h-5 sm:w-5" />
                         </button>
+                        </div>
+                      </div>
 
+                      {/* Document Buttons Row - First Row */}
+                      <div className="flex flex-wrap items-center gap-2 mt-3 sm:mt-4">
                         {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
-                          <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[120px]">
-                            <button className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 bg-white px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium">
-                              <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                              <span className="hidden xs:inline">View </span>Deck
+                          <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[120px]">
+                            <button className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                              <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> <span className="hidden xs:inline">View </span>Deck
+                            </button>
+                          </a>
+                        )}
+
+                        {inv.businessPlanUrl && inv.businessPlanUrl !== '#' && (
+                          <a href={inv.businessPlanUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[140px]">
+                            <button className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                              <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> <span className="hidden xs:inline">Business </span>Plan
                             </button>
                           </a>
                         )}
 
                         {inv.onePagerUrl && inv.onePagerUrl !== '#' && (
-                          <a href={inv.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[140px]">
-                            <button className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 bg-white px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium">
-                              <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                              <span className="hidden xs:inline">Business </span>Plan
+                          <a href={inv.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[120px]">
+                            <button className="w-full hover:bg-emerald-50 hover:text-emerald-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                              <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> One-Pager
                             </button>
                           </a>
                         )}
+                      </div>
+
+                      {/* Action Buttons Row - Second Row */}
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2">
+                        <button
+                          onClick={() => handleFavoriteToggle(inv.id)}
+                          className={`!rounded-full !p-1.5 sm:!p-2 transition-all duration-200 ${
+                            favoritedPitches.has(inv.id)
+                              ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
+                              : 'hover:bg-red-50 hover:text-red-600 border border-slate-200 bg-white'
+                          }`}
+                        >
+                          <Heart className={`h-3 w-3 sm:h-4 sm:w-4 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
+                        </button>
 
                         <button
                           onClick={() => handleDueDiligenceClick(inv)}
-                          className={`flex-1 min-w-[140px] transition-all duration-200 border px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${
+                          className={`flex-1 min-w-[90px] sm:min-w-[120px] transition-all duration-200 border px-2 py-1 rounded-lg text-xs font-medium ${
                             approvedDueDiligenceStartups.has(inv.id)
                               ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
                               : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
                           }`}
                         >
-                          <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                          </svg>
+                          <HelpCircle className="h-3 w-3 mr-1 inline" />
                           <span className="hidden sm:inline">{approvedDueDiligenceStartups.has(inv.id) ? 'Due Diligence Accepted' : 'Due Diligence'}</span>
                           <span className="sm:hidden">DD</span>
                         </button>
 
                         <button
                           onClick={() => handleRecommendCoInvestment(inv.id)}
-                          className={`flex-1 min-w-[140px] transition-all duration-200 shadow-lg text-white px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${
+                          className={`flex-1 min-w-[90px] sm:min-w-[120px] bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 transition-all duration-200 shadow-lg shadow-green-200 text-white px-2 py-1 rounded-lg text-xs font-medium ${
                             recommendedStartups.has(inv.id)
-                              ? 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-blue-200'
-                              : 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-green-200'
+                              ? 'from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-blue-200'
+                              : ''
                           }`}
                         >
-                          <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                          </svg>
-                          <span className="hidden sm:inline">{recommendedStartups.has(inv.id) ? 'Recommended ✓' : 'Recommend to Investors'}</span>
+                          <span className="hidden sm:inline">{recommendedStartups.has(inv.id) ? 'Recommended ✓' : 'Recommend'}</span>
                           <span className="sm:hidden">{recommendedStartups.has(inv.id) ? 'Rec ✓' : 'Recommend'}</span>
                         </button>
                       </div>
                     </div>
 
                     {/* Enhanced Investment Details Footer */}
-                    <div className="bg-gradient-to-r from-slate-50 to-blue-50 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 border-t border-slate-200">
+                    <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 border-t border-slate-200">
+                      <div className="flex items-center gap-4 flex-wrap">
                       <div className="text-sm sm:text-base">
-                        <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(inv.investmentValue, inv.currency || 'USD')} for <span className="font-semibold text-blue-600">{inv.equityAllocation}%</span> equity
+                          <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(inv.investmentValue, inv.currency || 'USD')} for <span className="font-semibold text-purple-600">{inv.equityAllocation}%</span> equity
+                        </div>
+                        {(inv.websiteUrl || inv.linkedInUrl) && (
+                          <div className="flex items-center gap-4">
+                            {inv.websiteUrl && inv.websiteUrl !== '#' && (
+                              <a 
+                                href={inv.websiteUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                                title={inv.websiteUrl}
+                              >
+                                <Globe className="h-4 w-4" />
+                                <span className="truncate max-w-[200px]">Website</span>
+                                <ExternalLink className="h-3 w-3 opacity-50" />
+                              </a>
+                            )}
+                            {inv.linkedInUrl && inv.linkedInUrl !== '#' && (
+                              <a 
+                                href={inv.linkedInUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                                title={inv.linkedInUrl}
+                              >
+                                <Linkedin className="h-4 w-4" />
+                                <span className="truncate max-w-[200px]">LinkedIn</span>
+                                <ExternalLink className="h-3 w-3 opacity-50" />
+                              </a>
+                            )}
+                          </div>
+                        )}
                       </div>
                       {inv.complianceStatus === ComplianceStatus.Compliant && (
                         <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
-                          <svg className="h-3 w-3 sm:h-4 sm:w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
+                          <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
                           <span className="text-xs font-semibold">Verified</span>
                         </div>
                       )}
@@ -4922,8 +5181,64 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         </div>
       )}
 
-      {/* My Investments Tab - Shows Stage 4 offers with same structure as Offers Made */}
-      {activeTab === 'myInvestments' && (
+      {/* Management Tab */}
+      {activeTab === 'management' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Sub-tabs Navigation */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="border-b border-gray-200">
+              <nav className="flex space-x-8 px-6" aria-label="Management Tabs">
+                <button
+                  onClick={() => setManagementSubTab('myInvestments')}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    managementSubTab === 'myInvestments'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    My Investments
+                  </div>
+                </button>
+                <button
+                  onClick={() => setManagementSubTab('myInvestors')}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    managementSubTab === 'myInvestors'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                    </svg>
+                    My Investors
+                  </div>
+                </button>
+                <button
+                  onClick={() => setManagementSubTab('myStartups')}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    managementSubTab === 'myStartups'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                    My Startups
+                  </div>
+                </button>
+              </nav>
+            </div>
+          </div>
+
+          {/* My Investments Sub-tab */}
+          {managementSubTab === 'myInvestments' && (
         <div className="space-y-6">
         <div className="bg-white rounded-lg shadow">
           <div className="p-6">
@@ -5044,8 +5359,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         </div>
       )}
 
-      {/* My Investors Tab */}
-      {activeTab === 'myInvestors' && (
+          {/* My Investors Sub-tab */}
+          {managementSubTab === 'myInvestors' && (
         <div className="space-y-6">
           <div className="bg-white rounded-lg shadow">
             <div className="p-6">
@@ -5578,8 +5893,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         </Modal>
       )}
 
-      {/* My Startups Tab */}
-      {activeTab === 'myStartups' && (
+          {/* My Startups Sub-tab */}
+          {managementSubTab === 'myStartups' && (
         <div className="bg-white rounded-lg shadow">
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
@@ -5746,8 +6061,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
           </div>
         </div>
+          )}
+        </div>
       )}
-
 
       {/* Investment Interests Tab */}
       {activeTab === 'interests' && (
@@ -7074,10 +7390,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               <div className="border-b border-slate-200 mb-6">
                 <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto pb-2" aria-label="Mandate Tabs">
                   {mandates.map((mandate) => (
-                    <button
+                    <div
                       key={mandate.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelectedMandateId(mandate.id)}
-                      className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-2 ${
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedMandateId(mandate.id);
+                        }
+                      }}
+                      className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-2 cursor-pointer ${
                         selectedMandateId === mandate.id
                           ? 'border-blue-500 text-blue-600'
                           : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -7085,7 +7409,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     >
                       <Filter className="h-4 w-4" />
                       {mandate.name}
-                      <div className="flex items-center gap-1 ml-2">
+                      <div className="flex items-center gap-1 ml-2" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -7093,6 +7417,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           }}
                           className="p-1 hover:bg-slate-100 rounded"
                           title="Edit mandate"
+                          type="button"
                         >
                           <Edit className="h-3 w-3" />
                         </button>
@@ -7103,11 +7428,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           }}
                           className="p-1 hover:bg-red-100 rounded text-red-600"
                           title="Delete mandate"
+                          type="button"
                         >
                           <X className="h-3 w-3" />
                         </button>
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </nav>
               </div>
@@ -7296,6 +7622,274 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               );
             })()
           ) : null}
+        </div>
+      )}
+
+      {/* Recommend Modal - Available from all tabs */}
+      {showRecommendModal && selectedStartupForRecommendation && (
+            <Modal
+              isOpen={showRecommendModal}
+              onClose={() => {
+                setShowRecommendModal(false);
+                setSelectedStartupForRecommendation(null);
+                setSelectedInvestors(new Set());
+                setSelectedCollaborators(new Set());
+                setExistingRecommendations(new Set());
+              }}
+              title="Recommend"
+              size="large"
+            >
+              <div className="space-y-4">
+                {/* Startup Info */}
+                {(() => {
+                  const startup = startups.find(s => s.id === selectedStartupForRecommendation);
+                  return startup ? (
+                    <div className="bg-slate-50 rounded-lg p-3 mb-4">
+                      <p className="text-sm text-slate-600 mb-1">Startup:</p>
+                      <p className="text-lg font-semibold text-slate-800">{startup.name}</p>
+                      <p className="text-sm text-slate-600">{startup.sector}</p>
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Select All / Deselect All */}
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <p className="text-sm font-medium text-slate-700">
+                    Select investors and collaborators to recommend this startup to:
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={selectAllAvailable}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                    >
+                      Select Available
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      onClick={deselectAllRecipients}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                    >
+                      Deselect All
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Info about existing recommendations */}
+                {existingRecommendations.size > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-xs text-blue-800">
+                      <CheckCircle className="h-3 w-3 inline mr-1" />
+                      {existingRecommendations.size} recipient{existingRecommendations.size > 1 ? 's have' : ' has'} already received a recommendation for this startup.
+                    </p>
+                  </div>
+                )}
+
+                {/* Recipients List */}
+                <div className="max-h-[500px] overflow-y-auto space-y-4">
+                  {isLoadingRecommendations ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                      <span className="ml-3 text-sm text-slate-600">Loading recipients...</span>
+                    </div>
+                  ) : (
+                    <>
+                      {/* My Investors Section */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <Users className="h-4 w-4 text-blue-600" />
+                          <h3 className="text-sm font-semibold text-slate-700">My Investors</h3>
+                          <span className="text-xs text-slate-500">({myInvestors.length})</span>
+                        </div>
+                        {myInvestors.length === 0 ? (
+                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-center">
+                            <p className="text-xs text-slate-500">No assigned investors</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {myInvestors.map((investor) => {
+                              const isSelected = selectedInvestors.has(investor.id);
+                              const alreadyRecommended = existingRecommendations.has(investor.id);
+                              const isDisabled = alreadyRecommended;
+                              
+                              return (
+                                <div
+                                  key={investor.id}
+                                  onClick={() => !isDisabled && toggleInvestorSelection(investor.id)}
+                                  className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                                    isDisabled
+                                      ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                                      : isSelected
+                                      ? 'bg-blue-50 border-blue-300 shadow-sm cursor-pointer'
+                                      : 'bg-white border-slate-200 hover:border-blue-200 hover:bg-slate-50 cursor-pointer'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    disabled={isDisabled}
+                                    onChange={() => !isDisabled && toggleInvestorSelection(investor.id)}
+                                    className={`w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 ${
+                                      isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                                    }`}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <p className={`text-sm font-medium truncate ${
+                                        isDisabled ? 'text-slate-500' : 'text-slate-800'
+                                      }`}>
+                                        {investor.name || investor.email || 'Unknown Investor'}
+                                      </p>
+                                      {alreadyRecommended && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                          Already Recommended
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {isSelected && !isDisabled && (
+                                    <div className="flex-shrink-0">
+                                      <CheckCircle className="h-5 w-5 text-blue-600" />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* My Collaborators Section */}
+                      <div className="border-t border-slate-200 pt-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Users className="h-4 w-4 text-purple-600" />
+                          <h3 className="text-sm font-semibold text-slate-700">My Collaborators</h3>
+                          <span className="text-xs text-slate-500">({acceptedCollaborators.length})</span>
+                        </div>
+                        {acceptedCollaborators.length === 0 ? (
+                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-center">
+                            <p className="text-xs text-slate-500">No collaborators yet</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {acceptedCollaborators.map((collaborator) => {
+                              const requesterUser = users.find(u => u.id === collaborator.requester_id);
+                              const collaboratorProfile = collaboratorProfiles[collaborator.requester_id] || null;
+                              const isSelected = selectedCollaborators.has(collaborator.requester_id);
+                              const alreadyRecommended = existingRecommendations.has(collaborator.requester_id);
+                              const isDisabled = alreadyRecommended;
+                              
+                              // Get collaborator name
+                              const collaboratorName = requesterUser?.name || 
+                                collaboratorProfile?.firm_name || 
+                                collaboratorProfile?.investor_name || 
+                                collaboratorProfile?.advisor_name || 
+                                collaboratorProfile?.mentor_name || 
+                                requesterUser?.email || 
+                                'Unknown Collaborator';
+                              
+                              return (
+                                <div
+                                  key={collaborator.requester_id}
+                                  onClick={() => !isDisabled && toggleCollaboratorSelection(collaborator.requester_id)}
+                                  className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                                    isDisabled
+                                      ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                                      : isSelected
+                                      ? 'bg-purple-50 border-purple-300 shadow-sm cursor-pointer'
+                                      : 'bg-white border-slate-200 hover:border-purple-200 hover:bg-slate-50 cursor-pointer'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    disabled={isDisabled}
+                                    onChange={() => !isDisabled && toggleCollaboratorSelection(collaborator.requester_id)}
+                                    className={`w-4 h-4 text-purple-600 border-slate-300 rounded focus:ring-purple-500 ${
+                                      isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                                    }`}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className={`text-sm font-medium truncate ${
+                                        isDisabled ? 'text-slate-500' : 'text-slate-800'
+                                      }`}>
+                                        {collaboratorName}
+                                      </p>
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                        {collaborator.requester_type}
+                                      </span>
+                                      {alreadyRecommended && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                          Already Recommended
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {isSelected && !isDisabled && (
+                                    <div className="flex-shrink-0">
+                                      <CheckCircle className="h-5 w-5 text-purple-600" />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Selection Count */}
+                {(selectedInvestors.size > 0 || selectedCollaborators.size > 0) && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-sm font-medium text-blue-800">
+                      {selectedInvestors.size + selectedCollaborators.size} recipient{(selectedInvestors.size + selectedCollaborators.size) > 1 ? 's' : ''} selected
+                      {selectedInvestors.size > 0 && (
+                        <span className="text-blue-600"> ({selectedInvestors.size} investor{selectedInvestors.size > 1 ? 's' : ''}</span>
+                      )}
+                      {selectedInvestors.size > 0 && selectedCollaborators.size > 0 && <span className="text-blue-600">, </span>}
+                      {selectedCollaborators.size > 0 && (
+                        <span className="text-blue-600">{selectedCollaborators.size} collaborator{selectedCollaborators.size > 1 ? 's' : ''}</span>
+                      )}
+                      {selectedInvestors.size > 0 && <span className="text-blue-600">)</span>}
+                    </p>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowRecommendModal(false);
+                      setSelectedStartupForRecommendation(null);
+                      setSelectedInvestors(new Set());
+                      setSelectedCollaborators(new Set());
+                      setExistingRecommendations(new Set());
+                    }}
+                    disabled={isLoading}
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    onClick={handleSubmitRecommendations}
+                    disabled={isLoading || (selectedInvestors.size === 0 && selectedCollaborators.size === 0)}
+                    className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800"
+                  >
+                    {isLoading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Recommending...
+                      </>
+                    ) : (
+                      `Recommend to ${selectedInvestors.size + selectedCollaborators.size} Recipient${(selectedInvestors.size + selectedCollaborators.size) !== 1 ? 's' : ''}`
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          )}
 
           {/* Create/Edit Mandate Modal */}
           {showMandateModal && (
@@ -7442,8 +8036,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 </div>
               </div>
             </Modal>
-          )}
-        </div>
       )}
     </div>
   );

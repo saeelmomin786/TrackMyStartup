@@ -1093,34 +1093,62 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   }, [advisorCode, startups, users]);
 
   // Get accepted investors - FIXED VERSION
+  // Includes: 1) Investors who entered advisor code and were accepted, 2) Investors who connected via connection requests
   const myInvestors = useMemo(() => {
-    // Strict validation: advisorCode must be a non-empty string
-    if (!advisorCode || typeof advisorCode !== 'string' || advisorCode.trim() === '' || !users || !Array.isArray(users)) {
+    if (!users || !Array.isArray(users)) {
       return [];
     }
 
-    // Find investors who have entered the investment advisor code AND have been accepted
-    const acceptedInvestors = users.filter(user => {
-      // Must be an investor
-      if (user.role !== 'Investor') {
-        return false;
+    const investorSet = new Set<string>(); // Track unique investor IDs
+    const allInvestors: any[] = [];
+
+    // 1. Find investors who have entered the investment advisor code AND have been accepted
+    if (advisorCode && typeof advisorCode === 'string' && advisorCode.trim() !== '') {
+      const codeEnteredInvestors = users.filter(user => {
+        // Must be an investor
+        if (user.role !== 'Investor') {
+          return false;
+        }
+
+        const enteredCode = (user as any).investment_advisor_code_entered;
+        
+        // Only match if enteredCode is a non-empty string that exactly matches advisorCode
+        if (!enteredCode || typeof enteredCode !== 'string' || enteredCode.trim() === '') {
+          return false;
+        }
+
+        const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
+        const isAccepted = (user as any).advisor_accepted === true;
+
+        return hasEnteredCode && isAccepted; // Only include investors who have been accepted
+      });
+
+      codeEnteredInvestors.forEach(investor => {
+        if (!investorSet.has(investor.id)) {
+          investorSet.add(investor.id);
+          allInvestors.push(investor);
+        }
+      });
+    }
+
+    // 2. Find investors who connected via connection requests (accepted collaborators)
+    const connectedInvestors = acceptedCollaborators
+      .filter(request => request.requester_type === 'Investor' && request.status === 'accepted')
+      .map(request => {
+        // Find the user object for this investor
+        return users.find(user => user.id === request.requester_id && user.role === 'Investor');
+      })
+      .filter((investor): investor is any => investor !== undefined);
+
+    connectedInvestors.forEach(investor => {
+      if (!investorSet.has(investor.id)) {
+        investorSet.add(investor.id);
+        allInvestors.push(investor);
       }
-
-      const enteredCode = (user as any).investment_advisor_code_entered;
-      
-      // CRITICAL FIX: Only match if enteredCode is a non-empty string that exactly matches advisorCode
-      if (!enteredCode || typeof enteredCode !== 'string' || enteredCode.trim() === '') {
-        return false;
-      }
-
-      const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
-      const isAccepted = (user as any).advisor_accepted === true;
-
-      return hasEnteredCode && isAccepted; // Only include investors who have been accepted
     });
 
-    return acceptedInvestors;
-  }, [advisorCode, users]);
+    return allInvestors;
+  }, [advisorCode, users, acceptedCollaborators]);
 
   // Create serviceRequests - Startups (Pitch) + Investors (manual code entry from dashboard)
   // Note: Investors clicking "Connect" button go to Collaboration tab via advisor_connection_requests

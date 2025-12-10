@@ -121,3 +121,4 @@ COMMENT ON COLUMN public.advisor_added_investors.stage IS 'Stage from general_da
 
 
 
+

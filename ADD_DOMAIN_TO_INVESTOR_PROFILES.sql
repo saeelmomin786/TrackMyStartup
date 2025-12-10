@@ -28,3 +28,4 @@ COMMENT ON COLUMN public.investor_profiles.domain IS 'Array of investment domain
 
 
 
+

@@ -129,3 +129,4 @@ COMMENT ON COLUMN public.advisor_mandates.equity_max IS 'Maximum equity percenta
 
 
 
+

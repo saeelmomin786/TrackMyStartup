@@ -3,7 +3,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
 import { UserRole } from '../types';
-import { Mail, CheckCircle, AlertCircle, XCircle, ArrowLeft } from 'lucide-react';
+import { Mail, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
 import { authService } from '../lib/auth';
 
 interface BasicRegistrationStepProps {
@@ -251,20 +251,6 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
               Continue to Login
             </Button>
           </div>
-          
-          {/* Back to Form Button */}
-          <div className="mt-4">
-            <button
-              onClick={() => {
-                setShowConfirmation(false);
-                setEmailSent(false);
-              }}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:border-slate-400 hover:text-slate-900 transition-all duration-200 shadow-sm hover:shadow-md"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>Back to Registration Form</span>
-            </button>
-          </div>
         </div>
       </Card>
     );
@@ -272,20 +258,6 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
 
   return (
     <div className="w-full flex flex-col items-center">
-      <div className="w-full max-w-2xl mt-6 mb-4 flex justify-start">
-        <button
-          onClick={() => {
-            // Always go back to previous page using browser history
-            // This will work for both external websites and internal app navigation
-            window.history.back();
-          }}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:border-slate-400 hover:text-slate-900 transition-all duration-200 shadow-sm hover:shadow-md"
-          aria-label="Back"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Back</span>
-        </button>
-      </div>
     <Card className="w-full max-w-2xl">
       <div className="text-center mb-8">
         <h2 className="text-3xl font-bold tracking-tight text-slate-900">Create a new account</h2>

@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Input from './ui/Input';
 import Button from './ui/Button';
 import ForgotPasswordModal from './ForgotPasswordModal';
-import { Loader2, ArrowLeft } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
     onLogin: (user: AuthUser) => void;
@@ -284,22 +284,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
         }
     };
 
-    return (
+ return (
         <div className="w-full flex flex-col items-center">
-            <div className="w-full max-w-md mb-4 flex justify-start">
-                <button
-                    onClick={() => {
-                        // Always go back to previous page using browser history
-                        // This will work for both external websites and internal app navigation
-                        window.history.back();
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:border-slate-400 hover:text-slate-900 transition-all duration-200 shadow-sm hover:shadow-md"
-                    aria-label="Back"
-                >
-                    <ArrowLeft className="h-4 w-4" />
-                    <span>Back</span>
-                </button>
-            </div>
             <Card className="w-full max-w-md">
                 <div className="text-center mb-8">
                     <h2 className="text-3xl font-bold tracking-tight text-slate-900">Sign in to your account</h2>

@@ -4,7 +4,6 @@ import Button from './ui/Button';
 import Input from './ui/Input';
 import { UserRole } from '../types';
 import { Mail, CheckCircle, AlertCircle, XCircle, ArrowLeft } from 'lucide-react';
-import LogoTMS from './public/logoTMS.svg';
 import { authService } from '../lib/auth';
 
 interface BasicRegistrationStepProps {
@@ -43,7 +42,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
   const [emailSent, setEmailSent] = useState(false);
   
   // Role selection state
-  const [availableRoles, setAvailableRoles] = useState<string[]>(['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Mentor', 'Admin']);
+  const [availableRoles, setAvailableRoles] = useState<string[]>(['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Mentor']);
   
   // New state for email validation
   const [emailValidation, setEmailValidation] = useState<{
@@ -287,13 +286,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
       )}
     <Card className="w-full max-w-2xl">
       <div className="text-center mb-8">
-        <img 
-          src={LogoTMS} 
-          alt="TrackMyStartup" 
-          className="mx-auto h-40 w-40 cursor-pointer hover:opacity-80 transition-opacity" 
-          onClick={onNavigateToLanding}
-        />
-        <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-900">Create a new account</h2>
+        <h2 className="text-3xl font-bold tracking-tight text-slate-900">Create a new account</h2>
         <p className="mt-2 text-sm text-slate-600">
           Or{' '}
           <button

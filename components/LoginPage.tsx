@@ -5,7 +5,6 @@ import Input from './ui/Input';
 import Button from './ui/Button';
 import ForgotPasswordModal from './ForgotPasswordModal';
 import { Loader2, ArrowLeft } from 'lucide-react';
-import LogoTMS from './public/logoTMS.svg';
 
 interface LoginPageProps {
     onLogin: (user: AuthUser) => void;
@@ -301,13 +300,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
             )}
             <Card className="w-full max-w-md">
                 <div className="text-center mb-8">
-                    <img 
-                      src={LogoTMS} 
-                      alt="TrackMyStartup" 
-                      className="mx-auto h-40 w-40 cursor-pointer hover:opacity-80 transition-opacity" 
-                      onClick={onNavigateToLanding}
-                    />
-                    <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-900">Sign in to your account</h2>
+                    <h2 className="text-3xl font-bold tracking-tight text-slate-900">Sign in to your account</h2>
                     <p className="mt-2 text-sm text-slate-600">
                         Or{' '}
                         <button onClick={onNavigateToRegister} className="font-medium text-brand-primary hover:text-brand-secondary">

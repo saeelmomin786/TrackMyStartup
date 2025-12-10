@@ -31,6 +31,8 @@ import PageRouter from './components/PageRouter';
 import PublicProgramView from './components/PublicProgramView';
 import PublicAdminProgramView from './components/PublicAdminProgramView';
 import PublicStartupPage from './components/PublicStartupPage';
+import PublicInvestorPage from './components/PublicInvestorPage';
+import PublicAdvisorPage from './components/PublicAdvisorPage';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
 import DiagnosticPage from './components/DiagnosticPage';
 
@@ -53,6 +55,11 @@ const App: React.FC = () => {
   // This should work even when user is authenticated - it's a public view of a startup
   const isPublicStartupPage = (getQueryParam('view') === 'startup' || getQueryParam('startupId') || getQueryParam('id')) && (getQueryParam('startupId') || getQueryParam('id'));
   
+  // Check if we're on a public investor page
+  const isPublicInvestorPage = getQueryParam('view') === 'investor' && (getQueryParam('investorId') || getQueryParam('userId'));
+  // Check if we're on a public investment advisor page
+  const isPublicAdvisorPage = getQueryParam('view') === 'advisor' && (getQueryParam('advisorId') || getQueryParam('userId'));
+  
   // Clean up page=landing from public startup URLs to avoid routing conflicts
   // Do this in useEffect to avoid side effects during render
   useEffect(() => {
@@ -61,7 +68,12 @@ const App: React.FC = () => {
       url.searchParams.delete('page');
       window.history.replaceState({}, '', url.toString());
     }
-  }, [isPublicStartupPage]);
+    if (isPublicInvestorPage && getQueryParam('page') === 'landing') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('page');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [isPublicStartupPage, isPublicInvestorPage]);
   
   
   
@@ -2682,6 +2694,14 @@ const App: React.FC = () => {
   // Show public startup page if on /startup with startupId (BEFORE auth check)
   if (isPublicStartupPage) {
     return <PublicStartupPage />;
+  }
+
+  // Show public investor page if on /investor with investorId or userId (BEFORE auth check)
+  if (isPublicInvestorPage) {
+    return <PublicInvestorPage />;
+  }
+  if (isPublicAdvisorPage) {
+    return <PublicAdvisorPage />;
   }
   
   if (!isAuthenticated) {

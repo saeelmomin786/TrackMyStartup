@@ -12,10 +12,18 @@ interface MentorDataFormProps {
   startups: Startup[];
   onUpdate: () => void;
   mentorMetrics?: MentorMetrics | null;
+  initialSection?: 'active' | 'completed' | 'founded';
 }
 
-const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onUpdate, mentorMetrics }) => {
-  const [activeSection, setActiveSection] = useState<'active' | 'completed' | 'founded'>('active');
+const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onUpdate, mentorMetrics, initialSection }) => {
+  const [activeSection, setActiveSection] = useState<'active' | 'completed' | 'founded'>(initialSection || 'active');
+  
+  // Update active section when initialSection prop changes
+  useEffect(() => {
+    if (initialSection) {
+      setActiveSection(initialSection);
+    }
+  }, [initialSection]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states for active mentoring

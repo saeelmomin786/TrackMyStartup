@@ -14,6 +14,10 @@ export interface MentorRequest {
   requester_name?: string;
   requester_email?: string;
   startup_name?: string;
+  startup_website?: string;
+  startup_sector?: string;
+  fee_type?: string;
+  fee_amount?: number;
 }
 
 export interface MentorAssignment {
@@ -57,6 +61,7 @@ class MentorService {
       // Get active assignments (gracefully handle if table doesn't exist)
       let activeAssignments: any[] = [];
       try {
+        console.log('🔍 Fetching active assignments for mentor_id:', mentorId);
         const { data, error } = await supabase
           .from('mentor_startup_assignments')
           .select(`
@@ -68,12 +73,54 @@ class MentorService {
           .order('assigned_at', { ascending: false });
 
         if (error) {
-          console.warn('Error fetching active assignments (table may not exist):', error);
+          console.warn('❌ Error fetching active assignments:', error);
         } else {
           activeAssignments = data || [];
+          console.log('✅ Fetched active assignments:', activeAssignments.length, 'assignments');
+          
+          // Check which assignments came from mentor requests
+          if (activeAssignments.length > 0) {
+            const startupIds = activeAssignments
+              .filter(a => a.startup_id)
+              .map(a => a.startup_id);
+            
+            if (startupIds.length > 0) {
+              // Check for accepted mentor requests for these startups
+              const { data: acceptedRequests } = await supabase
+                .from('mentor_requests')
+                .select('startup_id')
+                .eq('mentor_id', mentorId)
+                .eq('status', 'accepted')
+                .in('startup_id', startupIds);
+              
+              const requestedStartupIds = new Set(
+                (acceptedRequests || []).map(r => r.startup_id)
+              );
+              
+              // Mark assignments that came from requests
+              activeAssignments = activeAssignments.map(assignment => ({
+                ...assignment,
+                fromRequest: assignment.startup_id ? requestedStartupIds.has(assignment.startup_id) : false
+              }));
+            } else {
+              // No startup_ids, mark all as not from request
+              activeAssignments = activeAssignments.map(assignment => ({
+                ...assignment,
+                fromRequest: false
+              }));
+            }
+            
+            console.log('📋 Active assignments:', activeAssignments.map(a => ({
+              id: a.id,
+              startup_id: a.startup_id,
+              startup_name: a.startups?.name || 'N/A',
+              status: a.status,
+              fromRequest: a.fromRequest
+            })));
+          }
         }
       } catch (err) {
-        console.warn('Table mentor_startup_assignments may not exist yet:', err);
+        console.warn('❌ Table mentor_startup_assignments may not exist yet:', err);
       }
 
       // Get completed assignments
@@ -102,37 +149,137 @@ class MentorService {
       let requests: any[] = [];
       let allRequests: any[] = [];
       try {
+        console.log('🔍 Fetching mentor requests for mentor_id:', mentorId);
+        // First, get the basic request data
         const { data: requestsData, error: requestsError } = await supabase
           .from('mentor_requests')
-          .select(`
-            *,
-            requester:users!mentor_requests_requester_id_fkey (
-              id,
-              name,
-              email
-            )
-          `)
+          .select('*')
           .eq('mentor_id', mentorId)
           .eq('status', 'pending')
           .order('requested_at', { ascending: false });
 
         if (requestsError) {
-          console.warn('Error fetching requests:', requestsError);
+          console.warn('❌ Error fetching requests:', requestsError);
+          requests = [];
         } else {
-          requests = requestsData || [];
+          console.log('✅ Fetched requests data:', requestsData?.length || 0, 'requests');
+          if (requestsData && requestsData.length > 0) {
+          // Fetch requester and startup data separately
+          const enrichedRequests = await Promise.all(
+            requestsData.map(async (request) => {
+              // Fetch requester user data
+              let requesterName: string | undefined;
+              let requesterEmail: string | undefined;
+              if (request.requester_id) {
+                try {
+                  const { data: requesterData, error: requesterError } = await supabase
+                    .from('users')
+                    .select('id, name, email')
+                    .eq('id', request.requester_id)
+                    .single();
+                  if (!requesterError && requesterData) {
+                    requesterName = requesterData.name || undefined;
+                    requesterEmail = requesterData.email || undefined;
+                  }
+                } catch (err) {
+                  console.warn('Error fetching requester data:', err);
+                }
+              }
+
+              // Fetch startup data
+              let startupName: string | undefined;
+              let startupWebsite: string | undefined;
+              let startupSector: string | undefined;
+              if (request.startup_id) {
+                try {
+                  // First get basic startup data
+                  const { data: startupData, error: startupError } = await supabase
+                    .from('startups')
+                    .select('id, name, sector')
+                    .eq('id', request.startup_id)
+                    .single();
+                  
+                  if (!startupError && startupData) {
+                    startupName = startupData.name || undefined;
+                    startupSector = startupData.sector || undefined;
+                    
+                    // Try to get domain/website from opportunity_applications
+                    try {
+                      const { data: oppData } = await supabase
+                        .from('opportunity_applications')
+                        .select('domain')
+                        .eq('startup_id', request.startup_id)
+                        .eq('status', 'accepted')
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+                      
+                      if (oppData?.domain) {
+                        startupWebsite = oppData.domain;
+                      }
+                    } catch (oppErr) {
+                      // Ignore if opportunity_applications doesn't exist or has no data
+                    }
+                  }
+                } catch (err) {
+                  console.warn('Error fetching startup data:', err);
+                }
+              }
+
+              // Fetch fee information from mentor_equity_records
+              let feeType: string | undefined;
+              let feeAmount: number | undefined;
+              try {
+                const { data: equityData, error: equityError } = await supabase
+                  .from('mentor_equity_records')
+                  .select('fee_type, fee_amount')
+                  .eq('request_id', request.id)
+                  .single();
+                if (!equityError && equityData) {
+                  feeType = equityData.fee_type || undefined;
+                  feeAmount = equityData.fee_amount || undefined;
+                }
+              } catch (err) {
+                console.warn('Error fetching fee data:', err);
+              }
+
+              return {
+                ...request,
+                requester_name: requesterName,
+                requester_email: requesterEmail,
+                startup_name: startupName,
+                startup_website: startupWebsite,
+                startup_sector: startupSector,
+                fee_type: feeType,
+                fee_amount: feeAmount
+              };
+            })
+          );
+          requests = enrichedRequests;
+          console.log('✅ Enriched requests:', requests.length);
+        } else {
+          requests = [];
+          console.log('ℹ️ No pending requests found');
         }
 
-        // Get all requests (for count)
+        // Get all requests (for count) - only count pending requests for requestsReceived
         const { data: allRequestsData, error: allRequestsError } = await supabase
           .from('mentor_requests')
-          .select('id')
+          .select('id, status')
           .eq('mentor_id', mentorId);
 
         if (allRequestsError) {
           console.warn('Error fetching all requests:', allRequestsError);
         } else {
           allRequests = allRequestsData || [];
+          console.log('📊 All requests breakdown:', {
+            total: allRequests.length,
+            pending: allRequests.filter(r => r.status === 'pending').length,
+            accepted: allRequests.filter(r => r.status === 'accepted').length,
+            rejected: allRequests.filter(r => r.status === 'rejected').length
+          });
         }
+        } // Close the outer else block
       } catch (err) {
         console.warn('Table mentor_requests may not exist yet:', err);
       }
@@ -172,13 +319,15 @@ class MentorService {
         return sum + (parseFloat(String(assignment.esop_value || 0)));
       }, 0);
 
-      // Map requests with requester info
+      // Map requests with requester info and startup info
       const mappedRequests = requests.map(req => {
         const requester = (req as any).requester;
+        const startup = (req as any).startups;
         return {
           ...req,
           requester_name: requester?.name || 'Unknown',
           requester_email: requester?.email || 'Unknown',
+          startup_name: startup?.name || req.startup_name || 'N/A',
         } as MentorRequest;
       });
 
@@ -191,7 +340,7 @@ class MentorService {
       };
 
       return {
-        requestsReceived: allRequests.length,
+        requestsReceived: allRequests.filter(r => r.status === 'pending').length, // Only count pending requests
         startupsMentoring: activeAssignments.length,
         startupsMentoredPreviously: completedAssignments.length,
         startupsFounded: foundedStartups.length,
@@ -262,6 +411,183 @@ class MentorService {
         pendingRequests: [],
         foundedStartups: [],
       };
+    }
+  }
+
+  // Accept a mentor request and create assignment
+  async acceptMentorRequest(requestId: number): Promise<boolean> {
+    try {
+      // Get the request
+      const { data: request, error: requestError } = await supabase
+        .from('mentor_requests')
+        .select('*')
+        .eq('id', requestId)
+        .single();
+
+      if (requestError || !request) {
+        console.error('Error fetching mentor request:', requestError);
+        return false;
+      }
+
+      // Check if request is pending
+      if (request.status !== 'pending') {
+        console.error('Request is not pending:', request.status);
+        return false;
+      }
+
+      // Update request status to accepted
+      const { error: updateError } = await supabase
+        .from('mentor_requests')
+        .update({
+          status: 'accepted',
+          responded_at: new Date().toISOString()
+        })
+        .eq('id', requestId);
+
+      if (updateError) {
+        console.error('Error updating mentor request:', updateError);
+        return false;
+      }
+
+      // Create mentor assignment if startup_id exists
+      if (request.startup_id) {
+        console.log('📝 Creating mentor assignment for startup_id:', request.startup_id);
+        // Get mentor equity record to get fee details
+        const { data: equityRecord, error: equityError } = await supabase
+          .from('mentor_equity_records')
+          .select('fee_amount, fee_type, shares, price_per_share, equity_allocated, investment_amount')
+          .eq('request_id', requestId)
+          .single();
+
+        if (equityError) {
+          console.warn('⚠️ Error fetching equity record:', equityError);
+        }
+
+        const feeAmount = equityRecord?.fee_amount || 0;
+        const esopPercentage = equityRecord?.equity_allocated || 0;
+        const esopValue = equityRecord?.investment_amount || 0;
+
+        console.log('💰 Assignment details:', {
+          mentor_id: request.mentor_id,
+          startup_id: request.startup_id,
+          feeAmount,
+          esopPercentage,
+          esopValue
+        });
+
+        // Check if assignment already exists
+        const { data: existingAssignment, error: checkError } = await supabase
+          .from('mentor_startup_assignments')
+          .select('id')
+          .eq('mentor_id', request.mentor_id)
+          .eq('startup_id', request.startup_id)
+          .maybeSingle();
+
+        if (checkError) {
+          console.error('❌ Error checking existing assignment:', checkError);
+        }
+
+        let assignmentData;
+        let assignmentError;
+
+        if (existingAssignment) {
+          // Update existing assignment
+          console.log('🔄 Updating existing assignment:', existingAssignment.id);
+          const { data, error } = await supabase
+            .from('mentor_startup_assignments')
+            .update({
+              status: 'active',
+              fee_amount: feeAmount,
+              fee_currency: 'USD',
+              esop_percentage: esopPercentage,
+              esop_value: esopValue,
+              assigned_at: new Date().toISOString()
+            })
+            .eq('id', existingAssignment.id)
+            .select();
+          assignmentData = data;
+          assignmentError = error;
+        } else {
+          // Create new assignment
+          console.log('➕ Creating new assignment');
+          const { data, error } = await supabase
+            .from('mentor_startup_assignments')
+            .insert({
+              mentor_id: request.mentor_id,
+              startup_id: request.startup_id,
+              status: 'active',
+              fee_amount: feeAmount,
+              fee_currency: 'USD',
+              esop_percentage: esopPercentage,
+              esop_value: esopValue,
+              assigned_at: new Date().toISOString()
+            })
+            .select();
+          assignmentData = data;
+          assignmentError = error;
+        }
+
+        if (assignmentError) {
+          console.error('❌ Error creating/updating mentor assignment:', assignmentError);
+          return false; // Fail if assignment creation fails
+        } else {
+          console.log('✅ Mentor assignment created/updated successfully:', assignmentData);
+        }
+      } else {
+        console.warn('⚠️ Request has no startup_id, cannot create assignment');
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error accepting mentor request:', error);
+      return false;
+    }
+  }
+
+  // Mark assignment as completed (move from Currently Mentoring to Previously Mentored)
+  async completeMentoringAssignment(assignmentId: number): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('mentor_startup_assignments')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', assignmentId);
+
+      if (error) {
+        console.error('Error completing mentor assignment:', error);
+        return false;
+      }
+
+      console.log('✅ Mentor assignment marked as completed:', assignmentId);
+      return true;
+    } catch (error) {
+      console.error('Error completing mentor assignment:', error);
+      return false;
+    }
+  }
+
+  // Reject a mentor request
+  async rejectMentorRequest(requestId: number): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('mentor_requests')
+        .update({
+          status: 'rejected',
+          responded_at: new Date().toISOString()
+        })
+        .eq('id', requestId);
+
+      if (error) {
+        console.error('Error rejecting mentor request:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error rejecting mentor request:', error);
+      return false;
     }
   }
 

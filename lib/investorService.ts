@@ -11,8 +11,14 @@ export interface ActiveFundraisingStartup {
   complianceStatus: ComplianceStatus;
   pitchDeckUrl?: string;
   pitchVideoUrl?: string;
+  logoUrl?: string;
   onePagerUrl?: string;
+  businessPlanUrl?: string;
+  websiteUrl?: string;
+  linkedInUrl?: string;
   fundraisingType: InvestmentType;
+  domain?: string;
+  stage?: string;
   description?: string;
   createdAt: string;
   fundraisingId: string; // UUID of the fundraising_details record
@@ -151,8 +157,14 @@ class InvestorService {
           complianceStatus: item.startups.compliance_status as ComplianceStatus,
           pitchDeckUrl: item.pitch_deck_url,
           pitchVideoUrl: item.pitch_video_url,
+          logoUrl: item.logo_url,
           onePagerUrl: item.one_pager_url,
+          businessPlanUrl: item.business_plan_url,
+          websiteUrl: item.website_url,
+          linkedInUrl: item.linkedin_url,
           fundraisingType: item.type as InvestmentType,
+          domain: item.domain || domainMap[item.startups.id] || undefined,
+          stage: item.stage || undefined,
           description: item.startups.description || `${item.startups.name} - ${finalSector} startup`,
           createdAt: item.startups.created_at,
           fundraisingId: item.id,

@@ -55,9 +55,50 @@ const MentorView: React.FC<MentorViewProps> = ({
   const [mentorMetrics, setMentorMetrics] = useState<MentorMetrics | null>(null);
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [formSection, setFormSection] = useState<'active' | 'completed' | 'founded' | null>(null);
   
   // Mentor profile state
   const [previewProfile, setPreviewProfile] = useState<any>(null);
+  
+  // Tab state for mentor startups section
+  const [mentorStartupsTab, setMentorStartupsTab] = useState<'active' | 'completed' | 'founded'>('active');
+  
+  // Handle navigation from profile form to dashboard
+  const handleNavigateToDashboard = (section?: 'active' | 'completed' | 'founded') => {
+    setActiveTab('dashboard');
+    if (section) {
+      setFormSection(section);
+      setShowAddForm(true);
+      // Set the appropriate tab in the startups section
+      if (section === 'active') {
+        setMentorStartupsTab('active');
+      } else if (section === 'completed') {
+        setMentorStartupsTab('completed');
+      } else if (section === 'founded') {
+        setMentorStartupsTab('founded');
+      }
+    }
+  };
+  
+  // Reset form section when form is closed
+  useEffect(() => {
+    if (!showAddForm) {
+      setFormSection(null);
+    }
+  }, [showAddForm]);
+  
+  // Set initial tab based on available data
+  useEffect(() => {
+    if (mentorMetrics) {
+      if (mentorMetrics.activeAssignments.length > 0) {
+        setMentorStartupsTab('active');
+      } else if (mentorMetrics.completedAssignments.length > 0) {
+        setMentorStartupsTab('completed');
+      } else if (mentorMetrics.foundedStartups.length > 0) {
+        setMentorStartupsTab('founded');
+      }
+    }
+  }, [mentorMetrics]);
 
   // Fetch mentor metrics
   const fetchMetrics = async () => {
@@ -437,23 +478,222 @@ ${mentorName}`;
                       startups={startups}
                       onUpdate={fetchMetrics}
                       mentorMetrics={mentorMetrics}
+                      initialSection={formSection || undefined}
                     />
                   )}
                 </Card>
 
-                {/* Currently Mentoring */}
-                {mentorMetrics && mentorMetrics.activeAssignments.length > 0 && (
+                {/* Pending Requests */}
+                {mentorMetrics && (
                   <Card>
                     <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700 flex items-center gap-2">
-                      <Clock className="h-5 w-5 text-green-600" />
-                      Currently Mentoring ({mentorMetrics.activeAssignments.length})
+                      <Mail className="h-5 w-5 text-blue-600" />
+                      Pending Requests ({mentorMetrics.pendingRequests.length})
                     </h3>
+                    {mentorMetrics.pendingRequests.length === 0 ? (
+                      <div className="text-center py-8 text-slate-500">
+                        <Mail className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                        <p className="text-sm">No pending requests at this time.</p>
+                        <p className="text-xs mt-1">Requests from startups will appear here when they add you as a mentor.</p>
+                      </div>
+                    ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-slate-200">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup</th>
+                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
+                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee</th>
+                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Requested</th>
+                            <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-slate-200">
+                          {mentorMetrics.pendingRequests.map(request => {
+                            // Find startup from request
+                            const requestStartup = request.startup_id ? startups.find(s => s.id === request.startup_id) : null;
+                            
+                            return (
+                              <tr key={request.id}>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-900 font-medium">
+                                  {request.startup_name || requestStartup?.name || 'N/A'}
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                                  {request.startup_website ? (
+                                    <a 
+                                      href={request.startup_website.startsWith('http') ? request.startup_website : `https://${request.startup_website}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:text-blue-800 underline"
+                                    >
+                                      {request.startup_website}
+                                    </a>
+                                  ) : (
+                                    'N/A'
+                                  )}
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                                  {request.startup_sector || requestStartup?.sector || 'N/A'}
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                                  {request.fee_type ? (
+                                    <div>
+                                      <div className="font-medium">{request.fee_type}</div>
+                                      {request.fee_amount !== null && request.fee_amount !== undefined && (
+                                        <div className="text-xs text-slate-400">
+                                          {formatCurrency(request.fee_amount, 'USD')}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    'N/A'
+                                  )}
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                                  {new Date(request.requested_at).toLocaleDateString()}
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
+                                  <div className="flex items-center justify-end gap-2">
+                                    {requestStartup && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        className="border-blue-300 text-blue-600 hover:bg-blue-50"
+                                        onClick={() => handleViewStartup(requestStartup)}
+                                      >
+                                        <Eye className="mr-1 h-3 w-3" /> View Startup
+                                      </Button>
+                                    )}
+                                    {request.startup_id && !requestStartup && onViewStartup && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        className="border-blue-300 text-blue-600 hover:bg-blue-50"
+                                        onClick={() => onViewStartup(request.startup_id!)}
+                                      >
+                                        <Eye className="mr-1 h-3 w-3" /> View Startup
+                                      </Button>
+                                    )}
+                                    <Button 
+                                      size="sm" 
+                                      variant="primary" 
+                                      className="bg-green-600 hover:bg-green-700"
+                                      onClick={async () => {
+                                        if (confirm('Are you sure you want to accept this mentor request? This will add the startup to your Currently Mentoring section.')) {
+                                          const success = await mentorService.acceptMentorRequest(request.id);
+                                          if (success) {
+                                            // Reload mentor metrics
+                                            if (currentUser?.id) {
+                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                              setMentorMetrics(metrics);
+                                              // Switch to Currently Mentoring tab to show the newly accepted startup
+                                              if (metrics.activeAssignments.length > 0) {
+                                                setMentorStartupsTab('active');
+                                              }
+                                            }
+                                          } else {
+                                            alert('Failed to accept mentor request. Please try again.');
+                                          }
+                                        }
+                                      }}
+                                    >
+                                      <CheckCircle className="mr-1 h-3 w-3" /> Accept
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline" 
+                                      className="border-red-300 text-red-600 hover:bg-red-50"
+                                      onClick={async () => {
+                                        if (confirm('Are you sure you want to reject this mentor request?')) {
+                                          const success = await mentorService.rejectMentorRequest(request.id);
+                                          if (success) {
+                                            // Reload mentor metrics
+                                            if (currentUser?.id) {
+                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                              setMentorMetrics(metrics);
+                                            }
+                                          } else {
+                                            alert('Failed to reject mentor request. Please try again.');
+                                          }
+                                        }
+                                      }}
+                                    >
+                                      <X className="mr-1 h-3 w-3" /> Reject
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    )}
+                  </Card>
+                )}
+
+                {/* Combined Mentor Startups Section */}
+                {mentorMetrics && (
+                  (mentorMetrics.activeAssignments.length > 0 || 
+                   mentorMetrics.completedAssignments.length > 0 || 
+                   mentorMetrics.foundedStartups.length > 0) && (
+                  <Card>
+                    <div className="mb-4">
+                      <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700">My Startups</h3>
+                      {/* Tabs */}
+                      <div className="border-b border-slate-200">
+                        <nav className="-mb-px flex space-x-4" aria-label="Tabs">
+                          <button
+                            onClick={() => setMentorStartupsTab('active')}
+                            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                              mentorStartupsTab === 'active'
+                                ? 'border-green-500 text-green-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4" />
+                              Currently Mentoring ({mentorMetrics.activeAssignments.length})
+                            </div>
+                          </button>
+                          <button
+                            onClick={() => setMentorStartupsTab('completed')}
+                            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                              mentorStartupsTab === 'completed'
+                                ? 'border-purple-500 text-purple-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="h-4 w-4" />
+                              Previously Mentored ({mentorMetrics.completedAssignments.length})
+                            </div>
+                          </button>
+                          <button
+                            onClick={() => setMentorStartupsTab('founded')}
+                            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                              mentorStartupsTab === 'founded'
+                                ? 'border-orange-500 text-orange-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Star className="h-4 w-4" />
+                              Startups Founded ({mentorMetrics.foundedStartups.length})
+                            </div>
+                          </button>
+                        </nav>
+                      </div>
+                    </div>
+
+                    {/* Currently Mentoring Tab Content */}
+                    {mentorStartupsTab === 'active' && mentorMetrics.activeAssignments.length > 0 && (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50">
                           <tr>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email ID</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee</th>
@@ -494,9 +734,6 @@ ${mentorName}`;
                                   </div>
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {emailId || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                   {website ? (
                                     <a 
                                       href={website.startsWith('http') ? website : `https://${website}`} 
@@ -519,14 +756,17 @@ ${mentorName}`;
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
                                   <div className="flex items-center justify-end gap-2">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => handleInviteToTMS(startupName, emailId)}
-                                      className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                                    >
-                                      <Send className="mr-1 h-3 w-3" /> Invite to TMS
-                                    </Button>
+                                    {/* Only show Invite to TMS if assignment didn't come from a request */}
+                                    {!(assignment as any).fromRequest && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleInviteToTMS(startupName, emailId)}
+                                        className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                      >
+                                        <Send className="mr-1 h-3 w-3" /> Invite to TMS
+                                      </Button>
+                                    )}
                                     {assignment.startup && (
                                       <Button
                                         size="sm"
@@ -536,6 +776,31 @@ ${mentorName}`;
                                         <Eye className="mr-2 h-4 w-4" /> View
                                       </Button>
                                     )}
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-purple-600 border-purple-300 hover:bg-purple-50"
+                                      onClick={async () => {
+                                        if (confirm(`Mark ${startupName} as completed? This will move it to Previously Mentored section.`)) {
+                                          const success = await mentorService.completeMentoringAssignment(assignment.id);
+                                          if (success) {
+                                            // Reload mentor metrics
+                                            if (currentUser?.id) {
+                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                              setMentorMetrics(metrics);
+                                              // Switch to Previously Mentored tab to show the moved startup
+                                              if (metrics.completedAssignments.length > 0) {
+                                                setMentorStartupsTab('completed');
+                                              }
+                                            }
+                                          } else {
+                                            alert('Failed to mark mentoring as completed. Please try again.');
+                                          }
+                                        }
+                                      }}
+                                    >
+                                      <CheckCircle2 className="mr-1 h-3 w-3" /> Update
+                                    </Button>
                                   </div>
                                 </td>
                               </tr>
@@ -544,74 +809,15 @@ ${mentorName}`;
                         </tbody>
                       </table>
                     </div>
-                  </Card>
-                )}
+                    )}
 
-                {/* Pending Requests */}
-                {mentorMetrics && mentorMetrics.pendingRequests.length > 0 && (
-                  <Card>
-                    <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700 flex items-center gap-2">
-                      <Mail className="h-5 w-5 text-blue-600" />
-                      Pending Requests ({mentorMetrics.pendingRequests.length})
-                    </h3>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-slate-200">
-                        <thead className="bg-slate-50">
-                          <tr>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Requester</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Type</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Requested</th>
-                            <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-slate-200">
-                          {mentorMetrics.pendingRequests.map(request => (
-                            <tr key={request.id}>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                                <div className="text-xs sm:text-sm font-medium text-slate-900">{request.requester_name || 'Unknown'}</div>
-                                <div className="text-xs text-slate-500">{request.requester_email || 'N/A'}</div>
-                              </td>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                <Badge status={request.requester_type === 'Startup' ? ComplianceStatus.Pending : ComplianceStatus.Compliant} />
-                              </td>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                {request.startup_name || 'N/A'}
-                              </td>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                {new Date(request.requested_at).toLocaleDateString()}
-                              </td>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
-                                <div className="flex items-center justify-end gap-2">
-                                  <Button size="sm" variant="primary" className="bg-green-600 hover:bg-green-700">
-                                    <CheckCircle className="mr-1 h-3 w-3" /> Accept
-                                  </Button>
-                                  <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50">
-                                    <X className="mr-1 h-3 w-3" /> Reject
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </Card>
-                )}
-
-                {/* Previously Mentored */}
-                {mentorMetrics && mentorMetrics.completedAssignments.length > 0 && (
-                  <Card>
-                    <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700 flex items-center gap-2">
-                      <CheckCircle2 className="h-5 w-5 text-purple-600" />
-                      Previously Mentored ({mentorMetrics.completedAssignments.length})
-                    </h3>
+                    {/* Previously Mentored Tab Content */}
+                    {mentorStartupsTab === 'completed' && mentorMetrics.completedAssignments.length > 0 && (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50">
                           <tr>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email ID</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee Earned</th>
@@ -650,9 +856,6 @@ ${mentorName}`;
                                   <div className="text-xs sm:text-sm font-medium text-slate-900">
                                     {startupName}
                                   </div>
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {emailId || 'N/A'}
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                   {website ? (
@@ -702,22 +905,15 @@ ${mentorName}`;
                         </tbody>
                       </table>
                     </div>
-                  </Card>
-                )}
+                    )}
 
-                {/* Founded Startups */}
-                {mentorMetrics && mentorMetrics.foundedStartups.length > 0 && (
-                  <Card>
-                    <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700 flex items-center gap-2">
-                      <Star className="h-5 w-5 text-orange-600" />
-                      Startups Founded ({mentorMetrics.foundedStartups.length})
-                    </h3>
+                    {/* Founded Startups Tab Content */}
+                    {mentorStartupsTab === 'founded' && mentorMetrics.foundedStartups.length > 0 && (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50">
                           <tr>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email ID</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Current Valuation</th>
@@ -735,9 +931,6 @@ ${mentorName}`;
                               <tr key={startup.id}>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                                   <div className="text-xs sm:text-sm font-medium text-slate-900">{startup.name}</div>
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {emailId || 'N/A'}
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                   {website ? (
@@ -773,7 +966,29 @@ ${mentorName}`;
                         </tbody>
                       </table>
                     </div>
+                    )}
+
+                    {/* Empty state messages */}
+                    {mentorStartupsTab === 'active' && mentorMetrics.activeAssignments.length === 0 && (
+                      <div className="text-center py-8 text-slate-500">
+                        <Clock className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                        <p className="text-sm">No active mentoring assignments.</p>
+                      </div>
+                    )}
+                    {mentorStartupsTab === 'completed' && mentorMetrics.completedAssignments.length === 0 && (
+                      <div className="text-center py-8 text-slate-500">
+                        <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                        <p className="text-sm">No previously mentored startups.</p>
+                      </div>
+                    )}
+                    {mentorStartupsTab === 'founded' && mentorMetrics.foundedStartups.length === 0 && (
+                      <div className="text-center py-8 text-slate-500">
+                        <Star className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                        <p className="text-sm">No founded startups.</p>
+                      </div>
+                    )}
                   </Card>
+                  )
                 )}
               </>
             )}
@@ -1084,6 +1299,9 @@ ${mentorName}`;
                       setPreviewProfile(profile);
                     }}
                     isViewOnly={false}
+                    onNavigateToDashboard={handleNavigateToDashboard}
+                    startups={startups}
+                    onMetricsUpdate={fetchMetrics}
                   />
                 </Card>
               )}

@@ -15,8 +15,9 @@ CREATE TABLE IF NOT EXISTS public.investor_profiles (
     
     -- Investment Preferences
     geography TEXT[], -- Array of countries/regions where they invest
-    ticket_size_min DECIMAL(15,2), -- Minimum investment amount in USD
-    ticket_size_max DECIMAL(15,2), -- Maximum investment amount in USD
+    ticket_size_min DECIMAL(15,2), -- Minimum investment amount
+    ticket_size_max DECIMAL(15,2), -- Maximum investment amount
+    currency VARCHAR(10) DEFAULT 'USD', -- Currency for ticket sizes (USD, EUR, INR, etc.)
     investment_stages TEXT[], -- Array of stages (Pre-Seed, Seed, Series A, etc.)
     investment_thesis TEXT, -- Description of investment thesis
     
@@ -50,6 +51,17 @@ CREATE INDEX IF NOT EXISTS idx_investor_profiles_geography ON public.investor_pr
 
 -- Enable RLS (Row Level Security)
 ALTER TABLE public.investor_profiles ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist (only if table exists)
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'investor_profiles') THEN
+        DROP POLICY IF EXISTS "Anyone can view investor profiles" ON public.investor_profiles;
+        DROP POLICY IF EXISTS "Users can insert their own investor profile" ON public.investor_profiles;
+        DROP POLICY IF EXISTS "Users can update their own investor profile" ON public.investor_profiles;
+        DROP POLICY IF EXISTS "Users can delete their own investor profile" ON public.investor_profiles;
+    END IF;
+END $$;
 
 -- Policy: Users can view all investor profiles (for discovery)
 CREATE POLICY "Anyone can view investor profiles"
@@ -86,6 +98,13 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger to automatically update updated_at
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'investor_profiles') THEN
+        DROP TRIGGER IF EXISTS update_investor_profiles_updated_at ON public.investor_profiles;
+    END IF;
+END $$;
+
 CREATE TRIGGER update_investor_profiles_updated_at
     BEFORE UPDATE ON public.investor_profiles
     FOR EACH ROW
@@ -96,6 +115,7 @@ COMMENT ON TABLE public.investor_profiles IS 'Stores detailed investor profile i
 COMMENT ON COLUMN public.investor_profiles.user_id IS 'Reference to the user who owns this investor profile';
 COMMENT ON COLUMN public.investor_profiles.firm_type IS 'Type of investment firm (VC, Angel Investor, Corporate VC, etc.)';
 COMMENT ON COLUMN public.investor_profiles.geography IS 'Array of countries/regions where the investor is interested in investing';
+COMMENT ON COLUMN public.investor_profiles.currency IS 'Currency code for ticket sizes (USD, EUR, INR, etc.)';
 COMMENT ON COLUMN public.investor_profiles.investment_stages IS 'Array of investment stages the investor focuses on';
 COMMENT ON COLUMN public.investor_profiles.media_type IS 'Type of media to display: logo or video';
 

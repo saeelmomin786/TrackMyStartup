@@ -240,10 +240,39 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
   };
 
   return (
-    <div className={`space-y-4 ${className}`}>
+    <div className={`space-y-2 ${className}`}>
       {/* Privacy Message - Removed per user request */}
 
-      {/* Input Mode Toggle */}
+      {/* Label and URL Input Field - Always shown at top */}
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-gray-700">
+          {label} {required && <span className="text-red-500">*</span>}
+        </label>
+        <div className="relative">
+          <input
+            type="url"
+            value={value}
+            onChange={handleUrlChange}
+            placeholder={placeholder}
+            className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm pr-10 ${urlError ? 'border-red-300 focus:border-red-500' : isValidUrl ? 'border-green-300 focus:border-green-500' : ''}`}
+          />
+          {isValidUrl && (
+            <CheckCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-green-500" />
+          )}
+          {urlError && (
+            <AlertCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-red-500" />
+          )}
+        </div>
+        
+        {urlError && (
+          <p className="text-sm text-red-600 flex items-center gap-1">
+            <AlertCircle className="w-4 h-4" />
+            {urlError}
+          </p>
+        )}
+      </div>
+
+      {/* Input Mode Toggle - Shown below the input field */}
       <div className="flex items-center gap-2">
         <Button
           type="button"
@@ -268,50 +297,9 @@ const CloudDriveInput: React.FC<CloudDriveInputProps> = ({
         </Button>
       </div>
 
-      {/* URL Input Mode */}
-      {inputMode === 'url' && (
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">
-            {label} {required && <span className="text-red-500">*</span>}
-          </label>
-          <div className="relative">
-            <input
-              type="url"
-              value={value}
-              onChange={handleUrlChange}
-              placeholder={placeholder}
-              className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm pr-10 ${urlError ? 'border-red-300 focus:border-red-500' : isValidUrl ? 'border-green-300 focus:border-green-500' : ''}`}
-            />
-            {isValidUrl && (
-              <CheckCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-green-500" />
-            )}
-            {urlError && (
-              <AlertCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-red-500" />
-            )}
-          </div>
-          
-          {urlError && (
-            <p className="text-sm text-red-600 flex items-center gap-1">
-              <AlertCircle className="w-4 h-4" />
-              {urlError}
-            </p>
-          )}
-          
-          {isValidUrl && value && (
-            <p className="text-sm text-green-600 flex items-center gap-1">
-              <CheckCircle className="w-4 h-4" />
-              Valid {getCloudProvider(value)} link
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* File Upload Mode */}
+      {/* File Upload Mode - Shown below toggle buttons when file mode is selected */}
       {inputMode === 'file' && (
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">
-            {label} {required && <span className="text-red-500">*</span>}
-          </label>
           <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-gray-400 transition-colors">
             <input
               ref={fileInputRef}

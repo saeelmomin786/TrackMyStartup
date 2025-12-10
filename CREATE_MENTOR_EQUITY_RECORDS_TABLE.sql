@@ -13,8 +13,9 @@ CREATE TABLE IF NOT EXISTS public.mentor_equity_records (
     investment_amount DECIMAL(15, 2),
     equity_allocated DECIMAL(5, 2),
     post_money_valuation DECIMAL(15, 2),
-    signed_agreement_url TEXT NOT NULL,
+    signed_agreement_url TEXT,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    request_id BIGINT REFERENCES public.mentor_requests(id) ON DELETE SET NULL,
     date_added DATE DEFAULT CURRENT_DATE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -29,57 +30,100 @@ CREATE INDEX IF NOT EXISTS idx_mentor_equity_records_mentor_code ON public.mento
 -- Create index on date_added for sorting
 CREATE INDEX IF NOT EXISTS idx_mentor_equity_records_date_added ON public.mentor_equity_records(date_added DESC);
 
+-- Create index on request_id for linking with mentor_requests
+CREATE INDEX IF NOT EXISTS idx_mentor_equity_records_request_id ON public.mentor_equity_records(request_id);
+
 -- Enable Row Level Security
 ALTER TABLE public.mentor_equity_records ENABLE ROW LEVEL SECURITY;
 
 -- Create RLS policies (adjust based on your security requirements)
 -- Policy to allow startups to view their own mentor records
-CREATE POLICY "Startups can view their own mentor equity records"
-    ON public.mentor_equity_records
-    FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.startups
-            WHERE startups.id = mentor_equity_records.startup_id
-            AND startups.user_id = auth.uid()
-        )
-    );
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE schemaname = 'public' 
+        AND tablename = 'mentor_equity_records' 
+        AND policyname = 'Startups can view their own mentor equity records'
+    ) THEN
+        CREATE POLICY "Startups can view their own mentor equity records"
+            ON public.mentor_equity_records
+            FOR SELECT
+            USING (
+                EXISTS (
+                    SELECT 1 FROM public.startups
+                    WHERE startups.id = mentor_equity_records.startup_id
+                    AND startups.user_id = auth.uid()
+                )
+            );
+    END IF;
+END $$;
 
 -- Policy to allow startups to insert their own mentor records
-CREATE POLICY "Startups can insert their own mentor equity records"
-    ON public.mentor_equity_records
-    FOR INSERT
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.startups
-            WHERE startups.id = mentor_equity_records.startup_id
-            AND startups.user_id = auth.uid()
-        )
-    );
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE schemaname = 'public' 
+        AND tablename = 'mentor_equity_records' 
+        AND policyname = 'Startups can insert their own mentor equity records'
+    ) THEN
+        CREATE POLICY "Startups can insert their own mentor equity records"
+            ON public.mentor_equity_records
+            FOR INSERT
+            WITH CHECK (
+                EXISTS (
+                    SELECT 1 FROM public.startups
+                    WHERE startups.id = mentor_equity_records.startup_id
+                    AND startups.user_id = auth.uid()
+                )
+            );
+    END IF;
+END $$;
 
 -- Policy to allow startups to update their own mentor records
-CREATE POLICY "Startups can update their own mentor equity records"
-    ON public.mentor_equity_records
-    FOR UPDATE
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.startups
-            WHERE startups.id = mentor_equity_records.startup_id
-            AND startups.user_id = auth.uid()
-        )
-    );
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE schemaname = 'public' 
+        AND tablename = 'mentor_equity_records' 
+        AND policyname = 'Startups can update their own mentor equity records'
+    ) THEN
+        CREATE POLICY "Startups can update their own mentor equity records"
+            ON public.mentor_equity_records
+            FOR UPDATE
+            USING (
+                EXISTS (
+                    SELECT 1 FROM public.startups
+                    WHERE startups.id = mentor_equity_records.startup_id
+                    AND startups.user_id = auth.uid()
+                )
+            );
+    END IF;
+END $$;
 
 -- Policy to allow startups to delete their own mentor records
-CREATE POLICY "Startups can delete their own mentor equity records"
-    ON public.mentor_equity_records
-    FOR DELETE
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.startups
-            WHERE startups.id = mentor_equity_records.startup_id
-            AND startups.user_id = auth.uid()
-        )
-    );
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE schemaname = 'public' 
+        AND tablename = 'mentor_equity_records' 
+        AND policyname = 'Startups can delete their own mentor equity records'
+    ) THEN
+        CREATE POLICY "Startups can delete their own mentor equity records"
+            ON public.mentor_equity_records
+            FOR DELETE
+            USING (
+                EXISTS (
+                    SELECT 1 FROM public.startups
+                    WHERE startups.id = mentor_equity_records.startup_id
+                    AND startups.user_id = auth.uid()
+                )
+            );
+    END IF;
+END $$;
 
 -- Policy to allow admins to view all mentor records
 -- Note: Using public.users instead of auth.users for RLS policies (Supabase compatibility)

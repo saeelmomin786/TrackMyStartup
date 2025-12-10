@@ -11,6 +11,22 @@ import ProfilePage from './ProfilePage';
 import InvestorView from './InvestorView';
 import StartupHealthView from './StartupHealthView';
 import { paymentService } from '../lib/paymentService';
+import InvestmentAdvisorProfileForm from './investment-advisor/InvestmentAdvisorProfileForm';
+import InvestmentAdvisorCard from './investment-advisor/InvestmentAdvisorCard';
+import InvestorCard from './investor/InvestorCard';
+import MentorCard from './mentor/MentorCard';
+import Card from './ui/Card';
+import Modal from './ui/Modal';
+import Input from './ui/Input';
+import Select from './ui/Select';
+import Button from './ui/Button';
+import Badge from './ui/Badge';
+import { advisorAddedInvestorService, AdvisorAddedInvestor, CreateAdvisorAddedInvestor } from '../lib/advisorAddedInvestorService';
+import { advisorAddedStartupService, AdvisorAddedStartup, CreateAdvisorAddedStartup } from '../lib/advisorAddedStartupService';
+import { generalDataService } from '../lib/generalDataService';
+import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../lib/advisorConnectionRequestService';
+import { advisorMandateService, AdvisorMandate, CreateAdvisorMandate } from '../lib/advisorMandateService';
+import { PlusCircle, Edit, Trash2, Filter, X } from 'lucide-react';
 
 interface InvestmentAdvisorViewProps {
   currentUser: AuthUser | null;
@@ -33,7 +49,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   pendingRelationships = [],
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'portfolio' | 'collaboration' | 'mandate'>('dashboard');
   const [showProfilePage, setShowProfilePage] = useState(false);
   const [agreementFile, setAgreementFile] = useState<File | null>(null);
   const [coInvestmentListings, setCoInvestmentListings] = useState<Set<number>>(new Set());
@@ -79,10 +95,728 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     investorStartupAdditionRequests: any[];
   }>({ investorStartups: [], investorInvestments: [], investorStartupAdditionRequests: [] });
   const [startupOffers, setStartupOffers] = useState<any[]>([]);
+  const [previewProfile, setPreviewProfile] = useState<any>({
+    user_id: currentUser?.id || '',
+    media_type: 'logo',
+    geography: [],
+    investment_stages: [],
+    domain: [],
+    service_types: []
+  });
+  const [collaborationSubTab, setCollaborationSubTab] = useState<'myCollaborators' | 'collaboratorRequests'>('myCollaborators');
+  
+  // Collaboration requests state
+  const [collaborationRequests, setCollaborationRequests] = useState<AdvisorConnectionRequest[]>([]);
+  const [loadingCollaborationRequests, setLoadingCollaborationRequests] = useState(false);
+  const [acceptedCollaborators, setAcceptedCollaborators] = useState<AdvisorConnectionRequest[]>([]);
+  const [collaboratorProfiles, setCollaboratorProfiles] = useState<{[key: string]: any}>({});
+
+  // Mandate state
+  const [mandates, setMandates] = useState<AdvisorMandate[]>([]);
+  const [selectedMandateId, setSelectedMandateId] = useState<number | null>(null);
+  const [isLoadingMandates, setIsLoadingMandates] = useState(false);
+  const [showMandateModal, setShowMandateModal] = useState(false);
+  const [editingMandate, setEditingMandate] = useState<AdvisorMandate | null>(null);
+  const [mandateFormData, setMandateFormData] = useState<CreateAdvisorMandate>({
+    advisor_id: currentUser?.id || '',
+    name: '',
+    stage: '',
+    round_type: '',
+    domain: '',
+    amount_min: undefined,
+    amount_max: undefined,
+    equity_min: undefined,
+    equity_max: undefined
+  });
+  const [mandateFilterOptions, setMandateFilterOptions] = useState({
+    stages: [] as string[],
+    roundTypes: [] as string[],
+    domains: [] as string[]
+  });
+  const [isLoadingMandateFilters, setIsLoadingMandateFilters] = useState(false);
+
+  // Advisor-added investors state
+  const [advisorAddedInvestors, setAdvisorAddedInvestors] = useState<AdvisorAddedInvestor[]>([]);
+  const [loadingAddedInvestors, setLoadingAddedInvestors] = useState(false);
+  const [showAddInvestorModal, setShowAddInvestorModal] = useState(false);
+  const [editingAddedInvestor, setEditingAddedInvestor] = useState<AdvisorAddedInvestor | null>(null);
+  const [addInvestorFormData, setAddInvestorFormData] = useState<CreateAdvisorAddedInvestor>({
+    advisor_id: currentUser?.id || '',
+    investor_name: '',
+    email: '',
+    contact_number: '',
+    website: '',
+    linkedin_url: '',
+    firm_type: '',
+    location: '',
+    investment_focus: '',
+    domain: '',
+    stage: '',
+    notes: ''
+  });
+
+  // Advisor-added startups state
+  const [advisorAddedStartups, setAdvisorAddedStartups] = useState<AdvisorAddedStartup[]>([]);
+  const [loadingAddedStartups, setLoadingAddedStartups] = useState(false);
+  const [showAddStartupModal, setShowAddStartupModal] = useState(false);
+  const [editingAddedStartup, setEditingAddedStartup] = useState<AdvisorAddedStartup | null>(null);
+  const [addStartupFormData, setAddStartupFormData] = useState<CreateAdvisorAddedStartup>({
+    advisor_id: currentUser?.id || '',
+    startup_name: '',
+    sector: '',
+    website_url: '',
+    linkedin_url: '',
+    contact_email: '',
+    contact_name: '',
+    contact_number: '',
+    description: '',
+    current_valuation: undefined,
+    investment_amount: undefined,
+    equity_percentage: undefined,
+    investment_date: undefined,
+    currency: 'USD',
+    domain: '',
+    stage: '',
+    round_type: '',
+    country: '',
+    notes: ''
+  });
+
+  // Dropdown options state
+  const [countries, setCountries] = useState<string[]>([]);
+  const [loadingCountries, setLoadingCountries] = useState(false);
+  const [investmentStages, setInvestmentStages] = useState<string[]>([]);
+  const [loadingInvestmentStages, setLoadingInvestmentStages] = useState(false);
+  const [domains, setDomains] = useState<string[]>([]);
+  const [loadingDomains, setLoadingDomains] = useState(false);
+  const [stages, setStages] = useState<string[]>([]);
+  const [loadingStages, setLoadingStages] = useState(false);
+  const [firmTypes, setFirmTypes] = useState<string[]>([]);
+  const [loadingFirmTypes, setLoadingFirmTypes] = useState(false);
+  const [sectors, setSectors] = useState<string[]>([]);
+  const [loadingSectors, setLoadingSectors] = useState(false);
+  const [roundTypes, setRoundTypes] = useState<string[]>([]);
+  const [loadingRoundTypes, setLoadingRoundTypes] = useState(false);
+  const [currencies, setCurrencies] = useState<string[]>([]);
+  const [loadingCurrencies, setLoadingCurrencies] = useState(false);
 
   // Get the investment advisor's currency
   const advisorCurrency = useInvestmentAdvisorCurrency(currentUser);
 
+  // Load advisor-added investors
+  useEffect(() => {
+    const loadAdvisorAddedInvestors = async () => {
+      if (activeTab === 'myInvestors' && currentUser?.id) {
+        setLoadingAddedInvestors(true);
+        try {
+          const investors = await advisorAddedInvestorService.getInvestorsByAdvisor(currentUser.id);
+          setAdvisorAddedInvestors(investors);
+        } catch (error) {
+          console.error('Error loading advisor-added investors:', error);
+        } finally {
+          setLoadingAddedInvestors(false);
+        }
+      }
+    };
+    loadAdvisorAddedInvestors();
+  }, [activeTab, currentUser?.id]);
+
+  // Load advisor-added startups
+  useEffect(() => {
+    const loadAdvisorAddedStartups = async () => {
+      if (activeTab === 'myStartups' && currentUser?.id) {
+        setLoadingAddedStartups(true);
+        try {
+          const startups = await advisorAddedStartupService.getStartupsByAdvisor(currentUser.id);
+          setAdvisorAddedStartups(startups);
+        } catch (error) {
+          console.error('Error loading advisor-added startups:', error);
+        } finally {
+          setLoadingAddedStartups(false);
+        }
+      }
+    };
+    loadAdvisorAddedStartups();
+  }, [activeTab, currentUser?.id]);
+
+  // Load collaboration requests
+  useEffect(() => {
+    const loadCollaborationRequests = async () => {
+      if (activeTab === 'collaboration' && currentUser?.id) {
+        setLoadingCollaborationRequests(true);
+        try {
+          const requests = await advisorConnectionRequestService.getCollaboratorRequests(currentUser.id);
+          setCollaborationRequests(requests.filter(r => r.status === 'pending'));
+          setAcceptedCollaborators(requests.filter(r => r.status === 'accepted'));
+        } catch (error) {
+          console.error('Error loading collaboration requests:', error);
+        } finally {
+          setLoadingCollaborationRequests(false);
+        }
+      }
+    };
+    loadCollaborationRequests();
+  }, [activeTab, currentUser?.id]);
+
+  // Load collaborator profiles with full data
+  useEffect(() => {
+    const loadProfiles = async () => {
+      if (collaborationRequests.length === 0 && acceptedCollaborators.length === 0) return;
+      
+      const allRequests = [...collaborationRequests, ...acceptedCollaborators];
+      const profiles: {[key: string]: any} = {};
+      
+      for (const request of allRequests) {
+        if (!request.requester_id || profiles[request.requester_id]) continue;
+        
+        try {
+          if (request.requester_type === 'Investor') {
+            const { data } = await supabase
+              .from('investor_profiles')
+              .select('*')
+              .eq('user_id', request.requester_id)
+              .maybeSingle();
+            if (data) {
+              // Get user data
+              const requesterUser = users.find(u => u.id === request.requester_id);
+              profiles[request.requester_id] = {
+                ...data,
+                user: requesterUser ? { name: requesterUser.name, email: requesterUser.email } : undefined
+              };
+            }
+          } else if (request.requester_type === 'Investment Advisor') {
+            const { data } = await supabase
+              .from('investment_advisor_profiles')
+              .select('*')
+              .eq('user_id', request.requester_id)
+              .maybeSingle();
+            if (data) {
+              const requesterUser = users.find(u => u.id === request.requester_id);
+              profiles[request.requester_id] = {
+                ...data,
+                user: requesterUser ? { name: requesterUser.name, email: requesterUser.email } : undefined
+              };
+            }
+          } else if (request.requester_type === 'Mentor') {
+            const { data } = await supabase
+              .from('mentor_profiles')
+              .select('*')
+              .eq('user_id', request.requester_id)
+              .maybeSingle();
+            if (data) {
+              const requesterUser = users.find(u => u.id === request.requester_id);
+              profiles[request.requester_id] = {
+                ...data,
+                user: requesterUser ? { name: requesterUser.name, email: requesterUser.email } : undefined
+              };
+            }
+          }
+        } catch (error) {
+          console.error(`Error loading profile for ${request.requester_id}:`, error);
+        }
+      }
+      
+      setCollaboratorProfiles(profiles);
+    };
+    
+    loadProfiles();
+  }, [collaborationRequests, acceptedCollaborators, users]);
+
+  // Load mandates and filter options
+  useEffect(() => {
+    const loadMandateData = async () => {
+      if (activeTab === 'mandate' && currentUser?.id) {
+        setIsLoadingMandates(true);
+        setIsLoadingMandateFilters(true);
+        try {
+          // Load mandates
+          const mandatesData = await advisorMandateService.getMandatesByAdvisor(currentUser.id);
+          setMandates(mandatesData);
+          
+          // Select first mandate if available
+          if (mandatesData.length > 0 && !selectedMandateId) {
+            setSelectedMandateId(mandatesData[0].id);
+          }
+          
+          // Load filter options
+          const [stagesData, roundTypesData, domainsData] = await Promise.all([
+            generalDataService.getItemsByCategory('stage'),
+            generalDataService.getItemsByCategory('round_type'),
+            generalDataService.getItemsByCategory('domain')
+          ]);
+          
+          setMandateFilterOptions({
+            stages: stagesData.map(s => s.name),
+            roundTypes: roundTypesData.map(r => r.name),
+            domains: domainsData.map(d => d.name)
+          });
+        } catch (error) {
+          console.error('Error loading mandate data:', error);
+        } finally {
+          setIsLoadingMandates(false);
+          setIsLoadingMandateFilters(false);
+        }
+      }
+    };
+    
+    loadMandateData();
+  }, [activeTab, currentUser?.id]);
+
+  // Load mandates when component mounts (for mandate tab)
+  useEffect(() => {
+    if (currentUser?.id && activeTab === 'mandate') {
+      const loadMandates = async () => {
+        const mandatesData = await advisorMandateService.getMandatesByAdvisor(currentUser.id!);
+        setMandates(mandatesData);
+        if (mandatesData.length > 0 && !selectedMandateId) {
+          setSelectedMandateId(mandatesData[0].id);
+        }
+      };
+      loadMandates();
+    }
+  }, [currentUser?.id, activeTab]);
+
+  // Load countries and investment stages for dropdowns
+  useEffect(() => {
+    const loadDropdownData = async () => {
+      if (showAddInvestorModal) {
+        // Load countries
+        setLoadingCountries(true);
+        try {
+          const countryData = await generalDataService.getItemsByCategory('country');
+          const countryNames = countryData.map(country => country.name);
+          setCountries(countryNames);
+        } catch (error) {
+          console.error('Error loading countries:', error);
+          setCountries(['India', 'USA', 'UK', 'Singapore', 'UAE', 'Germany', 'France', 'Canada', 'Australia', 'Japan', 'China', 'Other']);
+        } finally {
+          setLoadingCountries(false);
+        }
+
+        // Load investment stages (round_type)
+        setLoadingInvestmentStages(true);
+        try {
+          const stageData = await generalDataService.getItemsByCategory('round_type');
+          const stageNames = stageData.map(stage => stage.name);
+          setInvestmentStages(stageNames);
+        } catch (error) {
+          console.error('Error loading investment stages:', error);
+          setInvestmentStages(['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Bridge', 'Growth']);
+        } finally {
+          setLoadingInvestmentStages(false);
+        }
+
+        // Load domains
+        setLoadingDomains(true);
+        try {
+          const domainData = await generalDataService.getItemsByCategory('domain');
+          const domainNames = domainData.map(domain => domain.name);
+          setDomains(domainNames);
+        } catch (error) {
+          console.error('Error loading domains:', error);
+          setDomains(['Agriculture', 'AI', 'Climate', 'Consumer Goods', 'Defence', 'E-commerce', 'Education', 'EV', 'Finance', 'Food & Beverage', 'Healthcare', 'Manufacturing', 'Media & Entertainment', 'Others', 'PaaS', 'Renewable Energy', 'Retail', 'SaaS', 'Social Impact', 'Space', 'Transportation and Logistics', 'Waste Management', 'Web 3.0']);
+        } finally {
+          setLoadingDomains(false);
+        }
+
+        // Load stages (stage category)
+        setLoadingStages(true);
+        try {
+          const stageData = await generalDataService.getItemsByCategory('stage');
+          const stageNames = stageData.map(stage => stage.name);
+          setStages(stageNames);
+        } catch (error) {
+          console.error('Error loading stages:', error);
+          setStages(['Idea', 'MVP', 'Early Stage', 'Growth', 'Mature']);
+        } finally {
+          setLoadingStages(false);
+        }
+
+        // Load firm types
+        setLoadingFirmTypes(true);
+        try {
+          const firmTypeData = await generalDataService.getItemsByCategory('firm_type');
+          const firmTypeNames = firmTypeData.map(firmType => firmType.name);
+          setFirmTypes(firmTypeNames);
+        } catch (error) {
+          console.error('Error loading firm types:', error);
+          setFirmTypes(['VC', 'Angel Investor', 'Corporate VC', 'Family Office', 'PE Firm', 'Government', 'Other']);
+        } finally {
+          setLoadingFirmTypes(false);
+        }
+      }
+    };
+    loadDropdownData();
+  }, [showAddInvestorModal]);
+
+  // Handle add investor
+  const handleAddInvestor = () => {
+    setEditingAddedInvestor(null);
+    setAddInvestorFormData({
+      advisor_id: currentUser?.id || '',
+      investor_name: '',
+      email: '',
+      contact_number: '',
+      website: '',
+      linkedin_url: '',
+      firm_type: '',
+      location: '',
+      investment_focus: '',
+      domain: '',
+      stage: '',
+      notes: ''
+    });
+    setShowAddInvestorModal(true);
+  };
+
+  // Handle edit added investor
+  const handleEditAddedInvestor = (investor: AdvisorAddedInvestor) => {
+    setEditingAddedInvestor(investor);
+    setAddInvestorFormData({
+      advisor_id: investor.advisor_id,
+      investor_name: investor.investor_name,
+      email: investor.email,
+      contact_number: investor.contact_number || '',
+      website: investor.website || '',
+      linkedin_url: investor.linkedin_url || '',
+      firm_type: investor.firm_type || '',
+      location: investor.location || '',
+      investment_focus: investor.investment_focus || '',
+      domain: investor.domain || '',
+      stage: investor.stage || '',
+      notes: investor.notes || ''
+    });
+    setShowAddInvestorModal(true);
+  };
+
+  const handleRejectRequest = async (request: any) => {
+    if (request.type === 'startup') {
+      try {
+        await supabase
+          .from('users')
+          .update({ advisor_accepted: false })
+          .eq('id', request.user_id || request.id);
+      } catch (error) {
+        console.error('Error rejecting startup request', error);
+      }
+    } else if (request.type === 'investor') {
+      try {
+        await supabase
+          .from('users')
+          .update({ advisor_accepted: false })
+          .eq('id', request.id);
+      } catch (error) {
+        console.error('Error rejecting investor request', error);
+      }
+    }
+  };
+
+  const handleViewRequest = (request: any) => {
+    if (request.type === 'startup') {
+      const startupId = request.id;
+      if (startupId) {
+        const url = new URL(window.location.origin + window.location.pathname);
+        url.searchParams.set('view', 'startup');
+        url.searchParams.set('startupId', String(startupId));
+        window.open(url.toString(), '_blank');
+      }
+    } else if (request.type === 'investor') {
+      const investorUserId = request.user_id || request.id;
+      if (investorUserId) {
+        const url = new URL(window.location.origin + window.location.pathname);
+        url.searchParams.set('view', 'investor');
+        url.searchParams.set('userId', String(investorUserId));
+        window.open(url.toString(), '_blank');
+      }
+    }
+  };
+
+  // Handle save added investor
+  const handleSaveAddedInvestor = async () => {
+    if (!addInvestorFormData.investor_name || !addInvestorFormData.email) {
+      alert('Please fill in investor name and email');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      if (editingAddedInvestor) {
+        // Update existing
+        const updated = await advisorAddedInvestorService.updateInvestor(editingAddedInvestor.id, addInvestorFormData);
+        if (updated) {
+          setAdvisorAddedInvestors(prev => prev.map(inv => inv.id === updated.id ? updated : inv));
+          alert('Investor updated successfully!');
+        } else {
+          alert('Failed to update investor');
+        }
+      } else {
+        // Create new
+        const created = await advisorAddedInvestorService.createInvestor(addInvestorFormData);
+        if (created) {
+          setAdvisorAddedInvestors(prev => [created, ...prev]);
+          alert('Investor added successfully!');
+        } else {
+          alert('Failed to add investor');
+        }
+      }
+      setShowAddInvestorModal(false);
+      setEditingAddedInvestor(null);
+    } catch (error) {
+      console.error('Error saving investor:', error);
+      alert('Failed to save investor');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle delete added investor
+  const handleDeleteAddedInvestor = async (investorId: number) => {
+    if (!confirm('Are you sure you want to delete this investor?')) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const success = await advisorAddedInvestorService.deleteInvestor(investorId);
+      if (success) {
+        setAdvisorAddedInvestors(prev => prev.filter(inv => inv.id !== investorId));
+        alert('Investor deleted successfully!');
+      } else {
+        alert('Failed to delete investor');
+      }
+    } catch (error) {
+      console.error('Error deleting investor:', error);
+      alert('Failed to delete investor');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load dropdown data for startup modal
+  useEffect(() => {
+    const loadStartupDropdownData = async () => {
+      if (showAddStartupModal) {
+        // Load sectors
+        setLoadingSectors(true);
+        try {
+          const sectorData = await generalDataService.getItemsByCategory('sector');
+          const sectorNames = sectorData.map(sector => sector.name);
+          setSectors(sectorNames);
+        } catch (error) {
+          console.error('Error loading sectors:', error);
+          setSectors(['Agriculture', 'AI', 'Climate', 'Consumer Goods', 'Defence', 'E-commerce', 'Education', 'EV', 'Finance', 'Food & Beverage', 'Healthcare', 'Manufacturing', 'Media & Entertainment', 'Others', 'PaaS', 'Renewable Energy', 'Retail', 'SaaS', 'Social Impact', 'Space', 'Transportation and Logistics', 'Waste Management', 'Web 3.0']);
+        } finally {
+          setLoadingSectors(false);
+        }
+
+        // Load countries
+        setLoadingCountries(true);
+        try {
+          const countryData = await generalDataService.getItemsByCategory('country');
+          const countryNames = countryData.map(country => country.name);
+          setCountries(countryNames);
+        } catch (error) {
+          console.error('Error loading countries:', error);
+          setCountries(['India', 'USA', 'UK', 'Singapore', 'UAE', 'Germany', 'France', 'Canada', 'Australia', 'Japan', 'China', 'Other']);
+        } finally {
+          setLoadingCountries(false);
+        }
+
+        // Load domains
+        setLoadingDomains(true);
+        try {
+          const domainData = await generalDataService.getItemsByCategory('domain');
+          const domainNames = domainData.map(domain => domain.name);
+          setDomains(domainNames);
+        } catch (error) {
+          console.error('Error loading domains:', error);
+          setDomains(['Agriculture', 'AI', 'Climate', 'Consumer Goods', 'Defence', 'E-commerce', 'Education', 'EV', 'Finance', 'Food & Beverage', 'Healthcare', 'Manufacturing', 'Media & Entertainment', 'Others', 'PaaS', 'Renewable Energy', 'Retail', 'SaaS', 'Social Impact', 'Space', 'Transportation and Logistics', 'Waste Management', 'Web 3.0']);
+        } finally {
+          setLoadingDomains(false);
+        }
+
+        // Load stages
+        setLoadingStages(true);
+        try {
+          const stageData = await generalDataService.getItemsByCategory('stage');
+          const stageNames = stageData.map(stage => stage.name);
+          setStages(stageNames);
+        } catch (error) {
+          console.error('Error loading stages:', error);
+          setStages(['Idea', 'MVP', 'Early Stage', 'Growth', 'Mature']);
+        } finally {
+          setLoadingStages(false);
+        }
+
+        // Load round types
+        setLoadingRoundTypes(true);
+        try {
+          const roundTypeData = await generalDataService.getItemsByCategory('round_type');
+          const roundTypeNames = roundTypeData.map(roundType => roundType.name);
+          setRoundTypes(roundTypeNames);
+        } catch (error) {
+          console.error('Error loading round types:', error);
+          setRoundTypes(['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Bridge', 'Growth']);
+        } finally {
+          setLoadingRoundTypes(false);
+        }
+
+        // Load currencies
+        setLoadingCurrencies(true);
+        try {
+          const currencyData = await generalDataService.getItemsByCategory('currency');
+          const currencyNames = currencyData.map(currency => currency.name);
+          setCurrencies(currencyNames);
+        } catch (error) {
+          console.error('Error loading currencies:', error);
+          setCurrencies(['USD', 'INR', 'EUR', 'GBP', 'SGD', 'AED', 'JPY', 'CNY', 'AUD', 'CAD']);
+        } finally {
+          setLoadingCurrencies(false);
+        }
+      }
+    };
+    loadStartupDropdownData();
+  }, [showAddStartupModal]);
+
+  // Handle add startup
+  const handleAddStartup = () => {
+    setEditingAddedStartup(null);
+    setAddStartupFormData({
+      advisor_id: currentUser?.id || '',
+      startup_name: '',
+      sector: '',
+      website_url: '',
+      linkedin_url: '',
+      contact_email: '',
+      contact_name: '',
+      contact_number: '',
+      description: '',
+      current_valuation: undefined,
+      investment_amount: undefined,
+      equity_percentage: undefined,
+      investment_date: undefined,
+      currency: 'USD',
+      domain: '',
+      stage: '',
+      round_type: '',
+      country: '',
+      notes: ''
+    });
+    setShowAddStartupModal(true);
+  };
+
+  // Handle edit added startup
+  const handleEditAddedStartup = (startup: AdvisorAddedStartup) => {
+    setEditingAddedStartup(startup);
+    setAddStartupFormData({
+      advisor_id: startup.advisor_id,
+      startup_name: startup.startup_name,
+      sector: startup.sector || '',
+      website_url: startup.website_url || '',
+      linkedin_url: startup.linkedin_url || '',
+      contact_email: startup.contact_email,
+      contact_name: startup.contact_name,
+      contact_number: startup.contact_number || '',
+      description: startup.description || '',
+      current_valuation: startup.current_valuation,
+      investment_amount: startup.investment_amount,
+      equity_percentage: startup.equity_percentage,
+      investment_date: startup.investment_date,
+      currency: startup.currency || 'USD',
+      domain: startup.domain || '',
+      stage: startup.stage || '',
+      round_type: startup.round_type || '',
+      country: startup.country || '',
+      notes: startup.notes || ''
+    });
+    setShowAddStartupModal(true);
+  };
+
+  // Handle save added startup
+  const handleSaveAddedStartup = async () => {
+    if (!addStartupFormData.startup_name || !addStartupFormData.contact_email || !addStartupFormData.contact_name) {
+      alert('Please fill in startup name, contact name, and contact email');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      if (editingAddedStartup) {
+        // Update existing
+        const updated = await advisorAddedStartupService.updateStartup(editingAddedStartup.id, addStartupFormData);
+        if (updated) {
+          setAdvisorAddedStartups(prev => prev.map(s => s.id === updated.id ? updated : s));
+          alert('Startup updated successfully!');
+        } else {
+          alert('Failed to update startup');
+        }
+      } else {
+        // Create new
+        const created = await advisorAddedStartupService.createStartup(addStartupFormData);
+        if (created) {
+          setAdvisorAddedStartups(prev => [created, ...prev]);
+          alert('Startup added successfully!');
+        } else {
+          alert('Failed to add startup');
+        }
+      }
+      setShowAddStartupModal(false);
+      setEditingAddedStartup(null);
+    } catch (error) {
+      console.error('Error saving startup:', error);
+      alert('Failed to save startup');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle delete added startup
+  const handleDeleteAddedStartup = async (startupId: number) => {
+    if (!confirm('Are you sure you want to delete this startup?')) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const success = await advisorAddedStartupService.deleteStartup(startupId);
+      if (success) {
+        setAdvisorAddedStartups(prev => prev.filter(s => s.id !== startupId));
+        alert('Startup deleted successfully!');
+      } else {
+        alert('Failed to delete startup');
+      }
+    } catch (error) {
+      console.error('Error deleting startup:', error);
+      alert('Failed to delete startup');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle send invite to TMS for advisor-added startups
+  const handleSendInviteToTMS = async (startupId: number) => {
+    setIsLoading(true);
+    try {
+      const success = await advisorAddedStartupService.sendInviteToTMS(startupId);
+      if (success) {
+        setAdvisorAddedStartups(prev =>
+          prev.map(s =>
+            s.id === startupId
+              ? { ...s, invite_status: 'sent', invite_sent_at: new Date().toISOString() }
+              : s
+          )
+        );
+        alert('Invite sent successfully!');
+      } else {
+        alert('Failed to send invite');
+      }
+    } catch (error) {
+      console.error('Error sending invite to TMS:', error);
+      alert('Failed to send invite');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Check authentication health on component mount
   useEffect(() => {
@@ -297,6 +1031,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     return pendingInvestors;
   }, [advisorCode, users]);
 
+  const [viewingRequest, setViewingRequest] = useState<any | null>(null);
   // Get accepted startups - FIXED VERSION
   const myStartups = useMemo(() => {
     // Strict validation: advisorCode must be a non-empty string
@@ -363,7 +1098,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     return acceptedInvestors;
   }, [advisorCode, users]);
 
-  // Create serviceRequests by combining pending startups and investors - FIXED VERSION
+  // Create serviceRequests - Startups (Pitch) + Investors (manual code entry from dashboard)
+  // Note: Investors clicking "Connect" button go to Collaboration tab via advisor_connection_requests
+  // But investors manually entering code from dashboard still go to Service Requests
   const serviceRequests = useMemo(() => {
     if (!advisorCode) {
       return [];
@@ -373,6 +1110,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       const startupUser = users.find(user => user.id === startup.user_id);
       return {
         id: startup.id,
+        user_id: startup.user_id,
         name: startup.name,
         email: startupUser?.email || '',
         type: 'startup',
@@ -380,8 +1118,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       };
     });
 
+    // Include investors who manually entered code from their dashboard
     const investorRequests = pendingInvestorRequests.map(user => ({
       id: user.id,
+      user_id: user.id,
       name: user.name,
       email: user.email,
       type: 'investor',
@@ -405,6 +1145,27 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const startupOffersList = useMemo(() => {
     return offersMade.filter(offer => (offer as any).isStartupOffer);
   }, [offersMade]);
+
+  // Computed management metrics for advisor profile
+  const computedManagementMetrics = useMemo(() => {
+    const startupsUnderManagement = (myStartups?.length || 0) + (advisorAddedStartups?.length || 0);
+    const investorsUnderManagement = (myInvestors?.length || 0) + (advisorAddedInvestors?.length || 0);
+    const successfulFundraisesStartups = offersMade.filter(offer => (offer as any).stage === 4).length;
+
+    // Verified = on-platform (TMS) only
+    const verifiedStartupsUnderManagement = myStartups?.length || 0;
+    const verifiedInvestorsUnderManagement = myInvestors?.length || 0;
+    const verifiedSuccessfulFundraisesStartups = successfulFundraisesStartups;
+
+    return {
+      startupsUnderManagement,
+      investorsUnderManagement,
+      successfulFundraisesStartups,
+      verifiedStartupsUnderManagement,
+      verifiedInvestorsUnderManagement,
+      verifiedSuccessfulFundraisesStartups
+    };
+  }, [myStartups, advisorAddedStartups, myInvestors, advisorAddedInvestors, offersMade]);
   
   // Startup fundraising data
   const [startupFundraisingData, setStartupFundraisingData] = useState<{[key: number]: any}>({});
@@ -1180,6 +1941,263 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       loadAllCoOpps();
     }
   }, [activeTab]);
+
+  // Handle accepting collaboration requests
+  const handleAcceptCollaborationRequest = async (request: AdvisorConnectionRequest) => {
+    try {
+      setIsLoading(true);
+      await advisorConnectionRequestService.updateRequestStatus(request.id, 'accepted', currentUser?.id || '');
+      
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: `${request.requester_type} collaboration request accepted successfully!`,
+        type: 'success',
+        timestamp: new Date()
+      }]);
+      
+      // Remove from pending and add to accepted
+      setCollaborationRequests(prev => prev.filter(r => r.id !== request.id));
+      setAcceptedCollaborators(prev => [...prev, { ...request, status: 'accepted' as const }]);
+      
+      // Refresh collaboration requests to get updated data
+      const requests = await advisorConnectionRequestService.getCollaboratorRequests(currentUser?.id || '');
+      setCollaborationRequests(requests.filter(r => r.status === 'pending'));
+      setAcceptedCollaborators(requests.filter(r => r.status === 'accepted'));
+    } catch (error) {
+      console.error('Error accepting collaboration request:', error);
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: 'Failed to accept collaboration request',
+        type: 'error',
+        timestamp: new Date()
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle rejecting collaboration requests - Delete the request
+  const handleRejectCollaborationRequest = async (request: AdvisorConnectionRequest) => {
+    if (!confirm(`Are you sure you want to reject the collaboration request from ${request.requester_type}?`)) {
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      await advisorConnectionRequestService.deleteRequest(request.id, currentUser?.id || '');
+      
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: `${request.requester_type} collaboration request rejected and removed`,
+        type: 'info',
+        timestamp: new Date()
+      }]);
+      
+      // Remove from pending requests
+      setCollaborationRequests(prev => prev.filter(r => r.id !== request.id));
+      
+      // Remove from profiles cache
+      setCollaboratorProfiles(prev => {
+        const updated = { ...prev };
+        delete updated[request.requester_id];
+        return updated;
+      });
+    } catch (error) {
+      console.error('Error rejecting collaboration request:', error);
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: 'Failed to reject collaboration request',
+        type: 'error',
+        timestamp: new Date()
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle viewing collaborator profile
+  const handleViewCollaborator = (request: AdvisorConnectionRequest) => {
+    if (request.collaborator_profile_url) {
+      window.open(request.collaborator_profile_url, '_blank');
+    } else {
+      // Fallback: try to construct URL based on requester type
+      const url = new URL(window.location.origin + window.location.pathname);
+      if (request.requester_type === 'Investor') {
+        url.searchParams.set('view', 'investor');
+        url.searchParams.set('userId', request.requester_id);
+      } else if (request.requester_type === 'Investment Advisor') {
+        url.searchParams.set('view', 'advisor');
+        url.searchParams.set('userId', request.requester_id);
+      }
+      window.open(url.toString(), '_blank');
+    }
+  };
+
+  // Filter startups based on selected mandate
+  const getFilteredMandateStartups = (mandate: AdvisorMandate | null): ActiveFundraisingStartup[] => {
+    if (!mandate) return [];
+    
+    let filtered = [...activeFundraisingStartups];
+
+    // Filter by round type (fundraisingType)
+    if (mandate.round_type) {
+      filtered = filtered.filter(startup => 
+        startup.fundraisingType === mandate.round_type
+      );
+    }
+
+    // Filter by domain (sector)
+    if (mandate.domain) {
+      filtered = filtered.filter(startup => 
+        startup.sector.toLowerCase() === mandate.domain!.toLowerCase()
+      );
+    }
+
+    // Filter by amount range
+    if (mandate.amount_min !== null && mandate.amount_min !== undefined) {
+      filtered = filtered.filter(startup => startup.investmentValue >= mandate.amount_min!);
+    }
+    if (mandate.amount_max !== null && mandate.amount_max !== undefined) {
+      filtered = filtered.filter(startup => startup.investmentValue <= mandate.amount_max!);
+    }
+
+    // Filter by equity range
+    if (mandate.equity_min !== null && mandate.equity_min !== undefined) {
+      filtered = filtered.filter(startup => startup.equityAllocation >= mandate.equity_min!);
+    }
+    if (mandate.equity_max !== null && mandate.equity_max !== undefined) {
+      filtered = filtered.filter(startup => startup.equityAllocation <= mandate.equity_max!);
+    }
+
+    return filtered;
+  };
+
+  // Handle create/edit mandate
+  const handleSaveMandate = async () => {
+    if (!mandateFormData.name.trim()) {
+      alert('Please enter a mandate name');
+      return;
+    }
+
+    if (!currentUser?.id) {
+      alert('User not found');
+      return;
+    }
+
+    try {
+      let result: AdvisorMandate | null = null;
+      
+      if (editingMandate) {
+        // Update existing mandate
+        result = await advisorMandateService.updateMandate(editingMandate.id, {
+          name: mandateFormData.name,
+          stage: mandateFormData.stage || undefined,
+          round_type: mandateFormData.round_type || undefined,
+          domain: mandateFormData.domain || undefined,
+          amount_min: mandateFormData.amount_min || undefined,
+          amount_max: mandateFormData.amount_max || undefined,
+          equity_min: mandateFormData.equity_min || undefined,
+          equity_max: mandateFormData.equity_max || undefined
+        });
+      } else {
+        // Create new mandate
+        result = await advisorMandateService.createMandate({
+          ...mandateFormData,
+          advisor_id: currentUser.id
+        });
+      }
+
+      if (result) {
+        // Reload mandates
+        const updatedMandates = await advisorMandateService.getMandatesByAdvisor(currentUser.id);
+        setMandates(updatedMandates);
+        
+        if (!editingMandate && result.id) {
+          setSelectedMandateId(result.id);
+        }
+        
+        setShowMandateModal(false);
+        setEditingMandate(null);
+        setMandateFormData({
+          advisor_id: currentUser.id,
+          name: '',
+          stage: '',
+          round_type: '',
+          domain: '',
+          amount_min: undefined,
+          amount_max: undefined,
+          equity_min: undefined,
+          equity_max: undefined
+        });
+        alert(editingMandate ? 'Mandate updated successfully!' : 'Mandate created successfully!');
+      } else {
+        alert('Failed to save mandate');
+      }
+    } catch (error) {
+      console.error('Error saving mandate:', error);
+      alert('Failed to save mandate');
+    }
+  };
+
+  // Handle delete mandate
+  const handleDeleteMandate = async (mandateId: number) => {
+    if (!confirm('Are you sure you want to delete this mandate?')) {
+      return;
+    }
+
+    try {
+      const success = await advisorMandateService.hardDeleteMandate(mandateId);
+      if (success) {
+        const updatedMandates = await advisorMandateService.getMandatesByAdvisor(currentUser?.id || '');
+        setMandates(updatedMandates);
+        
+        if (selectedMandateId === mandateId) {
+          setSelectedMandateId(updatedMandates.length > 0 ? updatedMandates[0].id : null);
+        }
+        
+        alert('Mandate deleted successfully!');
+      } else {
+        alert('Failed to delete mandate');
+      }
+    } catch (error) {
+      console.error('Error deleting mandate:', error);
+      alert('Failed to delete mandate');
+    }
+  };
+
+  // Handle edit mandate
+  const handleEditMandate = (mandate: AdvisorMandate) => {
+    setEditingMandate(mandate);
+    setMandateFormData({
+      advisor_id: mandate.advisor_id,
+      name: mandate.name,
+      stage: mandate.stage || '',
+      round_type: mandate.round_type || '',
+      domain: mandate.domain || '',
+      amount_min: mandate.amount_min,
+      amount_max: mandate.amount_max,
+      equity_min: mandate.equity_min,
+      equity_max: mandate.equity_max
+    });
+    setShowMandateModal(true);
+  };
+
+  // Handle add mandate
+  const handleAddMandate = () => {
+    setEditingMandate(null);
+    setMandateFormData({
+      advisor_id: currentUser?.id || '',
+      name: '',
+      stage: '',
+      round_type: '',
+      domain: '',
+      amount_min: undefined,
+      amount_max: undefined,
+      equity_min: undefined,
+      equity_max: undefined
+    });
+    setShowMandateModal(true);
+  };
 
   // Handle accepting service requests
   const handleAcceptRequest = async (request: any) => {
@@ -2206,6 +3224,49 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 Investment Interests
               </div>
             </button>
+            <button
+              onClick={() => setActiveTab('mandate')}
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+                activeTab === 'mandate'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <Filter className="w-5 h-5 mr-2" />
+                Mandate
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('portfolio')}
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+                activeTab === 'portfolio'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                Portfolio
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('collaboration')}
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+                activeTab === 'collaboration'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a3 3 0 00-.879-2.121M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2a3 3 0 01.879-2.121M12 12a4 4 0 100-8 4 4 0 000 8zm0 0a4 4 0 01-3.121 1.5H9a3 3 0 013 3v1" />
+                </svg>
+                Collaboration
+              </div>
+            </button>
           </nav>
         </div>
       </div>
@@ -2285,7 +3346,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             <div className="p-4 sm:p-6">
               <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">Service Requests</h3>
               <p className="text-xs sm:text-sm text-gray-600 mb-4">
-                Investors and Startups who have requested your services using your Investment Advisor Code
+                Startups (Pitch) and Investors (manual code entry from dashboard) who have requested your services using your Investment Advisor Code
               </p>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -2330,13 +3391,26 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {new Date(request.created_at || Date.now()).toLocaleDateString()}
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium space-x-3">
                             <button
                               onClick={() => handleAcceptRequest(request)}
                               disabled={isLoading}
                               className="text-blue-600 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              {isLoading ? 'Accepting...' : 'Accept Request'}
+                              {isLoading ? 'Accepting...' : 'Accept'}
+                            </button>
+                            <button
+                              onClick={() => handleRejectRequest(request)}
+                              disabled={isLoading}
+                              className="text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Reject
+                            </button>
+                            <button
+                              onClick={() => handleViewRequest(request)}
+                              className="text-gray-700 hover:text-gray-900"
+                            >
+                              View
                             </button>
                           </td>
                         </tr>
@@ -3972,33 +5046,41 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       {/* My Investors Tab */}
       {activeTab === 'myInvestors' && (
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">My Investors</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Investors who have accepted your advisory services
-            </p>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Accepted Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {myInvestors.length === 0 ? (
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg shadow">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">My Investors</h3>
+                  <p className="text-sm text-gray-600">
+                    TMS investors who have accepted your advisory services and manually added investors
+                  </p>
+                </div>
+                <button
+                  onClick={handleAddInvestor}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  Add Investor
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
                     <tr>
-                      <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
-                        No assigned investors
-                      </td>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name/VC Firm</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact Number</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Website</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
-                  ) : (
-                    myInvestors.map((investor) => (
-                      <tr key={investor.id}>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {/* TMS Investors */}
+                    {myInvestors.map((investor) => (
+                      <tr key={`tms-${investor.id}`}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                           {investor.name || 'N/A'}
                         </td>
@@ -4006,16 +5088,22 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           {investor.email}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          -
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          -
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                            TMS
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {(investor as any).advisor_accepted_date 
                             ? new Date((investor as any).advisor_accepted_date).toLocaleDateString()
                             : investor.created_at 
                               ? new Date(investor.created_at).toLocaleDateString()
                               : 'N/A'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                            Active
-                          </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <button
@@ -4026,23 +5114,489 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           </button>
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ))}
+                    
+                    {/* Advisor-Added Investors */}
+                    {loadingAddedInvestors ? (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                          Loading added investors...
+                        </td>
+                      </tr>
+                    ) : advisorAddedInvestors.length === 0 && myInvestors.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                          No investors found. Click "Add Investor" to add investors who are not on TMS.
+                        </td>
+                      </tr>
+                    ) : (
+                      advisorAddedInvestors.map((investor) => (
+                        <tr key={`added-${investor.id}`}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {investor.investor_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {investor.email}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {investor.contact_number || '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {investor.website ? (
+                              <a href={investor.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                {investor.website}
+                              </a>
+                            ) : '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                              Added
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {new Date(investor.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleEditAddedInvestor(investor)}
+                                className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                title="Edit"
+                              >
+                                <Edit className="h-3 w-3" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAddedInvestor(investor.id)}
+                                className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Add/Edit Investor Modal */}
+      {showAddInvestorModal && (
+        <Modal
+          isOpen={showAddInvestorModal}
+          onClose={() => {
+            setShowAddInvestorModal(false);
+            setEditingAddedInvestor(null);
+          }}
+          title={editingAddedInvestor ? 'Edit Investor' : 'Add Investor'}
+        >
+          <div className="space-y-4">
+            <Input
+              label="Investor Name / VC Firm *"
+              value={addInvestorFormData.investor_name}
+              onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, investor_name: e.target.value })}
+              required
+            />
+            
+            {/* Email and Contact Number in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Email *"
+                type="email"
+                value={addInvestorFormData.email}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, email: e.target.value })}
+                required
+              />
+              <Input
+                label="Contact Number"
+                value={addInvestorFormData.contact_number}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, contact_number: e.target.value })}
+              />
+            </div>
+
+            {/* Website and LinkedIn in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Website"
+                type="url"
+                value={addInvestorFormData.website}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, website: e.target.value })}
+              />
+              <Input
+                label="LinkedIn URL"
+                type="url"
+                value={addInvestorFormData.linkedin_url}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, linkedin_url: e.target.value })}
+              />
+            </div>
+
+            {/* Firm Type and Country in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Select
+                label="Firm Type"
+                value={addInvestorFormData.firm_type || ''}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, firm_type: e.target.value })}
+              >
+                <option value="">Select Firm Type</option>
+                {loadingFirmTypes ? (
+                  <option>Loading...</option>
+                ) : (
+                  firmTypes.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))
+                )}
+              </Select>
+              <Select
+                label="Country"
+                value={addInvestorFormData.location || ''}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, location: e.target.value })}
+              >
+                <option value="">Select Country</option>
+                {loadingCountries ? (
+                  <option>Loading...</option>
+                ) : (
+                  countries.map(country => (
+                    <option key={country} value={country}>{country}</option>
+                  ))
+                )}
+              </Select>
+            </div>
+
+            {/* Investment Focus and Domain in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Select
+                label="Investment Focus"
+                value={addInvestorFormData.investment_focus || ''}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, investment_focus: e.target.value })}
+              >
+                <option value="">Select Investment Focus</option>
+                {loadingInvestmentStages ? (
+                  <option>Loading...</option>
+                ) : (
+                  investmentStages.map(stage => (
+                    <option key={stage} value={stage}>{stage}</option>
+                  ))
+                )}
+              </Select>
+              <Select
+                label="Domain"
+                value={addInvestorFormData.domain || ''}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, domain: e.target.value })}
+              >
+                <option value="">Select Domain</option>
+                {loadingDomains ? (
+                  <option>Loading...</option>
+                ) : (
+                  domains.map(domain => (
+                    <option key={domain} value={domain}>{domain}</option>
+                  ))
+                )}
+              </Select>
+            </div>
+
+            {/* Stage - Full width */}
+            <Select
+              label="Stage"
+              value={addInvestorFormData.stage || ''}
+              onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, stage: e.target.value })}
+            >
+              <option value="">Select Stage</option>
+              {loadingStages ? (
+                <option>Loading...</option>
+              ) : (
+                stages.map(stage => (
+                  <option key={stage} value={stage}>{stage}</option>
+                ))
+              )}
+            </Select>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Notes
+              </label>
+              <textarea
+                value={addInvestorFormData.notes}
+                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, notes: e.target.value })}
+                rows={2}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Additional notes about this investor"
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-4">
+              <button
+                onClick={() => {
+                  setShowAddInvestorModal(false);
+                  setEditingAddedInvestor(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAddedInvestor}
+                disabled={isLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? 'Saving...' : editingAddedInvestor ? 'Update' : 'Add Investor'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Add/Edit Startup Modal */}
+      {showAddStartupModal && (
+        <Modal
+          isOpen={showAddStartupModal}
+          onClose={() => {
+            setShowAddStartupModal(false);
+            setEditingAddedStartup(null);
+          }}
+          title={editingAddedStartup ? 'Edit Startup' : 'Add Startup'}
+        >
+          <div className="space-y-4">
+            <Input
+              label="Startup Name *"
+              value={addStartupFormData.startup_name}
+              onChange={(e) => setAddStartupFormData({ ...addStartupFormData, startup_name: e.target.value })}
+              required
+            />
+            
+            {/* Contact Name and Contact Email in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Contact Name *"
+                value={addStartupFormData.contact_name}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, contact_name: e.target.value })}
+                required
+              />
+              <Input
+                label="Contact Email *"
+                type="email"
+                value={addStartupFormData.contact_email}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, contact_email: e.target.value })}
+                required
+              />
+            </div>
+
+            {/* Contact Number - Full width */}
+            <Input
+              label="Contact Number"
+              value={addStartupFormData.contact_number || ''}
+              onChange={(e) => setAddStartupFormData({ ...addStartupFormData, contact_number: e.target.value })}
+            />
+
+            {/* Website and LinkedIn URL in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Website"
+                value={addStartupFormData.website_url || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, website_url: e.target.value })}
+              />
+              <Input
+                label="LinkedIn URL"
+                value={addStartupFormData.linkedin_url || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, linkedin_url: e.target.value })}
+              />
+            </div>
+
+            {/* Sector and Country in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Select
+                label="Sector"
+                value={addStartupFormData.sector || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, sector: e.target.value })}
+              >
+                <option value="">Select Sector</option>
+                {loadingSectors ? (
+                  <option>Loading...</option>
+                ) : (
+                  sectors.map(sector => (
+                    <option key={sector} value={sector}>{sector}</option>
+                  ))
+                )}
+              </Select>
+              <Select
+                label="Country"
+                value={addStartupFormData.country || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, country: e.target.value })}
+              >
+                <option value="">Select Country</option>
+                {loadingCountries ? (
+                  <option>Loading...</option>
+                ) : (
+                  countries.map(country => (
+                    <option key={country} value={country}>{country}</option>
+                  ))
+                )}
+              </Select>
+            </div>
+
+            {/* Domain and Stage in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Select
+                label="Domain"
+                value={addStartupFormData.domain || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, domain: e.target.value })}
+              >
+                <option value="">Select Domain</option>
+                {loadingDomains ? (
+                  <option>Loading...</option>
+                ) : (
+                  domains.map(domain => (
+                    <option key={domain} value={domain}>{domain}</option>
+                  ))
+                )}
+              </Select>
+              <Select
+                label="Stage"
+                value={addStartupFormData.stage || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, stage: e.target.value })}
+              >
+                <option value="">Select Stage</option>
+                {loadingStages ? (
+                  <option>Loading...</option>
+                ) : (
+                  stages.map(stage => (
+                    <option key={stage} value={stage}>{stage}</option>
+                  ))
+                )}
+              </Select>
+            </div>
+
+            {/* Round Type and Currency in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Select
+                label="Round Type"
+                value={addStartupFormData.round_type || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, round_type: e.target.value })}
+              >
+                <option value="">Select Round Type</option>
+                {loadingRoundTypes ? (
+                  <option>Loading...</option>
+                ) : (
+                  roundTypes.map(roundType => (
+                    <option key={roundType} value={roundType}>{roundType}</option>
+                  ))
+                )}
+              </Select>
+              <Select
+                label="Currency"
+                value={addStartupFormData.currency || 'USD'}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, currency: e.target.value })}
+              >
+                {loadingCurrencies ? (
+                  <option>Loading...</option>
+                ) : (
+                  currencies.map(currency => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))
+                )}
+              </Select>
+            </div>
+
+            {/* Current Valuation, Investment Amount, Equity Percentage in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Input
+                label="Current Valuation"
+                type="number"
+                value={addStartupFormData.current_valuation || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, current_valuation: e.target.value ? parseFloat(e.target.value) : undefined })}
+              />
+              <Input
+                label="Investment Amount"
+                type="number"
+                value={addStartupFormData.investment_amount || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, investment_amount: e.target.value ? parseFloat(e.target.value) : undefined })}
+              />
+              <Input
+                label="Equity Percentage (%)"
+                type="number"
+                step="0.01"
+                value={addStartupFormData.equity_percentage || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, equity_percentage: e.target.value ? parseFloat(e.target.value) : undefined })}
+              />
+            </div>
+
+            {/* Investment Date - Full width */}
+            <Input
+              label="Investment Date"
+              type="date"
+              value={addStartupFormData.investment_date || ''}
+              onChange={(e) => setAddStartupFormData({ ...addStartupFormData, investment_date: e.target.value || undefined })}
+            />
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Description
+              </label>
+              <textarea
+                value={addStartupFormData.description || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, description: e.target.value })}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Description of the startup"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Notes
+              </label>
+              <textarea
+                value={addStartupFormData.notes || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, notes: e.target.value })}
+                rows={2}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Additional notes about this startup"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4">
+              <button
+                onClick={() => {
+                  setShowAddStartupModal(false);
+                  setEditingAddedStartup(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAddedStartup}
+                disabled={isLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? 'Saving...' : editingAddedStartup ? 'Update' : 'Add Startup'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* My Startups Tab */}
       {activeTab === 'myStartups' && (
         <div className="bg-white rounded-lg shadow">
           <div className="p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">My Startups</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Startups that have accepted your advisory services
-            </p>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">My Startups</h3>
+                <p className="text-sm text-gray-600">
+                  Startups that have accepted your advisory services
+                </p>
+              </div>
+              <button
+                onClick={handleAddStartup}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+              >
+                <PlusCircle className="h-4 w-4" />
+                Add Startup
+              </button>
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -4050,57 +5604,139 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Ask</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {myStartups.length === 0 ? (
+                  {/* TMS Startups */}
+                  {myStartups.map((startup) => (
+                    <tr key={`tms-${startup.id}`}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {startup.name}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {startup.sector || 'Not specified'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {(() => {
+                          // Get startup ask from fundraising_details table
+                          const fundraising = startupFundraisingData[startup.id];
+                          const investmentValue = Number(fundraising?.value) || 0;
+                          const equityAllocation = Number(fundraising?.equity) || 0;
+                          const currency = fundraising?.currency || startup.currency || 'USD';
+                          
+                          if (investmentValue === 0 && equityAllocation === 0) {
+                            return (
+                              <span className="text-gray-500 italic">
+                                Funding ask not specified
+                              </span>
+                            );
+                          }
+                          
+                          return `Seeking ${formatCurrency(investmentValue, currency)} for ${equityAllocation}% equity`;
+                        })()}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                          TMS
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {startup.created_at 
+                          ? new Date(startup.created_at).toLocaleDateString()
+                          : 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button
+                          onClick={() => handleViewStartupDashboard(startup)}
+                          className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                        >
+                          View Dashboard
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  
+                  {/* Advisor-Added Startups */}
+                  {loadingAddedStartups ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
-                        No assigned startups
+                      <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                        Loading added startups...
+                      </td>
+                    </tr>
+                  ) : advisorAddedStartups.length === 0 && myStartups.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                        No startups found. Click "Add Startup" to add startups who are not on TMS.
                       </td>
                     </tr>
                   ) : (
-                    myStartups.map((startup) => (
-                      <tr key={startup.id}>
+                    advisorAddedStartups.map((startup) => (
+                      <tr key={`added-${startup.id}`}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {startup.name}
+                          {startup.startup_name}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {startup.sector || 'Not specified'}
+                          {startup.sector || startup.domain || 'Not specified'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {(() => {
-                            // Get startup ask from fundraising_details table
-                            const fundraising = startupFundraisingData[startup.id];
-                            const investmentValue = Number(fundraising?.value) || 0;
-                            const equityAllocation = Number(fundraising?.equity) || 0;
-                            const currency = fundraising?.currency || startup.currency || 'USD';
-                            
-                            if (investmentValue === 0 && equityAllocation === 0) {
-                              return (
-                                <span className="text-gray-500 italic">
-                                  Funding ask not specified
-                                </span>
-                              );
-                            }
-                            
-                            return `Seeking ${formatCurrency(investmentValue, currency)} for ${equityAllocation}% equity`;
-                          })()}
+                          {startup.investment_amount && startup.equity_percentage
+                            ? `Seeking ${formatCurrency(startup.investment_amount, startup.currency || 'USD')} for ${startup.equity_percentage}% equity`
+                            : startup.current_valuation
+                              ? `Valuation: ${formatCurrency(startup.current_valuation, startup.currency || 'USD')}`
+                              : <span className="text-gray-500 italic">Funding ask not specified</span>}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                            Active
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                            Added
                           </span>
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {new Date(startup.created_at).toLocaleDateString()}
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button
-                            onClick={() => handleViewStartupDashboard(startup)}
-                            className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
-                          >
-                            View Dashboard
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {startup.is_on_tms && startup.tms_startup_id ? (
+                              <button
+                                onClick={() => {
+                                  const tmsStartup = startups.find(s => s.id === startup.tms_startup_id);
+                                  if (tmsStartup) {
+                                    handleViewStartupDashboard(tmsStartup);
+                                  }
+                                }}
+                                className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                              >
+                                View Dashboard
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleSendInviteToTMS(startup.id)}
+                                  disabled={isLoading || startup.invite_status === 'sent'}
+                                  className={`text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed`}
+                                  title={startup.invite_status === 'sent' ? 'Invite already sent' : 'Send invite'}
+                                >
+                                  {startup.invite_status === 'sent' ? 'Invite Sent' : 'Invite to TMS'}
+                                </button>
+                                <button
+                                  onClick={() => handleEditAddedStartup(startup)}
+                                  className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                  title="Edit"
+                                >
+                                  <Edit className="h-3 w-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteAddedStartup(startup.id)}
+                                  className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -4218,6 +5854,1120 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         </div>
       )}
 
+      {/* Portfolio Tab */}
+      {activeTab === 'portfolio' && currentUser && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Two-column layout: Form on left, Preview on right */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 xl:gap-6 items-stretch">
+            {/* Left: Investment Advisor Profile Form */}
+            <Card className="p-4 sm:p-6 h-full">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-slate-900">Investment Advisor Profile</h2>
+                <p className="text-xs sm:text-sm text-slate-500">
+                  Fill out your Investment Advisor profile details. Changes will be reflected in the preview.
+                </p>
+              </div>
+              <InvestmentAdvisorProfileForm
+                currentUser={currentUser}
+                onSave={(profile) => {
+                  console.log('Profile saved:', profile);
+                }}
+                onProfileChange={(profile) => {
+                  setPreviewProfile(profile);
+                }}
+                isViewOnly={false}
+                computedMetrics={computedManagementMetrics}
+              />
+            </Card>
+
+            {/* Right: Investment Advisor Profile Card Preview */}
+            <div className="flex flex-col h-full max-w-xl w-full mx-auto xl:mx-0">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-slate-900">Profile Preview</h2>
+                <p className="text-xs sm:text-sm text-slate-500">
+                  This is how your profile will appear to others.
+                </p>
+              </div>
+              <InvestmentAdvisorCard
+                advisor={previewProfile}
+                isPublicPage={false}
+                isAuthenticated={true}
+                currentUser={currentUser}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Collaboration Tab */}
+      {activeTab === 'collaboration' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Collaboration</h2>
+                <p className="text-sm text-slate-600">Manage collaborators and incoming requests.</p>
+              </div>
+            </div>
+
+            <div className="border-b border-slate-200 mb-4 flex flex-wrap gap-4">
+              <button
+                onClick={() => setCollaborationSubTab('myCollaborators')}
+                className={`pb-2 text-sm font-medium ${
+                  collaborationSubTab === 'myCollaborators'
+                    ? 'text-blue-600 border-b-2 border-blue-600'
+                    : 'text-slate-600 hover:text-slate-800 border-b-2 border-transparent'
+                }`}
+              >
+                My Collaborators
+              </button>
+              <button
+                onClick={() => setCollaborationSubTab('collaboratorRequests')}
+                className={`pb-2 text-sm font-medium ${
+                  collaborationSubTab === 'collaboratorRequests'
+                    ? 'text-blue-600 border-b-2 border-blue-600'
+                    : 'text-slate-600 hover:text-slate-800 border-b-2 border-transparent'
+                }`}
+              >
+                Collaborator Requests
+              </button>
+            </div>
+
+            {collaborationSubTab === 'myCollaborators' && (
+              <div>
+                {loadingCollaborationRequests ? (
+                  <div className="text-center py-8 text-slate-600">Loading collaborators...</div>
+                ) : acceptedCollaborators.length === 0 ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
+                    <p className="font-medium text-slate-800 mb-1">No collaborators yet</p>
+                    <p className="text-slate-600">Accepted collaborators will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {acceptedCollaborators.map((request) => {
+                      const requesterUser = users.find(u => u.id === request.requester_id);
+                      const collaboratorProfile = collaboratorProfiles[request.requester_id] || null;
+                      
+                      // Get video URL and logo
+                      const videoUrl = collaboratorProfile?.video_url || collaboratorProfile?.videoUrl;
+                      const logoUrl = collaboratorProfile?.logo_url || requesterUser?.logo_url;
+                      const firmName = collaboratorProfile?.firm_name || collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || '';
+                      const location = collaboratorProfile?.global_hq || collaboratorProfile?.location || '';
+                      
+                      // Get YouTube embed URL if video exists
+                      const getYoutubeEmbedUrl = (url?: string): string | null => {
+                        if (!url) return null;
+                        try {
+                          const urlObj = new URL(url);
+                          if (urlObj.hostname.includes('youtube.com')) {
+                            const videoId = urlObj.searchParams.get('v');
+                            return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+                          } else if (urlObj.hostname.includes('youtu.be')) {
+                            const videoId = urlObj.pathname.slice(1);
+                            return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+                          }
+                        } catch {
+                          return null;
+                        }
+                        return null;
+                      };
+                      
+                      const videoEmbedUrl = videoUrl ? getYoutubeEmbedUrl(videoUrl) : null;
+                      const mediaType = collaboratorProfile?.media_type || (videoUrl ? 'video' : 'logo');
+
+                      // Format currency helper
+                      const formatCurrency = (value?: number, currency?: string) => {
+                        if (!value) return 'N/A';
+                        const currencyCode = currency || 'USD';
+                        return new Intl.NumberFormat('en-US', {
+                          style: 'currency',
+                          currency: currencyCode,
+                          notation: 'compact',
+                          maximumFractionDigits: 0
+                        }).format(value);
+                      };
+
+                      return (
+                        <Card key={request.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 border border-slate-200 bg-white max-w-6xl">
+                          <div className="flex flex-col md:flex-row">
+                            {/* Left Side: Video/Logo Section - Smaller */}
+                            <div className="md:w-1/4 relative h-48 md:h-auto md:min-h-[250px] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+                              {videoEmbedUrl && mediaType === 'video' ? (
+                                <div className="relative w-full h-full">
+                                  <iframe
+                                    src={videoEmbedUrl}
+                                    title={`Profile video for ${requesterUser?.name || 'Collaborator'}`}
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                    className="absolute top-0 left-0 w-full h-full"
+                                  />
+                                </div>
+                              ) : logoUrl && logoUrl !== '#' ? (
+                                <div className="w-full h-full flex items-center justify-center bg-white p-4">
+                                  <img 
+                                    src={logoUrl} 
+                                    alt={`${requesterUser?.name || 'Collaborator'} logo`}
+                                    className="max-w-full max-h-full object-contain"
+                                    onError={(e) => {
+                                      const target = e.target as HTMLImageElement;
+                                      target.style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-slate-400">
+                                  <div className="text-center">
+                                    <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    <p className="text-xs">No media</p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Right Side: Full Details Section */}
+                            <div className="md:w-3/4 p-4 sm:p-6 flex flex-col">
+                              {/* Header */}
+                              <div className="mb-4">
+                                <div className="flex items-start justify-between mb-2 gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1 break-words">
+                                      {collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || requesterUser?.name || 'Unknown'}
+                                    </h3>
+                                    {firmName && (
+                                      <p className="text-sm text-slate-600 font-medium">{firmName}</p>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                      Accepted
+                                    </span>
+                                    <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                      {request.requester_type}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Basic Info: Type, Location, Range (varies by user type) */}
+                                <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm mb-3 pb-3 border-b border-slate-200">
+                                  {/* For Investors */}
+                                  {request.requester_type === 'Investor' && (
+                                    <>
+                                      {collaboratorProfile?.firm_type && (
+                                        <span className="text-slate-700 font-medium">{collaboratorProfile.firm_type}</span>
+                                      )}
+                                      {location && (
+                                        <>
+                                          {collaboratorProfile?.firm_type && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600 flex items-center gap-1">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            </svg>
+                                            <span className="capitalize">{location}</span>
+                                          </span>
+                                        </>
+                                      )}
+                                      {collaboratorProfile?.ticket_size_min && collaboratorProfile?.ticket_size_max && (
+                                        <>
+                                          {(collaboratorProfile?.firm_type || location) && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600 flex items-center gap-1">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <span>{formatCurrency(collaboratorProfile.ticket_size_min, collaboratorProfile.currency)} - {formatCurrency(collaboratorProfile.ticket_size_max, collaboratorProfile.currency)}</span>
+                                          </span>
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                  
+                                  {/* For Investment Advisors */}
+                                  {request.requester_type === 'Investment Advisor' && (
+                                    <>
+                                      {location && (
+                                        <span className="text-slate-600 flex items-center gap-1">
+                                          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                          </svg>
+                                          <span className="capitalize">{location}</span>
+                                        </span>
+                                      )}
+                                      {collaboratorProfile?.minimum_investment && collaboratorProfile?.maximum_investment && (
+                                        <>
+                                          {location && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600 flex items-center gap-1">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <span>{formatCurrency(collaboratorProfile.minimum_investment, collaboratorProfile.currency)} - {formatCurrency(collaboratorProfile.maximum_investment, collaboratorProfile.currency)}</span>
+                                          </span>
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                  
+                                  {/* For Mentors */}
+                                  {request.requester_type === 'Mentor' && (
+                                    <>
+                                      {collaboratorProfile?.mentor_type && (
+                                        <span className="text-slate-700 font-medium">{collaboratorProfile.mentor_type}</span>
+                                      )}
+                                      {location && (
+                                        <>
+                                          {collaboratorProfile?.mentor_type && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600 flex items-center gap-1">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            </svg>
+                                            <span className="capitalize">{location}</span>
+                                          </span>
+                                        </>
+                                      )}
+                                      {collaboratorProfile?.years_of_experience && (
+                                        <>
+                                          {(collaboratorProfile?.mentor_type || location) && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600">
+                                            {collaboratorProfile.years_of_experience} years experience
+                                          </span>
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                  
+                                  {/* For other types (CA, CS, Incubation) */}
+                                  {!['Investor', 'Investment Advisor', 'Mentor'].includes(request.requester_type) && location && (
+                                    <span className="text-slate-600 flex items-center gap-1">
+                                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                      </svg>
+                                      <span className="capitalize">{location}</span>
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Contact Links */}
+                                {(collaboratorProfile?.website || collaboratorProfile?.linkedin_link) && (
+                                  <div className="flex flex-wrap items-center gap-3 mb-3 pb-3 border-b border-slate-200">
+                                    {collaboratorProfile.website && (
+                                      <a
+                                        href={collaboratorProfile.website}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-700 flex items-center gap-1.5 text-xs sm:text-sm font-medium transition-colors"
+                                      >
+                                        <svg className="h-3 w-3 sm:h-4 sm:w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                                        </svg>
+                                        Website
+                                      </a>
+                                    )}
+                                    {collaboratorProfile.linkedin_link && (
+                                      <a
+                                        href={collaboratorProfile.linkedin_link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-700 flex items-center gap-1.5 text-xs sm:text-sm font-medium transition-colors"
+                                      >
+                                        <svg className="h-3 w-3 sm:h-4 sm:w-4" fill="currentColor" viewBox="0 0 24 24">
+                                          <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+                                        </svg>
+                                        LinkedIn
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Details Section - Varies by User Type */}
+                              <div className="space-y-3 mb-3 pb-3 border-b border-slate-200 flex-1">
+                                {/* For Investors */}
+                                {request.requester_type === 'Investor' && (
+                                  <>
+                                    {/* Investment Stages and Geography */}
+                                    {(collaboratorProfile?.investment_stages && collaboratorProfile.investment_stages.length > 0) || (collaboratorProfile?.geography && collaboratorProfile.geography.length > 0) ? (
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {collaboratorProfile.investment_stages && collaboratorProfile.investment_stages.length > 0 && (
+                                          <>
+                                            <span className="text-xs font-medium text-slate-500">Investment Stages:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.investment_stages.slice(0, 3).map((stage: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+                                                  {stage}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.investment_stages.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.investment_stages.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </>
+                                        )}
+                                        {collaboratorProfile.geography && collaboratorProfile.geography.length > 0 && (
+                                          <>
+                                            {collaboratorProfile.investment_stages && collaboratorProfile.investment_stages.length > 0 && (
+                                              <span className="text-slate-300 mx-1">•</span>
+                                            )}
+                                            <span className="text-xs font-medium text-slate-500">Geography:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.geography.slice(0, 3).map((geo: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
+                                                  {geo}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.geography.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.geography.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </>
+                                        )}
+                                      </div>
+                                    ) : null}
+
+                                    {/* Investment Thesis */}
+                                    {collaboratorProfile?.investment_thesis && (
+                                      <div>
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Investment Thesis</div>
+                                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed line-clamp-2">{collaboratorProfile.investment_thesis}</p>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+
+                                {/* For Investment Advisors */}
+                                {request.requester_type === 'Investment Advisor' && (
+                                  <>
+                                    {/* Service Types, Investment Stages, Domain, Geography */}
+                                    {(collaboratorProfile?.service_types && collaboratorProfile.service_types.length > 0) || 
+                                     (collaboratorProfile?.investment_stages && collaboratorProfile.investment_stages.length > 0) ||
+                                     (collaboratorProfile?.domain && collaboratorProfile.domain.length > 0) ||
+                                     (collaboratorProfile?.geography && collaboratorProfile.geography.length > 0) ? (
+                                      <div className="space-y-2">
+                                        {collaboratorProfile.service_types && collaboratorProfile.service_types.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Service Types:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.service_types.slice(0, 3).map((type: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-purple-100 text-purple-800 text-xs font-medium rounded">
+                                                  {type}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.service_types.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.service_types.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.investment_stages && collaboratorProfile.investment_stages.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Investment Stages:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.investment_stages.slice(0, 3).map((stage: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+                                                  {stage}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.investment_stages.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.investment_stages.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.domain && collaboratorProfile.domain.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Domain:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.domain.slice(0, 3).map((dom: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-medium rounded">
+                                                  {dom}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.domain.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.domain.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.geography && collaboratorProfile.geography.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Geography:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.geography.slice(0, 3).map((geo: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
+                                                  {geo}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.geography.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.geography.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : null}
+
+                                    {/* Service Description */}
+                                    {collaboratorProfile?.service_description && (
+                                      <div>
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Service Description</div>
+                                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed line-clamp-2">{collaboratorProfile.service_description}</p>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+
+                                {/* For Mentors */}
+                                {request.requester_type === 'Mentor' && (
+                                  <>
+                                    {/* Expertise Areas, Sectors, Mentoring Stages */}
+                                    {(collaboratorProfile?.expertise_areas && collaboratorProfile.expertise_areas.length > 0) ||
+                                     (collaboratorProfile?.sectors && collaboratorProfile.sectors.length > 0) ||
+                                     (collaboratorProfile?.mentoring_stages && collaboratorProfile.mentoring_stages.length > 0) ? (
+                                      <div className="space-y-2">
+                                        {collaboratorProfile.expertise_areas && collaboratorProfile.expertise_areas.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Expertise:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.expertise_areas.slice(0, 3).map((area: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-xs font-medium rounded">
+                                                  {area}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.expertise_areas.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.expertise_areas.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.sectors && collaboratorProfile.sectors.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Sectors:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.sectors.slice(0, 3).map((sector: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-pink-100 text-pink-800 text-xs font-medium rounded">
+                                                  {sector}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.sectors.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.sectors.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.mentoring_stages && collaboratorProfile.mentoring_stages.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Mentoring Stages:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.mentoring_stages.slice(0, 3).map((stage: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-teal-100 text-teal-800 text-xs font-medium rounded">
+                                                  {stage}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.mentoring_stages.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.mentoring_stages.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : null}
+
+                                    {/* Mentoring Approach */}
+                                    {collaboratorProfile?.mentoring_approach && (
+                                      <div>
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Mentoring Approach</div>
+                                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed line-clamp-2">{collaboratorProfile.mentoring_approach}</p>
+                                      </div>
+                                    )}
+
+                                    {/* Companies Mentored */}
+                                    {collaboratorProfile?.companies_mentored && (
+                                      <div className="text-xs text-slate-600">
+                                        <span className="font-medium">Companies Mentored:</span> {collaboratorProfile.companies_mentored}
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+
+                              {/* Connection Details */}
+                              <div className="mb-3 pb-3 border-b border-slate-200">
+                                <div className="text-xs text-slate-600">
+                                  <span className="font-medium">Connected:</span> {new Date(request.responded_at || request.created_at).toLocaleDateString()}
+                                </div>
+                              </div>
+
+                              {/* Action Button */}
+                              <div className="flex flex-wrap items-center gap-2 mt-auto">
+                                <button
+                                  onClick={() => handleViewCollaborator(request)}
+                                  className="flex-1 min-w-[90px] hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 bg-white px-2 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center"
+                                >
+                                  <svg className="h-3 w-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                  </svg>
+                                  View Profile
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {collaborationSubTab === 'collaboratorRequests' && (
+              <div>
+                {loadingCollaborationRequests ? (
+                  <div className="text-center py-8 text-slate-600">Loading requests...</div>
+                ) : collaborationRequests.length === 0 ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
+                    <p className="font-medium text-slate-800 mb-1">No collaborator requests</p>
+                    <p className="text-slate-600">Incoming requests will be listed here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {collaborationRequests.map((request) => {
+                      const requesterUser = users.find(u => u.id === request.requester_id);
+                      const collaboratorProfile = collaboratorProfiles[request.requester_id] || null;
+                      
+                      // Get video URL and logo
+                      const videoUrl = collaboratorProfile?.video_url || collaboratorProfile?.videoUrl;
+                      const logoUrl = collaboratorProfile?.logo_url || requesterUser?.logo_url;
+                      const firmName = collaboratorProfile?.firm_name || collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || '';
+                      const location = collaboratorProfile?.global_hq || collaboratorProfile?.location || '';
+                      
+                      // Get YouTube embed URL if video exists
+                      const getYoutubeEmbedUrl = (url?: string): string | null => {
+                        if (!url) return null;
+                        try {
+                          const urlObj = new URL(url);
+                          if (urlObj.hostname.includes('youtube.com')) {
+                            const videoId = urlObj.searchParams.get('v');
+                            return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+                          } else if (urlObj.hostname.includes('youtu.be')) {
+                            const videoId = urlObj.pathname.slice(1);
+                            return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+                          }
+                        } catch {
+                          return null;
+                        }
+                        return null;
+                      };
+                      
+                      const videoEmbedUrl = videoUrl ? getYoutubeEmbedUrl(videoUrl) : null;
+                      const mediaType = collaboratorProfile?.media_type || (videoUrl ? 'video' : 'logo');
+
+                      // Format currency helper
+                      const formatCurrency = (value?: number, currency?: string) => {
+                        if (!value) return 'N/A';
+                        const currencyCode = currency || 'USD';
+                        return new Intl.NumberFormat('en-US', {
+                          style: 'currency',
+                          currency: currencyCode,
+                          notation: 'compact',
+                          maximumFractionDigits: 0
+                        }).format(value);
+                      };
+
+                      return (
+                        <Card key={request.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 border border-slate-200 bg-white max-w-6xl">
+                          <div className="flex flex-col md:flex-row">
+                            {/* Left Side: Video/Logo Section - Smaller */}
+                            <div className="md:w-1/4 relative h-48 md:h-auto md:min-h-[250px] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+                              {videoEmbedUrl && mediaType === 'video' ? (
+                                <div className="relative w-full h-full">
+                                  <iframe
+                                    src={videoEmbedUrl}
+                                    title={`Profile video for ${requesterUser?.name || 'Collaborator'}`}
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                    className="absolute top-0 left-0 w-full h-full"
+                                  />
+                                </div>
+                              ) : logoUrl && logoUrl !== '#' ? (
+                                <div className="w-full h-full flex items-center justify-center bg-white p-4">
+                                  <img 
+                                    src={logoUrl} 
+                                    alt={`${requesterUser?.name || 'Collaborator'} logo`}
+                                    className="max-w-full max-h-full object-contain"
+                                    onError={(e) => {
+                                      const target = e.target as HTMLImageElement;
+                                      target.style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-slate-400">
+                                  <div className="text-center">
+                                    <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    <p className="text-xs">No media</p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Right Side: Full Details Section */}
+                            <div className="md:w-3/4 p-4 sm:p-6 flex flex-col">
+                              {/* Header */}
+                              <div className="mb-4">
+                                <div className="flex items-start justify-between mb-2 gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1 break-words">
+                                      {collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || requesterUser?.name || 'Unknown'}
+                                    </h3>
+                                    {firmName && (
+                                      <p className="text-sm text-slate-600 font-medium">{firmName}</p>
+                                    )}
+                                  </div>
+                                  <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 flex-shrink-0">
+                                    {request.requester_type}
+                                  </span>
+                                </div>
+
+                                {/* Basic Info: Type, Location, Range (varies by user type) */}
+                                <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm mb-3 pb-3 border-b border-slate-200">
+                                  {/* For Investors */}
+                                  {request.requester_type === 'Investor' && (
+                                    <>
+                                      {collaboratorProfile?.firm_type && (
+                                        <span className="text-slate-700 font-medium">{collaboratorProfile.firm_type}</span>
+                                      )}
+                                      {location && (
+                                        <>
+                                          {collaboratorProfile?.firm_type && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600 flex items-center gap-1">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            </svg>
+                                            <span className="capitalize">{location}</span>
+                                          </span>
+                                        </>
+                                      )}
+                                      {collaboratorProfile?.ticket_size_min && collaboratorProfile?.ticket_size_max && (
+                                        <>
+                                          {(collaboratorProfile?.firm_type || location) && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600 flex items-center gap-1">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <span>{formatCurrency(collaboratorProfile.ticket_size_min, collaboratorProfile.currency)} - {formatCurrency(collaboratorProfile.ticket_size_max, collaboratorProfile.currency)}</span>
+                                          </span>
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                  
+                                  {/* For Investment Advisors */}
+                                  {request.requester_type === 'Investment Advisor' && (
+                                    <>
+                                      {location && (
+                                        <span className="text-slate-600 flex items-center gap-1">
+                                          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                          </svg>
+                                          <span className="capitalize">{location}</span>
+                                        </span>
+                                      )}
+                                      {collaboratorProfile?.minimum_investment && collaboratorProfile?.maximum_investment && (
+                                        <>
+                                          {location && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600 flex items-center gap-1">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <span>{formatCurrency(collaboratorProfile.minimum_investment, collaboratorProfile.currency)} - {formatCurrency(collaboratorProfile.maximum_investment, collaboratorProfile.currency)}</span>
+                                          </span>
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                  
+                                  {/* For Mentors */}
+                                  {request.requester_type === 'Mentor' && (
+                                    <>
+                                      {collaboratorProfile?.mentor_type && (
+                                        <span className="text-slate-700 font-medium">{collaboratorProfile.mentor_type}</span>
+                                      )}
+                                      {location && (
+                                        <>
+                                          {collaboratorProfile?.mentor_type && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600 flex items-center gap-1">
+                                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            </svg>
+                                            <span className="capitalize">{location}</span>
+                                          </span>
+                                        </>
+                                      )}
+                                      {collaboratorProfile?.years_of_experience && (
+                                        <>
+                                          {(collaboratorProfile?.mentor_type || location) && <span className="text-slate-300">•</span>}
+                                          <span className="text-slate-600">
+                                            {collaboratorProfile.years_of_experience} years experience
+                                          </span>
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                  
+                                  {/* For other types (CA, CS, Incubation) */}
+                                  {!['Investor', 'Investment Advisor', 'Mentor'].includes(request.requester_type) && location && (
+                                    <span className="text-slate-600 flex items-center gap-1">
+                                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                      </svg>
+                                      <span className="capitalize">{location}</span>
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Contact Links */}
+                                {(collaboratorProfile?.website || collaboratorProfile?.linkedin_link) && (
+                                  <div className="flex flex-wrap items-center gap-3 mb-3 pb-3 border-b border-slate-200">
+                                    {collaboratorProfile.website && (
+                                      <a
+                                        href={collaboratorProfile.website}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-700 flex items-center gap-1.5 text-xs sm:text-sm font-medium transition-colors"
+                                      >
+                                        <svg className="h-3 w-3 sm:h-4 sm:w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                                        </svg>
+                                        Website
+                                      </a>
+                                    )}
+                                    {collaboratorProfile.linkedin_link && (
+                                      <a
+                                        href={collaboratorProfile.linkedin_link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-700 flex items-center gap-1.5 text-xs sm:text-sm font-medium transition-colors"
+                                      >
+                                        <svg className="h-3 w-3 sm:h-4 sm:w-4" fill="currentColor" viewBox="0 0 24 24">
+                                          <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+                                        </svg>
+                                        LinkedIn
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Details Section - Varies by User Type */}
+                              <div className="space-y-3 mb-3 pb-3 border-b border-slate-200 flex-1">
+                                {/* For Investors */}
+                                {request.requester_type === 'Investor' && (
+                                  <>
+                                    {/* Investment Stages and Geography */}
+                                    {(collaboratorProfile?.investment_stages && collaboratorProfile.investment_stages.length > 0) || (collaboratorProfile?.geography && collaboratorProfile.geography.length > 0) ? (
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {collaboratorProfile.investment_stages && collaboratorProfile.investment_stages.length > 0 && (
+                                          <>
+                                            <span className="text-xs font-medium text-slate-500">Investment Stages:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.investment_stages.slice(0, 3).map((stage: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+                                                  {stage}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.investment_stages.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.investment_stages.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </>
+                                        )}
+                                        {collaboratorProfile.geography && collaboratorProfile.geography.length > 0 && (
+                                          <>
+                                            {collaboratorProfile.investment_stages && collaboratorProfile.investment_stages.length > 0 && (
+                                              <span className="text-slate-300 mx-1">•</span>
+                                            )}
+                                            <span className="text-xs font-medium text-slate-500">Geography:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.geography.slice(0, 3).map((geo: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
+                                                  {geo}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.geography.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.geography.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </>
+                                        )}
+                                      </div>
+                                    ) : null}
+
+                                    {/* Investment Thesis */}
+                                    {collaboratorProfile?.investment_thesis && (
+                                      <div>
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Investment Thesis</div>
+                                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed line-clamp-2">{collaboratorProfile.investment_thesis}</p>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+
+                                {/* For Investment Advisors */}
+                                {request.requester_type === 'Investment Advisor' && (
+                                  <>
+                                    {/* Service Types, Investment Stages, Domain, Geography */}
+                                    {(collaboratorProfile?.service_types && collaboratorProfile.service_types.length > 0) || 
+                                     (collaboratorProfile?.investment_stages && collaboratorProfile.investment_stages.length > 0) ||
+                                     (collaboratorProfile?.domain && collaboratorProfile.domain.length > 0) ||
+                                     (collaboratorProfile?.geography && collaboratorProfile.geography.length > 0) ? (
+                                      <div className="space-y-2">
+                                        {collaboratorProfile.service_types && collaboratorProfile.service_types.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Service Types:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.service_types.slice(0, 3).map((type: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-purple-100 text-purple-800 text-xs font-medium rounded">
+                                                  {type}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.service_types.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.service_types.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.investment_stages && collaboratorProfile.investment_stages.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Investment Stages:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.investment_stages.slice(0, 3).map((stage: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+                                                  {stage}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.investment_stages.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.investment_stages.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.domain && collaboratorProfile.domain.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Domain:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.domain.slice(0, 3).map((dom: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-medium rounded">
+                                                  {dom}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.domain.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.domain.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.geography && collaboratorProfile.geography.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Geography:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.geography.slice(0, 3).map((geo: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
+                                                  {geo}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.geography.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.geography.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : null}
+
+                                    {/* Service Description */}
+                                    {collaboratorProfile?.service_description && (
+                                      <div>
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Service Description</div>
+                                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed line-clamp-2">{collaboratorProfile.service_description}</p>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+
+                                {/* For Mentors */}
+                                {request.requester_type === 'Mentor' && (
+                                  <>
+                                    {/* Expertise Areas, Sectors, Mentoring Stages */}
+                                    {(collaboratorProfile?.expertise_areas && collaboratorProfile.expertise_areas.length > 0) ||
+                                     (collaboratorProfile?.sectors && collaboratorProfile.sectors.length > 0) ||
+                                     (collaboratorProfile?.mentoring_stages && collaboratorProfile.mentoring_stages.length > 0) ? (
+                                      <div className="space-y-2">
+                                        {collaboratorProfile.expertise_areas && collaboratorProfile.expertise_areas.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Expertise:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.expertise_areas.slice(0, 3).map((area: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-xs font-medium rounded">
+                                                  {area}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.expertise_areas.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.expertise_areas.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.sectors && collaboratorProfile.sectors.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Sectors:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.sectors.slice(0, 3).map((sector: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-pink-100 text-pink-800 text-xs font-medium rounded">
+                                                  {sector}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.sectors.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.sectors.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {collaboratorProfile.mentoring_stages && collaboratorProfile.mentoring_stages.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-slate-500">Mentoring Stages:</span>
+                                            <div className="flex flex-wrap gap-1">
+                                              {collaboratorProfile.mentoring_stages.slice(0, 3).map((stage: string, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-teal-100 text-teal-800 text-xs font-medium rounded">
+                                                  {stage}
+                                                </span>
+                                              ))}
+                                              {collaboratorProfile.mentoring_stages.length > 3 && (
+                                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+                                                  +{collaboratorProfile.mentoring_stages.length - 3} more
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : null}
+
+                                    {/* Mentoring Approach */}
+                                    {collaboratorProfile?.mentoring_approach && (
+                                      <div>
+                                        <div className="text-xs font-medium text-slate-500 mb-1">Mentoring Approach</div>
+                                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed line-clamp-2">{collaboratorProfile.mentoring_approach}</p>
+                                      </div>
+                                    )}
+
+                                    {/* Companies Mentored */}
+                                    {collaboratorProfile?.companies_mentored && (
+                                      <div className="text-xs text-slate-600">
+                                        <span className="font-medium">Companies Mentored:</span> {collaboratorProfile.companies_mentored}
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+
+                              {/* Request Details */}
+                              <div className="mb-3 pb-3 border-b border-slate-200">
+                                <div className="text-xs text-slate-600 mb-1">
+                                  <span className="font-medium">Request Date:</span> {new Date(request.created_at).toLocaleDateString()}
+                                </div>
+                                {request.message && (
+                                  <div className="text-xs text-slate-600 mt-1 line-clamp-2">
+                                    <span className="font-medium">Message:</span> {request.message}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Action Buttons */}
+                              <div className="flex flex-wrap items-center gap-2 mt-auto">
+                                <button
+                                  onClick={() => handleViewCollaborator(request)}
+                                  className="flex-1 min-w-[90px] hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 bg-white px-2 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center"
+                                >
+                                  <svg className="h-3 w-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                  </svg>
+                                  View
+                                </button>
+                                <button
+                                  onClick={() => handleAcceptCollaborationRequest(request)}
+                                  disabled={isLoading}
+                                  className="flex-1 min-w-[90px] transition-all duration-200 shadow text-white px-2 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {isLoading ? 'Accepting...' : 'Accept'}
+                                </button>
+                                <button
+                                  onClick={() => handleRejectCollaborationRequest(request)}
+                                  disabled={isLoading}
+                                  className="flex-1 min-w-[90px] transition-all duration-200 border border-red-200 bg-white text-red-600 hover:bg-red-50 hover:text-red-700 px-2 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {isLoading ? 'Rejecting...' : 'Reject'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
 
       {/* Investor Dashboard Modal */}
       {viewingInvestorDashboard && selectedInvestor && (
@@ -4288,6 +7038,411 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Mandate Tab */}
+      {activeTab === 'mandate' && (
+        <div className="animate-fade-in max-w-6xl mx-auto w-full">
+          {/* Header */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 mb-2">Mandate</h2>
+                <p className="text-sm text-slate-600">Create and manage investment mandates with specific criteria</p>
+              </div>
+              <Button onClick={handleAddMandate} size="sm">
+                <PlusCircle className="h-4 w-4 mr-2" />
+                Add Mandate
+              </Button>
+            </div>
+
+            {/* Mandate Tabs */}
+            {isLoadingMandates ? (
+              <div className="text-center py-4 text-slate-500">Loading mandates...</div>
+            ) : mandates.length === 0 ? (
+              <Card className="text-center py-12">
+                <Filter className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-slate-800 mb-2">No Mandates Created</h3>
+                <p className="text-slate-500 mb-4">Create your first mandate to filter startups based on your investment criteria</p>
+                <Button onClick={handleAddMandate}>
+                  <PlusCircle className="h-4 w-4 mr-2" />
+                  Create Your First Mandate
+                </Button>
+              </Card>
+            ) : (
+              <div className="border-b border-slate-200 mb-6">
+                <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto pb-2" aria-label="Mandate Tabs">
+                  {mandates.map((mandate) => (
+                    <button
+                      key={mandate.id}
+                      onClick={() => setSelectedMandateId(mandate.id)}
+                      className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-2 ${
+                        selectedMandateId === mandate.id
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      <Filter className="h-4 w-4" />
+                      {mandate.name}
+                      <div className="flex items-center gap-1 ml-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditMandate(mandate);
+                          }}
+                          className="p-1 hover:bg-slate-100 rounded"
+                          title="Edit mandate"
+                        >
+                          <Edit className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteMandate(mandate.id);
+                          }}
+                          className="p-1 hover:bg-red-100 rounded text-red-600"
+                          title="Delete mandate"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </button>
+                  ))}
+                </nav>
+              </div>
+            )}
+          </div>
+
+          {/* Filtered Startups Display for Selected Mandate */}
+          {selectedMandateId ? (
+            (() => {
+              const selectedMandate = mandates.find(m => m.id === selectedMandateId);
+              if (!selectedMandate) {
+                return (
+                  <Card className="text-center py-20">
+                    <div className="max-w-sm mx-auto">
+                      <Filter className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                      <h3 className="text-xl font-semibold text-slate-800 mb-2">Mandate Not Found</h3>
+                      <p className="text-slate-500">Please select a valid mandate</p>
+                    </div>
+                  </Card>
+                );
+              }
+
+              const filteredStartups = getFilteredMandateStartups(selectedMandate);
+              
+              if (isLoadingPitches) {
+                return (
+                  <Card className="text-center py-20">
+                    <div className="max-w-sm mx-auto">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                      <h3 className="text-xl font-semibold text-slate-800 mb-2">Loading Startups...</h3>
+                      <p className="text-slate-500">Fetching active fundraising startups</p>
+                    </div>
+                  </Card>
+                );
+              }
+              
+              if (filteredStartups.length === 0) {
+                return (
+                  <Card className="text-center py-20">
+                    <div className="max-w-sm mx-auto">
+                      <Filter className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                      <h3 className="text-xl font-semibold text-slate-800 mb-2">No Startups Found</h3>
+                      <p className="text-slate-500 mb-4">No startups match the criteria for "{selectedMandate.name}". Try adjusting the mandate filters or create a new mandate.</p>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleEditMandate(selectedMandate)}
+                      >
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit Mandate Criteria
+                      </Button>
+                    </div>
+                  </Card>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-slate-600">
+                      Showing <span className="font-semibold text-slate-800">{filteredStartups.length}</span> startup{filteredStartups.length !== 1 ? 's' : ''} matching <span className="font-semibold text-blue-600">"{selectedMandate.name}"</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleEditMandate(selectedMandate)}
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit Mandate
+                    </Button>
+                  </div>
+                  {filteredStartups.map((startup) => {
+                    const videoUrl = investorService.getYoutubeEmbedUrl(startup.pitchVideoUrl);
+                    const isFavorited = favoritedPitches.has(startup.id);
+
+                    return (
+                      <Card key={startup.id} className="p-6">
+                        <div className="flex flex-col md:flex-row gap-6">
+                          {/* Video/Logo Section */}
+                          <div className="md:w-1/3">
+                            {videoUrl ? (
+                              <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black">
+                                <iframe
+                                  src={videoUrl}
+                                  title={`Pitch video for ${startup.name}`}
+                                  frameBorder="0"
+                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                  allowFullScreen
+                                  className="absolute top-0 left-0 w-full h-full"
+                                />
+                              </div>
+                            ) : startup.logoUrl && startup.logoUrl !== '#' ? (
+                              <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white flex items-center justify-center">
+                                <img
+                                  src={startup.logoUrl}
+                                  alt={`${startup.name} logo`}
+                                  className="w-full h-full object-contain"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-full aspect-video bg-slate-200 rounded-lg flex items-center justify-center">
+                                <svg className="h-12 w-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Content Section */}
+                          <div className="md:w-2/3 flex flex-col">
+                            <div className="mb-3">
+                              <div className="flex items-start justify-between gap-3 mb-2">
+                                <h3 className="text-xl font-bold text-slate-800 flex-1">{startup.name}</h3>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge status={startup.complianceStatus} />
+                                {startup.isStartupNationValidated && (
+                                  <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full flex items-center gap-1">
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Verified
+                                  </span>
+                                )}
+                                <span className="text-sm text-slate-600">{startup.sector}</span>
+                              </div>
+                            </div>
+
+                            {/* Investment Details */}
+                            <div className="mb-4">
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500">Investment Ask:</span>
+                                  <span className="text-xs font-medium text-slate-600">
+                                    {investorService.formatCurrency(startup.investmentValue, startup.currency || 'USD')}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500">Equity:</span>
+                                  <span className="text-xs font-medium text-slate-600">{startup.equityAllocation}%</span>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500">Round Type:</span>
+                                  <span className="text-xs font-medium text-slate-600">{startup.fundraisingType}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500">Currency:</span>
+                                  <span className="text-xs font-medium text-slate-600">{startup.currency || 'USD'}</span>
+                                </div>
+                                {startup.stage && (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs text-slate-500">Stage:</span>
+                                    <span className="text-xs font-medium text-slate-600">{startup.stage}</span>
+                                  </div>
+                                )}
+                                {startup.domain && (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs text-slate-500">Domain:</span>
+                                    <span className="text-xs font-medium text-slate-600">{startup.domain}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="mt-auto flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onViewStartup(startup.id, 'discovery')}
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Details
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              );
+            })()
+          ) : null}
+
+          {/* Create/Edit Mandate Modal */}
+          {showMandateModal && (
+            <Modal
+              isOpen={showMandateModal}
+              onClose={() => {
+                setShowMandateModal(false);
+                setEditingMandate(null);
+                setMandateFormData({
+                  advisor_id: currentUser?.id || '',
+                  name: '',
+                  stage: '',
+                  round_type: '',
+                  domain: '',
+                  amount_min: undefined,
+                  amount_max: undefined,
+                  equity_min: undefined,
+                  equity_max: undefined
+                });
+              }}
+              title={editingMandate ? 'Edit Mandate' : 'Create New Mandate'}
+              size="small"
+            >
+              <div className="space-y-3">
+                <Input
+                  label="Mandate Name *"
+                  value={mandateFormData.name}
+                  onChange={(e) => setMandateFormData({ ...mandateFormData, name: e.target.value })}
+                  placeholder="e.g., Early Stage SaaS, Healthcare Series A"
+                  required
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Stage Filter */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Stage</label>
+                    <select
+                      value={mandateFormData.stage || ''}
+                      onChange={(e) => setMandateFormData({ ...mandateFormData, stage: e.target.value || undefined })}
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">All Stages</option>
+                      {mandateFilterOptions.stages.map(stage => (
+                        <option key={stage} value={stage}>{stage}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Round Type Filter */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Round Type</label>
+                    <select
+                      value={mandateFormData.round_type || ''}
+                      onChange={(e) => setMandateFormData({ ...mandateFormData, round_type: e.target.value || undefined })}
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">All Round Types</option>
+                      {mandateFilterOptions.roundTypes.map(roundType => (
+                        <option key={roundType} value={roundType}>{roundType}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Domain Filter */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Domain</label>
+                  <select
+                    value={mandateFormData.domain || ''}
+                    onChange={(e) => setMandateFormData({ ...mandateFormData, domain: e.target.value || undefined })}
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  >
+                    <option value="">All Domains</option>
+                    {mandateFilterOptions.domains.map(domain => (
+                      <option key={domain} value={domain}>{domain}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Amount Range */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    label="Min Investment Amount"
+                    type="number"
+                    value={mandateFormData.amount_min || ''}
+                    onChange={(e) => setMandateFormData({ ...mandateFormData, amount_min: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    placeholder="Min amount"
+                  />
+                  <Input
+                    label="Max Investment Amount"
+                    type="number"
+                    value={mandateFormData.amount_max || ''}
+                    onChange={(e) => setMandateFormData({ ...mandateFormData, amount_max: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    placeholder="Max amount"
+                  />
+                </div>
+
+                {/* Equity Range */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    label="Min Equity %"
+                    type="number"
+                    value={mandateFormData.equity_min || ''}
+                    onChange={(e) => setMandateFormData({ ...mandateFormData, equity_min: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    placeholder="Min equity"
+                    min="0"
+                    max="100"
+                  />
+                  <Input
+                    label="Max Equity %"
+                    type="number"
+                    value={mandateFormData.equity_max || ''}
+                    onChange={(e) => setMandateFormData({ ...mandateFormData, equity_max: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    placeholder="Max equity"
+                    min="0"
+                    max="100"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowMandateModal(false);
+                      setEditingMandate(null);
+                      setMandateFormData({
+                        advisor_id: currentUser?.id || '',
+                        name: '',
+                        stage: '',
+                        round_type: '',
+                        domain: '',
+                        amount_min: undefined,
+                        amount_max: undefined,
+                        equity_min: undefined,
+                        equity_max: undefined
+                      });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveMandate}>
+                    {editingMandate ? 'Update Mandate' : 'Create Mandate'}
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          )}
         </div>
       )}
     </div>

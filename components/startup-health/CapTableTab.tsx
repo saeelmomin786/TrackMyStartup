@@ -1950,8 +1950,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         const agreementUrlEntry = formData.get('mentor-agreement-url-new');
         const agreementUrl = typeof agreementUrlEntry === 'string' ? agreementUrlEntry.trim() : '';
         
-        if (!mentorName || !mentorCode || !feeType || (!agreementFile && !agreementUrl)) {
-            setError('Please fill in all required fields and upload the signed agreement file or provide a valid cloud link.');
+        if (!mentorName || !mentorCode || !feeType) {
+            setError('Please fill in all required fields (Mentor Name, Mentor Code, and Fee Type).');
             return;
         }
         
@@ -1959,24 +1959,28 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setError(null);
             setIsLoading(true);
             
-            // Handle file upload for signed agreement
-            let signedAgreementUrl = agreementUrl;
+            // Handle file upload for signed agreement (optional)
+            let signedAgreementUrl: string | undefined = agreementUrl || undefined;
             if (agreementFile) {
                 try {
                     const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/mentor_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
                         signedAgreementUrl = uploadResult.url;
                     } else {
-                        throw new Error(uploadResult.error || 'Upload failed');
+                        console.warn('Failed to upload agreement file, continuing without it:', uploadResult.error);
+                        // Don't fail the entire operation if file upload fails
                     }
                 } catch (uploadErr) {
-                    console.error('Failed to upload agreement file:', uploadErr);
-                    setError('Failed to upload agreement file');
-                    return;
+                    console.warn('Failed to upload agreement file, continuing without it:', uploadErr);
+                    // Don't fail the entire operation if file upload fails
                 }
             }
             
-            // Create mentor record using the service
+            // Get current user ID for creating mentor request
+            const { data: { user: currentUser } } = await supabase.auth.getUser();
+            const requesterId = currentUser?.id;
+
+            // Create mentor record using the service (this will also create a mentor request)
             const newMentorRecord = await mentorEquityService.createMentorRecord({
                 startupId: startup.id,
                 mentorName,
@@ -1989,7 +1993,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 equityAllocated,
                 postMoneyValuation,
                 signedAgreementUrl
-            });
+            }, requesterId);
             
             // Add to local state
             setMentorRecords(prev => [newMentorRecord, ...prev]);
@@ -4034,8 +4038,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                         const hiddenInput = document.getElementById('mentor-agreement-url-new') as HTMLInputElement;
                                         if (hiddenInput) hiddenInput.value = '';
                                     }}
-                                    placeholder="Paste your cloud drive link here..."
-                                    label="Upload Signed Agreement"
+                                    placeholder="Paste your cloud drive link here (optional)..."
+                                    label="Upload Signed Agreement (Optional)"
                                     accept=".pdf,.doc,.docx"
                                     maxSize={10}
                                     documentType="signed agreement"

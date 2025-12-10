@@ -740,6 +740,10 @@ class CapTableService {
       validationRequested: item.validation_requested,
       pitchDeckUrl: item.pitch_deck_url,
       pitchVideoUrl: item.pitch_video_url,
+      logoUrl: item.logo_url,
+      businessPlanUrl: item.business_plan_url,
+      websiteUrl: item.website_url,
+      linkedInUrl: item.linkedin_url,
       onePagerUrl: item.one_pager_url,
       // One‑pager text fields (may be null in DB)
       onePagerDate: item.one_pager_date || null,
@@ -777,12 +781,16 @@ class CapTableService {
         throw new Error('Fundraising type is required');
       }
       
-      if (!fundraisingData.value || fundraisingData.value <= 0) {
-        throw new Error('Valid fundraising value is required');
-      }
-      
-      if (!fundraisingData.equity || fundraisingData.equity <= 0 || fundraisingData.equity > 100) {
-        throw new Error('Valid equity percentage (1-100%) is required');
+      // Allow saving even if value/equity are 0 (user might be setting up the round)
+      // Only validate if they're trying to activate fundraising
+      if (fundraisingData.active) {
+        if (!fundraisingData.value || fundraisingData.value <= 0) {
+          throw new Error('Valid fundraising value is required when fundraising is active');
+        }
+        
+        if (!fundraisingData.equity || fundraisingData.equity <= 0 || fundraisingData.equity > 100) {
+          throw new Error('Valid equity percentage (1-100%) is required when fundraising is active');
+        }
       }
       
       // Check if fundraising details exist
@@ -799,6 +807,10 @@ class CapTableService {
         validation_requested: fundraisingData.validationRequested,
         pitch_deck_url: fundraisingData.pitchDeckUrl || null,
         pitch_video_url: fundraisingData.pitchVideoUrl || null,
+        logo_url: fundraisingData.logoUrl || null,
+        business_plan_url: fundraisingData.businessPlanUrl || null,
+        website_url: fundraisingData.websiteUrl || null,
+        linkedin_url: fundraisingData.linkedInUrl || null,
         one_pager_url: fundraisingData.onePagerUrl || null,
         // One‑pager fields mapped into DB
         one_pager_date: fundraisingData.onePagerDate || null,
@@ -829,6 +841,7 @@ class CapTableService {
       // 1) If fundraisingData.id is present, update that specific row
       // 2) Else, update active record
       // 3) Else, update most recent record
+      // 4) If no record exists, create a new one (upsert behavior)
       const byIdRecord = fundraisingData.id
         ? existing.find(r => r.id === fundraisingData.id)
         : undefined;
@@ -838,24 +851,115 @@ class CapTableService {
       const target = byIdRecord || activeRecord || fallbackRecord;
 
       if (!target || !target.id) {
-        // As per requirement: do not create new rows, only update existing
-        throw new Error('No existing fundraising round found to update for this startup.');
+        // No existing record found - create a new one
+        console.log('🆕 No existing fundraising record found, creating new record...');
+        const insertData = {
+          startup_id: startupId,
+          ...updateData
+        };
+        
+        const { data: insertedData, error: insertError } = await supabase
+          .from('fundraising_details')
+          .insert(insertData)
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('❌ Error creating fundraising details:', insertError);
+          throw new Error(`Create failed: ${insertError.message}`);
+        }
+
+        data = insertedData;
+        console.log('✅ Fundraising details created successfully:', data);
+      } else {
+        // Update existing record
+        console.log('🔄 Updating fundraising record:', target.id);
+        console.log('🔄 Update data being sent:', updateData);
+        console.log('🔄 Target ID type:', typeof target.id, 'Value:', target.id);
+        
+        // Perform the update - use select() without single() to avoid coercion errors
+        const { data: updatedData, error: updateError } = await supabase
+          .from('fundraising_details')
+          .update(updateData)
+          .eq('id', target.id)
+          .select(); // Returns array, more reliable than single()
+
+        if (updateError) {
+          console.error('❌ Error updating fundraising details:', updateError);
+          console.error('❌ Update error details:', JSON.stringify(updateError, null, 2));
+          throw new Error(`Update failed: ${updateError.message}`);
+        }
+
+        // Handle array response
+        if (!updatedData || updatedData.length === 0) {
+          console.warn('⚠️ Update query returned no rows, but update may have succeeded. Refetching...');
+          // Update might have succeeded but RLS prevented returning data
+          // Refetch directly from database to get raw format
+          const { data: refetchData, error: refetchError } = await supabase
+            .from('fundraising_details')
+            .select('*')
+            .eq('id', target.id)
+            .maybeSingle(); // Use maybeSingle() to avoid error if no rows
+          
+          if (refetchError) {
+            console.error('❌ Error refetching after update:', refetchError);
+            // Fallback: use getFundraisingDetails and convert
+            const refreshed = await this.getFundraisingDetails(startupId);
+            const updated = refreshed.find(r => r.id === target.id) || refreshed.find(r => r.active) || refreshed[0];
+            
+            if (!updated) {
+              throw new Error('Update may have succeeded but could not refetch the updated record');
+            }
+            
+            // Convert FundraisingDetails format to database format
+            data = {
+              id: updated.id,
+              active: updated.active,
+              type: updated.type,
+              value: updated.value,
+              equity: updated.equity,
+              domain: updated.domain,
+              stage: updated.stage,
+              validation_requested: updated.validationRequested,
+              pitch_deck_url: updated.pitchDeckUrl,
+              pitch_video_url: updated.pitchVideoUrl,
+              business_plan_url: updated.businessPlanUrl,
+              website_url: updated.websiteUrl,
+              linkedin_url: updated.linkedInUrl,
+              one_pager_url: updated.onePagerUrl,
+              one_pager_date: updated.onePagerDate,
+              one_pager_one_liner: updated.onePagerOneLiner,
+              problem_statement: updated.problemStatement,
+              solution: updated.solutionText,
+              growth_challenge: updated.growthChallenge,
+              usp: updated.uspText,
+              competition: updated.competitionText,
+              team: updated.teamText,
+              tam: updated.tamText,
+              sam: updated.samText,
+              som: updated.somText,
+              traction: updated.tractionText,
+              ask_utilization: updated.askUtilizationText,
+              revenue_this_year: updated.revenueThisYear,
+              revenue_last_year: updated.revenueLastYear,
+              revenue_next_month: updated.revenueNextMonth,
+              gross_profit_margin: updated.grossProfitMargin,
+              net_profit_margin: updated.netProfitMargin,
+              fixed_cost_last_3_months: updated.fixedCostLast3Months
+            };
+            console.log('✅ Update succeeded (verified via getFundraisingDetails):', data);
+          } else if (refetchData) {
+            data = refetchData;
+            console.log('✅ Update succeeded (verified via refetch):', data);
+          } else {
+            throw new Error('Update query returned no rows and refetch also returned no data');
+          }
+        } else {
+          // Successfully got data back
+          data = updatedData[0]; // Get first element from array
+          console.log('✅ Fundraising details updated successfully:', data);
+        }
       }
-
-      console.log('🔄 Updating fundraising record:', target.id);
-      const { data: updatedData, error: updateError } = await supabase
-        .from('fundraising_details')
-        .update(updateData)
-        .eq('id', target.id)
-        .select(); // returns array
-
-      if (updateError) {
-        console.error('❌ Error updating fundraising details:', updateError);
-        throw new Error(`Update failed: ${updateError.message}`);
-      }
-
-      data = Array.isArray(updatedData) ? updatedData[0] : updatedData;
-      console.log('✅ Fundraising details updated successfully:', data);
 
       // Safety: if PostgREST did not return the updated row (data undefined/null),
       // refetch the latest fundraising details and return the active/most-recent one.
@@ -880,7 +984,31 @@ class CapTableService {
         validationRequested: data.validation_requested,
         pitchDeckUrl: data.pitch_deck_url,
         pitchVideoUrl: data.pitch_video_url,
-        onePagerUrl: data.one_pager_url
+        logoUrl: data.logo_url,
+        businessPlanUrl: data.business_plan_url,
+        websiteUrl: data.website_url,
+        linkedInUrl: data.linkedin_url,
+        onePagerUrl: data.one_pager_url,
+        // One‑pager text fields
+        onePagerDate: data.one_pager_date || null,
+        onePagerOneLiner: data.one_pager_one_liner || null,
+        problemStatement: data.problem_statement || null,
+        solutionText: data.solution || null,
+        growthChallenge: data.growth_challenge || null,
+        uspText: data.usp || null,
+        competitionText: data.competition || null,
+        teamText: data.team || null,
+        tamText: data.tam || null,
+        samText: data.sam || null,
+        somText: data.som || null,
+        tractionText: data.traction || null,
+        askUtilizationText: data.ask_utilization || null,
+        revenueThisYear: data.revenue_this_year || null,
+        revenueLastYear: data.revenue_last_year || null,
+        revenueNextMonth: data.revenue_next_month || null,
+        grossProfitMargin: data.gross_profit_margin || null,
+        netProfitMargin: data.net_profit_margin || null,
+        fixedCostLast3Months: data.fixed_cost_last_3_months || null
       };
     } catch (error) {
       console.error('❌ Fundraising details operation failed:', error);
@@ -1299,6 +1427,86 @@ class CapTableService {
       .getPublicUrl(fileName);
 
     return urlData.publicUrl;
+  }
+
+  async uploadLogo(file: File, startupId: number): Promise<string> {
+    // Use consistent filename to replace existing logo instead of creating new files
+    // Extract file extension from original filename
+    const fileExtension = file.name.split('.').pop()?.toLowerCase() || 'png';
+    const fileName = `${startupId}/logo.${fileExtension}`;
+    
+    // First, try to delete the existing logo if it exists (to ensure clean replacement)
+    const existingFiles = await supabase.storage
+      .from('logos')
+      .list(`${startupId}/`, {
+        search: 'logo'
+      });
+    
+    if (existingFiles.data && existingFiles.data.length > 0) {
+      // Delete all existing logo files for this startup
+      const filesToDelete = existingFiles.data.map(f => `${startupId}/${f.name}`);
+      await supabase.storage
+        .from('logos')
+        .remove(filesToDelete);
+    }
+    
+    // Upload the new logo (this will replace if filename matches, or create new)
+    const { data, error } = await supabase.storage
+      .from('logos')
+      .upload(fileName, file, {
+        upsert: true // This replaces the file if it already exists
+      });
+
+    if (error) {
+      console.error('Error uploading logo:', error);
+      throw new Error(`Failed to upload logo: ${error.message}`);
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('logos')
+      .getPublicUrl(data.path);
+
+    return publicUrl;
+  }
+
+  async uploadBusinessPlan(file: File, startupId: number): Promise<string> {
+    // Use consistent filename to replace existing business plan instead of creating new files
+    // Extract file extension from original filename
+    const fileExtension = file.name.split('.').pop()?.toLowerCase() || 'pdf';
+    const fileName = `${startupId}/business-plan.${fileExtension}`;
+    
+    // First, try to delete the existing business plan if it exists (to ensure clean replacement)
+    const existingFiles = await supabase.storage
+      .from('business-plans')
+      .list(`${startupId}/`, {
+        search: 'business-plan'
+      });
+    
+    if (existingFiles.data && existingFiles.data.length > 0) {
+      // Delete all existing business plan files for this startup
+      const filesToDelete = existingFiles.data.map(f => `${startupId}/${f.name}`);
+      await supabase.storage
+        .from('business-plans')
+        .remove(filesToDelete);
+    }
+    
+    // Upload the new business plan (this will replace if filename matches, or create new)
+    const { data, error } = await supabase.storage
+      .from('business-plans')
+      .upload(fileName, file, {
+        upsert: true // This replaces the file if it already exists
+      });
+
+    if (error) {
+      console.error('Error uploading business plan:', error);
+      throw new Error(`Failed to upload business plan: ${error.message}`);
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('business-plans')
+      .getPublicUrl(data.path);
+
+    return publicUrl;
   }
 
   async uploadOnePagerPDF(file: File, startupId: number): Promise<string> {

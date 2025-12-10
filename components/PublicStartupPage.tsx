@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
-import { ArrowLeft, Share2, Building2, TrendingUp, DollarSign, Users, FileText, Video, ExternalLink, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Share2, Building2, TrendingUp, DollarSign, Users, FileText, Video, ExternalLink, CheckCircle, Linkedin, Globe } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { messageService } from '../lib/messageService';
 import { Startup, FundraisingDetails, ComplianceStatus, InvestmentType } from '../types';
@@ -12,6 +12,7 @@ import { toDirectImageUrl } from '../lib/imageUrl';
 import { authService, AuthUser } from '../lib/auth';
 import { paymentService } from '../lib/paymentService';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
+import { getVideoEmbedUrl, VideoSource } from '../lib/videoUtils';
 import LogoTMS from './public/logoTMS.svg';
 
 const PublicStartupPage: React.FC = () => {
@@ -120,29 +121,47 @@ const PublicStartupPage: React.FC = () => {
 
         // Load fundraising details if available (load latest, even if not active)
         try {
-          // Use public view if not authenticated, direct query if authenticated
-          const fundraisingTableName = isUserAuthenticated ? 'fundraising_details' : 'fundraising_details_public';
-          const { data: fundraisingData, error: fundraisingError } = await supabase
+          // Try public view first if not authenticated, fallback to direct table if view fails
+          let fundraisingTableName = isUserAuthenticated ? 'fundraising_details' : 'fundraising_details_public';
+          let { data: fundraisingData, error: fundraisingError } = await supabase
             .from(fundraisingTableName)
             .select('*')
             .eq('startup_id', (startupData as any).id)
             .order('created_at', { ascending: false })
             .limit(1);
 
+          // If view fails and user is not authenticated, try direct table access (RLS policy should allow it)
+          if (fundraisingError && !isUserAuthenticated) {
+            console.log('Public view failed, trying direct table access with RLS policy...', fundraisingError);
+            fundraisingTableName = 'fundraising_details';
+            const retryResult = await supabase
+              .from(fundraisingTableName)
+              .select('*')
+              .eq('startup_id', (startupData as any).id)
+              .order('created_at', { ascending: false })
+              .limit(1);
+            fundraisingData = retryResult.data;
+            fundraisingError = retryResult.error;
+          }
+
           if (!fundraisingError && fundraisingData && (fundraisingData as any[]).length > 0) {
             const fd = (fundraisingData as any[])[0] as any;
             // Map to FundraisingDetails format
-            // Note: domain and validationRequested are not in public view, so they'll be undefined
             setFundraisingDetails({
               active: fd.active,
               type: fd.type,
               value: fd.value,
               equity: fd.equity,
               stage: fd.stage,
-              domain: fd.domain || undefined, // May not be in public view
+              domain: fd.domain || undefined,
               validationRequested: fd.validation_requested || false, // May not be in public view
               pitchDeckUrl: fd.pitch_deck_url,
-              pitchVideoUrl: fd.pitch_video_url
+              pitchVideoUrl: fd.pitch_video_url,
+              logoUrl: fd.logo_url, // Logo URL
+              businessPlanUrl: fd.business_plan_url,
+              websiteUrl: fd.website_url,
+              linkedInUrl: fd.linkedin_url,
+              onePagerUrl: fd.one_pager_url
             });
           }
         } catch (e: any) {
@@ -214,22 +233,16 @@ const PublicStartupPage: React.FC = () => {
     }
   };
 
-  const getYoutubeEmbedUrl = (url?: string): string | null => {
-    if (!url) return null;
-    try {
-      const urlObj = new URL(url);
-      if (urlObj.hostname.includes('youtube.com')) {
-        const videoId = urlObj.searchParams.get('v');
-        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-      } else if (urlObj.hostname.includes('youtu.be')) {
-        const videoId = urlObj.pathname.slice(1);
-        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-      }
-    } catch {
-      return null;
+  // Autoplay state - can be controlled via URL parameter or user preference
+  const [autoplayVideo, setAutoplayVideo] = useState(false);
+  
+  useEffect(() => {
+    // Check if autoplay is requested via URL parameter
+    const autoplayParam = getQueryParam('autoplay');
+    if (autoplayParam === 'true' || autoplayParam === '1') {
+      setAutoplayVideo(true);
     }
-    return null;
-  };
+  }, []);
 
   const handleMakeOffer = async () => {
     console.log('🔍 handleMakeOffer called', { isAuthenticated, currentUser: currentUser?.role, startupId: startup?.id });
@@ -293,6 +306,33 @@ const PublicStartupPage: React.FC = () => {
     url.searchParams.set('pitchId', String(startup.id));
     url.searchParams.set('makeOffer', 'true');
     window.location.href = url.toString();
+  };
+
+  const handleDocumentClick = async (url: string | undefined, documentType: string) => {
+    if (!url || url === '#') return;
+    
+    // Double-check authentication status before proceeding
+    const authCheck = await authService.isAuthenticated();
+    const currentAuthUser = authCheck ? await authService.getCurrentUser() : null;
+    
+    if (!authCheck || !currentAuthUser) {
+      // Show message and redirect to login page
+      messageService.error('Login Required', `You must be logged in to view the ${documentType}. Please log in to continue.`, 3000);
+      // Store the current URL to redirect back after login
+      const currentUrl = window.location.href;
+      sessionStorage.setItem('redirectAfterLogin', currentUrl);
+      // Redirect to login page
+      const url = new URL(window.location.origin + window.location.pathname);
+      url.searchParams.delete('view');
+      url.searchParams.delete('startupId');
+      url.searchParams.delete('id');
+      url.searchParams.set('page', 'login');
+      window.location.href = url.toString();
+      return;
+    }
+    
+    // User is authenticated, open the document
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const handleDueDiligence = async () => {
@@ -563,9 +603,13 @@ const PublicStartupPage: React.FC = () => {
   }
 
   // Pitch video URL comes from fundraising_details, not startups table
-  const videoEmbedUrl = fundraisingDetails?.pitchVideoUrl
-    ? getYoutubeEmbedUrl(fundraisingDetails.pitchVideoUrl)
+  // Get video embed info with autoplay support
+  const videoEmbedInfo = fundraisingDetails?.pitchVideoUrl
+    ? getVideoEmbedUrl(fundraisingDetails.pitchVideoUrl, autoplayVideo)
     : null;
+  
+  const videoEmbedUrl = videoEmbedInfo?.embedUrl || null;
+  const videoSource = videoEmbedInfo?.source || null;
 
   // Convert to ActiveFundraisingStartup format for compatibility
   const activeFundraisingStartup: ActiveFundraisingStartup | null = startup && fundraisingDetails ? {
@@ -680,140 +724,240 @@ const PublicStartupPage: React.FC = () => {
         </div>
 
         {/* Discover Page Style Card */}
-        <Card className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white">
-          {/* Video Section */}
-          <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <Card className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white max-w-4xl mx-auto">
+          {/* Video/Logo Section */}
+          <div className="relative w-full aspect-[16/7] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
             {videoEmbedUrl ? (
               <div className="relative w-full h-full">
-                <iframe
-                  src={videoEmbedUrl}
-                  title={`Pitch video for ${startup?.name}`}
-                  frameBorder="0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  className="absolute top-0 left-0 w-full h-full"
+                {videoSource === 'direct' ? (
+                  // Direct video URL - use HTML5 video player
+                  <video
+                    src={videoEmbedUrl}
+                    controls
+                    autoPlay={autoplayVideo}
+                    muted={autoplayVideo}
+                    playsInline
+                    className="absolute top-0 left-0 w-full h-full object-cover"
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+                ) : (
+                  // Embedded video (YouTube, Vimeo, Google Drive, OneDrive, etc.)
+                  <iframe
+                    src={videoEmbedUrl}
+                    title={`Pitch video for ${startup?.name}`}
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    className="absolute top-0 left-0 w-full h-full"
+                  />
+                )}
+                {/* Autoplay toggle button */}
+                <div className="absolute top-2 right-2 z-10">
+                  <button
+                    onClick={() => setAutoplayVideo(!autoplayVideo)}
+                    className="bg-black/70 hover:bg-black/90 text-white px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors"
+                    title={autoplayVideo ? 'Disable autoplay' : 'Enable autoplay'}
+                  >
+                    {autoplayVideo ? '⏸️ Autoplay ON' : '▶️ Autoplay OFF'}
+                  </button>
+                </div>
+              </div>
+            ) : fundraisingDetails?.logoUrl && fundraisingDetails.logoUrl !== '#' ? (
+              // Show logo if video is not available - auto-fit to card
+              <div className="relative w-full h-full flex items-center justify-center bg-white overflow-hidden">
+                <img
+                  src={fundraisingDetails.logoUrl}
+                  alt={`${startup?.name} logo`}
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    // Fallback if image fails to load
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
                 />
               </div>
             ) : (
+              // No video or logo - show placeholder
               <div className="w-full h-full flex items-center justify-center text-slate-400">
                 <div className="text-center">
                   <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No video available</p>
+                  <p className="text-sm">No video or logo available</p>
                 </div>
               </div>
             )}
           </div>
 
           {/* Content Section */}
-          <div className="p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-              <div className="flex-1 min-w-0">
-                <h3 className="text-2xl font-bold text-slate-800 mb-2">{startup?.name}</h3>
-                <p className="text-slate-600 font-medium mb-2">{startup?.sector || fundraisingDetails?.domain || 'Not specified'}</p>
-                {(fundraisingDetails?.type || fundraisingDetails?.stage) && (
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    {fundraisingDetails?.type && (
+          <div className="p-3 sm:p-4">
+            <div className="relative flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-3">
+              <div className="flex-1 min-w-0 pr-10 sm:pr-0">
+                <h3 className="text-lg sm:text-xl font-bold text-slate-800 mb-1.5 line-clamp-2">{startup?.name}</h3>
+                <div className="flex flex-wrap items-center gap-1.5 text-xs sm:text-sm">
+                  {fundraisingDetails?.domain && (
+                    <span className="text-slate-500">
+                      <span className="font-medium text-slate-700">Domain:</span> {fundraisingDetails.domain}
+                    </span>
+                  )}
+                  {fundraisingDetails?.type && (
+                    <>
+                      {fundraisingDetails?.domain && <span className="text-slate-300">•</span>}
                       <span className="text-slate-500">
-                        <span className="font-medium text-slate-700">Round:</span> {fundraisingDetails?.type}
+                        <span className="font-medium text-slate-700">Round:</span> {fundraisingDetails.type}
                       </span>
-                    )}
-                    {fundraisingDetails?.stage && (
-                      <>
-                        {fundraisingDetails?.type && <span className="text-slate-300">•</span>}
-                        <span className="text-slate-500">
-                          <span className="font-medium text-slate-700">Stage:</span> {fundraisingDetails?.stage}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                )}
+                    </>
+                  )}
+                  {fundraisingDetails?.stage && (
+                    <>
+                      {(fundraisingDetails?.domain || fundraisingDetails?.type) && <span className="text-slate-300">•</span>}
+                      <span className="text-slate-500">
+                        <span className="font-medium text-slate-700">Stage:</span> {fundraisingDetails.stage}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {fundraisingDetails?.active && (
-                  <div className="flex items-center gap-1 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
-                    <CheckCircle className="h-3 w-3" />
-                    Active
-                  </div>
-                )}
-                {startup?.compliance_status === 'Compliant' && (
-                  <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
-                    <CheckCircle className="h-3 w-3" />
-                    Verified
-                  </div>
-                )}
+              <div className="absolute top-0 right-0 sm:relative sm:flex sm:items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
+                  {fundraisingDetails?.active && (
+                    <div className="flex items-center gap-1 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-2 py-1 rounded-full text-xs font-medium shadow-sm">
+                      <CheckCircle className="h-3 w-3" />
+                      <span className="hidden xs:inline">Active</span>
+                    </div>
+                  )}
+                  {startup?.compliance_status === 'Compliant' && (
+                    <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2 py-1 rounded-full text-xs font-medium shadow-sm">
+                      <CheckCircle className="h-3 w-3" />
+                      <span className="hidden xs:inline">Verified</span>
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleShare}
+                    className="!rounded-full !p-2 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
+                  >
+                    <Share2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </div>
 
             {/* Action Buttons */}
-            <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleShare}
-                className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200 self-start sm:self-auto"
-              >
-                <Share2 className="h-5 w-5" />
-              </Button>
-
-              {fundraisingDetails?.pitchDeckUrl && fundraisingDetails?.pitchDeckUrl !== '#' && (
-                <a
-                  href={fundraisingDetails?.pitchDeckUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1"
-                >
+            <div className="mt-3 space-y-2">
+              {/* First Row: Document Buttons - Always visible, redirects to login if not authenticated */}
+              <div className="flex flex-wrap items-center gap-2">
+                {fundraisingDetails?.pitchDeckUrl && fundraisingDetails?.pitchDeckUrl !== '#' && (
                   <Button
                     size="sm"
                     variant="secondary"
-                    className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200"
+                    onClick={() => handleDocumentClick(fundraisingDetails?.pitchDeckUrl, 'Pitch Deck')}
+                    className="flex-1 min-w-[100px] sm:min-w-[120px] w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 text-xs sm:text-sm py-1.5"
                   >
-                    <FileText className="h-4 w-4 mr-2" /> View Deck
+                    <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden xs:inline">View </span>Deck
                   </Button>
-                </a>
-              )}
+                )}
 
-              {/* Due Diligence Button - Always visible, redirects to login if needed */}
-              <button
-                onClick={handleDueDiligence}
-                disabled={currentUser?.role === 'Startup'}
-                className={`flex-1 transition-all duration-200 border px-3 py-2 rounded-lg text-sm font-medium text-center ${
-                  currentUser?.role === 'Startup'
-                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
-                    : isAuthenticated && hasDueDiligenceAccess
-                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
-                    : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
-                }`}
-                title={currentUser?.role === 'Startup' ? 'Please login as investor to view due diligence or make offer' : ''}
-              >
-                <svg className="h-4 w-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                {isAuthenticated && hasDueDiligenceAccess ? 'Due Diligence Accepted' : 'Due Diligence'}
-              </button>
+                {fundraisingDetails?.businessPlanUrl && fundraisingDetails?.businessPlanUrl !== '#' && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleDocumentClick(fundraisingDetails?.businessPlanUrl, 'Business Plan')}
+                    className="flex-1 min-w-[100px] sm:min-w-[140px] w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 text-xs sm:text-sm py-1.5"
+                  >
+                    <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden xs:inline">Business </span>Plan
+                  </Button>
+                )}
 
-              {/* Make Offer Button - Always visible, redirects to login if needed */}
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={handleMakeOffer}
-                disabled={currentUser?.role === 'Startup'}
-                className={`flex-1 min-w-[140px] transition-all duration-200 text-xs sm:text-sm text-center ${
-                  currentUser?.role === 'Startup'
-                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60 shadow-none'
-                    : 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg shadow-blue-200'
-                }`}
-                title={currentUser?.role === 'Startup' ? 'Please login as investor to view due diligence or make offer' : ''}
-              >
-                <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden sm:inline">Make </span>Offer
-              </Button>
+                {fundraisingDetails?.onePagerUrl && fundraisingDetails?.onePagerUrl !== '#' && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleDocumentClick(fundraisingDetails?.onePagerUrl, 'One-Pager')}
+                    className="flex-1 min-w-[100px] sm:min-w-[120px] w-full hover:bg-emerald-50 hover:text-emerald-600 transition-all duration-200 border border-slate-200 text-xs sm:text-sm py-1.5"
+                  >
+                    <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> One-Pager
+                  </Button>
+                )}
+              </div>
+
+              {/* Second Row: Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Due Diligence Button - Always visible, redirects to login if needed */}
+                <button
+                  onClick={handleDueDiligence}
+                  disabled={currentUser?.role === 'Startup'}
+                  className={`flex-1 min-w-[120px] transition-all duration-200 border px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium text-center ${
+                    currentUser?.role === 'Startup'
+                      ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                      : isAuthenticated && hasDueDiligenceAccess
+                      ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
+                      : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
+                  }`}
+                  title={currentUser?.role === 'Startup' ? 'Please login as investor to view due diligence or make offer' : ''}
+                >
+                  <svg className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <span className="hidden sm:inline">{isAuthenticated && hasDueDiligenceAccess ? 'Due Diligence Accepted' : 'Due Diligence'}</span>
+                  <span className="sm:hidden">DD</span>
+                </button>
+
+                {/* Make Offer Button - Always visible, redirects to login if needed */}
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={handleMakeOffer}
+                  disabled={currentUser?.role === 'Startup'}
+                  className={`flex-1 min-w-[120px] sm:min-w-[140px] transition-all duration-200 text-xs sm:text-sm text-center py-1.5 ${
+                    currentUser?.role === 'Startup'
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60 shadow-none'
+                      : 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg shadow-blue-200'
+                  }`}
+                  title={currentUser?.role === 'Startup' ? 'Please login as investor to view due diligence or make offer' : ''}
+                >
+                  <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" /> <span className="hidden sm:inline">Make </span>Offer
+                </Button>
+              </div>
             </div>
           </div>
 
           {/* Investment Details Footer - Only show if fundraising details exist */}
           {hasFundraisingDetails && (
-            <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 border-t border-slate-200">
-              <div className="text-sm sm:text-base">
-                <span className="font-semibold text-slate-800">Ask:</span> {formatCurrency(fundraisingDetails?.value || 0, startup?.currency || 'INR')} for <span className="font-semibold text-purple-600">{fundraisingDetails?.equity || 0}%</span> equity
+            <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-3 sm:px-4 py-2 sm:py-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3 border-t border-slate-200">
+              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                <div className="text-xs sm:text-sm">
+                  <span className="font-semibold text-slate-800">Ask:</span> {formatCurrency(fundraisingDetails?.value || 0, startup?.currency || 'INR')} for <span className="font-semibold text-purple-600">{fundraisingDetails?.equity || 0}%</span> equity
+                </div>
+                {(fundraisingDetails?.websiteUrl || fundraisingDetails?.linkedInUrl) && (
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    {fundraisingDetails?.websiteUrl && fundraisingDetails?.websiteUrl !== '#' && (
+                      <a 
+                        href={fundraisingDetails.websiteUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                        title={fundraisingDetails.websiteUrl}
+                      >
+                        <Globe className="h-3 w-3 sm:h-4 sm:w-4" />
+                        <span className="truncate max-w-[150px] sm:max-w-[200px]">Website</span>
+                        <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3 opacity-50" />
+                      </a>
+                    )}
+                    {fundraisingDetails?.linkedInUrl && fundraisingDetails?.linkedInUrl !== '#' && (
+                      <a 
+                        href={fundraisingDetails.linkedInUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                        title={fundraisingDetails.linkedInUrl}
+                      >
+                        <Linkedin className="h-3 w-3 sm:h-4 sm:w-4" />
+                        <span className="truncate max-w-[150px] sm:max-w-[200px]">LinkedIn</span>
+                        <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3 opacity-50" />
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
               {startup?.compliance_status === 'Compliant' && (
                 <div className="flex items-center gap-1 text-green-600" title="This startup has been verified">
@@ -849,4 +993,5 @@ const PublicStartupPage: React.FC = () => {
 };
 
 export default PublicStartupPage;
+
 

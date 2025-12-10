@@ -10,7 +10,9 @@ import CloudDriveInput from '../ui/CloudDriveInput';
 import { formatCurrency } from '../../lib/utils';
 import { messageService } from '../../lib/messageService';
 import { validationService } from '../../lib/validationService';
-import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle } from 'lucide-react';
+import { generalDataService, GeneralDataItem } from '../../lib/generalDataService';
+import { getVideoEmbedUrl, VideoSource } from '../../lib/videoUtils';
+import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import FundraisingCRM from './FundraisingCRM';
@@ -47,8 +49,14 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     validationRequested: false,
     pitchDeckUrl: '',
     pitchVideoUrl: '',
+    logoUrl: '',
+    businessPlanUrl: '',
+    websiteUrl: '',
+    linkedInUrl: '',
   });
   const [pitchDeckFile, setPitchDeckFile] = useState<File | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [businessPlanFile, setBusinessPlanFile] = useState<File | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Local state for auto-generated one-pager (questionnaire based)
@@ -78,6 +86,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   const onePagerPrintRef = useRef<HTMLDivElement | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSavingToSupabase, setIsSavingToSupabase] = useState(false);
+  const [autoplayVideo, setAutoplayVideo] = useState(false);
 
   // Simple per-field character limits (kept in one place)
   const ONE_PAGER_LIMITS: Record<keyof typeof onePager, number> = {
@@ -104,12 +113,28 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
   const [onePagerErrors, setOnePagerErrors] = useState<Record<string, string>>({});
 
+  // Dropdown options from general_data table
+  const [domainOptions, setDomainOptions] = useState<GeneralDataItem[]>([]);
+  const [stageOptions, setStageOptions] = useState<GeneralDataItem[]>([]);
+  const [roundTypeOptions, setRoundTypeOptions] = useState<GeneralDataItem[]>([]);
+
   useEffect(() => {
     const loadData = async () => {
       if (!startup?.id) return;
       setIsLoading(true);
       setError(null);
       try {
+        // Load dropdown options from general_data table
+        const [domains, stages, roundTypes] = await Promise.all([
+          generalDataService.getItemsByCategory('domain'),
+          generalDataService.getItemsByCategory('stage'),
+          generalDataService.getItemsByCategory('round_type'),
+        ]);
+        
+        setDomainOptions(domains);
+        setStageOptions(stages);
+        setRoundTypeOptions(roundTypes);
+
         const rounds = await capTableService.getFundraisingDetails(startup.id);
         setExistingRounds(rounds);
         if (rounds.length > 0) {
@@ -328,10 +353,18 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       return;
     }
 
-    const target = onePagerPrintRef.current;
+    // Wait a bit for the ref to be ready if it's not immediately available
+    let target = onePagerPrintRef.current;
     if (!target) {
-      console.error('Print ref not found, cannot generate PDF');
-      messageService.error('Error', 'One-pager preview not ready. Please try again.', 3000);
+      // Try waiting a bit for the DOM to render
+      await new Promise(resolve => setTimeout(resolve, 100));
+      target = onePagerPrintRef.current;
+    }
+
+    if (!target) {
+      console.warn('One-pager print ref not found, skipping PDF generation');
+      // Don't show error - just skip the one-pager PDF save
+      // The fundraising details are still saved successfully
       return;
     }
 
@@ -517,6 +550,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
     try {
       let pitchDeckUrl = fundraising.pitchDeckUrl;
+      let businessPlanUrl = fundraising.businessPlanUrl;
 
       if (pitchDeckFile) {
         try {
@@ -526,11 +560,31 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         }
       }
 
+      let logoUrl = fundraising.logoUrl;
+      if (logoFile) {
+        try {
+          // This will replace existing logo file in storage
+          logoUrl = await capTableService.uploadLogo(logoFile, startup.id);
+        } catch (e) {
+          console.warn('Logo upload failed (non‑blocking):', e);
+        }
+      }
+
+      if (businessPlanFile) {
+        try {
+          businessPlanUrl = await capTableService.uploadBusinessPlan(businessPlanFile, startup.id);
+        } catch (e) {
+          console.warn('Business plan upload failed (non‑blocking):', e);
+        }
+      }
+
       const toSave: FundraisingDetails = {
         ...fundraising,
         value: Number(fundraising.value) || 0,
         equity: Number(fundraising.equity) || 0,
         pitchDeckUrl,
+        logoUrl,
+        businessPlanUrl,
         // Map one-pager answers into fundraising details so they are stored in Supabase
         onePagerDate: onePager.date,
         onePagerOneLiner: onePager.oneLiner,
@@ -554,8 +608,45 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       };
 
       const saved = await capTableService.updateFundraisingDetails(startup.id, toSave);
-      setExistingRounds([saved, ...existingRounds]);
-      setFundraising(saved);
+      
+      // Reload all fundraising details to ensure we have the latest data
+      const refreshedRounds = await capTableService.getFundraisingDetails(startup.id);
+      setExistingRounds(refreshedRounds);
+      
+      // Find the updated record (by ID if available, or use the first/active one)
+      const updatedRecord = saved.id 
+        ? refreshedRounds.find(r => r.id === saved.id) || saved
+        : refreshedRounds.find(r => r.active) || refreshedRounds[0] || saved;
+      
+      setFundraising(updatedRecord);
+      
+      // Update one-pager state from saved data
+      setOnePager(prev => ({
+        ...prev,
+        date: updatedRecord.onePagerDate || prev.date,
+        oneLiner: updatedRecord.onePagerOneLiner || prev.oneLiner,
+        problemStatement: updatedRecord.problemStatement || prev.problemStatement,
+        solution: updatedRecord.solutionText || prev.solution,
+        growthChallenge: updatedRecord.growthChallenge || prev.growthChallenge,
+        usp: updatedRecord.uspText || prev.usp,
+        competition: updatedRecord.competitionText || prev.competition,
+        team: updatedRecord.teamText || prev.team,
+        tam: updatedRecord.tamText || prev.tam,
+        sam: updatedRecord.samText || prev.sam,
+        som: updatedRecord.somText || prev.som,
+        traction: updatedRecord.tractionText || prev.traction,
+        askUtilization: updatedRecord.askUtilizationText || prev.askUtilization,
+        revenueThisYear: updatedRecord.revenueThisYear || prev.revenueThisYear,
+        revenueLastYear: updatedRecord.revenueLastYear || prev.revenueLastYear,
+        revenueNextMonth: updatedRecord.revenueNextMonth || prev.revenueNextMonth,
+        grossProfitMargin: updatedRecord.grossProfitMargin || prev.grossProfitMargin,
+        netProfitMargin: updatedRecord.netProfitMargin || prev.netProfitMargin,
+        fixedCostLast3Months: updatedRecord.fixedCostLast3Months || prev.fixedCostLast3Months,
+      }));
+      
+            setPitchDeckFile(null);
+            setLogoFile(null);
+            setBusinessPlanFile(null);
 
       if (onActivateFundraising) {
         onActivateFundraising(saved, startup);
@@ -608,7 +699,18 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
     // Save fundraising details first, then one‑pager PDF
     await handleSave();
-    await handleSaveOnePagerToSupabase();
+    // Try to save one-pager PDF, but don't fail if it's not ready
+    try {
+      await handleSaveOnePagerToSupabase();
+    } catch (err) {
+      console.warn('One-pager PDF save failed (non-blocking):', err);
+      // Don't show error to user - fundraising details are already saved
+    }
+  };
+
+  // Separate function to save just fundraising details without one-pager validation
+  const handleSaveFundraisingOnly = async () => {
+    await handleSave();
   };
 
   if (isLoading) {
@@ -712,8 +814,9 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Left Column: Basic Fundraising Info */}
+            <div className="space-y-4">
               <Select
                 label="Round Type"
                 id="fr-type"
@@ -721,9 +824,10 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 onChange={e => handleChange('type', (e.target as HTMLSelectElement).value as InvestmentType)}
                 disabled={!canEdit}
               >
-                {Object.values(InvestmentType).map(t => (
-                  <option key={t} value={t}>
-                    {t}
+                <option value="">Select round type</option>
+                {roundTypeOptions.map(option => (
+                  <option key={option.id} value={option.name}>
+                    {option.name}
                   </option>
                 ))}
               </Select>
@@ -750,9 +854,10 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 onChange={e => handleChange('stage', (e.target as HTMLSelectElement).value as StartupStage)}
                 disabled={!canEdit}
               >
-                {Object.values(StartupStage).map(s => (
-                  <option key={s} value={s}>
-                    {s}
+                <option value="">Select stage</option>
+                {stageOptions.map(option => (
+                  <option key={option.id} value={option.name}>
+                    {option.name}
                   </option>
                 ))}
               </Select>
@@ -764,39 +869,53 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 disabled={!canEdit}
               >
                 <option value="">Select your startup sector</option>
-                {Object.values(StartupDomain).map(d => (
-                  <option key={d} value={d}>
-                    {d}
+                {domainOptions.map(option => (
+                  <option key={option.id} value={option.name}>
+                    {option.name}
                   </option>
                 ))}
               </Select>
+              <Input
+                label="Website URL"
+                value={fundraising.websiteUrl || ''}
+                onChange={e => handleChange('websiteUrl', e.target.value)}
+                disabled={!canEdit}
+                placeholder="https://..."
+              />
+              <Input
+                label="LinkedIn URL"
+                value={fundraising.linkedInUrl || ''}
+                onChange={e => handleChange('linkedInUrl', e.target.value)}
+                disabled={!canEdit}
+                placeholder="https://linkedin.com/company/..."
+              />
             </div>
 
-            <div className="space-y-3">
-              <CloudDriveInput
-                label="Pitch Deck"
-                value={fundraising.pitchDeckUrl || ''}
-                onChange={url => {
-                  // When user pastes/changes URL, clear file and keep URL
-                  setPitchDeckFile(null);
-                  handleChange('pitchDeckUrl', url);
-                }}
-                onFileSelect={file => {
-                  if (file) {
-                    setPitchDeckFile(file);
-                    // Clear URL when a new file is selected
-                    handleChange('pitchDeckUrl', '');
-                  } else {
+            {/* Right Column: Documents & Links */}
+            <div className="space-y-4">
+              <div>
+                <CloudDriveInput
+                  label="Pitch Deck"
+                  value={fundraising.pitchDeckUrl || ''}
+                  onChange={url => {
                     setPitchDeckFile(null);
-                  }
-                }}
-                disabled={!canEdit}
-                helperText="Upload updated pitch deck for this round"
-                accept=".pdf"
-                maxSize={10}
-                documentType="pitch deck"
-                showPrivacyMessage={false}
-              />
+                    handleChange('pitchDeckUrl', url);
+                  }}
+                  onFileSelect={file => {
+                    if (file) {
+                      setPitchDeckFile(file);
+                      handleChange('pitchDeckUrl', '');
+                    } else {
+                      setPitchDeckFile(null);
+                    }
+                  }}
+                  disabled={!canEdit}
+                  accept=".pdf"
+                  maxSize={10}
+                  documentType="pitch deck"
+                  showPrivacyMessage={false}
+                />
+              </div>
               <Input
                 label="Pitch Video URL"
                 value={fundraising.pitchVideoUrl || ''}
@@ -804,22 +923,88 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 disabled={!canEdit}
                 placeholder="https://..."
               />
-              <label className="inline-flex items-center gap-2 text-sm mt-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-300"
-                  checked={!!fundraising.validationRequested}
-                  onChange={e => handleChange('validationRequested', e.target.checked)}
+              <div>
+                <CloudDriveInput
+                  label="Company Logo"
+                  value={fundraising.logoUrl || ''}
+                  onChange={url => {
+                    setLogoFile(null);
+                    handleChange('logoUrl', url);
+                  }}
+                  onFileSelect={file => {
+                    if (file) {
+                      setLogoFile(file);
+                      handleChange('logoUrl', '');
+                    } else {
+                      setLogoFile(null);
+                    }
+                  }}
                   disabled={!canEdit}
+                  accept=".jpg,.jpeg,.png,.svg,.webp"
+                  maxSize={5}
+                  documentType="company logo"
+                  showPrivacyMessage={false}
                 />
-                <span className="font-semibold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-md border border-blue-200">
-                  TMS validation
-                </span>
-              </label>
+              </div>
+              <div>
+                <CloudDriveInput
+                  label="Business Plan"
+                  value={fundraising.businessPlanUrl || ''}
+                  onChange={url => {
+                    setBusinessPlanFile(null);
+                    handleChange('businessPlanUrl', url);
+                  }}
+                  onFileSelect={file => {
+                    if (file) {
+                      setBusinessPlanFile(file);
+                      handleChange('businessPlanUrl', '');
+                    } else {
+                      setBusinessPlanFile(null);
+                    }
+                  }}
+                  disabled={!canEdit}
+                  accept=".pdf,.doc,.docx"
+                  maxSize={10}
+                  documentType="business plan"
+                  showPrivacyMessage={false}
+                />
+              </div>
+              <div className="pt-2 space-y-2">
+                <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-slate-300"
+                    checked={!!fundraising.validationRequested}
+                    onChange={e => handleChange('validationRequested', e.target.checked)}
+                    disabled={!canEdit}
+                  />
+                  <span className="font-semibold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-md border border-blue-200">
+                    TMS validation
+                  </span>
+                </label>
+                <p className="text-xs text-slate-600 pl-7">
+                  We verify your profile and due diligence by TMS team. You will be shown to investors in the verified profile section.
+                </p>
+              </div>
             </div>
           </div>
 
-          {/* Save moved to combined button in One‑Pager section */}
+          {/* Save button for basic fundraising fields */}
+          {canEdit && (
+            <div className="mt-6 pt-4 border-t border-slate-200">
+              <Button
+                variant="primary"
+                onClick={handleSaveFundraisingOnly}
+                disabled={isSaving}
+                className="w-full sm:w-auto"
+              >
+                {isSaving ? 'Saving...' : 'Save Fundraising Details'}
+              </Button>
+              <p className="text-xs text-slate-500 mt-2">
+                Save your fundraising round details. Use "Save Fundraising & One‑Pager" below to also save the one-pager PDF.
+              </p>
+            </div>
+          )}
         </Card>
 
         {/* Right: Fundraising Card Display - Same design as Discover page */}
@@ -836,39 +1021,68 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             {/* Video Section */}
             <div className="relative w-full aspect-[16/7] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
               {(() => {
-                const getYoutubeEmbedUrl = (url?: string): string | null => {
-                  if (!url) return null;
-                  try {
-                    const urlObj = new URL(url);
-                    if (urlObj.hostname.includes('youtube.com')) {
-                      const videoId = urlObj.searchParams.get('v');
-                      return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-                    } else if (urlObj.hostname.includes('youtu.be')) {
-                      const videoId = urlObj.pathname.slice(1);
-                      return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-                    }
-                  } catch {
-                    return null;
-                  }
-                  return null;
-                };
-                const embedUrl = getYoutubeEmbedUrl(fundraising.pitchVideoUrl);
+                const videoEmbedInfo = fundraising.pitchVideoUrl
+                  ? getVideoEmbedUrl(fundraising.pitchVideoUrl, autoplayVideo)
+                  : null;
+                
+                const embedUrl = videoEmbedInfo?.embedUrl || null;
+                const videoSource = videoEmbedInfo?.source || null;
+
                 return embedUrl ? (
                   <div className="relative w-full h-full">
-                    <iframe
-                      src={embedUrl}
-                      title={`Pitch video for ${startup.name}`}
-                      frameBorder="0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                      className="absolute top-0 left-0 w-full h-full"
+                    {videoSource === 'direct' ? (
+                      // Direct video URL - use HTML5 video player
+                      <video
+                        src={embedUrl}
+                        controls
+                        autoPlay={autoplayVideo}
+                        muted={autoplayVideo}
+                        playsInline
+                        className="absolute top-0 left-0 w-full h-full object-cover"
+                      >
+                        Your browser does not support the video tag.
+                      </video>
+                    ) : (
+                      // Embedded video (YouTube, Vimeo, Google Drive, OneDrive, etc.)
+                      <iframe
+                        src={embedUrl}
+                        title={`Pitch video for ${startup.name}`}
+                        frameBorder="0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        className="absolute top-0 left-0 w-full h-full"
+                      />
+                    )}
+                    {/* Autoplay toggle button */}
+                    <div className="absolute top-2 right-2 z-10">
+                      <button
+                        onClick={() => setAutoplayVideo(!autoplayVideo)}
+                        className="bg-black/70 hover:bg-black/90 text-white px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors"
+                        title={autoplayVideo ? 'Disable autoplay' : 'Enable autoplay'}
+                      >
+                        {autoplayVideo ? '⏸️ Autoplay ON' : '▶️ Autoplay OFF'}
+                      </button>
+                    </div>
+                  </div>
+                ) : fundraising.logoUrl && fundraising.logoUrl !== '#' ? (
+                  // Show logo if video is not available - auto-fit to card
+                  <div className="relative w-full h-full flex items-center justify-center bg-white overflow-hidden">
+                    <img
+                      src={fundraising.logoUrl}
+                      alt={`${startup.name} logo`}
+                      className="w-full h-full object-contain"
+                      onError={(e) => {
+                        // Fallback if image fails to load
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
                     />
                   </div>
                 ) : (
+                  // No video or logo - show placeholder
                   <div className="w-full h-full flex items-center justify-center text-slate-400">
                     <div className="text-center">
                       <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No video available</p>
+                      <p className="text-sm">No video or logo available</p>
                     </div>
                   </div>
                 );
@@ -880,16 +1094,23 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
                   <h3 className="text-2xl font-bold text-slate-800 mb-2">{startup.name}</h3>
-                  <p className="text-slate-600 font-medium mb-2">{startup.sector || fundraising.domain || 'Not specified'}</p>
                   <div className="flex flex-wrap items-center gap-2 text-sm">
-                    {fundraising.type && (
+                    {fundraising.domain && (
                       <span className="text-slate-500">
-                        <span className="font-medium text-slate-700">Round:</span> {fundraising.type}
+                        <span className="font-medium text-slate-700">Domain:</span> {fundraising.domain}
                       </span>
+                    )}
+                    {fundraising.type && (
+                      <>
+                        {fundraising.domain && <span className="text-slate-300">•</span>}
+                        <span className="text-slate-500">
+                          <span className="font-medium text-slate-700">Round:</span> {fundraising.type}
+                        </span>
+                      </>
                     )}
                     {fundraising.stage && (
                       <>
-                        {fundraising.type && <span className="text-slate-300">•</span>}
+                        {(fundraising.domain || fundraising.type) && <span className="text-slate-300">•</span>}
                         <span className="text-slate-500">
                           <span className="font-medium text-slate-700">Stage:</span> {fundraising.stage}
                         </span>
@@ -904,64 +1125,116 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                       Active
                     </div>
                   )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      // Create clean public shareable link
+                      const url = new URL(window.location.origin + window.location.pathname);
+                      url.searchParams.set('view', 'startup');
+                      url.searchParams.set('startupId', String(startup.id));
+                      const shareUrl = url.toString();
+                      
+                      try {
+                        if (navigator.share) {
+                          await navigator.share({
+                            title: `${startup.name} - Fundraising`,
+                            text: `Check out ${startup.name}'s fundraising round`,
+                            url: shareUrl,
+                          });
+                        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                          await navigator.clipboard.writeText(shareUrl);
+                          messageService.success('Link Copied', 'Public startup link copied to clipboard!', 2000);
+                        } else {
+                          // Fallback
+                          const textarea = document.createElement('textarea');
+                          textarea.value = shareUrl;
+                          document.body.appendChild(textarea);
+                          textarea.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(textarea);
+                          messageService.success('Link Copied', 'Public startup link copied to clipboard!', 2000);
+                        }
+                      } catch (err) {
+                        console.error('Share failed', err);
+                      }
+                    }}
+                    className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
+                  >
+                    <Share2 className="h-5 w-5" />
+                  </Button>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-4 mt-6">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={async () => {
-                    // Create clean public shareable link
-                    const url = new URL(window.location.origin + window.location.pathname);
-                    url.searchParams.set('view', 'startup');
-                    url.searchParams.set('startupId', String(startup.id));
-                    const shareUrl = url.toString();
-                    
-                    try {
-                      if (navigator.share) {
-                        await navigator.share({
-                          title: `${startup.name} - Fundraising`,
-                          text: `Check out ${startup.name}'s fundraising round`,
-                          url: shareUrl,
-                        });
-                      } else if (navigator.clipboard && navigator.clipboard.writeText) {
-                        await navigator.clipboard.writeText(shareUrl);
-                        messageService.success('Link Copied', 'Public startup link copied to clipboard!', 2000);
-                      } else {
-                        // Fallback
-                        const textarea = document.createElement('textarea');
-                        textarea.value = shareUrl;
-                        document.body.appendChild(textarea);
-                        textarea.select();
-                        document.execCommand('copy');
-                        document.body.removeChild(textarea);
-                        messageService.success('Link Copied', 'Public startup link copied to clipboard!', 2000);
-                      }
-                    } catch (err) {
-                      console.error('Share failed', err);
-                    }
-                  }}
-                  className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
-                >
-                  <Share2 className="h-5 w-5" />
-                </Button>
+              <div className="space-y-3 mt-6">
+                {/* Primary Action Buttons Row */}
+                <div className="flex items-center gap-2 flex-wrap">
 
-                {fundraising.pitchDeckUrl && fundraising.pitchDeckUrl !== '#' && (
-                  <a href={fundraising.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
-                    <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200">
-                      <FileText className="h-4 w-4 mr-2" /> View Deck
-                    </Button>
-                  </a>
-                )}
+                  {fundraising.pitchDeckUrl && fundraising.pitchDeckUrl !== '#' && (
+                    <a href={fundraising.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[120px]">
+                      <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200">
+                        <FileText className="h-4 w-4 mr-2" /> View Deck
+                      </Button>
+                    </a>
+                  )}
+
+                  {fundraising.businessPlanUrl && fundraising.businessPlanUrl !== '#' && (
+                    <a href={fundraising.businessPlanUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[140px]">
+                      <Button size="sm" variant="secondary" className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200">
+                        <FileText className="h-4 w-4 mr-2" /> Business Plan
+                      </Button>
+                    </a>
+                  )}
+
+                  {fundraising.onePagerUrl && fundraising.onePagerUrl !== '#' && (
+                    <a href={fundraising.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[120px]">
+                      <Button size="sm" variant="secondary" className="w-full hover:bg-emerald-50 hover:text-emerald-600 transition-all duration-200 border border-slate-200">
+                        <FileText className="h-4 w-4 mr-2" /> One-Pager
+                      </Button>
+                    </a>
+                  )}
+                </div>
+
               </div>
             </div>
 
             {/* Investment Details Footer */}
-            <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 border-t border-slate-200">
-              <div className="text-sm sm:text-base">
-                <span className="font-semibold text-slate-800">Ask:</span> {formatCurrency(fundraising.value || 0, startup.currency || 'INR')} for <span className="font-semibold text-purple-600">{fundraising.equity || 0}%</span> equity
+            <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 border-t border-slate-200">
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="text-sm sm:text-base">
+                  <span className="font-semibold text-slate-800">Ask:</span> {formatCurrency(fundraising.value || 0, startup.currency || 'INR')} for <span className="font-semibold text-purple-600">{fundraising.equity || 0}%</span> equity
+                </div>
+                {(fundraising.websiteUrl || fundraising.linkedInUrl) && (
+                  <div className="flex items-center gap-4">
+                    {fundraising.websiteUrl && fundraising.websiteUrl !== '#' && (
+                      <a 
+                        href={fundraising.websiteUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                        title={fundraising.websiteUrl}
+                      >
+                        <Globe className="h-4 w-4" />
+                        <span className="truncate max-w-[200px]">Website</span>
+                        <ExternalLink className="h-3 w-3 opacity-50" />
+                      </a>
+                    )}
+                    {fundraising.linkedInUrl && fundraising.linkedInUrl !== '#' && (
+                      <a 
+                        href={fundraising.linkedInUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                        title={fundraising.linkedInUrl}
+                      >
+                        <Linkedin className="h-4 w-4" />
+                        <span className="truncate max-w-[200px]">LinkedIn</span>
+                        <ExternalLink className="h-3 w-3 opacity-50" />
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
               {startup.compliance_status === 'Compliant' && (
                 <div className="flex items-center gap-1 text-green-600" title="This startup has been verified">

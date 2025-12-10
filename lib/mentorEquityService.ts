@@ -67,12 +67,56 @@ class MentorEquityService {
     }
   }
 
-  // Create a new mentor record
-  async createMentorRecord(recordData: CreateMentorRecordData): Promise<MentorRecord> {
+  // Create a new mentor record and mentor request
+  async createMentorRecord(recordData: CreateMentorRecordData, requesterId?: string): Promise<MentorRecord> {
     try {
       console.log('🚀 Creating mentor record for startup:', recordData.startupId);
       console.log('📋 Record data:', recordData);
       
+      // Step 1: Find mentor user ID from mentor code
+      let mentorUserId: string | null = null;
+      if (recordData.mentorCode) {
+        const { data: mentorUser, error: mentorError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('mentor_code', recordData.mentorCode)
+          .eq('role', 'Mentor')
+          .single();
+
+        if (!mentorError && mentorUser) {
+          mentorUserId = mentorUser.id;
+        }
+      }
+
+      // Step 2: Create mentor request if mentor user found and requesterId provided
+      let requestId: number | null = null;
+      if (mentorUserId && requesterId) {
+        try {
+          const { data: requestData, error: requestError } = await supabase
+            .from('mentor_requests')
+            .insert({
+              mentor_id: mentorUserId,
+              requester_id: requesterId,
+              requester_type: 'Startup',
+              startup_id: recordData.startupId,
+              status: 'pending',
+              message: `Equity allocation request from startup`
+            })
+            .select()
+            .single();
+
+          if (!requestError && requestData) {
+            requestId = requestData.id;
+            console.log('✅ Mentor request created:', requestId);
+          } else {
+            console.warn('⚠️ Could not create mentor request:', requestError);
+          }
+        } catch (requestErr) {
+          console.warn('⚠️ Error creating mentor request (continuing anyway):', requestErr);
+        }
+      }
+
+      // Step 3: Create mentor equity record
       const { data, error } = await supabase
         .from('mentor_equity_records')
         .insert({
@@ -88,6 +132,7 @@ class MentorEquityService {
           post_money_valuation: recordData.postMoneyValuation,
           signed_agreement_url: recordData.signedAgreementUrl,
           status: recordData.status || 'pending',
+          request_id: requestId,
           date_added: new Date().toISOString().split('T')[0]
         })
         .select()

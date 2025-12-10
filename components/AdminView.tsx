@@ -15,6 +15,7 @@ import ComplianceRulesComprehensiveManager from './ComplianceRulesComprehensiveM
 import FinancialModelAdmin from './FinancialModelAdmin';
 import InvestorView from './InvestorView';
 import InvestmentAdvisorView from './InvestmentAdvisorView';
+import GeneralDataManager from './admin/GeneralDataManager';
 import { supabase } from '../lib/supabase';
 import { investmentService } from '../lib/database';
 import { AuthUser } from '../lib/auth';
@@ -1356,44 +1357,78 @@ const AnalyticsTab: React.FC<{
 };
 
 const SystemTab: React.FC = () => {
+    const [activeSubTab, setActiveSubTab] = useState<'general' | 'data'>('general');
+    
     return (
         <div className="space-y-6">
-            <Card>
-                <h3 className="text-lg font-semibold mb-4 text-slate-700">System Management</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div className="p-4 border border-slate-200 rounded-lg">
-                        <Database className="h-8 w-8 text-blue-600 mb-2" />
-                        <h4 className="font-semibold text-slate-700">Data Management</h4>
-                        <p className="text-sm text-slate-600 mt-1">Manage platform data and exports</p>
-                        <Button size="sm" className="mt-2" variant="outline">
-                            <Database className="h-4 w-4 mr-1" />
-                            Access
-                        </Button>
-                    </div>
-                    
-                    <div className="p-4 border border-slate-200 rounded-lg">
-                        <Settings className="h-8 w-8 text-green-600 mb-2" />
-                        <h4 className="font-semibold text-slate-700">System Settings</h4>
-                        <p className="text-sm text-slate-600 mt-1">Configure platform settings</p>
-                        <Button size="sm" className="mt-2" variant="outline">
-                            <Settings className="h-4 w-4 mr-1" />
-                            Configure
-                        </Button>
-                    </div>
-                    
-                    <div className="p-4 border border-slate-200 rounded-lg">
-                        <AlertTriangle className="h-8 w-8 text-yellow-600 mb-2" />
-                        <h4 className="font-semibold text-slate-700">System Health</h4>
-                        <p className="text-sm text-slate-600 mt-1">Monitor system performance</p>
-                        <Button size="sm" className="mt-2" variant="outline">
-                            <AlertTriangle className="h-4 w-4 mr-1" />
-                            Monitor
-                        </Button>
-                    </div>
-                </div>
-            </Card>
+            {/* Sub-tabs */}
+            <div className="border-b border-slate-200">
+                <nav className="-mb-px flex space-x-8">
+                    <button
+                        onClick={() => setActiveSubTab('general')}
+                        className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                            activeSubTab === 'general'
+                                ? 'border-blue-500 text-blue-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                        }`}
+                    >
+                        General Data
+                    </button>
+                    <button
+                        onClick={() => setActiveSubTab('data')}
+                        className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                            activeSubTab === 'data'
+                                ? 'border-blue-500 text-blue-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                        }`}
+                    >
+                        Data Management
+                    </button>
+                </nav>
+            </div>
 
-            <DataManager />
+            {activeSubTab === 'general' ? (
+                <GeneralDataManager />
+            ) : (
+                <>
+                    <Card>
+                        <h3 className="text-lg font-semibold mb-4 text-slate-700">System Management</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div className="p-4 border border-slate-200 rounded-lg">
+                                <Database className="h-8 w-8 text-blue-600 mb-2" />
+                                <h4 className="font-semibold text-slate-700">Data Management</h4>
+                                <p className="text-sm text-slate-600 mt-1">Manage platform data and exports</p>
+                                <Button size="sm" className="mt-2" variant="outline">
+                                    <Database className="h-4 w-4 mr-1" />
+                                    Access
+                                </Button>
+                            </div>
+                            
+                            <div className="p-4 border border-slate-200 rounded-lg">
+                                <Settings className="h-8 w-8 text-green-600 mb-2" />
+                                <h4 className="font-semibold text-slate-700">System Settings</h4>
+                                <p className="text-sm text-slate-600 mt-1">Configure platform settings</p>
+                                <Button size="sm" className="mt-2" variant="outline">
+                                    <Settings className="h-4 w-4 mr-1" />
+                                    Configure
+                                </Button>
+                            </div>
+                            
+                            <div className="p-4 border border-slate-200 rounded-lg">
+                                <AlertTriangle className="h-8 w-8 text-yellow-600 mb-2" />
+                                <h4 className="font-semibold text-slate-700">System Health</h4>
+                                <p className="text-sm text-slate-600 mt-1">Monitor system performance</p>
+                                <Button size="sm" className="mt-2" variant="outline">
+                                    <AlertTriangle className="h-4 w-4 mr-1" />
+                                    Monitor
+                                </Button>
+                            </div>
+                        </div>
+                    </Card>
+
+                    <DataManager />
+                </>
+            )}
         </div>
     );
 };

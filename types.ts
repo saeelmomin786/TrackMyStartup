@@ -317,7 +317,7 @@ export interface MentorRecord {
     investmentAmount?: number;
     equityAllocated?: number;
     postMoneyValuation?: number;
-    signedAgreementUrl: string;
+    signedAgreementUrl?: string;
     status?: string;
     dateAdded: string;
     startup?: {
@@ -344,6 +344,10 @@ export interface FundraisingDetails {
     validationRequested: boolean;
     pitchDeckUrl?: string;
     pitchVideoUrl?: string;
+    logoUrl?: string;
+    businessPlanUrl?: string;
+    websiteUrl?: string;
+    linkedInUrl?: string;
     onePagerUrl?: string;
     // One‑pager stored fields
     onePagerDate?: string;

@@ -4,8 +4,11 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
-import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X } from 'lucide-react';
+import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X, Plus } from 'lucide-react';
 import { MentorMetrics } from '../../lib/mentorService';
+import Modal from '../ui/Modal';
+import MentorDataForm from '../MentorDataForm';
+import { Startup } from '../../types';
 
 interface MentorProfile {
   id?: string;
@@ -24,6 +27,7 @@ interface MentorProfile {
   companies_founded?: number;
   current_role?: string;
   previous_companies?: string[];
+  mentoring_experience?: string;
   mentoring_approach?: string;
   availability?: string;
   preferred_engagement?: string;
@@ -31,6 +35,7 @@ interface MentorProfile {
   fee_amount_min?: number;
   fee_amount_max?: number;
   fee_currency?: string;
+  equity_percentage?: number;
   fee_description?: string;
   logo_url?: string;
   video_url?: string;
@@ -43,6 +48,9 @@ interface MentorProfileFormProps {
   onSave?: (profile: MentorProfile) => void;
   onProfileChange?: (profile: MentorProfile) => void;
   isViewOnly?: boolean;
+  onNavigateToDashboard?: (section?: 'active' | 'completed' | 'founded') => void;
+  startups?: Startup[];
+  onMetricsUpdate?: () => void;
 }
 
 const MentorProfileForm: React.FC<MentorProfileFormProps> = ({ 
@@ -50,7 +58,10 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   mentorMetrics,
   onSave,
   onProfileChange,
-  isViewOnly = false 
+  isViewOnly = false,
+  onNavigateToDashboard,
+  startups = [],
+  onMetricsUpdate
 }) => {
   const [isEditing, setIsEditing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -66,17 +77,31 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   const [isExpertiseOpen, setIsExpertiseOpen] = useState(false);
   const [isSectorsOpen, setIsSectorsOpen] = useState(false);
   const [isStagesOpen, setIsStagesOpen] = useState(false);
+  const [showAddFormModal, setShowAddFormModal] = useState(false);
+  const [formSection, setFormSection] = useState<'active' | 'completed' | 'founded'>('active');
   const expertiseRef = useRef<HTMLDivElement>(null);
   const sectorsRef = useRef<HTMLDivElement>(null);
   const stagesRef = useRef<HTMLDivElement>(null);
+  
+  const handleOpenAddForm = (section: 'active' | 'completed' | 'founded') => {
+    setFormSection(section);
+    setShowAddFormModal(true);
+  };
+  
+  const handleCloseAddForm = () => {
+    setShowAddFormModal(false);
+    if (onMetricsUpdate) {
+      onMetricsUpdate();
+    }
+  };
 
   const mentorTypes = ['Industry Expert', 'Serial Entrepreneur', 'Corporate Executive', 'Academic', 'Investor', 'Other'];
   const expertiseAreas = ['Product Development', 'Marketing', 'Sales', 'Finance', 'Operations', 'HR', 'Technology', 'Strategy', 'Fundraising', 'Legal', 'Compliance', 'International Expansion'];
   const sectors = ['SaaS', 'E-commerce', 'FinTech', 'HealthTech', 'EdTech', 'AgriTech', 'AI/ML', 'Blockchain', 'Gaming', 'Media', 'Real Estate', 'Manufacturing', 'Other'];
-  const mentoringStages = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Growth'];
-  const availabilityOptions = ['Full-time', 'Part-time', 'Advisory', 'On-demand'];
+  const mentoringStages = ['Ideation', 'Proof of Concept (PoC)', 'Prototype / MVP', 'Pilot Testing', 'Product–Market Fit (PMF)', 'Early Traction', 'Growth Stage', 'Scaling & Expansion', 'Maturity', 'Exit (IPO / Acquisition)'];
+  const availabilityOptions = ['Once per week', 'Once per month', 'Once per quarterly', 'Yearly', 'As per requirement'];
   const engagementOptions = ['1-on-1', 'Group Sessions', 'Workshops', 'Advisory Board', 'All of the above'];
-  const feeTypes = ['Hourly', 'Monthly', 'Project-based', 'Equity-based', 'Free', 'Negotiable', 'Other'];
+  const feeTypes = ['Free', 'Fees', 'Equity', 'Hybrid'];
   const currencies = ['USD', 'INR', 'EUR', 'GBP', 'SGD', 'AED'];
 
   useEffect(() => {
@@ -270,20 +295,6 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        {!isViewOnly && (
-          <Button
-            size="sm"
-            variant={isEditing ? "secondary" : "primary"}
-            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-            disabled={isSaving}
-            className="ml-auto"
-          >
-            {isSaving ? 'Saving...' : isEditing ? <><Save className="h-4 w-4 mr-2" /> Save</> : 'Edit Profile'}
-          </Button>
-        )}
-      </div>
-
       <div className="space-y-6">
         {/* Basic Information */}
         <div className="space-y-4">
@@ -517,6 +528,18 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               )}
             </div>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Mentoring Experience</label>
+            <textarea
+              value={profile.mentoring_experience || ''}
+              onChange={(e) => handleChange('mentoring_experience', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              rows={4}
+              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Describe your mentoring experience, achievements, and notable startups you've mentored..."
+            />
+          </div>
         </div>
 
         {/* Experience */}
@@ -535,15 +558,28 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
-                Companies Mentored (Total)
-                <span className="ml-2 text-xs text-slate-500">(Auto-calculated)</span>
+                Startups Mentored (Total)
+                <span className="ml-2 text-xs text-slate-500">(Calculated from your dashboard)</span>
               </label>
-              <div className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                {mentorMetrics ? (
-                  mentorMetrics.startupsMentoring + mentorMetrics.startupsMentoredPreviously
-                ) : (
-                  profile.companies_mentored || 0
-                )}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                  {mentorMetrics ? (
+                    mentorMetrics.startupsMentoring + mentorMetrics.startupsMentoredPreviously
+                  ) : (
+                    profile.companies_mentored || 0
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleOpenAddForm('active')}
+                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
+                  title="Add startup to increase count"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Add</span>
+                </Button>
               </div>
               <input
                 type="hidden"
@@ -555,10 +591,23 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Previously Mentored
-                <span className="ml-2 text-xs text-slate-500">(Auto-calculated)</span>
+                <span className="ml-2 text-xs text-slate-500">(Calculated from your dashboard)</span>
               </label>
-              <div className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                {mentorMetrics?.startupsMentoredPreviously || 0}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                  {mentorMetrics?.startupsMentoredPreviously || 0}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleOpenAddForm('completed')}
+                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
+                  title="Add previously mentored startup to increase count"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Add</span>
+                </Button>
               </div>
               <input
                 type="hidden"
@@ -569,11 +618,24 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
-                Companies Founded
-                <span className="ml-2 text-xs text-slate-500">(Auto-calculated)</span>
+                Startups Founded
+                <span className="ml-2 text-xs text-slate-500">(Calculated from your dashboard)</span>
               </label>
-              <div className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                {mentorMetrics?.startupsFounded || profile.companies_founded || 0}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                  {mentorMetrics?.startupsFounded || profile.companies_founded || 0}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleOpenAddForm('founded')}
+                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
+                  title="Add founded startup to increase count"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Add</span>
+                </Button>
               </div>
               <input
                 type="hidden"
@@ -647,34 +709,56 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               ))}
             </Select>
 
-            <Select
-              label="Currency"
-              value={profile.fee_currency || 'USD'}
-              onChange={(e) => handleChange('fee_currency', e.target.value)}
-              disabled={!isEditing || isViewOnly}
-            >
-              {currencies.map(currency => (
-                <option key={currency} value={currency}>{currency}</option>
-              ))}
-            </Select>
+            {/* Currency - Show for Fees and Hybrid */}
+            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
+              <Select
+                label="Currency"
+                value={profile.fee_currency || 'USD'}
+                onChange={(e) => handleChange('fee_currency', e.target.value)}
+                disabled={!isEditing || isViewOnly}
+              >
+                {currencies.map(currency => (
+                  <option key={currency} value={currency}>{currency}</option>
+                ))}
+              </Select>
+            )}
 
-            <Input
-              label="Minimum Fee Amount"
-              type="number"
-              value={profile.fee_amount_min?.toString() || ''}
-              onChange={(e) => handleChange('fee_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
-              disabled={!isEditing || isViewOnly}
-              placeholder="e.g., 1000"
-            />
+            {/* Minimum Fee Amount - Show for Fees and Hybrid */}
+            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
+              <Input
+                label="Minimum Fee Amount"
+                type="number"
+                value={profile.fee_amount_min?.toString() || ''}
+                onChange={(e) => handleChange('fee_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g., 1000"
+              />
+            )}
 
-            <Input
-              label="Maximum Fee Amount"
-              type="number"
-              value={profile.fee_amount_max?.toString() || ''}
-              onChange={(e) => handleChange('fee_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
-              disabled={!isEditing || isViewOnly}
-              placeholder="e.g., 5000"
-            />
+            {/* Maximum Fee Amount - Show for Fees and Hybrid */}
+            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
+              <Input
+                label="Maximum Fee Amount"
+                type="number"
+                value={profile.fee_amount_max?.toString() || ''}
+                onChange={(e) => handleChange('fee_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g., 5000"
+              />
+            )}
+
+            {/* Equity Percentage - Show for Equity and Hybrid */}
+            {(profile.fee_type === 'Equity' || profile.fee_type === 'Hybrid') && (
+              <Input
+                label="Equity Percentage (%)"
+                type="number"
+                step="0.01"
+                value={profile.equity_percentage?.toString() || ''}
+                onChange={(e) => handleChange('equity_percentage', e.target.value ? parseFloat(e.target.value) : null)}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g., 2.5"
+              />
+            )}
           </div>
 
           <div>
@@ -727,24 +811,41 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
           </div>
 
           {profile.media_type === 'logo' ? (
-            <div>
+            <div className="space-y-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">Logo</label>
               {profile.logo_url ? (
-                <div className="mb-2">
+                <div className="mb-4">
                   <img src={profile.logo_url} alt="Logo" className="h-24 w-24 object-contain border border-slate-200 rounded" />
                 </div>
               ) : null}
               {isEditing && !isViewOnly && (
-                <label className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md cursor-pointer hover:bg-blue-700">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload Logo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleLogoUpload}
-                    className="hidden"
-                  />
-                </label>
+                <div className="flex items-end gap-3">
+                  <div className="mb-1">
+                    <label className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md cursor-pointer hover:bg-blue-700">
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload Logo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
+                    <span>OR</span>
+                  </div>
+                  <div className="flex-1">
+                    <Input
+                      label="Logo URL"
+                      type="url"
+                      value={profile.logo_url || ''}
+                      onChange={(e) => handleChange('logo_url', e.target.value)}
+                      disabled={!isEditing || isViewOnly}
+                      placeholder="https://example.com/logo.png"
+                    />
+                  </div>
+                </div>
               )}
             </div>
           ) : (
@@ -758,6 +859,49 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
           )}
         </div>
       </div>
+
+      {/* Save Button at the end */}
+      {!isViewOnly && (
+        <div className="flex justify-end mt-6 pt-6 border-t border-slate-200">
+          <Button
+            size="md"
+            variant={isEditing ? "primary" : "secondary"}
+            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+            disabled={isSaving}
+          >
+            {isSaving ? 'Saving...' : isEditing ? <><Save className="h-4 w-4 mr-2" /> Save</> : 'Edit Profile'}
+          </Button>
+        </div>
+      )}
+
+      {/* Add Startup Form Modal */}
+      <Modal
+        isOpen={showAddFormModal}
+        onClose={handleCloseAddForm}
+        title={
+          formSection === 'active' 
+            ? 'Add Currently Mentoring Startup' 
+            : formSection === 'completed' 
+            ? 'Add Previously Mentored Startup' 
+            : 'Add Founded Startup'
+        }
+        size="large"
+      >
+        {currentUser?.id && (
+          <MentorDataForm
+            mentorId={currentUser.id}
+            startups={startups}
+            onUpdate={() => {
+              handleCloseAddForm();
+              if (onMetricsUpdate) {
+                onMetricsUpdate();
+              }
+            }}
+            mentorMetrics={mentorMetrics}
+            initialSection={formSection}
+          />
+        )}
+      </Modal>
     </div>
   );
 };

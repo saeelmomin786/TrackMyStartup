@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
+import { generalDataService } from '../../lib/generalDataService';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
-import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X } from 'lucide-react';
+import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X, PlusCircle } from 'lucide-react';
 
 interface InvestorProfile {
   id?: string;
@@ -18,7 +19,9 @@ interface InvestorProfile {
   geography?: string[];
   ticket_size_min?: number;
   ticket_size_max?: number;
+  currency?: string;
   investment_stages?: string[];
+  domain?: string[];
   investment_thesis?: string;
   funding_requirements?: string;
   funding_stages?: string[];
@@ -34,13 +37,19 @@ interface InvestorProfileFormProps {
   onSave?: (profile: InvestorProfile) => void;
   onProfileChange?: (profile: InvestorProfile) => void;
   isViewOnly?: boolean;
+  totalStartupsInvested?: number;
+  totalVerifiedStartups?: number;
+  onAddStartup?: () => void;
 }
 
 const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({ 
   currentUser, 
   onSave,
   onProfileChange,
-  isViewOnly = false 
+  isViewOnly = false,
+  totalStartupsInvested = 0,
+  totalVerifiedStartups = 0,
+  onAddStartup
 }) => {
   const [isEditing, setIsEditing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -49,27 +58,154 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
     media_type: 'logo',
     geography: [],
     investment_stages: [],
-    funding_stages: [],
-    target_countries: []
+    domain: []
   });
   const [isGeographyOpen, setIsGeographyOpen] = useState(false);
   const [isInvestmentStagesOpen, setIsInvestmentStagesOpen] = useState(false);
-  const [isFundingStagesOpen, setIsFundingStagesOpen] = useState(false);
-  const [isTargetCountriesOpen, setIsTargetCountriesOpen] = useState(false);
+  const [isDomainOpen, setIsDomainOpen] = useState(false);
   const geographyRef = useRef<HTMLDivElement>(null);
   const investmentStagesRef = useRef<HTMLDivElement>(null);
-  const fundingStagesRef = useRef<HTMLDivElement>(null);
-  const targetCountriesRef = useRef<HTMLDivElement>(null);
+  const domainRef = useRef<HTMLDivElement>(null);
+  const [countries, setCountries] = useState<string[]>([]);
+  const [loadingCountries, setLoadingCountries] = useState(true);
+  const [investmentStages, setInvestmentStages] = useState<string[]>([]);
+  const [loadingInvestmentStages, setLoadingInvestmentStages] = useState(true);
+  const [domains, setDomains] = useState<string[]>([]);
+  const [loadingDomains, setLoadingDomains] = useState(true);
+  const [logoInputMethod, setLogoInputMethod] = useState<'upload' | 'url'>('upload');
+  const [logoUrlInput, setLogoUrlInput] = useState('');
 
   const firmTypes = ['VC', 'Angel Investor', 'Corporate VC', 'Family Office', 'PE Firm', 'Government', 'Other'];
-  const investmentStages = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Bridge', 'Growth'];
-  const fundingStages = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Bridge', 'Growth'];
-  const companySizes = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+'];
-  const countries = ['India', 'USA', 'UK', 'Singapore', 'UAE', 'Germany', 'France', 'Canada', 'Australia', 'Japan', 'China', 'Other'];
+  const [currencies, setCurrencies] = useState<Array<{ code: string; name: string; color: string }>>([]);
+  const [loadingCurrencies, setLoadingCurrencies] = useState(true);
+
+  // Currency color mapping
+  const getCurrencyColor = (code: string): string => {
+    const colorMap: { [key: string]: string } = {
+      'USD': 'text-green-600',
+      'EUR': 'text-blue-600',
+      'GBP': 'text-red-600',
+      'INR': 'text-orange-600',
+      'CAD': 'text-red-500',
+      'AUD': 'text-yellow-600',
+      'SGD': 'text-blue-500',
+      'JPY': 'text-red-700',
+      'CNY': 'text-red-600',
+      'AED': 'text-green-700',
+      'SAR': 'text-green-600',
+      'CHF': 'text-red-600'
+    };
+    return colorMap[code] || 'text-slate-700';
+  };
+
+  const loadCurrencies = async () => {
+    try {
+      setLoadingCurrencies(true);
+      // Try to fetch from general_data table first
+      try {
+        const currencyData = await generalDataService.getItemsByCategory('currency');
+        if (currencyData && currencyData.length > 0) {
+          const currencyList = currencyData.map(currency => ({
+            code: currency.code || currency.name,
+            name: currency.name,
+            color: getCurrencyColor(currency.code || currency.name)
+          }));
+          setCurrencies(currencyList);
+          return;
+        }
+      } catch (error) {
+        console.log('Currency category not found in general_data, using fallback');
+      }
+      
+      // Fallback to hardcoded list if not in database
+      setCurrencies([
+        { code: 'USD', name: 'US Dollar', color: 'text-green-600' },
+        { code: 'EUR', name: 'Euro', color: 'text-blue-600' },
+        { code: 'GBP', name: 'British Pound', color: 'text-red-600' },
+        { code: 'INR', name: 'Indian Rupee', color: 'text-orange-600' },
+        { code: 'CAD', name: 'Canadian Dollar', color: 'text-red-500' },
+        { code: 'AUD', name: 'Australian Dollar', color: 'text-yellow-600' },
+        { code: 'SGD', name: 'Singapore Dollar', color: 'text-blue-500' },
+        { code: 'JPY', name: 'Japanese Yen', color: 'text-red-700' },
+        { code: 'CNY', name: 'Chinese Yuan', color: 'text-red-600' },
+        { code: 'AED', name: 'UAE Dirham', color: 'text-green-700' },
+        { code: 'SAR', name: 'Saudi Riyal', color: 'text-green-600' },
+        { code: 'CHF', name: 'Swiss Franc', color: 'text-red-600' }
+      ]);
+    } catch (error) {
+      console.error('Error loading currencies:', error);
+      // Fallback to hardcoded list
+      setCurrencies([
+        { code: 'USD', name: 'US Dollar', color: 'text-green-600' },
+        { code: 'EUR', name: 'Euro', color: 'text-blue-600' },
+        { code: 'GBP', name: 'British Pound', color: 'text-red-600' },
+        { code: 'INR', name: 'Indian Rupee', color: 'text-orange-600' },
+        { code: 'CAD', name: 'Canadian Dollar', color: 'text-red-500' },
+        { code: 'AUD', name: 'Australian Dollar', color: 'text-yellow-600' },
+        { code: 'SGD', name: 'Singapore Dollar', color: 'text-blue-500' },
+        { code: 'JPY', name: 'Japanese Yen', color: 'text-red-700' },
+        { code: 'CNY', name: 'Chinese Yuan', color: 'text-red-600' },
+        { code: 'AED', name: 'UAE Dirham', color: 'text-green-700' },
+        { code: 'SAR', name: 'Saudi Riyal', color: 'text-green-600' },
+        { code: 'CHF', name: 'Swiss Franc', color: 'text-red-600' }
+      ]);
+    } finally {
+      setLoadingCurrencies(false);
+    }
+  };
 
   useEffect(() => {
     loadProfile();
+    loadCountries();
+    loadInvestmentStages();
+    loadDomains();
+    loadCurrencies();
   }, [currentUser.id]);
+
+  const loadCountries = async () => {
+    try {
+      setLoadingCountries(true);
+      const countryData = await generalDataService.getItemsByCategory('country');
+      const countryNames = countryData.map(country => country.name);
+      setCountries(countryNames);
+    } catch (error) {
+      console.error('Error loading countries:', error);
+      // Fallback to hardcoded list if database fails
+      setCountries(['India', 'USA', 'UK', 'Singapore', 'UAE', 'Germany', 'France', 'Canada', 'Australia', 'Japan', 'China', 'Other']);
+    } finally {
+      setLoadingCountries(false);
+    }
+  };
+
+  const loadInvestmentStages = async () => {
+    try {
+      setLoadingInvestmentStages(true);
+      const stageData = await generalDataService.getItemsByCategory('round_type');
+      const stageNames = stageData.map(stage => stage.name);
+      setInvestmentStages(stageNames);
+    } catch (error) {
+      console.error('Error loading investment stages:', error);
+      // Fallback to hardcoded list if database fails
+      setInvestmentStages(['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Bridge', 'Growth']);
+    } finally {
+      setLoadingInvestmentStages(false);
+    }
+  };
+
+  const loadDomains = async () => {
+    try {
+      setLoadingDomains(true);
+      const domainData = await generalDataService.getItemsByCategory('domain');
+      const domainNames = domainData.map(domain => domain.name);
+      setDomains(domainNames);
+    } catch (error) {
+      console.error('Error loading domains:', error);
+      // Fallback to hardcoded list if database fails
+      setDomains(['Agriculture', 'AI', 'Climate', 'Consumer Goods', 'Defence', 'E-commerce', 'Education', 'EV', 'Finance', 'Food & Beverage', 'Healthcare', 'Manufacturing', 'Media & Entertainment', 'Others', 'PaaS', 'Renewable Energy', 'Retail', 'SaaS', 'Social Impact', 'Space', 'Transportation and Logistics', 'Waste Management', 'Web 3.0']);
+    } finally {
+      setLoadingDomains(false);
+    }
+  };
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -80,11 +216,8 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
       if (investmentStagesRef.current && !investmentStagesRef.current.contains(event.target as Node)) {
         setIsInvestmentStagesOpen(false);
       }
-      if (fundingStagesRef.current && !fundingStagesRef.current.contains(event.target as Node)) {
-        setIsFundingStagesOpen(false);
-      }
-      if (targetCountriesRef.current && !targetCountriesRef.current.contains(event.target as Node)) {
-        setIsTargetCountriesOpen(false);
+      if (domainRef.current && !domainRef.current.contains(event.target as Node)) {
+        setIsDomainOpen(false);
       }
     };
 
@@ -112,8 +245,7 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
           ...data,
           geography: data.geography || [],
           investment_stages: data.investment_stages || [],
-          funding_stages: data.funding_stages || [],
-          target_countries: data.target_countries || []
+          domain: data.domain || []
         };
         setProfile(loadedProfile);
         if (onProfileChange) {
@@ -140,7 +272,7 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
     });
   };
 
-  const handleArrayChange = (field: 'geography' | 'investment_stages' | 'funding_stages' | 'target_countries', value: string) => {
+  const handleArrayChange = (field: 'geography' | 'investment_stages', value: string) => {
     setProfile(prev => {
       const currentArray = prev[field] || [];
       const newArray = currentArray.includes(value)
@@ -158,6 +290,20 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (!validTypes.includes(file.type)) {
+      alert('Invalid file type. Please upload an image (JPEG, PNG, GIF, WebP, or SVG)');
+      return;
+    }
+
+    // Validate file size (5MB limit)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      alert('File size too large. Please upload an image smaller than 5MB');
+      return;
+    }
+
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `${currentUser.id}-${Date.now()}.${fileExt}`;
@@ -165,11 +311,24 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
 
       const { error: uploadError } = await supabase.storage
         .from('investor-assets')
-        .upload(filePath, file);
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
       if (uploadError) {
         console.error('Upload error:', uploadError);
-        alert('Failed to upload logo');
+        let errorMessage = 'Failed to upload logo';
+        
+        if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('does not exist')) {
+          errorMessage = 'Storage bucket not found. Please contact administrator to set up investor-assets bucket.';
+        } else if (uploadError.message?.includes('new row violates row-level security')) {
+          errorMessage = 'Permission denied. Please check storage bucket policies.';
+        } else if (uploadError.message) {
+          errorMessage = `Upload failed: ${uploadError.message}`;
+        }
+        
+        alert(errorMessage);
         return;
       }
 
@@ -179,11 +338,34 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
 
       handleChange('logo_url', publicUrl);
       handleChange('media_type', 'logo');
-    } catch (error) {
+      setLogoUrlInput(publicUrl);
+      alert('Logo uploaded successfully!');
+    } catch (error: any) {
       console.error('Error uploading logo:', error);
-      alert('Failed to upload logo');
+      alert(`Failed to upload logo: ${error.message || 'Unknown error'}`);
     }
   };
+
+  const handleLogoUrlChange = (url: string) => {
+    setLogoUrlInput(url);
+    if (url.trim()) {
+      handleChange('logo_url', url.trim());
+      handleChange('media_type', 'logo');
+    }
+  };
+
+  // Sync logoUrlInput with profile.logo_url when profile loads
+  useEffect(() => {
+    if (profile.logo_url && profile.media_type === 'logo') {
+      setLogoUrlInput(profile.logo_url);
+      // Determine input method based on URL (if it's a supabase storage URL, it's upload, otherwise it's URL)
+      if (profile.logo_url.includes('supabase.co') || profile.logo_url.includes('storage.googleapis.com')) {
+        setLogoInputMethod('upload');
+      } else {
+        setLogoInputMethod('url');
+      }
+    }
+  }, [profile.logo_url, profile.media_type]);
 
   const handleSave = async () => {
     if (!profile.investor_name) {
@@ -228,20 +410,6 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        {!isViewOnly && (
-          <Button
-            size="sm"
-            variant={isEditing ? "secondary" : "primary"}
-            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-            disabled={isSaving}
-            className="ml-auto"
-          >
-            {isSaving ? 'Saving...' : isEditing ? <><Save className="h-4 w-4 mr-2" /> Save</> : 'Edit Profile'}
-          </Button>
-        )}
-      </div>
-
       <div className="space-y-6">
         {/* Basic Information */}
         <div className="space-y-4">
@@ -255,6 +423,45 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
               disabled={!isEditing || isViewOnly}
               required
             />
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Number of Startups Invested
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-sm text-slate-700">
+                  {totalStartupsInvested}
+                </div>
+                {!isViewOnly && onAddStartup && (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={onAddStartup}
+                    className="whitespace-nowrap"
+                  >
+                    <PlusCircle className="h-4 w-4 mr-1" />
+                    Add
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Calculated from your portfolio
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Number of Verified Startups
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-sm text-slate-700">
+                  {totalVerifiedStartups}
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Startups from TMS platform
+              </p>
+            </div>
             
             <Select
               label="Firm Type"
@@ -311,7 +518,7 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="relative" ref={geographyRef}>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Where do you want to invest?</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
               <div
                 onClick={() => !isViewOnly && isEditing && setIsGeographyOpen(!isGeographyOpen)}
                 className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm cursor-pointer ${
@@ -342,7 +549,9 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
                         </span>
                       ))
                     ) : (
-                      <span className="text-slate-500 text-sm">Select countries...</span>
+                      <span className="text-slate-500 text-sm">
+                        {loadingCountries ? 'Loading countries...' : 'Select country...'}
+                      </span>
                     )}
                   </div>
                   <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isGeographyOpen ? 'transform rotate-180' : ''}`} />
@@ -350,7 +559,10 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
               </div>
               {isGeographyOpen && isEditing && !isViewOnly && (
                 <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                  {countries.map(country => (
+                  {loadingCountries ? (
+                    <div className="px-3 py-2 text-sm text-slate-500">Loading countries...</div>
+                  ) : (
+                    countries.map(country => (
                     <div
                       key={country}
                       onClick={() => {
@@ -367,7 +579,8 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
                     >
                       {country}
                     </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               )}
             </div>
@@ -404,7 +617,9 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
                         </span>
                       ))
                     ) : (
-                      <span className="text-slate-500 text-sm">Select stages...</span>
+                      <span className="text-slate-500 text-sm">
+                        {loadingInvestmentStages ? 'Loading stages...' : 'Select stages...'}
+                      </span>
                     )}
                   </div>
                   <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isInvestmentStagesOpen ? 'transform rotate-180' : ''}`} />
@@ -412,7 +627,10 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
               </div>
               {isInvestmentStagesOpen && isEditing && !isViewOnly && (
                 <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                  {investmentStages.map(stage => (
+                  {loadingInvestmentStages ? (
+                    <div className="px-3 py-2 text-sm text-slate-500">Loading stages...</div>
+                  ) : (
+                    investmentStages.map(stage => (
                     <div
                       key={stage}
                       onClick={() => {
@@ -429,15 +647,101 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
                     >
                       {stage}
                     </div>
-                  ))}
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="relative" ref={domainRef}>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Domain</label>
+              <div
+                onClick={() => !isViewOnly && isEditing && setIsDomainOpen(!isDomainOpen)}
+                className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm cursor-pointer ${
+                  !isEditing || isViewOnly ? 'disabled:bg-slate-50 disabled:text-slate-500 disabled:border-slate-200 disabled:shadow-none disabled:cursor-not-allowed' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                    {profile.domain && profile.domain.length > 0 ? (
+                      profile.domain.map((domain) => (
+                        <span
+                          key={domain}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+                        >
+                          {domain}
+                          {isEditing && !isViewOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleChange('domain', profile.domain?.filter(d => d !== domain) || []);
+                              }}
+                              className="hover:bg-blue-200 rounded-full p-0.5"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-500 text-sm">
+                        {loadingDomains ? 'Loading domains...' : 'Select domains...'}
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isDomainOpen ? 'transform rotate-180' : ''}`} />
+                </div>
+              </div>
+              {isDomainOpen && isEditing && !isViewOnly && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                  {loadingDomains ? (
+                    <div className="px-3 py-2 text-sm text-slate-500">Loading domains...</div>
+                  ) : (
+                    domains.map(domain => (
+                    <div
+                      key={domain}
+                      onClick={() => {
+                        const current = profile.domain || [];
+                        if (current.includes(domain)) {
+                          handleChange('domain', current.filter(d => d !== domain));
+                        } else {
+                          handleChange('domain', [...current, domain]);
+                        }
+                      }}
+                      className={`px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm ${
+                        profile.domain?.includes(domain) ? 'bg-blue-100 font-medium' : ''
+                      }`}
+                    >
+                      {domain}
+                    </div>
+                    ))
+                  )}
                 </div>
               )}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Select
+              label="Currency"
+              value={profile.currency || 'USD'}
+              onChange={(e) => handleChange('currency', e.target.value)}
+              disabled={!isEditing || isViewOnly || loadingCurrencies}
+            >
+              {loadingCurrencies ? (
+                <option value="">Loading currencies...</option>
+              ) : (
+                currencies.map(currency => (
+                  <option key={currency.code} value={currency.code}>
+                    {currency.code} - {currency.name}
+                  </option>
+                ))
+              )}
+            </Select>
+
             <Input
-              label="Ticket Size (Min) - USD"
+              label="Ticket Size (Min)"
               type="number"
               value={profile.ticket_size_min?.toString() || ''}
               onChange={(e) => handleChange('ticket_size_min', e.target.value ? parseFloat(e.target.value) : null)}
@@ -446,7 +750,7 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
             />
             
             <Input
-              label="Ticket Size (Max) - USD"
+              label="Ticket Size (Max)"
               type="number"
               value={profile.ticket_size_max?.toString() || ''}
               onChange={(e) => handleChange('ticket_size_max', e.target.value ? parseFloat(e.target.value) : null)}
@@ -464,161 +768,6 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
               rows={4}
               className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Describe your investment thesis, focus areas, and what you look for in startups..."
-            />
-          </div>
-        </div>
-
-        {/* Funding Requirements */}
-        <div className="space-y-4">
-          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Funding Requirements</h4>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="relative" ref={fundingStagesRef}>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Funding Stages</label>
-              <div
-                onClick={() => !isViewOnly && isEditing && setIsFundingStagesOpen(!isFundingStagesOpen)}
-                className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm cursor-pointer ${
-                  !isEditing || isViewOnly ? 'disabled:bg-slate-50 disabled:text-slate-500 disabled:border-slate-200 disabled:shadow-none disabled:cursor-not-allowed' : ''
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-wrap gap-1 flex-1 min-w-0">
-                    {profile.funding_stages && profile.funding_stages.length > 0 ? (
-                      profile.funding_stages.map((stage) => (
-                        <span
-                          key={stage}
-                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
-                        >
-                          {stage}
-                          {isEditing && !isViewOnly && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleChange('funding_stages', profile.funding_stages?.filter(s => s !== stage) || []);
-                              }}
-                              className="hover:bg-blue-200 rounded-full p-0.5"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          )}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-slate-500 text-sm">Select stages...</span>
-                    )}
-                  </div>
-                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isFundingStagesOpen ? 'transform rotate-180' : ''}`} />
-                </div>
-              </div>
-              {isFundingStagesOpen && isEditing && !isViewOnly && (
-                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                  {fundingStages.map(stage => (
-                    <div
-                      key={stage}
-                      onClick={() => {
-                        const current = profile.funding_stages || [];
-                        if (current.includes(stage)) {
-                          handleChange('funding_stages', current.filter(s => s !== stage));
-                        } else {
-                          handleChange('funding_stages', [...current, stage]);
-                        }
-                      }}
-                      className={`px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm ${
-                        profile.funding_stages?.includes(stage) ? 'bg-blue-100 font-medium' : ''
-                      }`}
-                    >
-                      {stage}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="relative" ref={targetCountriesRef}>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Target Countries</label>
-              <div
-                onClick={() => !isViewOnly && isEditing && setIsTargetCountriesOpen(!isTargetCountriesOpen)}
-                className={`block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm cursor-pointer ${
-                  !isEditing || isViewOnly ? 'disabled:bg-slate-50 disabled:text-slate-500 disabled:border-slate-200 disabled:shadow-none disabled:cursor-not-allowed' : ''
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-wrap gap-1 flex-1 min-w-0">
-                    {profile.target_countries && profile.target_countries.length > 0 ? (
-                      profile.target_countries.map((country) => (
-                        <span
-                          key={country}
-                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
-                        >
-                          {country}
-                          {isEditing && !isViewOnly && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleChange('target_countries', profile.target_countries?.filter(c => c !== country) || []);
-                              }}
-                              className="hover:bg-blue-200 rounded-full p-0.5"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          )}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-slate-500 text-sm">Select countries...</span>
-                    )}
-                  </div>
-                  <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isTargetCountriesOpen ? 'transform rotate-180' : ''}`} />
-                </div>
-              </div>
-              {isTargetCountriesOpen && isEditing && !isViewOnly && (
-                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                  {countries.map(country => (
-                    <div
-                      key={country}
-                      onClick={() => {
-                        const current = profile.target_countries || [];
-                        if (current.includes(country)) {
-                          handleChange('target_countries', current.filter(c => c !== country));
-                        } else {
-                          handleChange('target_countries', [...current, country]);
-                        }
-                      }}
-                      className={`px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm ${
-                        profile.target_countries?.includes(country) ? 'bg-blue-100 font-medium' : ''
-                      }`}
-                    >
-                      {country}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <Select
-            label="Company Size"
-            value={profile.company_size || ''}
-            onChange={(e) => handleChange('company_size', e.target.value)}
-            disabled={!isEditing || isViewOnly}
-          >
-            <option value="">Select Company Size</option>
-            {companySizes.map(size => (
-              <option key={size} value={size}>{size} employees</option>
-            ))}
-          </Select>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Funding Requirements</label>
-            <textarea
-              value={profile.funding_requirements || ''}
-              onChange={(e) => handleChange('funding_requirements', e.target.value)}
-              disabled={!isEditing || isViewOnly}
-              rows={3}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Describe specific funding requirements, criteria, or preferences..."
             />
           </div>
         </div>
@@ -660,24 +809,41 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
           </div>
 
           {profile.media_type === 'logo' ? (
-            <div>
+            <div className="space-y-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">Logo</label>
               {profile.logo_url ? (
-                <div className="mb-2">
+                <div className="mb-4">
                   <img src={profile.logo_url} alt="Logo" className="h-24 w-24 object-contain border border-slate-200 rounded" />
                 </div>
               ) : null}
               {isEditing && !isViewOnly && (
-                <label className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md cursor-pointer hover:bg-blue-700">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload Logo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleLogoUpload}
-                    className="hidden"
-                  />
-                </label>
+                <div className="flex items-center gap-4 flex-wrap">
+                  {/* Upload Option */}
+                  <label className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md cursor-pointer hover:bg-blue-700">
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Logo
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {/* OR Divider */}
+                  <span className="text-sm text-slate-500">OR</span>
+
+                  {/* URL Option */}
+                  <div className="flex-1 min-w-[200px]">
+                    <Input
+                      type="url"
+                      value={logoUrlInput}
+                      onChange={(e) => handleLogoUrlChange(e.target.value)}
+                      placeholder="Enter logo URL (https://example.com/logo.png)"
+                      className="w-full"
+                    />
+                  </div>
+                </div>
               )}
             </div>
           ) : (
@@ -690,6 +856,21 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
             />
           )}
         </div>
+
+        {/* Save Button at the end */}
+        {!isViewOnly && (
+          <div className="pt-4 border-t border-slate-200">
+            <Button
+              size="md"
+              variant={isEditing ? "primary" : "secondary"}
+              onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+              disabled={isSaving}
+              className="w-full"
+            >
+              {isSaving ? 'Saving...' : isEditing ? <><Save className="h-4 w-4 mr-2" /> Save</> : 'Edit Profile'}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

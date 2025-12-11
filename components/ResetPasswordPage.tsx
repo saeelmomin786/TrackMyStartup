@@ -75,6 +75,25 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         hasPkceToken: !!pkceToken
       });
       
+      // Quick path: if Supabase hash tokens are present, let Supabase parse/store them
+      if (hash && hash.includes('access_token=')) {
+        try {
+          console.log('Found hash with access_token, using getSessionFromUrl to set session...');
+          const { data, error: urlError } = await authService.supabase.auth.getSessionFromUrl({ storeSession: true });
+          if (!urlError && data?.session) {
+            console.log('Session established via getSessionFromUrl:', { user: data.session.user?.email });
+            setIsSessionReady(true);
+            // Clean up URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return;
+          } else {
+            console.log('getSessionFromUrl failed or no session, falling back to manual parsing:', urlError);
+          }
+        } catch (err) {
+          console.log('getSessionFromUrl error, will fall back to manual parsing:', err);
+        }
+      }
+
       // Handle code parameter first (most common for password reset)
       if (code && !accessToken && !refreshToken) {
         console.log('Found code parameter, attempting to exchange for session...');

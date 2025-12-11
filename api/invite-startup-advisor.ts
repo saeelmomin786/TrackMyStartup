@@ -392,7 +392,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const resetLink = `${siteUrl}/?page=reset-password&advisorCode=${advisorCode}`;
 
-      await transporter.sendMail({
+      const info = await transporter.sendMail({
         from: `${fromName} <${fromAddress}>`,
         to: contactEmail,
         subject: 'Your TrackMyStartup invite OTP',
@@ -400,7 +400,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         html: `<p>Use this OTP to set your password: <b>${code}</b> (valid ${OTP_EXPIRY_MINUTES} minutes).</p><p>Then set your password here: <a href="${resetLink}">${resetLink}</a></p>`
       });
 
-      console.log('📧 Invite OTP sent to:', contactEmail);
+      console.log('📧 Invite OTP sent to:', contactEmail, 'accepted:', info.accepted, 'response:', info.response);
     } catch (otpErr) {
       console.error('Error sending invite OTP:', otpErr);
       return res.status(500).json({ error: 'Failed to send invite OTP' });

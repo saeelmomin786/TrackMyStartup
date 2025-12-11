@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { authService } from '../lib/auth';
+import { getQueryParam } from '../lib/urlState';
 import Card from './ui/Card';
 import Input from './ui/Input';
 import Button from './ui/Button';
@@ -73,6 +74,27 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         hasCode: !!code,
         hasPkceToken: !!pkceToken
       });
+      
+      // Handle code parameter first (most common for password reset)
+      if (code && !accessToken && !refreshToken) {
+        console.log('Found code parameter, attempting to exchange for session...');
+        try {
+          const { data, error: exchangeError } = await authService.supabase.auth.exchangeCodeForSession(code);
+          if (!exchangeError && data) {
+            console.log('Code exchanged for session successfully:', data);
+            setIsSessionReady(true);
+            // Clean up URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return; // Exit early, session is ready
+          } else {
+            console.log('exchangeCodeForSession failed:', exchangeError);
+            // Don't set error yet, try other methods
+          }
+        } catch (err) {
+          console.error('Error exchanging code for session:', err);
+          // Don't set error yet, try other methods
+        }
+      }
       
       if (accessToken && refreshToken) {
         try {
@@ -356,10 +378,30 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
       if (success) {
         console.log('Password reset successful');
         setIsSuccess(true);
-        // Redirect to login after 3 seconds
+        
+        // Check if this is an invite link (has advisorCode)
+        const advisorCode = getQueryParam('advisorCode');
+        const isInviteFlow = !!advisorCode;
+        
+        // Sign out the user after password reset (so they can login with new password)
+        try {
+          await authService.supabase.auth.signOut();
+          console.log('User signed out after password reset');
+        } catch (signOutError) {
+          console.log('Sign out error (non-critical):', signOutError);
+        }
+        
+        // Redirect to login after 2 seconds
+        // If this is an invite flow, preserve advisorCode in URL
         setTimeout(() => {
-          onNavigateToLogin();
-        }, 3000);
+          if (isInviteFlow) {
+            // Redirect to login with advisorCode so user can login and then go to Form 2
+            window.location.href = `/?page=login&advisorCode=${advisorCode}`;
+          } else {
+            // Normal password reset - just go to login
+            onNavigateToLogin();
+          }
+        }, 2000);
       } else {
         console.error('Password reset failed:', resetError);
         
@@ -375,9 +417,30 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         } else {
           console.log('Alternative method succeeded');
           setIsSuccess(true);
+          
+          // Check if this is an invite link (has advisorCode)
+          const advisorCode = getQueryParam('advisorCode');
+          const isInviteFlow = !!advisorCode;
+          
+          // Sign out the user after password reset
+          try {
+            await authService.supabase.auth.signOut();
+            console.log('User signed out after password reset');
+          } catch (signOutError) {
+            console.log('Sign out error (non-critical):', signOutError);
+          }
+          
+          // Redirect to login after 2 seconds
+          // If this is an invite flow, preserve advisorCode in URL
           setTimeout(() => {
-            onNavigateToLogin();
-          }, 3000);
+            if (isInviteFlow) {
+              // Redirect to login with advisorCode so user can login and then go to Form 2
+              window.location.href = `/?page=login&advisorCode=${advisorCode}`;
+            } else {
+              // Normal password reset - just go to login
+              onNavigateToLogin();
+            }
+          }, 2000);
         }
       }
     } catch (err: any) {
@@ -389,7 +452,13 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
   };
 
   const handleGoToLogin = () => {
-    onNavigateToLogin();
+    // If this is an invite flow, preserve advisorCode in URL
+    const advisorCode = getQueryParam('advisorCode');
+    if (advisorCode) {
+      window.location.href = `/?page=login&advisorCode=${advisorCode}`;
+    } else {
+      onNavigateToLogin();
+    }
   };
 
   if (isSuccess) {
@@ -401,28 +470,33 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           </div>
           
           <h2 className="text-2xl font-bold text-slate-900 mb-2">
-            Password Reset Successful!
+            {getQueryParam('advisorCode') ? 'Password Set Successfully!' : 'Password Reset Successful!'}
           </h2>
           
           <p className="text-slate-600 mb-6">
-            Your password has been successfully updated. You can now sign in with your new password.
+            {getQueryParam('advisorCode') 
+              ? 'Your password has been set successfully. You have been signed out for security. Please login to continue with your registration.'
+              : 'Your password has been successfully updated. You have been signed out for security.'}
           </p>
           
           <div className="bg-green-50 border border-green-200 rounded-md p-4 text-left mb-6">
             <h4 className="font-medium text-green-900 mb-2">What's next?</h4>
             <ul className="text-sm text-green-800 space-y-1">
-              <li>• You'll be redirected to the login page</li>
-              <li>• Sign in with your new password</li>
-              <li>• Your account is now secure</li>
+              <li>✓ You'll be redirected to the login page</li>
+              <li>✓ Sign in with your email and new password</li>
+              {getQueryParam('advisorCode') && (
+                <li>✓ After login, you'll complete your registration (Form 2)</li>
+              )}
+              <li>✓ Your account is now secure</li>
             </ul>
           </div>
           
           <Button onClick={handleGoToLogin} className="w-full">
-            Go to Login
+            Go to Login Page
           </Button>
           
           <p className="text-xs text-slate-500 mt-4">
-            Redirecting automatically in a few seconds...
+            Redirecting to login page in 2 seconds...
           </p>
         </Card>
       </div>

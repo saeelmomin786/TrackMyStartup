@@ -135,17 +135,34 @@ const App: React.FC = () => {
       }
       
       // Reset-password has priority over query param
+      // Check for code parameter (password reset/invite codes)
+      const hasCode = searchParams.get('code') || (hash.includes('code=') ? hash.split('code=')[1]?.split('&')[0] : null);
+      
       if (pathname === '/reset-password' || 
+          searchParams.get('page') === 'reset-password' ||
           type === 'recovery' ||
           hash.includes('type=recovery') ||
           searchParams.get('access_token') ||
-          searchParams.get('refresh_token')) {
+          searchParams.get('refresh_token') ||
+          hasCode) {
+        console.log('🔐 Reset password page detected:', { pathname, hasCode, type, page: searchParams.get('page') });
         return 'reset-password';
       }
       
-      // Check for invite link (has advisorCode) - should go to complete-registration AFTER password is set
+      // Check for invite link (has advisorCode) - should go to complete-registration AFTER login
+      // But if on login page with advisorCode, stay on login (user needs to login first)
       const advisorCode = searchParams.get('advisorCode') || getQueryParam('advisorCode');
-      if (advisorCode && !error) {
+      const pageParam = searchParams.get('page') || getQueryParam('page');
+      
+      // If advisorCode is present but we're on login page, stay on login
+      // After login, we'll redirect to complete-registration
+      if (advisorCode && pageParam === 'login') {
+        console.log('📧 Login page with advisorCode - user will login then go to Form 2');
+        return 'login';
+      }
+      
+      // If advisorCode is present and user is authenticated, go to Form 2
+      if (advisorCode && !error && pageParam !== 'login' && pageParam !== 'reset-password') {
         console.log('📧 Invite link detected with advisorCode:', advisorCode);
         return 'complete-registration';
       }
@@ -1527,6 +1544,19 @@ const App: React.FC = () => {
 
 
   const handleLogin = useCallback(async (user: AuthUser) => {
+    // Check if user logged in with advisorCode (from invite flow)
+    const advisorCode = getQueryParam('advisorCode');
+    if (advisorCode) {
+      console.log('🔗 User logged in with advisorCode, redirecting to Form 2:', advisorCode);
+      setIsAuthenticated(true);
+      setCurrentUser(user);
+      // Redirect to Form 2 after login
+      setCurrentPage('complete-registration');
+      // Keep advisorCode in URL
+      setQueryParam('page', 'complete-registration', true);
+      return; // Don't proceed with normal login flow, let Form 2 handle it
+    }
+    
     // Check if there's a redirect URL stored (e.g., from public startup page)
     const redirectUrl = sessionStorage.getItem('redirectAfterLogin');
     if (redirectUrl) {
@@ -2684,13 +2714,19 @@ const App: React.FC = () => {
   }
 
   // Check if we need to show reset-password page
+  // Show reset-password page even during loading if URL has code parameter
   if (currentPage === 'reset-password') {
     console.log('🎯 Showing ResetPasswordPage');
+    // Don't wait for loading to complete - show reset password page immediately
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col">
         <div className="flex-1 flex items-center justify-center">
           <ResetPasswordPage 
-            onNavigateToLogin={() => setCurrentPage('login')}
+            onNavigateToLogin={() => {
+              setCurrentPage('login');
+              setIsAuthenticated(false);
+              setCurrentUser(null);
+            }}
           />
         </div>
         {/* Footer for reset-password page */}

@@ -1415,9 +1415,9 @@ app.post('/api/invite-startup-advisor', async (req, res) => {
             : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://www.trackmystartup.com');
         }
         
-        // Format redirect URL - Supabase requires full URL with protocol
+        // Format redirect URL - First go to password setup, then login, then Form 2
         // Use hash-based routing for SPA compatibility
-        const inviteRedirectUrl = `${siteUrl}/?page=complete-registration&advisorCode=${advisorCode}`;
+        const inviteRedirectUrl = `${siteUrl}/?page=reset-password&advisorCode=${advisorCode}`;
 
         console.log('Inviting new user with redirect URL:', inviteRedirectUrl);
         console.log('⚠️ IMPORTANT: Make sure this URL is added to Supabase Dashboard > Authentication > URL Configuration > Redirect URLs');

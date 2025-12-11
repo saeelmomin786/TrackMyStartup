@@ -221,8 +221,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         // Create new user via admin invite
         const siteUrl = redirectUrl || process.env.VITE_SITE_URL || process.env.SITE_URL || 'http://localhost:5173';
-        // Redirect to complete-registration page with advisor code after password is set
-        const inviteRedirectUrl = `${siteUrl}/?page=complete-registration&advisorCode=${advisorCode}`;
+        // Redirect to password setup page first, then login, then Form 2
+        const inviteRedirectUrl = `${siteUrl}/?page=reset-password&advisorCode=${advisorCode}`;
 
         console.log('Inviting new user with redirect URL:', inviteRedirectUrl);
 

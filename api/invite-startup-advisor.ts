@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import nodemailer from 'nodemailer';
+import crypto from 'crypto';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -220,93 +222,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId = existingUser.id;
         console.log('User exists in auth:', userId);
       } else {
-        // Create new user via admin invite
-        // Use redirectUrl from client (which includes window.location.origin) for correct domain
-        // Fallback to localhost for local development
-        let siteUrl = redirectUrl;
-        
-        if (!siteUrl) {
-          // Check if we're in development
-          const isDevelopment = process.env.NODE_ENV === 'development' || 
-                               !process.env.VERCEL_ENV ||
-                               process.env.VITE_SITE_URL?.includes('localhost');
-          siteUrl = isDevelopment 
-            ? 'http://localhost:5173'
-            : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://trackmystartup.com');
-        }
-        
-        // Format redirect URL - First go to password setup, then login, then Form 2
-        const inviteRedirectUrl = `${siteUrl}/?page=reset-password&advisorCode=${advisorCode}`;
-
-        console.log('Inviting new user with redirect URL:', inviteRedirectUrl);
-        console.log('⚠️ IMPORTANT: Make sure this URL is added to Supabase Dashboard > Authentication > URL Configuration > Redirect URLs');
-        console.log('Redirect URL details:', {
-          redirectUrlFromClient: redirectUrl,
-          finalSiteUrl: siteUrl,
-          NODE_ENV: process.env.NODE_ENV,
-          VERCEL_ENV: process.env.VERCEL_ENV
+        // Create new user via admin (OTP flow, no magic link)
+        const { data: createdUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+          email: contactEmail.toLowerCase().trim(),
+          password: crypto.randomBytes(12).toString('hex'), // temp password; will be replaced via OTP
+          email_confirm: true,
+          user_metadata: {
+            name: contactName,
+            role: 'Startup',
+            startupName: startupName,
+            source: 'advisor_invite',
+            investment_advisor_code_entered: advisorCode,
+            skip_form1: true
+          }
         });
-        console.log('Email to send invite to:', contactEmail);
 
-        const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
-          contactEmail,
-          {
-            data: {
-              name: contactName,
-              role: 'Startup',
-              startupName: startupName,
-              source: 'advisor_invite',
-              investment_advisor_code_entered: advisorCode,
-              skip_form1: true
-            },
-            redirectTo: inviteRedirectUrl
-          }
-        );
-
-        if (inviteError) {
-          console.error('Error inviting user:', {
-            error: inviteError,
-            message: inviteError.message,
-            details: inviteError.details,
-            hint: inviteError.hint,
-            code: inviteError.code
-          });
-          return res.status(500).json({ 
-            error: inviteError.message || 'Failed to send invite',
-            details: inviteError.details || 'No additional details',
-            hint: inviteError.hint
-          });
+        if (createErr || !createdUser?.user) {
+          console.error('Error creating user via admin:', createErr);
+          return res.status(500).json({ error: 'Failed to create user for invite' });
         }
 
-        if (!inviteData?.user) {
-          console.error('No user returned from invite:', inviteData);
-          return res.status(500).json({ 
-            error: 'Failed to create user via invite',
-            details: 'No user data returned from Supabase'
-          });
-        }
-
-        userId = inviteData.user.id;
+        userId = createdUser.user.id;
         isNewUser = true;
-        console.log('✅ User invited successfully:', userId);
-        console.log('📧 Email should have been sent to:', contactEmail);
-        console.log('📧 Check Supabase Dashboard > Authentication > Users to verify email was sent');
-        console.log('📧 Note: Email might take a few minutes to arrive, check spam folder');
-        
-        // Try to get the invite link if available (for debugging)
-        try {
-          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
-          if (userData?.user) {
-            console.log('📋 User details:', {
-              email: userData.user.email,
-              email_confirmed_at: userData.user.email_confirmed_at,
-              invited_at: userData.user.invited_at,
-              confirmation_sent_at: userData.user.confirmation_sent_at
-            });
-          }
-        } catch (debugError: any) {
-          console.log('Could not fetch user details for debugging:', debugError.message);
-        }
+        console.log('✅ User created for invite (OTP flow):', userId);
       }
     }
 
@@ -406,6 +344,67 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Failed to update invite status' });
     }
 
+    // 3) Send OTP email for invite (OTP-only flow)
+    try {
+      const OTP_EXPIRY_MINUTES = 10;
+      const OTP_LENGTH = 6;
+      const code = Math.floor(10 ** (OTP_LENGTH - 1) + Math.random() * 9 * 10 ** (OTP_LENGTH - 1)).toString();
+      const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000).toISOString();
+
+      const { error: otpInsertError } = await supabaseAdmin
+        .from('password_otps')
+        .insert({
+          email: contactEmail.toLowerCase().trim(),
+          user_id: userId,
+          code,
+          purpose: 'invite',
+          advisor_code: advisorCode,
+          expires_at: expiresAt
+        });
+
+      if (otpInsertError) {
+        console.error('Error inserting invite OTP:', otpInsertError);
+        return res.status(500).json({ error: 'Failed to generate invite OTP' });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: Number(process.env.SMTP_PORT || 587) === 465,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+
+      const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
+      const fromName = process.env.SMTP_FROM_NAME || 'TrackMyStartup';
+
+      let siteUrl = redirectUrl;
+      if (!siteUrl) {
+        const isDevelopment = process.env.NODE_ENV === 'development' || 
+                             !process.env.VERCEL_ENV ||
+                             process.env.VITE_SITE_URL?.includes('localhost');
+        siteUrl = isDevelopment 
+          ? 'http://localhost:5173'
+          : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://trackmystartup.com');
+      }
+      const resetLink = `${siteUrl}/?page=reset-password&advisorCode=${advisorCode}`;
+
+      await transporter.sendMail({
+        from: `${fromName} <${fromAddress}>`,
+        to: contactEmail,
+        subject: 'Your TrackMyStartup invite OTP',
+        text: `Use this OTP to set your password: ${code} (valid ${OTP_EXPIRY_MINUTES} minutes). Then set your password here: ${resetLink}`,
+        html: `<p>Use this OTP to set your password: <b>${code}</b> (valid ${OTP_EXPIRY_MINUTES} minutes).</p><p>Then set your password here: <a href="${resetLink}">${resetLink}</a></p>`
+      });
+
+      console.log('📧 Invite OTP sent to:', contactEmail);
+    } catch (otpErr) {
+      console.error('Error sending invite OTP:', otpErr);
+      return res.status(500).json({ error: 'Failed to send invite OTP' });
+    }
+
     return res.status(200).json({
       success: true,
       userId,
@@ -416,8 +415,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       message: isExistingTMSStartup 
         ? 'Startup already exists on TMS and has been linked to your account' 
         : isNewUser 
-          ? 'Invite sent successfully' 
-          : 'User already exists, linked to advisor'
+          ? 'Invite OTP sent successfully' 
+          : 'User already exists, linked to advisor (OTP sent)'
     });
   } catch (error: any) {
     console.error('Error in invite-startup-advisor:', error);

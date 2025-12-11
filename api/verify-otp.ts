@@ -9,12 +9,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { email, code, newPassword, purpose, advisorCode } = req.body as {
+    const { email, code, newPassword, purpose, advisorCode, name, role, startupName, centerName, investmentAdvisorCode } = req.body as {
       email: string;
       code: string;
       newPassword: string;
-      purpose: 'invite' | 'forgot';
+      purpose: 'invite' | 'forgot' | 'register';
       advisorCode?: string;
+      name?: string;
+      role?: string;
+      startupName?: string;
+      centerName?: string;
+      investmentAdvisorCode?: string;
     };
 
     if (!email || !code || !newPassword || !purpose) {
@@ -61,27 +66,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('Error updating attempts:', attemptError);
     }
 
-    // Resolve user id
     let userId = otpRow.user_id;
-    if (!userId) {
-      const { data: userRow, error: userError } = await supabaseAdmin
+
+    if (purpose === 'register') {
+      // Ensure user does not already exist
+      const { data: existingUser } = await supabaseAdmin
         .from('users')
         .select('id')
         .eq('email', email.toLowerCase().trim())
         .maybeSingle();
-      if (userError || !userRow) {
-        return res.status(404).json({ error: 'User not found' });
+      if (existingUser?.id) {
+        return res.status(400).json({ error: 'Email already registered' });
       }
-      userId = userRow.id;
-    }
 
-    // Update password via admin API
-    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-      password: newPassword,
-    });
-    if (updateError) {
-      console.error('Error updating password:', updateError);
-      return res.status(500).json({ error: 'Failed to update password' });
+      // Create auth user
+      const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+        email: email.toLowerCase().trim(),
+        password: newPassword,
+        email_confirm: true,
+        user_metadata: {
+          name,
+          role,
+          startupName,
+          centerName,
+          investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null,
+          source: 'otp_register'
+        }
+      });
+      if (createError || !created?.user) {
+        console.error('Error creating user via admin:', createError);
+        return res.status(500).json({ error: 'Failed to create user' });
+      }
+      userId = created.user.id;
+
+      // Upsert users table
+      const { error: userUpsertError } = await supabaseAdmin
+        .from('users')
+        .upsert({
+          id: userId,
+          email: email.toLowerCase().trim(),
+          name: name || '',
+          role: role || 'Investor',
+          startup_name: startupName || null,
+          center_name: centerName || null,
+          investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null
+        }, { onConflict: 'id' });
+      if (userUpsertError) {
+        console.error('Error upserting users row:', userUpsertError);
+        return res.status(500).json({ error: 'Failed to save user profile' });
+      }
+    } else {
+      // Resolve user id for forgot/invite
+      if (!userId) {
+        const { data: userRow, error: userError } = await supabaseAdmin
+          .from('users')
+          .select('id')
+          .eq('email', email.toLowerCase().trim())
+          .maybeSingle();
+        if (userError || !userRow) {
+          return res.status(404).json({ error: 'User not found' });
+        }
+        userId = userRow.id;
+      }
+
+      // Update password via admin API
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        password: newPassword,
+      });
+      if (updateError) {
+        console.error('Error updating password:', updateError);
+        return res.status(500).json({ error: 'Failed to update password' });
+      }
     }
 
     // Mark OTP used

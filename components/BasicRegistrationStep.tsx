@@ -38,8 +38,10 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showConfirmation, setShowConfirmation] = useState(false);
-  const [emailSent, setEmailSent] = useState(false);
+  const [showOtp, setShowOtp] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   
   // Role selection state
   const [availableRoles, setAvailableRoles] = useState<string[]>(['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Mentor']);
@@ -160,97 +162,100 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
     }
 
     try {
-      // Create user account with email verification required
-      const { user, error: signUpError, confirmationRequired } = await authService.signUp({
-        email: formData.email,
-        password: formData.password,
-        name: formData.name,
-        role: formData.role,
-        startupName: formData.role === 'Startup' ? formData.startupName : undefined,
-        centerName: formData.role === 'Startup Facilitation Center' ? formData.centerName : undefined,
-        investmentAdvisorCode: formData.investmentAdvisorCode || undefined,
-        founders: [],
-        fileUrls: {}
-      });
-
-      if (signUpError) {
-        setError(signUpError);
-        setIsLoading(false);
-        return;
-      }
-
-      if (confirmationRequired) {
-        // Email confirmation required - show verification screen
-        setEmailSent(true);
-        setShowConfirmation(true);
-        console.log('Email verification required for:', formData.email);
-        // User needs to verify email, then login separately
-      } else if (user) {
-        // User already verified - move to Step 2
-        onEmailVerified({
-          name: formData.name,
+      setIsSendingOtp(true);
+      const response = await fetch('/api/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           email: formData.email,
-          password: formData.password,
-          role: formData.role,
-          startupName: formData.role === 'Startup' ? formData.startupName : undefined,
-          centerName: formData.role === 'Startup Facilitation Center' ? formData.centerName : undefined,
-          investmentAdvisorCode: formData.investmentAdvisorCode || undefined
-        });
+          purpose: 'register',
+          advisorCode: formData.investmentAdvisorCode || undefined
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send OTP');
       }
-
+      setShowOtp(true);
     } catch (err: any) {
-      setError(err.message || 'An error occurred');
+      setError(err.message || 'An error occurred while sending OTP');
     } finally {
+      setIsSendingOtp(false);
       setIsLoading(false);
     }
   };
 
-  if (showConfirmation) {
+  if (showOtp) {
     return (
       <Card className="w-full max-w-md">
         <div className="text-center">
           <Mail className="mx-auto h-12 w-12 text-blue-500" />
-          <h2 className="mt-4 text-2xl font-bold text-slate-900">Check Your Email</h2>
+          <h2 className="mt-4 text-2xl font-bold text-slate-900">Enter OTP</h2>
           <p className="mt-2 text-sm text-slate-600">
-            We've sent a verification link to <strong>{formData.email}</strong>
+            We sent a 6-digit code to <strong>{formData.email}</strong>. Enter it to create your account.
           </p>
-          <p className="mt-4 text-xs text-slate-500">
-            Please check your email and click the verification link to continue.
-          </p>
-          {emailSent && (
-            <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
-              <div className="flex items-center text-green-800">
-                <CheckCircle className="h-4 w-4 mr-2" />
-                <span className="text-sm">Verification email sent successfully!</span>
-              </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-4">
+            <div className="flex items-center text-red-800 text-sm">
+              <AlertCircle className="h-4 w-4 mr-2" />
+              <span>{error}</span>
             </div>
-          )}
-          
-          {/* Email Verification Instructions */}
-          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
-            <p className="text-sm text-blue-800 mb-3">
-              <strong>Next Steps:</strong>
-            </p>
-            <p className="text-xs text-blue-600">
-              1. Check your email for the verification link<br/>
-              2. Click the verification link in your email<br/>
-              3. Come back here and click "Continue to Login"
-            </p>
           </div>
-          
-          {/* Continue to Login Button */}
-          <div className="mt-4">
-            <Button
-              onClick={() => {
-                setShowConfirmation(false);
-                setEmailSent(false);
+        )}
+
+        <div className="space-y-4 mt-6">
+          <Input
+            label="OTP Code"
+            value={otpCode}
+            onChange={(e) => setOtpCode(e.target.value)}
+            placeholder="Enter the 6-digit code"
+          />
+
+          <Button
+            type="button"
+            className="w-full"
+            disabled={isVerifyingOtp}
+            onClick={async () => {
+              setError(null);
+              if (!otpCode) {
+                setError('Please enter the OTP code');
+                return;
+              }
+              setIsVerifyingOtp(true);
+              try {
+                const response = await fetch('/api/verify-otp', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    email: formData.email,
+                    code: otpCode,
+                    newPassword: formData.password,
+                    purpose: 'register',
+                    advisorCode: formData.investmentAdvisorCode || undefined,
+                    name: formData.name,
+                    role: formData.role,
+                    startupName: formData.role === 'Startup' ? formData.startupName : undefined,
+                    centerName: formData.role === 'Startup Facilitation Center' ? formData.centerName : undefined,
+                    investmentAdvisorCode: formData.investmentAdvisorCode || undefined
+                  })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                  throw new Error(data.error || 'Failed to verify OTP');
+                }
+                // Success: redirect to login
                 onNavigateToLogin();
-              }}
-              className="w-full"
-            >
-              Continue to Login
-            </Button>
-          </div>
+              } catch (err: any) {
+                setError(err.message || 'Failed to verify OTP');
+              } finally {
+                setIsVerifyingOtp(false);
+              }
+            }}
+          >
+            {isVerifyingOtp ? 'Verifying...' : 'Verify & Create Account'}
+          </Button>
         </div>
       </Card>
     );

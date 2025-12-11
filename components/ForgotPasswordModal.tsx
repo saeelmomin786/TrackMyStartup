@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { authService } from '../lib/auth';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
 import Input from './ui/Input';
@@ -12,9 +11,22 @@ interface ForgotPasswordModalProps {
 
 const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClose }) => {
   const [email, setEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [step, setStep] = useState<'request' | 'otp'>('request');
+
+  const validatePassword = (password: string): string | null => {
+    if (password.length < 8) return 'Password must be at least 8 characters long';
+    if (!/(?=.*[a-z])/.test(password)) return 'Password must contain at least one lowercase letter';
+    if (!/(?=.*[A-Z])/.test(password)) return 'Password must contain at least one uppercase letter';
+    if (!/(?=.*\d)/.test(password)) return 'Password must contain at least one number';
+    return null;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,99 +34,225 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
     setError(null);
 
     try {
-      const { success, error: resetError } = await authService.sendPasswordResetEmail(email);
-      
-      if (success) {
-        setIsSuccess(true);
-        setEmail(''); // Clear email for security
-      } else {
-        setError(resetError || 'Failed to send password reset email. Please try again.');
+      const response = await fetch('/api/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, purpose: 'forgot' })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send OTP');
       }
+      setStep('otp');
     } catch (err: any) {
-      console.error('Password reset error:', err);
+      console.error('Password reset OTP error:', err);
       setError(err.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleVerify = async () => {
+    setError(null);
+    if (!otpCode) {
+      setError('Please enter the OTP code.');
+      return;
+    }
+    const pwdErr = validatePassword(newPassword);
+    if (pwdErr) {
+      setError(pwdErr);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const response = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          code: otpCode,
+          newPassword,
+          purpose: 'forgot'
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to verify OTP');
+      }
+      setIsSuccess(true);
+    } catch (err: any) {
+      console.error('Verify OTP error:', err);
+      setError(err.message || 'Failed to verify OTP. Please try again.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handleClose = () => {
     setEmail('');
+    setOtpCode('');
+    setNewPassword('');
+    setConfirmPassword('');
     setError(null);
     setIsSuccess(false);
+    setStep('request');
     onClose();
   };
 
   const handleTryAgain = () => {
     setEmail('');
+    setOtpCode('');
+    setNewPassword('');
+    setConfirmPassword('');
     setError(null);
     setIsSuccess(false);
+    setStep('request');
   };
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Forgot Password">
       {!isSuccess ? (
-        <div className="space-y-6">
-          <div className="text-center">
-            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
-              <Mail className="h-6 w-6 text-blue-600" />
-            </div>
-            <h3 className="text-lg font-medium text-slate-900 mb-2">
-              Reset your password
-            </h3>
-            <p className="text-sm text-slate-600">
-              Enter your email address and we'll send you a link to reset your password.
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              label="Email address"
-              id="reset-email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              placeholder="Enter your email address"
-            />
-
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-red-600" />
-                  <p className="text-red-800 text-sm">{error}</p>
-                </div>
+        step === 'request' ? (
+          <div className="space-y-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
+                <Mail className="h-6 w-6 text-blue-600" />
               </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleClose}
-                className="flex-1"
-                disabled={isLoading}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1"
-                disabled={isLoading || !email.trim()}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  'Send Reset Link'
-                )}
-              </Button>
+              <h3 className="text-lg font-medium text-slate-900 mb-2">
+                Reset your password
+              </h3>
+              <p className="text-sm text-slate-600">
+                Enter your email and we’ll send you an OTP to reset your password.
+              </p>
             </div>
-          </form>
-        </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <Input
+                label="Email address"
+                id="reset-email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                placeholder="Enter your email address"
+              />
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-red-600" />
+                    <p className="text-red-800 text-sm">{error}</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleClose}
+                  className="flex-1"
+                  disabled={isLoading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="flex-1"
+                  disabled={isLoading || !email.trim()}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    'Send OTP'
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
+                <Mail className="h-6 w-6 text-blue-600" />
+              </div>
+              <h3 className="text-lg font-medium text-slate-900 mb-2">
+                Enter OTP & New Password
+              </h3>
+              <p className="text-sm text-slate-600">
+                Check your email for the 6-digit OTP.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <Input
+                label="OTP Code"
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value)}
+                placeholder="Enter the 6-digit code"
+              />
+              <Input
+                label="New Password"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Enter new password"
+              />
+              <Input
+                label="Confirm Password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter new password"
+              />
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-red-600" />
+                    <p className="text-red-800 text-sm">{error}</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleClose}
+                  className="flex-1"
+                  disabled={isVerifying}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1"
+                  disabled={isVerifying || !otpCode.trim() || !newPassword.trim() || !confirmPassword.trim()}
+                  onClick={handleVerify}
+                >
+                  {isVerifying ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    'Verify & Reset'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )
       ) : (
         <div className="text-center space-y-6">
           <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100">
@@ -123,20 +261,17 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
           
           <div>
             <h3 className="text-lg font-medium text-slate-900 mb-2">
-              Check your email
+              Password reset successful
             </h3>
             <p className="text-sm text-slate-600">
-              We've sent a password reset link to <strong>{email}</strong>
+              You can now sign in with your new password.
             </p>
           </div>
 
           <div className="bg-blue-50 border border-blue-200 rounded-md p-4 text-left">
             <h4 className="font-medium text-blue-900 mb-2">What happens next?</h4>
             <ul className="text-sm text-blue-800 space-y-1">
-              <li>• Check your email inbox (and spam folder)</li>
-              <li>• Click the reset link in the email</li>
-              <li>• Create a new password</li>
-              <li>• Sign in with your new password</li>
+              <li>• Sign in with your email and new password</li>
             </ul>
           </div>
 

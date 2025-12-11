@@ -11,7 +11,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { email, purpose, advisorCode } = req.body as { email: string; purpose: 'invite' | 'forgot'; advisorCode?: string };
+    const { email, purpose, advisorCode } = req.body as { email: string; purpose: 'invite' | 'forgot' | 'register'; advisorCode?: string };
 
     if (!email || !purpose) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -28,15 +28,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Lookup user id from users table
-    const { data: userRow } = await supabaseAdmin
-      .from('users')
-      .select('id, role')
-      .eq('email', email.toLowerCase().trim())
-      .maybeSingle();
+    // Lookup user id from users table (only for forgot/invite)
+    let userRow = null;
+    if (purpose !== 'register') {
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select('id, role')
+        .eq('email', email.toLowerCase().trim())
+        .maybeSingle();
+      userRow = data || null;
 
-    if (!userRow && purpose === 'forgot') {
-      return res.status(404).json({ error: 'User not found' });
+      if (!userRow && purpose === 'forgot') {
+        return res.status(404).json({ error: 'User not found' });
+      }
     }
 
     const code = Math.floor(10 ** (OTP_LENGTH - 1) + Math.random() * 9 * 10 ** (OTP_LENGTH - 1)).toString();

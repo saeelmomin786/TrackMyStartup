@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS public.password_otps (
   email TEXT NOT NULL,
   user_id UUID,
   code TEXT NOT NULL,
-  purpose TEXT NOT NULL CHECK (purpose IN ('invite', 'forgot')),
+  purpose TEXT NOT NULL CHECK (purpose IN ('invite', 'forgot', 'register')),
   advisor_code TEXT,
   expires_at TIMESTAMPTZ NOT NULL,
   used_at TIMESTAMPTZ,

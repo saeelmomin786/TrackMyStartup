@@ -4,7 +4,8 @@ export const environment = {
   development: {
     siteUrl: 'http://localhost:5173',
     emailRedirectUrl: 'http://localhost:5173/complete-registration',
-    passwordResetUrl: 'http://localhost:5173/reset-password',
+    // Use query param route for SPA so Vercel/SPA routing doesn't 404
+    passwordResetUrl: 'http://localhost:5173/?page=reset-password',
     supabaseUrl: 'https://dlesebbmlrewsbmqvuza.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRsZXNlYmJtbHJld3NibXF2dXphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ1NTMxMTcsImV4cCI6MjA3MDEyOTExN30.zFTVSgL5QpVqEDc-nQuKbaG_3egHZEm-V17UvkOpFCQ'
   },
@@ -13,7 +14,8 @@ export const environment = {
   production: {
     siteUrl: 'https://trackmystartup.com',
     emailRedirectUrl: 'https://trackmystartup.com/complete-registration',
-    passwordResetUrl: 'https://trackmystartup.com/reset-password',
+    // Use query param route for SPA so Vercel/SPA routing doesn't 404
+    passwordResetUrl: 'https://trackmystartup.com/?page=reset-password',
     supabaseUrl: 'https://dlesebbmlrewsbmqvuza.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRsZXNlYmJtbHJld3NibXF2dXphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ1NTMxMTcsImV4cCI6MjA3MDEyOTExN30.zFTVSgL5QpVqEDc-nQuKbaG_3egHZEm-V17UvkOpFCQ'
   }

@@ -4,7 +4,7 @@ import { getQueryParam } from '../lib/urlState';
 import Card from './ui/Card';
 import Input from './ui/Input';
 import Button from './ui/Button';
-import { Lock, CheckCircle, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, Mail } from 'lucide-react';
 
 interface ResetPasswordPageProps {
   onNavigateToLogin: () => void;
@@ -84,27 +84,37 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
       });
       
       // Check if this is an invite flow (has advisorCode)
-      const advisorCode = searchParams.get('advisorCode') || (hash.includes('advisorCode=') ? hash.split('advisorCode=')[1]?.split('&')[0] : null);
+      const advisorCode = searchParams.get('advisorCode') || (hash.includes('advisorCode=') ? hash.split('advisorCode=')[1]?.split('&')[0] : null) || getQueryParam('advisorCode');
       if (advisorCode) {
         setIsInviteFlow(true);
         console.log('📧 Invite flow detected, advisorCode:', advisorCode);
         
-        // Try to get email from session or user metadata
-        try {
-          const { data: { session } } = await authService.supabase.auth.getSession();
-          if (session?.user?.email) {
-            setEmail(session.user.email);
-            console.log('📧 Email extracted from session:', session.user.email);
-          } else {
-            // Try to get from user metadata
-            const { data: { user } } = await authService.supabase.auth.getUser();
-            if (user?.email) {
-              setEmail(user.email);
-              console.log('📧 Email extracted from user:', user.email);
+        // Extract email from URL (invite link includes email parameter)
+        // Check multiple sources to handle SendGrid redirects
+        const emailFromUrl = searchParams.get('email') || 
+                            (hash.includes('email=') ? decodeURIComponent(hash.split('email=')[1]?.split('&')[0] || '') : null) ||
+                            getQueryParam('email');
+        if (emailFromUrl) {
+          setEmail(emailFromUrl);
+          console.log('📧 Email extracted from invite link:', emailFromUrl);
+        } else {
+          // Fallback: Try to get email from session or user metadata
+          try {
+            const { data: { session } } = await authService.supabase.auth.getSession();
+            if (session?.user?.email) {
+              setEmail(session.user.email);
+              console.log('📧 Email extracted from session:', session.user.email);
+            } else {
+              // Try to get from user metadata
+              const { data: { user } } = await authService.supabase.auth.getUser();
+              if (user?.email) {
+                setEmail(user.email);
+                console.log('📧 Email extracted from user:', user.email);
+              }
             }
+          } catch (err) {
+            console.log('Could not extract email from session:', err);
           }
-        } catch (err) {
-          console.log('Could not extract email from session:', err);
         }
       }
 
@@ -440,11 +450,20 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
 
   const handleSendOtp = async () => {
     setError(null);
-    if (!email) {
+    const advisorCode = getQueryParam('advisorCode');
+    
+    // For invite flow, email must be auto-extracted from URL (cannot be manually entered)
+    if (isInviteFlow && !email) {
+      setError('Email is required for invite flow. Please use the invite link sent to your email.');
+      return;
+    }
+    
+    // For forgot password flow, email can be manually entered
+    if (!isInviteFlow && !email) {
       setError('Please enter your email to receive an OTP.');
       return;
     }
-    const advisorCode = getQueryParam('advisorCode');
+    
     setIsSendingOtp(true);
     try {
       const purpose = advisorCode ? 'invite' : 'forgot';
@@ -458,6 +477,7 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         throw new Error(data.error || 'Failed to send OTP');
       }
       setOtpSent(true);
+      setOtpCode(''); // Clear any existing OTP code when resending
     } catch (err: any) {
       setError(err.message || 'Failed to send OTP');
     } finally {
@@ -744,7 +764,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           </div>
           <h2 className="text-2xl font-bold text-slate-900">Reset / Set Your Password</h2>
           <p className="text-slate-600 mt-2">
-            Enter your email, OTP, and new password below
+            {isInviteFlow && email 
+              ? 'Enter your OTP and new password below'
+              : 'Enter your email, OTP, and new password below'}
           </p>
         </div>
 
@@ -773,22 +795,31 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         )}
 
         <div className="space-y-6">
-          {/* Only show email field if NOT invite flow OR if email is not pre-filled */}
-          {(!isInviteFlow || !email) && (
+          {/* Hide email field completely for invite flow - email is auto-extracted from link */}
+          {!isInviteFlow && (
             <div className="space-y-2">
               <label className="block text-sm font-medium text-slate-700">
-                Email {isInviteFlow && email && '(from invite)'}
+                Email
               </label>
               <Input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                disabled={isInviteFlow && !!email} // Disable if email is pre-filled from invite
               />
-              {isInviteFlow && email && (
-                <p className="text-xs text-slate-500">Email from your invite</p>
-              )}
+            </div>
+          )}
+          
+          {/* Show email info for invite flow (read-only, not editable) */}
+          {isInviteFlow && email && (
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-2">
+              <div className="flex items-center gap-2">
+                <Mail className="h-4 w-4 text-blue-600" />
+                <div>
+                  <p className="text-xs font-medium text-blue-900">Email Address</p>
+                  <p className="text-sm text-blue-800">{email}</p>
+                </div>
+              </div>
             </div>
           )}
 

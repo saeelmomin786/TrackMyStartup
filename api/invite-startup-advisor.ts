@@ -390,7 +390,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? 'http://localhost:5173'
           : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://trackmystartup.com');
       }
-      const resetLink = `${siteUrl}/?page=reset-password&advisorCode=${advisorCode}`;
+      // Include email in the invite link so it can be auto-filled and locked
+      const encodedEmail = encodeURIComponent(contactEmail.toLowerCase().trim());
+      const resetLink = `${siteUrl}/?page=reset-password&advisorCode=${advisorCode}&email=${encodedEmail}`;
 
       const info = await transporter.sendMail({
         from: `${fromName} <${fromAddress}>`,

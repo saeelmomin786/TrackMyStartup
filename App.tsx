@@ -174,9 +174,37 @@ const App: React.FC = () => {
   });
 
   // Keep URL ?page= in sync with currentPage
+  // Use pushState to maintain browser history for back button
+  // Only replace on initial load to avoid duplicate history entries
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   useEffect(() => {
-    setQueryParam('page', currentPage, true);
-  }, [currentPage]);
+    if (isInitialLoad) {
+      // On initial load, use replaceState to avoid adding unnecessary history entry
+      setQueryParam('page', currentPage, true);
+      setIsInitialLoad(false);
+    } else {
+      // On subsequent navigations, use pushState to maintain history
+      setQueryParam('page', currentPage, false);
+    }
+  }, [currentPage, isInitialLoad]);
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const pageParam = getQueryParam('page') as 'landing' | 'login' | 'register' | 'complete-registration' | 'payment' | 'reset-password' | null;
+      if (pageParam) {
+        const valid = ['landing', 'login', 'register', 'complete-registration', 'payment', 'reset-password'];
+        if (valid.includes(pageParam)) {
+          setCurrentPage(pageParam);
+        }
+      } else {
+        setCurrentPage('landing');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [assignedInvestmentAdvisor, setAssignedInvestmentAdvisor] = useState<AuthUser | null>(null);
@@ -1553,7 +1581,7 @@ const App: React.FC = () => {
       // Redirect to Form 2 after login
       setCurrentPage('complete-registration');
       // Keep advisorCode in URL
-      setQueryParam('page', 'complete-registration', true);
+      setQueryParam('page', 'complete-registration', false);
       return; // Don't proceed with normal login flow, let Form 2 handle it
     }
     

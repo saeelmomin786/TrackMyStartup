@@ -191,6 +191,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     country: '',
     notes: ''
   });
+  const [emailValidationError, setEmailValidationError] = useState<string | null>(null);
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+  const [showMoreFields, setShowMoreFields] = useState(false);
 
   // Dropdown options state
   const [countries, setCountries] = useState<string[]>([]);
@@ -734,6 +737,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       country: '',
       notes: ''
     });
+    setEmailValidationError(null); // Clear validation error when opening modal
+    setShowMoreFields(false); // Reset show more fields
     setShowAddStartupModal(true);
   };
 
@@ -761,7 +766,31 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       country: startup.country || '',
       notes: startup.notes || ''
     });
+    setEmailValidationError(null); // Clear validation error when editing
+    setShowMoreFields(true); // Show all fields when editing
     setShowAddStartupModal(true);
+  };
+
+  // Validate email when user enters it
+  const handleEmailChange = async (email: string) => {
+    setAddStartupFormData({ ...addStartupFormData, contact_email: email });
+    setEmailValidationError(null);
+
+    // Only validate if email is not empty and looks like a valid email
+    if (email && email.includes('@')) {
+      setIsCheckingEmail(true);
+      try {
+        const { exists } = await authService.checkEmailExists(email.trim());
+        if (exists) {
+          setEmailValidationError('User already Registered Please contact user to add your code');
+        }
+      } catch (error) {
+        console.error('Error checking email:', error);
+        // Don't show error if check fails, just log it
+      } finally {
+        setIsCheckingEmail(false);
+      }
+    }
   };
 
   // Handle save added startup
@@ -774,6 +803,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
     if (!addStartupFormData.startup_name || !addStartupFormData.contact_email || !addStartupFormData.contact_name) {
       alert('Please fill in startup name, contact name, and contact email');
+      return;
+    }
+
+    // Check if email validation error exists
+    if (emailValidationError) {
+      alert(emailValidationError);
       return;
     }
 
@@ -793,19 +828,29 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
       } else {
         // Create new
-        const created = await advisorAddedStartupService.createStartup({
+        const result = await advisorAddedStartupService.createStartup({
           ...addStartupFormData,
           advisor_id: advisorId
         });
-        if (created) {
-          setAdvisorAddedStartups(prev => [created, ...prev]);
+        if (result.success && result.data) {
+          // Reload the list to ensure we have the latest data
+          try {
+            const startups = await advisorAddedStartupService.getStartupsByAdvisor(advisorId);
+            setAdvisorAddedStartups(startups);
+          } catch (reloadError) {
+            // If reload fails, still add the created startup to the list
+            console.error('Error reloading startups:', reloadError);
+            setAdvisorAddedStartups(prev => [result.data!, ...prev]);
+          }
           alert('Startup added successfully!');
         } else {
-          alert('Failed to add startup');
+          alert(result.error || 'Failed to add startup');
         }
       }
       setShowAddStartupModal(false);
       setEditingAddedStartup(null);
+      setEmailValidationError(null); // Clear validation error on success
+      setShowMoreFields(false); // Reset show more fields on success
     } catch (error) {
       console.error('Error saving startup:', error);
       alert('Failed to save startup');
@@ -5754,206 +5799,242 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           onClose={() => {
             setShowAddStartupModal(false);
             setEditingAddedStartup(null);
+            setEmailValidationError(null); // Clear validation error when closing modal
+            setShowMoreFields(false); // Reset show more fields when closing
           }}
           title={editingAddedStartup ? 'Edit Startup' : 'Add Startup'}
         >
           <div className="space-y-4">
-            <Input
-              label="Startup Name *"
-              value={addStartupFormData.startup_name}
-              onChange={(e) => setAddStartupFormData({ ...addStartupFormData, startup_name: e.target.value })}
-              required
-            />
-            
-            {/* Contact Name and Contact Email in one line */}
+            {/* Startup Name and Founder Name in one line */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
-                label="Contact Name *"
+                label="Startup Name *"
+                value={addStartupFormData.startup_name}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, startup_name: e.target.value })}
+                required
+              />
+              <Input
+                label="Founder Name *"
                 value={addStartupFormData.contact_name}
                 onChange={(e) => setAddStartupFormData({ ...addStartupFormData, contact_name: e.target.value })}
                 required
               />
-              <Input
-                label="Contact Email *"
-                type="email"
-                value={addStartupFormData.contact_email}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, contact_email: e.target.value })}
-                required
-              />
             </div>
-
-            {/* Contact Number - Full width */}
-            <Input
-              label="Contact Number"
-              value={addStartupFormData.contact_number || ''}
-              onChange={(e) => setAddStartupFormData({ ...addStartupFormData, contact_number: e.target.value })}
-            />
-
-            {/* Website and LinkedIn URL in one line */}
+            
+            {/* Email and Contact Number in one line */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Input
+                  label="Email *"
+                  type="email"
+                  value={addStartupFormData.contact_email}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  onBlur={() => {
+                    if (addStartupFormData.contact_email) {
+                      handleEmailChange(addStartupFormData.contact_email);
+                    }
+                  }}
+                  required
+                  className={emailValidationError ? 'border-red-500' : ''}
+                />
+                {isCheckingEmail && (
+                  <p className="mt-1 text-sm text-gray-500">Checking email...</p>
+                )}
+                {emailValidationError && (
+                  <p className="mt-1 text-sm text-red-600">{emailValidationError}</p>
+                )}
+              </div>
               <Input
-                label="Website"
-                value={addStartupFormData.website_url || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, website_url: e.target.value })}
-              />
-              <Input
-                label="LinkedIn URL"
-                value={addStartupFormData.linkedin_url || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, linkedin_url: e.target.value })}
+                label="Contact Number"
+                value={addStartupFormData.contact_number || ''}
+                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, contact_number: e.target.value })}
               />
             </div>
 
-            {/* Sector and Country in one line */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select
-                label="Sector"
-                value={addStartupFormData.sector || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, sector: e.target.value })}
-              >
-                <option value="">Select Sector</option>
-                {loadingSectors ? (
-                  <option>Loading...</option>
-                ) : (
-                  sectors.map(sector => (
-                    <option key={sector} value={sector}>{sector}</option>
-                  ))
-                )}
-              </Select>
-              <Select
-                label="Country"
-                value={addStartupFormData.country || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, country: e.target.value })}
-              >
-                <option value="">Select Country</option>
-                {loadingCountries ? (
-                  <option>Loading...</option>
-                ) : (
-                  countries.map(country => (
-                    <option key={country} value={country}>{country}</option>
-                  ))
-                )}
-              </Select>
-            </div>
+            {/* Show More button */}
+            {!showMoreFields && (
+              <div className="flex justify-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowMoreFields(true)}
+                  className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
+                >
+                  Show More (optional)
+                </button>
+              </div>
+            )}
 
-            {/* Domain and Stage in one line */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select
-                label="Domain"
-                value={addStartupFormData.domain || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, domain: e.target.value })}
-              >
-                <option value="">Select Domain</option>
-                {loadingDomains ? (
-                  <option>Loading...</option>
-                ) : (
-                  domains.map(domain => (
-                    <option key={domain} value={domain}>{domain}</option>
-                  ))
-                )}
-              </Select>
-              <Select
-                label="Stage"
-                value={addStartupFormData.stage || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, stage: e.target.value })}
-              >
-                <option value="">Select Stage</option>
-                {loadingStages ? (
-                  <option>Loading...</option>
-                ) : (
-                  stages.map(stage => (
-                    <option key={stage} value={stage}>{stage}</option>
-                  ))
-                )}
-              </Select>
-            </div>
+            {/* Optional fields - shown when showMoreFields is true */}
+            {showMoreFields && (
+              <div className="space-y-4 pt-4 border-t border-gray-200">
 
-            {/* Round Type and Currency in one line */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select
-                label="Round Type"
-                value={addStartupFormData.round_type || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, round_type: e.target.value })}
-              >
-                <option value="">Select Round Type</option>
-                {loadingRoundTypes ? (
-                  <option>Loading...</option>
-                ) : (
-                  roundTypes.map(roundType => (
-                    <option key={roundType} value={roundType}>{roundType}</option>
-                  ))
-                )}
-              </Select>
-              <Select
-                label="Currency"
-                value={addStartupFormData.currency || 'USD'}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, currency: e.target.value })}
-              >
-                {loadingCurrencies ? (
-                  <option>Loading...</option>
-                ) : (
-                  currencies.map(currency => (
-                    <option key={currency} value={currency}>{currency}</option>
-                  ))
-                )}
-              </Select>
-            </div>
+                {/* Website and LinkedIn URL in one line */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Website"
+                    value={addStartupFormData.website_url || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, website_url: e.target.value })}
+                  />
+                  <Input
+                    label="LinkedIn URL"
+                    value={addStartupFormData.linkedin_url || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, linkedin_url: e.target.value })}
+                  />
+                </div>
 
-            {/* Current Valuation, Investment Amount, Equity Percentage in one line */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Input
-                label="Current Valuation"
-                type="number"
-                value={addStartupFormData.current_valuation || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, current_valuation: e.target.value ? parseFloat(e.target.value) : undefined })}
-              />
-              <Input
-                label="Investment Amount"
-                type="number"
-                value={addStartupFormData.investment_amount || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, investment_amount: e.target.value ? parseFloat(e.target.value) : undefined })}
-              />
-              <Input
-                label="Equity Percentage (%)"
-                type="number"
-                step="0.01"
-                value={addStartupFormData.equity_percentage || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, equity_percentage: e.target.value ? parseFloat(e.target.value) : undefined })}
-              />
-            </div>
+                {/* Sector and Country in one line */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Select
+                    label="Sector"
+                    value={addStartupFormData.sector || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, sector: e.target.value })}
+                  >
+                    <option value="">Select Sector</option>
+                    {loadingSectors ? (
+                      <option>Loading...</option>
+                    ) : (
+                      sectors.map(sector => (
+                        <option key={sector} value={sector}>{sector}</option>
+                      ))
+                    )}
+                  </Select>
+                  <Select
+                    label="Country"
+                    value={addStartupFormData.country || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, country: e.target.value })}
+                  >
+                    <option value="">Select Country</option>
+                    {loadingCountries ? (
+                      <option>Loading...</option>
+                    ) : (
+                      countries.map(country => (
+                        <option key={country} value={country}>{country}</option>
+                      ))
+                    )}
+                  </Select>
+                </div>
 
-            {/* Investment Date - Full width */}
-            <Input
-              label="Investment Date"
-              type="date"
-              value={addStartupFormData.investment_date || ''}
-              onChange={(e) => setAddStartupFormData({ ...addStartupFormData, investment_date: e.target.value || undefined })}
-            />
+                {/* Domain and Stage in one line */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Select
+                    label="Domain"
+                    value={addStartupFormData.domain || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, domain: e.target.value })}
+                  >
+                    <option value="">Select Domain</option>
+                    {loadingDomains ? (
+                      <option>Loading...</option>
+                    ) : (
+                      domains.map(domain => (
+                        <option key={domain} value={domain}>{domain}</option>
+                      ))
+                    )}
+                  </Select>
+                  <Select
+                    label="Stage"
+                    value={addStartupFormData.stage || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, stage: e.target.value })}
+                  >
+                    <option value="">Select Stage</option>
+                    {loadingStages ? (
+                      <option>Loading...</option>
+                    ) : (
+                      stages.map(stage => (
+                        <option key={stage} value={stage}>{stage}</option>
+                      ))
+                    )}
+                  </Select>
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Description
-              </label>
-              <textarea
-                value={addStartupFormData.description || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, description: e.target.value })}
-                rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Description of the startup"
-              />
-            </div>
+                {/* Round Type and Currency in one line */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Select
+                    label="Round Type"
+                    value={addStartupFormData.round_type || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, round_type: e.target.value })}
+                  >
+                    <option value="">Select Round Type</option>
+                    {loadingRoundTypes ? (
+                      <option>Loading...</option>
+                    ) : (
+                      roundTypes.map(roundType => (
+                        <option key={roundType} value={roundType}>{roundType}</option>
+                      ))
+                    )}
+                  </Select>
+                  <Select
+                    label="Currency"
+                    value={addStartupFormData.currency || 'USD'}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, currency: e.target.value })}
+                  >
+                    {loadingCurrencies ? (
+                      <option>Loading...</option>
+                    ) : (
+                      currencies.map(currency => (
+                        <option key={currency} value={currency}>{currency}</option>
+                      ))
+                    )}
+                  </Select>
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Notes
-              </label>
-              <textarea
-                value={addStartupFormData.notes || ''}
-                onChange={(e) => setAddStartupFormData({ ...addStartupFormData, notes: e.target.value })}
-                rows={2}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Additional notes about this startup"
-              />
-            </div>
+                {/* Current Valuation, Investment Amount, Equity Percentage in one line */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Input
+                    label="Current Valuation"
+                    type="number"
+                    value={addStartupFormData.current_valuation || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, current_valuation: e.target.value ? parseFloat(e.target.value) : undefined })}
+                  />
+                  <Input
+                    label="Investment Amount"
+                    type="number"
+                    value={addStartupFormData.investment_amount || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, investment_amount: e.target.value ? parseFloat(e.target.value) : undefined })}
+                  />
+                  <Input
+                    label="Equity Percentage (%)"
+                    type="number"
+                    step="0.01"
+                    value={addStartupFormData.equity_percentage || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, equity_percentage: e.target.value ? parseFloat(e.target.value) : undefined })}
+                  />
+                </div>
+
+                {/* Investment Date - Full width */}
+                <Input
+                  label="Investment Date"
+                  type="date"
+                  value={addStartupFormData.investment_date || ''}
+                  onChange={(e) => setAddStartupFormData({ ...addStartupFormData, investment_date: e.target.value || undefined })}
+                />
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={addStartupFormData.description || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, description: e.target.value })}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Description of the startup"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Notes
+                  </label>
+                  <textarea
+                    value={addStartupFormData.notes || ''}
+                    onChange={(e) => setAddStartupFormData({ ...addStartupFormData, notes: e.target.value })}
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Additional notes about this startup"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end gap-3 pt-4">
               <button

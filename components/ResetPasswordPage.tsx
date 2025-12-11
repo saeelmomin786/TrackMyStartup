@@ -24,6 +24,8 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
   const [otpSent, setOtpSent] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isSessionReady, setIsSessionReady] = useState(false);
+  const [otpError, setOtpError] = useState(false); // Track if OTP verification failed
+  const [isInviteFlow, setIsInviteFlow] = useState(false); // Track if this is invite flow
   const [validationErrors, setValidationErrors] = useState<{
     password?: string;
     confirmPassword?: string;
@@ -80,6 +82,31 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         hasPkceToken: !!pkceToken
       });
       
+      // Check if this is an invite flow (has advisorCode)
+      const advisorCode = searchParams.get('advisorCode') || (hash.includes('advisorCode=') ? hash.split('advisorCode=')[1]?.split('&')[0] : null);
+      if (advisorCode) {
+        setIsInviteFlow(true);
+        console.log('📧 Invite flow detected, advisorCode:', advisorCode);
+        
+        // Try to get email from session or user metadata
+        try {
+          const { data: { session } } = await authService.supabase.auth.getSession();
+          if (session?.user?.email) {
+            setEmail(session.user.email);
+            console.log('📧 Email extracted from session:', session.user.email);
+          } else {
+            // Try to get from user metadata
+            const { data: { user } } = await authService.supabase.auth.getUser();
+            if (user?.email) {
+              setEmail(user.email);
+              console.log('📧 Email extracted from user:', user.email);
+            }
+          }
+        } catch (err) {
+          console.log('Could not extract email from session:', err);
+        }
+      }
+
       // Quick path: if Supabase hash tokens are present, let Supabase parse/store them
       if (hash && hash.includes('access_token=')) {
         try {
@@ -308,6 +335,10 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
             if (!exchangeError && data) {
               console.log('Invite code exchanged for session successfully:', data);
               setIsSessionReady(true);
+              setIsInviteFlow(true);
+              if (data.session?.user?.email) {
+                setEmail(data.session.user.email);
+              }
               // Clean up URL
               window.history.replaceState({}, document.title, window.location.pathname);
             } else {
@@ -320,9 +351,19 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
             if (session && !sessionError) {
               console.log('Invite session found:', session.user.email);
               setIsSessionReady(true);
+              setIsInviteFlow(true);
+              if (session.user?.email) {
+                setEmail(session.user.email);
+              }
             } else {
               console.log('No invite session found:', sessionError);
-              setError('Invalid or expired invite link. Please contact your Investment Advisor to send a new invite.');
+              // For invite flow, don't show error immediately - let user enter email/OTP
+              if (advisorCode) {
+                setIsInviteFlow(true);
+                setError(null); // Allow OTP flow
+              } else {
+                setError('Invalid or expired invite link. Please contact your Investment Advisor to send a new invite.');
+              }
             }
           }
         } catch (err) {
@@ -399,8 +440,13 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
 
   const handleVerifyOtpAndReset = async () => {
     setError(null);
+    setOtpError(false);
     if (!otpCode) {
       setError('Please enter the OTP sent to your email.');
+      return;
+    }
+    if (!email && !isInviteFlow) {
+      setError('Please enter your email.');
       return;
     }
     if (!validateForm()) {
@@ -423,10 +469,12 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
       });
       const data = await response.json();
       if (!response.ok) {
+        setOtpError(true); // Mark OTP as invalid to show resend button
         throw new Error(data.error || 'Failed to verify OTP');
       }
 
       setIsSuccess(true);
+      setOtpError(false);
 
       // Sign out after password reset
       try {
@@ -435,14 +483,14 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         console.log('Sign out error (non-critical):', signOutError);
       }
 
-      // Redirect to login after short delay
+      // Auto-redirect to login after showing success message for 3 seconds
       setTimeout(() => {
         if (advisorCode) {
           window.location.href = `/?page=login&advisorCode=${advisorCode}`;
         } else {
           window.location.href = '/?page=login';
         }
-      }, 1200);
+      }, 3000); // 3 seconds delay to show success message
     } catch (err: any) {
       setError(err.message || 'Failed to verify OTP');
     } finally {
@@ -498,17 +546,14 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           console.log('Sign out error (non-critical):', signOutError);
         }
         
-        // Redirect to login after 2 seconds
-        // If this is an invite flow, preserve advisorCode in URL
+        // Auto-redirect to login after showing success message for 3 seconds
         setTimeout(() => {
           if (isInviteFlow) {
-            // Redirect to login with advisorCode so user can login and then go to Form 2
             window.location.href = `/?page=login&advisorCode=${advisorCode}`;
           } else {
-            // Normal password reset - just go to login
             onNavigateToLogin();
           }
-        }, 2000);
+        }, 3000); // 3 seconds delay to show success message
       } else {
         console.error('Password reset failed:', resetError);
         
@@ -537,17 +582,14 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
             console.log('Sign out error (non-critical):', signOutError);
           }
           
-          // Redirect to login after 2 seconds
-          // If this is an invite flow, preserve advisorCode in URL
+          // Auto-redirect to login after showing success message for 3 seconds
           setTimeout(() => {
             if (isInviteFlow) {
-              // Redirect to login with advisorCode so user can login and then go to Form 2
               window.location.href = `/?page=login&advisorCode=${advisorCode}`;
             } else {
-              // Normal password reset - just go to login
               onNavigateToLogin();
             }
-          }, 2000);
+          }, 3000); // 3 seconds delay to show success message
         }
       }
     } catch (err: any) {
@@ -577,19 +619,19 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           </div>
           
           <h2 className="text-2xl font-bold text-slate-900 mb-2">
-            {getQueryParam('advisorCode') ? 'Password Set Successfully!' : 'Password Reset Successful!'}
+            Password Set Successfully!
           </h2>
           
           <p className="text-slate-600 mb-6">
             {getQueryParam('advisorCode') 
-              ? 'Your password has been set successfully. You have been signed out for security. Please login to continue with your registration.'
-              : 'Your password has been successfully updated. You have been signed out for security.'}
+              ? 'Your password has been set successfully. You have been signed out for security. You will be redirected to the login page shortly.'
+              : 'Your password has been successfully updated. You have been signed out for security. You will be redirected to the login page shortly.'}
           </p>
           
           <div className="bg-green-50 border border-green-200 rounded-md p-4 text-left mb-6">
             <h4 className="font-medium text-green-900 mb-2">What's next?</h4>
             <ul className="text-sm text-green-800 space-y-1">
-              <li>✓ You'll be redirected to the login page</li>
+              <li>✓ You'll be redirected to the login page automatically</li>
               <li>✓ Sign in with your email and new password</li>
               {getQueryParam('advisorCode') && (
                 <li>✓ After login, you'll complete your registration (Form 2)</li>
@@ -599,11 +641,11 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           </div>
           
           <Button onClick={handleGoToLogin} className="w-full">
-            Go to Login Page
+            Go to Login Page Now
           </Button>
           
           <p className="text-xs text-slate-500 mt-4">
-            Redirecting to login page in 2 seconds...
+            Redirecting to login page in 3 seconds...
           </p>
         </Card>
       </div>
@@ -648,37 +690,61 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         )}
 
         <div className="space-y-6">
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">
-              Email
-            </label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
-          </div>
+          {/* Only show email field if NOT invite flow OR if email is not pre-filled */}
+          {(!isInviteFlow || !email) && (
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">
+                Email {isInviteFlow && email && '(from invite)'}
+              </label>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                disabled={isInviteFlow && !!email} // Disable if email is pre-filled from invite
+              />
+              {isInviteFlow && email && (
+                <p className="text-xs text-slate-500">Email from your invite</p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <label className="block text-sm font-medium text-slate-700">
-              OTP
+              OTP Code
             </label>
             <div className="flex gap-2">
               <Input
                 value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value)}
-                placeholder="Enter the 6-digit code"
+                onChange={(e) => {
+                  setOtpCode(e.target.value);
+                  setOtpError(false); // Clear error when user types
+                }}
+                placeholder="Enter the 6-digit code from email"
+                className={otpError ? 'border-red-500' : ''}
               />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleSendOtp}
-                disabled={isSendingOtp}
-              >
-                {isSendingOtp ? 'Sending...' : otpSent ? 'Resend OTP' : 'Send OTP'}
-              </Button>
+              {/* Show Resend OTP button if OTP verification failed OR if OTP was sent */}
+              {(otpError || otpSent) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setOtpError(false);
+                    setOtpCode('');
+                    handleSendOtp();
+                  }}
+                  disabled={isSendingOtp || !email}
+                >
+                  {isSendingOtp ? 'Sending...' : 'Resend OTP'}
+                </Button>
+              )}
             </div>
+            {otpError && (
+              <p className="text-red-600 text-xs mt-1">Invalid OTP. Please check and try again or click "Resend OTP".</p>
+            )}
+            {isInviteFlow && !otpSent && !otpError && (
+              <p className="text-xs text-slate-500">Enter the 6-digit OTP code from your invite email</p>
+            )}
           </div>
 
           <div className="space-y-2">

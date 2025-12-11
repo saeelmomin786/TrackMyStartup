@@ -548,12 +548,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         // This setTimeout is only executed if password was successfully set above
         setTimeout(() => {
           clearInterval(countdownInterval);
-          // Password was successfully set, redirect to login
-          if (advisorCode) {
-            window.location.href = `/?page=login&advisorCode=${advisorCode}`;
-          } else {
-            window.location.href = '/?page=login';
-          }
+          // Password was successfully set, redirect to normal login page
+          // AdvisorCode is already saved in database, no need to pass in URL
+          window.location.href = '/?page=login';
         }, 3000); // 3 seconds delay to show success message
       } else {
         throw new Error(data.error || 'Failed to verify OTP');
@@ -629,12 +626,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         // Auto-redirect to login ONLY after password is set successfully (after 3 seconds)
         setTimeout(() => {
           clearInterval(countdownInterval);
-          // Password was successfully reset, now redirect to login
-          if (isInviteFlow) {
-            window.location.href = `/?page=login&advisorCode=${advisorCode}`;
-          } else {
-            onNavigateToLogin();
-          }
+          // Password was successfully reset, now redirect to normal login page
+          // AdvisorCode is already saved in database, no need to pass in URL
+          onNavigateToLogin();
         }, 3000); // 3 seconds delay to show success message
       } else {
         console.error('Password reset failed:', resetError);
@@ -682,11 +676,8 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
             clearInterval(countdownInterval);
             // Double-check success state before redirecting
             if (isSuccess) {
-              if (isInviteFlow) {
-                window.location.href = `/?page=login&advisorCode=${advisorCode}`;
-              } else {
-                onNavigateToLogin();
-              }
+              // Always redirect to normal login page (advisorCode already saved in database)
+              onNavigateToLogin();
             }
           }, 3000); // 3 seconds delay to show success message
         }
@@ -700,13 +691,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
   };
 
   const handleGoToLogin = () => {
-    // If this is an invite flow, preserve advisorCode in URL
-    const advisorCode = getQueryParam('advisorCode');
-    if (advisorCode) {
-      window.location.href = `/?page=login&advisorCode=${advisorCode}`;
-    } else {
-      onNavigateToLogin();
-    }
+    // Always redirect to normal login page (without advisorCode)
+    // The advisorCode is already saved in the database, so no need to pass it in URL
+    onNavigateToLogin();
   };
 
   if (isSuccess) {

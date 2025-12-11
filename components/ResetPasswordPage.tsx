@@ -26,6 +26,7 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
   const [isSessionReady, setIsSessionReady] = useState(false);
   const [otpError, setOtpError] = useState(false); // Track if OTP verification failed
   const [isInviteFlow, setIsInviteFlow] = useState(false); // Track if this is invite flow
+  const [redirectCountdown, setRedirectCountdown] = useState(3); // Countdown timer for redirect
   const [validationErrors, setValidationErrors] = useState<{
     password?: string;
     confirmPassword?: string;
@@ -368,26 +369,52 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           }
         } catch (err) {
           console.error('Error handling invite session:', err);
-          setError('Invalid or expired invite link. Please contact your Investment Advisor to send a new invite.');
+          // For invite flow with advisorCode, allow OTP flow even if session handling fails
+          const advisorCodeCheck = searchParams.get('advisorCode') || getQueryParam('advisorCode');
+          if (advisorCodeCheck) {
+            setIsInviteFlow(true);
+            setError(null); // Allow OTP flow
+          } else {
+            setError('Invalid or expired invite link. Please contact your Investment Advisor to send a new invite.');
+          }
         }
       } else {
-        // Check if user is already authenticated (might be from a previous session)
-        console.log('No tokens found, checking existing session...');
-        const { data: { user }, error: userError } = await authService.supabase.auth.getUser();
-        if (userError || !user) {
-          console.log('No existing session found:', userError);
-          
-          // Try one more approach - check if we can detect this as a password reset context
-          // Sometimes Supabase redirects without tokens but with a specific path
-          if (window.location.pathname === '/reset-password') {
-            console.log('Reset password path detected, but no tokens. Falling back to OTP UI.');
-            setError(null); // allow OTP flow UI
-          } else {
-            setError('Invalid or expired reset link. Please request a new password reset.');
-          }
+        // Check if this is an invite flow (has advisorCode but no tokens) - this is normal for OTP flow
+        // Handle SendGrid click tracking redirects - check multiple ways advisorCode might be present
+        const advisorCodeFromSearch = searchParams.get('advisorCode');
+        const advisorCodeFromHash = hash.includes('advisorCode=') ? hash.split('advisorCode=')[1]?.split('&')[0] : null;
+        const advisorCodeFromQuery = getQueryParam('advisorCode');
+        const advisorCode = advisorCodeFromSearch || advisorCodeFromHash || advisorCodeFromQuery;
+        
+        const pageParam = searchParams.get('page') || getQueryParam('page');
+        const isResetPasswordPage = pageParam === 'reset-password' || 
+                                   window.location.pathname === '/reset-password' || 
+                                   window.location.href.includes('reset-password');
+        
+        if (advisorCode && isResetPasswordPage) {
+          console.log('📧 Invite flow detected via advisorCode (SendGrid redirect handled), showing OTP form');
+          setIsInviteFlow(true);
+          setError(null); // Allow OTP flow - this is expected for invite OTP flow
+          // Don't return early - let component render normally with OTP form
         } else {
-          console.log('Existing session found for user:', user.email);
-          setIsSessionReady(true);
+          // Check if user is already authenticated (might be from a previous session)
+          console.log('No tokens found, checking existing session...');
+          const { data: { user }, error: userError } = await authService.supabase.auth.getUser();
+          if (userError || !user) {
+            console.log('No existing session found:', userError);
+            
+            // Try one more approach - check if we can detect this as a password reset context
+            // Sometimes Supabase redirects without tokens but with a specific path
+            if (isResetPasswordPage) {
+              console.log('Reset password path detected, but no tokens. Falling back to OTP UI.');
+              setError(null); // allow OTP flow UI
+            } else {
+              setError('Invalid or expired reset link. Please request a new password reset.');
+            }
+          } else {
+            console.log('Existing session found for user:', user.email);
+            setIsSessionReady(true);
+          }
         }
       }
     };
@@ -473,24 +500,44 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         throw new Error(data.error || 'Failed to verify OTP');
       }
 
-      setIsSuccess(true);
-      setOtpError(false);
+      // Only proceed with success flow if OTP verification was successful
+      if (data.success !== false) {
+        setIsSuccess(true);
+        setOtpError(false);
+        setRedirectCountdown(3); // Start countdown at 3 seconds
 
-      // Sign out after password reset
-      try {
-        await authService.supabase.auth.signOut();
-      } catch (signOutError) {
-        console.log('Sign out error (non-critical):', signOutError);
-      }
-
-      // Auto-redirect to login after showing success message for 3 seconds
-      setTimeout(() => {
-        if (advisorCode) {
-          window.location.href = `/?page=login&advisorCode=${advisorCode}`;
-        } else {
-          window.location.href = '/?page=login';
+        // Sign out after password reset
+        try {
+          await authService.supabase.auth.signOut();
+        } catch (signOutError) {
+          console.log('Sign out error (non-critical):', signOutError);
         }
-      }, 3000); // 3 seconds delay to show success message
+
+        // Countdown timer
+        const countdownInterval = setInterval(() => {
+          setRedirectCountdown((prev) => {
+            if (prev <= 1) {
+              clearInterval(countdownInterval);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+
+        // Auto-redirect to login ONLY after password is set successfully (after 3 seconds)
+        // This setTimeout is only executed if password was successfully set above
+        setTimeout(() => {
+          clearInterval(countdownInterval);
+          // Password was successfully set, redirect to login
+          if (advisorCode) {
+            window.location.href = `/?page=login&advisorCode=${advisorCode}`;
+          } else {
+            window.location.href = '/?page=login';
+          }
+        }, 3000); // 3 seconds delay to show success message
+      } else {
+        throw new Error(data.error || 'Failed to verify OTP');
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to verify OTP');
     } finally {
@@ -532,7 +579,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
       
       if (success) {
         console.log('Password reset successful');
+        // Only set success and redirect if password was actually reset successfully
         setIsSuccess(true);
+        setRedirectCountdown(3); // Start countdown at 3 seconds
         
         // Check if this is an invite link (has advisorCode)
         const advisorCode = getQueryParam('advisorCode');
@@ -546,8 +595,21 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           console.log('Sign out error (non-critical):', signOutError);
         }
         
-        // Auto-redirect to login after showing success message for 3 seconds
+        // Countdown timer
+        const countdownInterval = setInterval(() => {
+          setRedirectCountdown((prev) => {
+            if (prev <= 1) {
+              clearInterval(countdownInterval);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+        
+        // Auto-redirect to login ONLY after password is set successfully (after 3 seconds)
         setTimeout(() => {
+          clearInterval(countdownInterval);
+          // Password was successfully reset, now redirect to login
           if (isInviteFlow) {
             window.location.href = `/?page=login&advisorCode=${advisorCode}`;
           } else {
@@ -568,7 +630,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           setError(resetError || altError.message || 'Failed to reset password. Please try again.');
         } else {
           console.log('Alternative method succeeded');
+          // Only set success and redirect if password was actually reset successfully
           setIsSuccess(true);
+          setRedirectCountdown(3); // Start countdown at 3 seconds
           
           // Check if this is an invite link (has advisorCode)
           const advisorCode = getQueryParam('advisorCode');
@@ -582,12 +646,27 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
             console.log('Sign out error (non-critical):', signOutError);
           }
           
-          // Auto-redirect to login after showing success message for 3 seconds
+          // Countdown timer
+          const countdownInterval = setInterval(() => {
+            setRedirectCountdown((prev) => {
+              if (prev <= 1) {
+                clearInterval(countdownInterval);
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+          
+          // Auto-redirect to login ONLY after password is set successfully (after 3 seconds)
           setTimeout(() => {
-            if (isInviteFlow) {
-              window.location.href = `/?page=login&advisorCode=${advisorCode}`;
-            } else {
-              onNavigateToLogin();
+            clearInterval(countdownInterval);
+            // Double-check success state before redirecting
+            if (isSuccess) {
+              if (isInviteFlow) {
+                window.location.href = `/?page=login&advisorCode=${advisorCode}`;
+              } else {
+                onNavigateToLogin();
+              }
             }
           }, 3000); // 3 seconds delay to show success message
         }
@@ -645,7 +724,11 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           </Button>
           
           <p className="text-xs text-slate-500 mt-4">
-            Redirecting to login page in 3 seconds...
+            {redirectCountdown > 0 ? (
+              <>Redirecting to login page in {redirectCountdown} second{redirectCountdown !== 1 ? 's' : ''}...</>
+            ) : (
+              <>Redirecting now...</>
+            )}
           </p>
         </Card>
       </div>

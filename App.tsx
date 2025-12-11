@@ -676,8 +676,21 @@ const App: React.FC = () => {
               if (again.data?.session) return; // session appeared; let listener handle it
               __initialLoadTimeout = setTimeout(() => {
                 if (isMounted && !isAuthenticatedRef.current && !currentUserRef.current) {
+                  // Don't redirect if user is on reset-password page (might be invite flow)
+                  const isResetPasswordPage = currentPage === 'reset-password' || 
+                                             window.location.href.includes('reset-password') ||
+                                             getQueryParam('page') === 'reset-password';
+                  const hasAdvisorCode = getQueryParam('advisorCode');
+                  
+                  if (isResetPasswordPage && hasAdvisorCode) {
+                    // This is an invite flow - don't redirect, let user enter OTP
+                    console.log('📧 Invite flow detected, skipping auto-redirect to login');
+                    setIsLoading(false);
+                    return;
+                  }
+                  
                   setIsLoading(false);
-                  if (currentPage !== 'login' && currentPage !== 'register') {
+                  if (currentPage !== 'login' && currentPage !== 'register' && !isResetPasswordPage) {
                     setCurrentPage('login');
                   }
                 }

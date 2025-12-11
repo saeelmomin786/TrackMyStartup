@@ -1121,7 +1121,41 @@ const App: React.FC = () => {
                   console.log('Profile completion status:', isProfileComplete);
                   
                   // Check if profile is complete before setting as authenticated
+                  // BUT: Don't redirect to complete-registration if this is an invite flow (user needs to set password first)
                   if (!isProfileComplete) {
+                    const advisorCode = getQueryParam('advisorCode');
+                    const pageParam = getQueryParam('page');
+                    const isResetPasswordPage = currentPage === 'reset-password' || 
+                                               window.location.href.includes('reset-password') ||
+                                               pageParam === 'reset-password';
+                    
+                    // If this is an invite flow, ALWAYS redirect to reset-password page (user needs to set password via OTP first)
+                    // This applies even if they're on complete-registration - they must set password first
+                    if (advisorCode) {
+                      // Only redirect if we're NOT already on reset-password page
+                      if (!isResetPasswordPage) {
+                        console.log('📧 Invite flow detected - user needs to set password first, redirecting to reset-password page');
+                        setCurrentUser(profileUser);
+                        const email = getQueryParam('email');
+                        if (email) {
+                          const encodedEmail = encodeURIComponent(email);
+                          window.location.href = `/?page=reset-password&advisorCode=${advisorCode}&email=${encodedEmail}`;
+                        } else {
+                          window.location.href = `/?page=reset-password&advisorCode=${advisorCode}`;
+                        }
+                        setIsLoading(false);
+                        setIsProcessingAuthChange(false);
+                        return; // Don't redirect to complete-registration, go to reset-password first
+                      } else {
+                        // Already on reset-password page, just stay there
+                        console.log('📧 Invite flow detected - user is on reset-password page, staying here');
+                        setCurrentUser(profileUser);
+                        setIsLoading(false);
+                        setIsProcessingAuthChange(false);
+                        return; // Don't redirect, let user set password first
+                      }
+                    }
+                    
                     console.log('Profile not complete, redirecting to complete-registration page');
                     setCurrentUser(profileUser);
                     setCurrentPage('complete-registration');
@@ -2893,7 +2927,25 @@ const App: React.FC = () => {
   }
 
   // Auth redirect guard: if authenticated and still on 'landing', check profile completion first
+  // BUT: Don't redirect if this is an invite flow (user needs to set password first)
   if (isAuthenticated && currentPage === 'landing') {
+    const advisorCode = getQueryParam('advisorCode');
+    const isResetPasswordPage = getQueryParam('page') === 'reset-password' || 
+                               window.location.href.includes('reset-password');
+    
+    // If this is an invite flow, redirect to reset-password instead of complete-registration
+    if (advisorCode && !isResetPasswordPage) {
+      console.log('📧 Invite flow detected in auth redirect guard - redirecting to reset-password');
+      const email = getQueryParam('email');
+      if (email) {
+        const encodedEmail = encodeURIComponent(email);
+        window.location.href = `/?page=reset-password&advisorCode=${advisorCode}&email=${encodedEmail}`;
+      } else {
+        window.location.href = `/?page=reset-password&advisorCode=${advisorCode}`;
+      }
+      return; // Don't proceed with profile completion check
+    }
+    
     console.log('🔁 Auth redirect guard: checking profile completion before redirect');
     
     // Check if user profile is complete before redirecting to dashboard
@@ -2903,17 +2955,51 @@ const App: React.FC = () => {
           console.log('🔁 Profile complete, redirecting to dashboard');
           setCurrentPage('login');
         } else {
-          console.log('🔁 Profile incomplete, redirecting to complete-registration');
-          setCurrentPage('complete-registration');
+          // Don't redirect to complete-registration if this is an invite flow
+          if (advisorCode) {
+            console.log('📧 Invite flow detected - redirecting to reset-password instead of complete-registration');
+            const email = getQueryParam('email');
+            if (email) {
+              const encodedEmail = encodeURIComponent(email);
+              window.location.href = `/?page=reset-password&advisorCode=${advisorCode}&email=${encodedEmail}`;
+            } else {
+              window.location.href = `/?page=reset-password&advisorCode=${advisorCode}`;
+            }
+          } else {
+            console.log('🔁 Profile incomplete, redirecting to complete-registration');
+            setCurrentPage('complete-registration');
+          }
         }
       }).catch((error) => {
         console.error('❌ Error checking profile completion:', error);
-        // Default to complete-registration if check fails
-        setCurrentPage('complete-registration');
+        // Default to reset-password for invite flows, complete-registration otherwise
+        if (advisorCode) {
+          const email = getQueryParam('email');
+          if (email) {
+            const encodedEmail = encodeURIComponent(email);
+            window.location.href = `/?page=reset-password&advisorCode=${advisorCode}&email=${encodedEmail}`;
+          } else {
+            window.location.href = `/?page=reset-password&advisorCode=${advisorCode}`;
+          }
+        } else {
+          setCurrentPage('complete-registration');
+        }
       });
     } else {
-      console.log('🔁 No current user, redirecting to complete-registration');
-      setCurrentPage('complete-registration');
+      // If no current user but advisorCode is present, redirect to reset-password
+      if (advisorCode) {
+        console.log('📧 Invite flow detected (no user) - redirecting to reset-password');
+        const email = getQueryParam('email');
+        if (email) {
+          const encodedEmail = encodeURIComponent(email);
+          window.location.href = `/?page=reset-password&advisorCode=${advisorCode}&email=${encodedEmail}`;
+        } else {
+          window.location.href = `/?page=reset-password&advisorCode=${advisorCode}`;
+        }
+      } else {
+        console.log('🔁 No current user, redirecting to complete-registration');
+        setCurrentPage('complete-registration');
+      }
     }
   }
 

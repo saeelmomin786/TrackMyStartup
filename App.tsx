@@ -149,22 +149,36 @@ const App: React.FC = () => {
         return 'reset-password';
       }
       
-      // Check for invite link (has advisorCode) - should go to complete-registration AFTER login
-      // But if on login page with advisorCode, stay on login (user needs to login first)
+      // Check for invite link (has advisorCode) - should go to reset-password FIRST for password setup
+      // Then after password is set and user logs in, go to complete-registration
       const advisorCode = searchParams.get('advisorCode') || getQueryParam('advisorCode');
       const pageParam = searchParams.get('page') || getQueryParam('page');
       
-      // If advisorCode is present but we're on login page, stay on login
+      // Priority 1: If page=reset-password is explicitly set, go to reset-password (for invite flow)
+      if (pageParam === 'reset-password') {
+        console.log('📧 Reset password page requested');
+        return 'reset-password';
+      }
+      
+      // Priority 2: If advisorCode is present but we're on login page, stay on login
       // After login, we'll redirect to complete-registration
       if (advisorCode && pageParam === 'login') {
         console.log('📧 Login page with advisorCode - user will login then go to Form 2');
         return 'login';
       }
       
-      // If advisorCode is present and user is authenticated, go to Form 2
-      if (advisorCode && !error && pageParam !== 'login' && pageParam !== 'reset-password') {
-        console.log('📧 Invite link detected with advisorCode:', advisorCode);
-        return 'complete-registration';
+      // Priority 3: If advisorCode is present but page is complete-registration
+      // This is an invite flow - user needs to set password first, so go to reset-password
+      if (advisorCode && pageParam === 'complete-registration') {
+        console.log('📧 Invite link with complete-registration detected - user needs to set password first, redirecting to reset-password');
+        return 'reset-password'; // Will redirect via useEffect below
+      }
+      
+      // Priority 4: If advisorCode is present without explicit page param
+      // Default to reset-password for invite flow (user needs to set password first)
+      if (advisorCode && !error && !pageParam) {
+        console.log('📧 Invite link detected with advisorCode (no page param) - defaulting to reset-password');
+        return 'reset-password';
       }
       const fromQuery = (getQueryParam('page') as any) || 'landing';
       const valid = ['landing','login','register','complete-registration','payment','reset-password'];
@@ -187,6 +201,24 @@ const App: React.FC = () => {
       setQueryParam('page', currentPage, false);
     }
   }, [currentPage, isInitialLoad]);
+
+  // Redirect from complete-registration to reset-password for invite flows
+  useEffect(() => {
+    const advisorCode = getQueryParam('advisorCode');
+    const pageParam = getQueryParam('page');
+    
+    // If user lands on complete-registration with advisorCode, redirect to reset-password
+    if (advisorCode && pageParam === 'complete-registration') {
+      console.log('📧 Redirecting from complete-registration to reset-password for invite flow');
+      const email = getQueryParam('email');
+      if (email) {
+        const encodedEmail = encodeURIComponent(email);
+        window.location.href = `/?page=reset-password&advisorCode=${advisorCode}&email=${encodedEmail}`;
+      } else {
+        window.location.href = `/?page=reset-password&advisorCode=${advisorCode}`;
+      }
+    }
+  }, []); // Run once on mount
 
   // Handle browser back/forward buttons
   useEffect(() => {

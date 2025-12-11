@@ -232,7 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                process.env.VITE_SITE_URL?.includes('localhost');
           siteUrl = isDevelopment 
             ? 'http://localhost:5173'
-            : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://www.trackmystartup.com');
+            : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://trackmystartup.com');
         }
         
         // Format redirect URL - First go to password setup, then login, then Form 2

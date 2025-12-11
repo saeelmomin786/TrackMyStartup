@@ -94,8 +94,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // Check if advisor code is already set (already linked)
         if (existingStartupByEmail.investment_advisor_code_entered === advisorCode) {
-          // Already linked to this advisor - can proceed
-          console.log('Startup already linked to this advisor');
+          // Already linked to this advisor (likely previously invited) - treat as re-invite
+          console.log('Startup already linked to this advisor; sending OTP re-invite');
+          isExistingTMSStartup = false; // allow normal invite flow messaging
         } else if (existingStartupByEmail.investment_advisor_code_entered && existingStartupByEmail.investment_advisor_code_entered !== advisorCode) {
           // Startup is already linked to a different advisor
           const { data: existingAdvisorData } = await supabaseAdmin

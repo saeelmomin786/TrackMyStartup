@@ -1270,27 +1270,9 @@ app.post('/api/invite-startup-advisor', async (req, res) => {
 
         // Check if advisor code is already set (already linked)
         if (existingStartupByEmail.investment_advisor_code_entered === advisorCode) {
-          // Already linked to this advisor - can proceed
-          console.log('Startup already linked to this advisor');
-          
-          // Update advisor_added_startups to mark as linked
-          await supabaseAdmin
-            .from('advisor_added_startups')
-            .update({
-              is_on_tms: true,
-              tms_startup_id: startupRecord.id,
-              invite_status: 'accepted'
-            })
-            .eq('id', startupId);
-
-          return res.status(200).json({
-            success: true,
-            userId,
-            isExistingTMSStartup: true,
-            tmsStartupId: startupRecord.id,
-            requiresPermission: false,
-            message: 'Startup is already on TMS and linked to your account'
-          });
+          // Already linked to this advisor (likely previously invited) - treat as re-invite
+          console.log('Startup already linked to this advisor; sending OTP re-invite');
+          isExistingTMSStartup = false; // allow OTP resend flow instead of "already on TMS"
         } else if (existingStartupByEmail.investment_advisor_code_entered && existingStartupByEmail.investment_advisor_code_entered !== advisorCode) {
           // Startup is already linked to a different advisor
           const { data: existingAdvisorData } = await supabaseAdmin

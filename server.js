@@ -1608,6 +1608,144 @@ app.post('/api/invite-startup-advisor', async (req, res) => {
 });
 
 // --------------------
+// OTP: request
+// --------------------
+app.post('/api/request-otp', async (req, res) => {
+  try {
+    const { email, purpose, advisorCode } = req.body;
+    if (!email || !purpose) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const OTP_EXPIRY_MINUTES = 10;
+    const OTP_LENGTH = 6;
+    const code = Math.floor(10 ** (OTP_LENGTH - 1) + Math.random() * 9 * 10 ** (OTP_LENGTH - 1)).toString();
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000).toISOString();
+
+    // Lookup user (only required for forgot)
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('id, role')
+      .eq('email', email.toLowerCase().trim())
+      .maybeSingle();
+
+    if (!userRow && purpose === 'forgot') {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const { error: insertError } = await supabase.from('password_otps').insert({
+      email: email.toLowerCase().trim(),
+      user_id: userRow?.id || null,
+      code,
+      purpose,
+      advisor_code: advisorCode || null,
+      expires_at: expiresAt,
+    });
+
+    if (insertError) {
+      console.error('Error inserting OTP:', insertError);
+      return res.status(500).json({ error: 'Failed to generate OTP' });
+    }
+
+    // Send email via SMTP
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: Number(process.env.SMTP_PORT || 587) === 465,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
+    const fromName = process.env.SMTP_FROM_NAME || 'TrackMyStartup';
+
+    await transporter.sendMail({
+      from: `${fromName} <${fromAddress}>`,
+      to: email,
+      subject: 'Your OTP Code',
+      text: `Your OTP code is ${code}. It expires in ${OTP_EXPIRY_MINUTES} minutes.`,
+      html: `<p>Your OTP code is <b>${code}</b>. It expires in ${OTP_EXPIRY_MINUTES} minutes.</p>`,
+    });
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('request-otp error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// --------------------
+// OTP: verify and set password
+// --------------------
+app.post('/api/verify-otp', async (req, res) => {
+  try {
+    const { email, code, newPassword, purpose, advisorCode } = req.body;
+    if (!email || !code || !newPassword || !purpose) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const MAX_ATTEMPTS = 5;
+
+    const { data: otpRow, error: otpError } = await supabase
+      .from('password_otps')
+      .select('*')
+      .eq('email', email.toLowerCase().trim())
+      .eq('code', code)
+      .eq('purpose', purpose)
+      .is('used_at', null)
+      .lte('attempts', MAX_ATTEMPTS)
+      .gte('expires_at', new Date().toISOString())
+      .maybeSingle();
+
+    if (otpError || !otpRow) {
+      return res.status(400).json({ error: 'Invalid or expired OTP' });
+    }
+
+    if (advisorCode && otpRow.advisor_code && otpRow.advisor_code !== advisorCode) {
+      return res.status(400).json({ error: 'Invalid OTP for this advisor' });
+    }
+
+    await supabase
+      .from('password_otps')
+      .update({ attempts: (otpRow.attempts || 0) + 1 })
+      .eq('id', otpRow.id);
+
+    let userId = otpRow.user_id;
+    if (!userId) {
+      const { data: userRow, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', email.toLowerCase().trim())
+        .maybeSingle();
+      if (userError || !userRow) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      userId = userRow.id;
+    }
+
+    const { error: updateError } = await supabase.auth.admin.updateUserById(userId, {
+      password: newPassword,
+    });
+    if (updateError) {
+      console.error('Error updating password:', updateError);
+      return res.status(500).json({ error: 'Failed to update password' });
+    }
+
+    await supabase
+      .from('password_otps')
+      .update({ used_at: new Date().toISOString() })
+      .eq('id', otpRow.id);
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('verify-otp error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// --------------------
 // Start Server
 // --------------------
 const port = process.env.PORT || 3001;

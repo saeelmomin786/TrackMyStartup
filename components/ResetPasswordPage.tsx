@@ -18,6 +18,11 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isSessionReady, setIsSessionReady] = useState(false);
   const [validationErrors, setValidationErrors] = useState<{
     password?: string;
@@ -83,6 +88,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           if (!urlError && data?.session) {
             console.log('Session established via getSessionFromUrl:', { user: data.session.user?.email });
             setIsSessionReady(true);
+            if (data.session.user?.email) {
+              setEmail(data.session.user.email);
+            }
             // Clean up URL
             window.history.replaceState({}, document.title, window.location.pathname);
             return;
@@ -331,11 +339,11 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           // Try one more approach - check if we can detect this as a password reset context
           // Sometimes Supabase redirects without tokens but with a specific path
           if (window.location.pathname === '/reset-password') {
-            console.log('Reset password path detected, but no tokens. This might be a Supabase configuration issue.');
-            setError('Password reset link configuration issue. Please check your Supabase settings and try requesting a new reset link.');
+            console.log('Reset password path detected, but no tokens. Falling back to OTP UI.');
+            setError(null); // allow OTP flow UI
           } else {
-      setError('Invalid or expired reset link. Please request a new password reset.');
-    }
+            setError('Invalid or expired reset link. Please request a new password reset.');
+          }
         } else {
           console.log('Existing session found for user:', user.email);
           setIsSessionReady(true);
@@ -360,6 +368,86 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
       return 'Password must contain at least one number';
     }
     return null;
+  };
+
+  const handleSendOtp = async () => {
+    setError(null);
+    if (!email) {
+      setError('Please enter your email to receive an OTP.');
+      return;
+    }
+    const advisorCode = getQueryParam('advisorCode');
+    setIsSendingOtp(true);
+    try {
+      const purpose = advisorCode ? 'invite' : 'forgot';
+      const response = await fetch('/api/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, purpose, advisorCode }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send OTP');
+      }
+      setOtpSent(true);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send OTP');
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  const handleVerifyOtpAndReset = async () => {
+    setError(null);
+    if (!otpCode) {
+      setError('Please enter the OTP sent to your email.');
+      return;
+    }
+    if (!validateForm()) {
+      return;
+    }
+    const advisorCode = getQueryParam('advisorCode');
+    setIsVerifyingOtp(true);
+    try {
+      const purpose = advisorCode ? 'invite' : 'forgot';
+      const response = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          code: otpCode,
+          newPassword,
+          purpose,
+          advisorCode,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to verify OTP');
+      }
+
+      setIsSuccess(true);
+
+      // Sign out after password reset
+      try {
+        await authService.supabase.auth.signOut();
+      } catch (signOutError) {
+        console.log('Sign out error (non-critical):', signOutError);
+      }
+
+      // Redirect to login after short delay
+      setTimeout(() => {
+        if (advisorCode) {
+          window.location.href = `/?page=login&advisorCode=${advisorCode}`;
+        } else {
+          window.location.href = '/?page=login';
+        }
+      }, 1200);
+    } catch (err: any) {
+      setError(err.message || 'Failed to verify OTP');
+    } finally {
+      setIsVerifyingOtp(false);
+    }
   };
 
   const validateForm = (): boolean => {
@@ -522,27 +610,6 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
     );
   }
 
-  // Show loading state while establishing session
-  if (!isSessionReady && !error) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-        <Card className="w-full max-w-md text-center">
-          <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
-            <Loader2 className="h-6 w-6 text-blue-600 animate-spin" />
-          </div>
-          
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">
-            Preparing Reset
-          </h2>
-          
-          <p className="text-slate-600">
-            Setting up your password reset session...
-          </p>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
       <Card className="w-full max-w-md">
@@ -550,9 +617,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
             <Lock className="h-6 w-6 text-blue-600" />
           </div>
-          <h2 className="text-2xl font-bold text-slate-900">Reset Your Password</h2>
+          <h2 className="text-2xl font-bold text-slate-900">Reset / Set Your Password</h2>
           <p className="text-slate-600 mt-2">
-            Enter your new password below
+            Enter your email, OTP, and new password below
           </p>
         </div>
 
@@ -580,7 +647,40 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700">
+              Email
+            </label>
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700">
+              OTP
+            </label>
+            <div className="flex gap-2">
+              <Input
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value)}
+                placeholder="Enter the 6-digit code"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSendOtp}
+                disabled={isSendingOtp}
+              >
+                {isSendingOtp ? 'Sending...' : otpSent ? 'Resend OTP' : 'Send OTP'}
+              </Button>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <label htmlFor="new-password" className="block text-sm font-medium text-slate-700">
               New Password
@@ -659,28 +759,27 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
               variant="outline"
               onClick={handleGoToLogin}
               className="flex-1"
-              disabled={isLoading}
+              disabled={isVerifyingOtp}
             >
               Back to Login
             </Button>
             <Button
-              type="submit"
+              type="button"
               className="flex-1"
-              disabled={isLoading || !newPassword.trim() || !confirmPassword.trim() || !isSessionReady}
+              onClick={handleVerifyOtpAndReset}
+              disabled={isVerifyingOtp || !newPassword.trim() || !confirmPassword.trim()}
             >
-              {isLoading ? (
-                <>
+              {isVerifyingOtp ? (
+                <span className="flex items-center justify-center gap-2">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Resetting...
-                </>
-              ) : !isSessionReady ? (
-                'Preparing...'
+                  Verifying...
+                </span>
               ) : (
-                'Reset Password'
+                'Verify OTP & Update Password'
               )}
             </Button>
           </div>
-        </form>
+        </div>
       </Card>
     </div>
   );

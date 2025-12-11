@@ -3,6 +3,7 @@ import Modal from './ui/Modal';
 import Button from './ui/Button';
 import Input from './ui/Input';
 import { Mail, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { authService } from '../lib/auth';
 
 interface ForgotPasswordModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<'request' | 'otp'>('request');
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+  const [emailValidationError, setEmailValidationError] = useState<string | null>(null);
 
   const validatePassword = (password: string): string | null => {
     if (password.length < 8) return 'Password must be at least 8 characters long';
@@ -28,10 +31,58 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
     return null;
   };
 
+  const handleEmailChange = async (emailValue: string) => {
+    setEmail(emailValue);
+    setEmailValidationError(null);
+    setError(null); // Clear general error when email changes
+
+    // Only validate if email is not empty and looks like a valid email
+    if (emailValue && emailValue.includes('@')) {
+      setIsCheckingEmail(true);
+      try {
+        const { exists } = await authService.checkEmailExists(emailValue.trim());
+        if (!exists) {
+          setEmailValidationError('User not registered yet');
+        }
+      } catch (error) {
+        console.error('Error checking email:', error);
+        // Don't show error if check fails, just log it
+      } finally {
+        setIsCheckingEmail(false);
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
+
+    // Check if email is registered before sending OTP
+    if (emailValidationError) {
+      setError(emailValidationError);
+      setIsLoading(false);
+      return;
+    }
+
+    // Re-check email if not already checked
+    if (!isCheckingEmail && email && email.includes('@')) {
+      setIsCheckingEmail(true);
+      try {
+        const { exists } = await authService.checkEmailExists(email.trim());
+        if (!exists) {
+          setEmailValidationError('User not registered yet');
+          setError('User not registered yet');
+          setIsLoading(false);
+          setIsCheckingEmail(false);
+          return;
+        }
+      } catch (error) {
+        console.error('Error checking email:', error);
+      } finally {
+        setIsCheckingEmail(false);
+      }
+    }
 
     try {
       const response = await fetch('/api/request-otp', {
@@ -41,9 +92,17 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to send OTP');
+        // Handle 404 specifically for user not found
+        if (response.status === 404) {
+          setError('User not registered yet');
+          setEmailValidationError('User not registered yet');
+        } else {
+          throw new Error(data.error || 'Failed to send OTP');
+        }
+        return;
       }
       setStep('otp');
+      setEmailValidationError(null); // Clear validation error on success
     } catch (err: any) {
       console.error('Password reset OTP error:', err);
       setError(err.message || 'An unexpected error occurred. Please try again.');
@@ -101,6 +160,8 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
     setError(null);
     setIsSuccess(false);
     setStep('request');
+    setEmailValidationError(null);
+    setIsCheckingEmail(false);
     onClose();
   };
 
@@ -112,6 +173,8 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
     setError(null);
     setIsSuccess(false);
     setStep('request');
+    setEmailValidationError(null);
+    setIsCheckingEmail(false);
   };
 
   return (
@@ -132,18 +195,32 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <Input
-                label="Email address"
-                id="reset-email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                placeholder="Enter your email address"
-              />
+              <div className="space-y-2">
+                <Input
+                  label="Email address"
+                  id="reset-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  onBlur={() => {
+                    if (email) {
+                      handleEmailChange(email);
+                    }
+                  }}
+                  required
+                  placeholder="Enter your email address"
+                  className={emailValidationError ? 'border-red-500' : ''}
+                />
+                {isCheckingEmail && (
+                  <p className="text-xs text-slate-500">Checking email...</p>
+                )}
+                {emailValidationError && (
+                  <p className="text-xs text-red-600">{emailValidationError}</p>
+                )}
+              </div>
 
-              {error && (
+              {error && !emailValidationError && (
                 <div className="bg-red-50 border border-red-200 rounded-md p-3">
                   <div className="flex items-center gap-2">
                     <AlertCircle className="h-4 w-4 text-red-600" />
@@ -165,7 +242,7 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
                 <Button
                   type="submit"
                   className="flex-1"
-                  disabled={isLoading || !email.trim()}
+                  disabled={isLoading || !email.trim() || isCheckingEmail || !!emailValidationError}
                 >
                   {isLoading ? (
                     <>

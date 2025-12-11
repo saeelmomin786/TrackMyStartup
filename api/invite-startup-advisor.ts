@@ -396,8 +396,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         from: `${fromName} <${fromAddress}>`,
         to: contactEmail,
         subject: 'Your TrackMyStartup invite OTP',
-        text: `Use this OTP to set your password: ${code} (valid ${OTP_EXPIRY_MINUTES} minutes). Then set your password here: ${resetLink}`,
-        html: `<p>Use this OTP to set your password: <b>${code}</b> (valid ${OTP_EXPIRY_MINUTES} minutes).</p><p>Then set your password here: <a href="${resetLink}">${resetLink}</a></p>`
+        text: [
+          `You’ve been invited to TrackMyStartup.`,
+          `Your OTP: ${code} (valid ${OTP_EXPIRY_MINUTES} minutes)`,
+          ``,
+          `Set your password here: ${resetLink}`,
+          `Steps:`,
+          `1) Open the link above.`,
+          `2) Enter your email, the OTP, and a new password.`,
+          `3) Continue to complete your registration.`
+        ].join('\n'),
+        html: `
+          <p>You’ve been invited to TrackMyStartup.</p>
+          <p>Your OTP: <b>${code}</b> (valid ${OTP_EXPIRY_MINUTES} minutes)</p>
+          <p>Set your password here: <a href="${resetLink}">${resetLink}</a></p>
+          <p><b>Steps:</b></p>
+          <ol>
+            <li>Open the link above.</li>
+            <li>Enter your email, the OTP, and a new password.</li>
+            <li>Continue to complete your registration.</li>
+          </ol>
+        `
       });
 
       console.log('📧 Invite OTP sent to:', contactEmail, 'accepted:', info.accepted, 'response:', info.response);

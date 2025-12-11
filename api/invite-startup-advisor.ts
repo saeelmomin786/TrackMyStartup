@@ -109,9 +109,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .update({
               is_on_tms: false,
               tms_startup_id: startupRecord.id,
-              invite_status: 'not_sent',
-              invited_user_id: userId,
-              invited_email: contactEmail
+              invite_status: 'not_sent'
+              // Note: invited_user_id and invited_email columns don't exist in the table
             })
             .eq('id', startupId);
 
@@ -182,9 +181,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .update({
               is_on_tms: false, // Not linked yet, pending permission
               tms_startup_id: startupRecord.id,
-              invite_status: 'not_sent', // Permission request sent instead
-              invited_user_id: userId,
-              invited_email: contactEmail
+              invite_status: 'not_sent' // Permission request sent instead
+              // Note: invited_user_id and invited_email columns don't exist in the table
             })
             .eq('id', startupId);
 
@@ -207,8 +205,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Check if user exists in auth (but not in users table)
       let existingUser;
       try {
-        const userResult = await supabaseAdmin.auth.admin.getUserByEmail(contactEmail);
-        existingUser = userResult?.data?.user;
+        // Use listUsers() instead of getUserByEmail (which doesn't exist)
+        const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+        if (!listError && usersData?.users) {
+          existingUser = usersData.users.find(u => u.email?.toLowerCase() === contactEmail.toLowerCase());
+        }
       } catch (authError: any) {
         console.log('No existing user in auth (this is OK for new users):', authError.message);
         existingUser = null;
@@ -220,11 +221,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.log('User exists in auth:', userId);
       } else {
         // Create new user via admin invite
-        const siteUrl = redirectUrl || process.env.VITE_SITE_URL || process.env.SITE_URL || 'http://localhost:5173';
-        // Redirect to password setup page first, then login, then Form 2
+        // Use redirectUrl from client (which includes window.location.origin) for correct domain
+        // Fallback to localhost for local development
+        let siteUrl = redirectUrl;
+        
+        if (!siteUrl) {
+          // Check if we're in development
+          const isDevelopment = process.env.NODE_ENV === 'development' || 
+                               !process.env.VERCEL_ENV ||
+                               process.env.VITE_SITE_URL?.includes('localhost');
+          siteUrl = isDevelopment 
+            ? 'http://localhost:5173'
+            : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://www.trackmystartup.com');
+        }
+        
+        // Format redirect URL - First go to password setup, then login, then Form 2
         const inviteRedirectUrl = `${siteUrl}/?page=reset-password&advisorCode=${advisorCode}`;
 
         console.log('Inviting new user with redirect URL:', inviteRedirectUrl);
+        console.log('⚠️ IMPORTANT: Make sure this URL is added to Supabase Dashboard > Authentication > URL Configuration > Redirect URLs');
+        console.log('Redirect URL details:', {
+          redirectUrlFromClient: redirectUrl,
+          finalSiteUrl: siteUrl,
+          NODE_ENV: process.env.NODE_ENV,
+          VERCEL_ENV: process.env.VERCEL_ENV
+        });
+        console.log('Email to send invite to:', contactEmail);
 
         const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
           contactEmail,
@@ -241,55 +263,110 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         );
 
-        if (inviteError || !inviteData?.user) {
-          console.error('Error inviting user:', inviteError);
+        if (inviteError) {
+          console.error('Error inviting user:', {
+            error: inviteError,
+            message: inviteError.message,
+            details: inviteError.details,
+            hint: inviteError.hint,
+            code: inviteError.code
+          });
           return res.status(500).json({ 
-            error: inviteError?.message || 'Failed to send invite',
-            details: inviteError?.details || 'No additional details'
+            error: inviteError.message || 'Failed to send invite',
+            details: inviteError.details || 'No additional details',
+            hint: inviteError.hint
+          });
+        }
+
+        if (!inviteData?.user) {
+          console.error('No user returned from invite:', inviteData);
+          return res.status(500).json({ 
+            error: 'Failed to create user via invite',
+            details: 'No user data returned from Supabase'
           });
         }
 
         userId = inviteData.user.id;
         isNewUser = true;
-        console.log('User invited successfully:', userId);
+        console.log('✅ User invited successfully:', userId);
+        console.log('📧 Email should have been sent to:', contactEmail);
+        console.log('📧 Check Supabase Dashboard > Authentication > Users to verify email was sent');
+        console.log('📧 Note: Email might take a few minutes to arrive, check spam folder');
+        
+        // Try to get the invite link if available (for debugging)
+        try {
+          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+          if (userData?.user) {
+            console.log('📋 User details:', {
+              email: userData.user.email,
+              email_confirmed_at: userData.user.email_confirmed_at,
+              invited_at: userData.user.invited_at,
+              confirmation_sent_at: userData.user.confirmation_sent_at
+            });
+          }
+        } catch (debugError: any) {
+          console.log('Could not fetch user details for debugging:', debugError.message);
+        }
       }
     }
 
     // Create or update user record in users table
+    // Note: Don't set created_at/updated_at - they're auto-generated by the database
+    // Note: is_verified column may not exist in all schemas, so we'll omit it
+    const userData = {
+      id: userId,
+      email: contactEmail.toLowerCase().trim(),
+      name: contactName,
+      role: 'Startup',
+      startup_name: startupName,
+      investment_advisor_code_entered: advisorCode
+    };
+
+    console.log('Creating/updating user record:', { userId, email: userData.email, isNewUser });
+
     const { data: userRecord, error: userError } = await supabaseAdmin
       .from('users')
-      .upsert({
-        id: userId,
-        email: contactEmail,
-        name: contactName,
-        role: 'Startup',
-        startup_name: startupName,
-        investment_advisor_code_entered: advisorCode,
-        is_verified: true, // Auto-verify since invited by advisor
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }, {
+      .upsert(userData, {
         onConflict: 'id'
       })
       .select()
       .single();
 
     if (userError) {
-      console.error('Error creating user record:', userError);
-      return res.status(500).json({ error: 'Failed to create user record' });
+      console.error('Error creating user record:', {
+        error: userError,
+        message: userError.message,
+        details: userError.details,
+        hint: userError.hint,
+        code: userError.code,
+        userData: { ...userData, id: userId }
+      });
+      return res.status(500).json({ 
+        error: 'Failed to create user record',
+        details: userError.message || userError.details || 'Unknown error',
+        hint: userError.hint
+      });
     }
+
+    console.log('User record created/updated successfully:', userRecord?.id);
 
     // Create startup record if user is new (and doesn't already exist)
     if (isNewUser && !existingStartupId) {
+      // Set default values for required fields (will be updated when user completes Form 2)
       const { data: startupRecord, error: startupError } = await supabaseAdmin
         .from('startups')
         .insert({
           name: startupName,
           user_id: userId,
           investment_advisor_code: advisorCode,
-          is_verified: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          investment_type: 'Pre-Seed', // Default, will be updated in Form 2
+          investment_value: 0, // Default, will be updated in Form 2
+          equity_allocation: 0, // Default, will be updated in Form 2
+          current_valuation: 0, // Default, will be updated in Form 2
+          sector: 'Technology', // Default, will be updated in Form 2
+          registration_date: new Date().toISOString().split('T')[0], // Today's date
+          compliance_status: 'Pending' // Default status
+          // Note: Don't set created_at, updated_at - they're auto-generated
         })
         .select()
         .single();
@@ -305,9 +382,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Update advisor_added_startups record
     const updateData: any = {
-      invite_sent_at: new Date().toISOString(),
-      invited_user_id: userId,
-      invited_email: contactEmail
+      invite_sent_at: new Date().toISOString()
+      // Note: invited_user_id and invited_email columns don't exist in the table
     };
 
     if (isExistingTMSStartup) {

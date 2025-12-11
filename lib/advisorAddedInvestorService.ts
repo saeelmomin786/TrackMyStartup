@@ -184,6 +184,76 @@ class AdvisorAddedInvestorService {
       return false;
     }
   }
+
+  // Send invite to TMS for advisor-added investors
+  async sendInviteToTMS(
+    investorId: number,
+    advisorId: string,
+    advisorCode: string
+  ): Promise<{ success: boolean; userId?: string; error?: string; isExistingTMSInvestor?: boolean; tmsInvestorId?: number; alreadyHasAdvisor?: boolean; existingAdvisorName?: string }> {
+    try {
+      // Get investor details first
+      const investor = await this.getInvestorById(investorId);
+      if (!investor) {
+        return { success: false, error: 'Investor not found' };
+      }
+
+      // Call API endpoint to handle invite
+      const apiUrl = '/api/invite-investor-advisor';
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          investorId,
+          advisorId,
+          advisorCode,
+          investorName: investor.investor_name,
+          contactEmail: investor.email,
+          contactName: investor.investor_name, // Using investor_name as contact name
+          redirectUrl: typeof window !== 'undefined' ? window.location.origin : undefined
+        }),
+      });
+
+      if (!response.ok) {
+        let errorData;
+        const responseText = await response.text();
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('API error - could not parse JSON:', responseText);
+          errorData = { error: `Server error (${response.status}): ${responseText || 'Unknown error'}` };
+        }
+        return { 
+          success: false, 
+          error: errorData.error || errorData.message || `Failed to send invite (${response.status})`
+        };
+      }
+
+      const result = await response.json();
+      
+      // Handle case where investor already has a different advisor
+      if (result.alreadyHasAdvisor) {
+        return {
+          success: false,
+          error: `This investor is already linked with another Investment Advisor (${result.existingAdvisorName || 'Unknown'}). Please contact the investor directly to change their Investment Advisor code.`,
+          alreadyHasAdvisor: true,
+          existingAdvisorName: result.existingAdvisorName
+        };
+      }
+
+      return { 
+        success: result.success, 
+        userId: result.userId,
+        isExistingTMSInvestor: result.isExistingTMSInvestor,
+        tmsInvestorId: result.tmsInvestorId
+      };
+    } catch (error: any) {
+      console.error('Error in sendInviteToTMS:', error);
+      return { success: false, error: error.message || 'Failed to send invite' };
+    }
+  }
 }
 
 export const advisorAddedInvestorService = new AdvisorAddedInvestorService();

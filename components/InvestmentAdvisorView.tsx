@@ -194,6 +194,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [emailValidationError, setEmailValidationError] = useState<string | null>(null);
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
   const [showMoreFields, setShowMoreFields] = useState(false);
+  // Investor email validation state
+  const [investorEmailValidationError, setInvestorEmailValidationError] = useState<string | null>(null);
+  const [isCheckingInvestorEmail, setIsCheckingInvestorEmail] = useState(false);
+  const [showMoreInvestorFields, setShowMoreInvestorFields] = useState(false);
 
   // Dropdown options state
   const [countries, setCountries] = useState<string[]>([]);
@@ -521,6 +525,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       stage: investor.stage || '',
       notes: investor.notes || ''
     });
+    setInvestorEmailValidationError(null);
+    setShowMoreInvestorFields(false);
     setShowAddInvestorModal(true);
   };
 
@@ -568,8 +574,20 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle save added investor
   const handleSaveAddedInvestor = async () => {
+    const advisorId = currentUser?.id;
+    if (!advisorId) {
+      alert('Missing advisor id. Please re-login and try again.');
+      return;
+    }
+
     if (!addInvestorFormData.investor_name || !addInvestorFormData.email) {
       alert('Please fill in investor name and email');
+      return;
+    }
+
+    // Check email validation error
+    if (investorEmailValidationError) {
+      alert(investorEmailValidationError);
       return;
     }
 
@@ -586,9 +604,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
       } else {
         // Create new
-        const created = await advisorAddedInvestorService.createInvestor(addInvestorFormData);
-        if (created) {
-          setAdvisorAddedInvestors(prev => [created, ...prev]);
+        const result = await advisorAddedInvestorService.createInvestor({
+          ...addInvestorFormData,
+          advisor_id: advisorId
+        });
+        if (result) {
+          // Reload the list to ensure data consistency
+          const investors = await advisorAddedInvestorService.getInvestorsByAdvisor(advisorId);
+          setAdvisorAddedInvestors(investors);
           alert('Investor added successfully!');
         } else {
           alert('Failed to add investor');
@@ -596,6 +619,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
       setShowAddInvestorModal(false);
       setEditingAddedInvestor(null);
+      setInvestorEmailValidationError(null);
+      setShowMoreInvestorFields(false);
     } catch (error) {
       console.error('Error saving investor:', error);
       alert('Failed to save investor');
@@ -793,6 +818,28 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     }
   };
 
+  // Handle email change for investors
+  const handleInvestorEmailChange = async (email: string) => {
+    setAddInvestorFormData({ ...addInvestorFormData, email });
+    setInvestorEmailValidationError(null);
+
+    // Only validate if email is not empty and looks like a valid email
+    if (email && email.includes('@')) {
+      setIsCheckingInvestorEmail(true);
+      try {
+        const { exists } = await authService.checkEmailExists(email.trim());
+        if (exists) {
+          setInvestorEmailValidationError('User already Registered Please contact user to add your code');
+        }
+      } catch (error) {
+        console.error('Error checking email:', error);
+        // Don't show error if check fails, just log it
+      } finally {
+        setIsCheckingInvestorEmail(false);
+      }
+    }
+  };
+
   // Handle save added startup
   const handleSaveAddedStartup = async () => {
     const advisorId = currentUser?.id;
@@ -877,6 +924,62 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     } catch (error) {
       console.error('Error deleting startup:', error);
       alert('Failed to delete startup');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle send invite to TMS for advisor-added investors
+  const handleSendInviteToTMSInvestor = async (investorId: number) => {
+    if (!currentUser?.id || !advisorCode) {
+      alert('Advisor information not available. Please refresh and try again.');
+      return;
+    }
+
+    const investor = advisorAddedInvestors.find(inv => inv.id === investorId);
+    if (!investor) {
+      alert('Investor not found');
+      return;
+    }
+
+    // Check if already linked to TMS
+    if (investor.is_on_tms && investor.tms_investor_id) {
+      alert('This investor is already linked to TMS. No invite needed.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await advisorAddedInvestorService.sendInviteToTMS(
+        investorId,
+        currentUser.id,
+        advisorCode
+      );
+      
+      if (result.success) {
+        const updatedInvestor = {
+          ...investor,
+          is_on_tms: result.isExistingTMSInvestor || false,
+          tms_investor_id: result.tmsInvestorId?.toString() || undefined
+        };
+
+        setAdvisorAddedInvestors(prev =>
+          prev.map(inv => inv.id === investorId ? updatedInvestor : inv)
+        );
+
+        if (result.alreadyHasAdvisor) {
+          alert(`⚠️ This investor is already linked with another Investment Advisor (${result.existingAdvisorName || 'Unknown'}). Please contact the investor directly to change their Investment Advisor code.`);
+        } else if (result.isExistingTMSInvestor) {
+          alert('Investor already exists on TMS and has been linked to your account!');
+        } else {
+          alert('Invite sent successfully! The investor will receive an email to set up their account.');
+        }
+      } else {
+        alert(result.error || 'Failed to send invite');
+      }
+    } catch (error: any) {
+      console.error('Error sending invite to TMS:', error);
+      alert(error.message || 'Failed to send invite');
     } finally {
       setIsLoading(false);
     }
@@ -5602,20 +5705,45 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => handleEditAddedInvestor(investor)}
-                                className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors"
-                                title="Edit"
-                              >
-                                <Edit className="h-3 w-3" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteAddedInvestor(investor.id)}
-                                className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
-                                title="Delete"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
+                              {investor.is_on_tms && investor.tms_investor_id ? (
+                                <button
+                                  onClick={() => {
+                                    const tmsInvestor = myInvestors.find(inv => inv.id === investor.tms_investor_id);
+                                    if (tmsInvestor) {
+                                      // Handle view investor dashboard if needed
+                                      alert('Investor is already linked to TMS');
+                                    }
+                                  }}
+                                  className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                                >
+                                  View Dashboard
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleSendInviteToTMSInvestor(investor.id)}
+                                    disabled={isLoading}
+                                    className={`text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed`}
+                                    title="Send or resend invite"
+                                  >
+                                    Invite to TMS
+                                  </button>
+                                  <button
+                                    onClick={() => handleEditAddedInvestor(investor)}
+                                    className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                    title="Edit"
+                                  >
+                                    <Edit className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteAddedInvestor(investor.id)}
+                                    className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -5636,6 +5764,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           onClose={() => {
             setShowAddInvestorModal(false);
             setEditingAddedInvestor(null);
+            setInvestorEmailValidationError(null);
+            setShowMoreInvestorFields(false);
           }}
           title={editingAddedInvestor ? 'Edit Investor' : 'Add Investor'}
         >
@@ -5649,132 +5779,167 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             
             {/* Email and Contact Number in one line */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Email *"
-                type="email"
-                value={addInvestorFormData.email}
-                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, email: e.target.value })}
-                required
-              />
+              <div>
+                <Input
+                  label="Email *"
+                  type="email"
+                  value={addInvestorFormData.email}
+                  onChange={(e) => handleInvestorEmailChange(e.target.value)}
+                  onBlur={() => {
+                    if (addInvestorFormData.email) {
+                      handleInvestorEmailChange(addInvestorFormData.email);
+                    }
+                  }}
+                  required
+                  className={investorEmailValidationError ? 'border-red-500' : ''}
+                />
+                {isCheckingInvestorEmail && (
+                  <p className="mt-1 text-sm text-gray-500">Checking email...</p>
+                )}
+                {investorEmailValidationError && (
+                  <p className="mt-1 text-sm text-red-600">{investorEmailValidationError}</p>
+                )}
+              </div>
               <Input
                 label="Contact Number"
-                value={addInvestorFormData.contact_number}
+                value={addInvestorFormData.contact_number || ''}
                 onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, contact_number: e.target.value })}
               />
             </div>
 
-            {/* Website and LinkedIn in one line */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Website"
-                type="url"
-                value={addInvestorFormData.website}
-                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, website: e.target.value })}
-              />
-              <Input
-                label="LinkedIn URL"
-                type="url"
-                value={addInvestorFormData.linkedin_url}
-                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, linkedin_url: e.target.value })}
-              />
-            </div>
+            {/* Show More button */}
+            {!showMoreInvestorFields && (
+              <div className="flex justify-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowMoreInvestorFields(true)}
+                  className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
+                >
+                  Show More (optional)
+                </button>
+              </div>
+            )}
 
-            {/* Firm Type and Country in one line */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select
-                label="Firm Type"
-                value={addInvestorFormData.firm_type || ''}
-                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, firm_type: e.target.value })}
-              >
-                <option value="">Select Firm Type</option>
-                {loadingFirmTypes ? (
-                  <option>Loading...</option>
-                ) : (
-                  firmTypes.map(type => (
-                    <option key={type} value={type}>{type}</option>
-                  ))
-                )}
-              </Select>
-              <Select
-                label="Country"
-                value={addInvestorFormData.location || ''}
-                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, location: e.target.value })}
-              >
-                <option value="">Select Country</option>
-                {loadingCountries ? (
-                  <option>Loading...</option>
-                ) : (
-                  countries.map(country => (
-                    <option key={country} value={country}>{country}</option>
-                  ))
-                )}
-              </Select>
-            </div>
+            {/* Optional fields - shown when showMoreInvestorFields is true */}
+            {showMoreInvestorFields && (
+              <div className="space-y-4 pt-4 border-t border-gray-200">
 
-            {/* Investment Focus and Domain in one line */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select
-                label="Investment Focus"
-                value={addInvestorFormData.investment_focus || ''}
-                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, investment_focus: e.target.value })}
-              >
-                <option value="">Select Investment Focus</option>
-                {loadingInvestmentStages ? (
-                  <option>Loading...</option>
-                ) : (
-                  investmentStages.map(stage => (
-                    <option key={stage} value={stage}>{stage}</option>
-                  ))
-                )}
-              </Select>
-              <Select
-                label="Domain"
-                value={addInvestorFormData.domain || ''}
-                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, domain: e.target.value })}
-              >
-                <option value="">Select Domain</option>
-                {loadingDomains ? (
-                  <option>Loading...</option>
-                ) : (
-                  domains.map(domain => (
-                    <option key={domain} value={domain}>{domain}</option>
-                  ))
-                )}
-              </Select>
-            </div>
+                {/* Website and LinkedIn in one line */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Website"
+                    type="url"
+                    value={addInvestorFormData.website || ''}
+                    onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, website: e.target.value })}
+                  />
+                  <Input
+                    label="LinkedIn URL"
+                    type="url"
+                    value={addInvestorFormData.linkedin_url || ''}
+                    onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, linkedin_url: e.target.value })}
+                  />
+                </div>
 
-            {/* Stage - Full width */}
-            <Select
-              label="Stage"
-              value={addInvestorFormData.stage || ''}
-              onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, stage: e.target.value })}
-            >
-              <option value="">Select Stage</option>
-              {loadingStages ? (
-                <option>Loading...</option>
-              ) : (
-                stages.map(stage => (
-                  <option key={stage} value={stage}>{stage}</option>
-                ))
-              )}
-            </Select>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Notes
-              </label>
-              <textarea
-                value={addInvestorFormData.notes}
-                onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, notes: e.target.value })}
-                rows={2}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Additional notes about this investor"
-              />
-            </div>
+                {/* Firm Type and Country in one line */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Select
+                    label="Firm Type"
+                    value={addInvestorFormData.firm_type || ''}
+                    onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, firm_type: e.target.value })}
+                  >
+                    <option value="">Select Firm Type</option>
+                    {loadingFirmTypes ? (
+                      <option>Loading...</option>
+                    ) : (
+                      firmTypes.map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))
+                    )}
+                  </Select>
+                  <Select
+                    label="Country"
+                    value={addInvestorFormData.location || ''}
+                    onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, location: e.target.value })}
+                  >
+                    <option value="">Select Country</option>
+                    {loadingCountries ? (
+                      <option>Loading...</option>
+                    ) : (
+                      countries.map(country => (
+                        <option key={country} value={country}>{country}</option>
+                      ))
+                    )}
+                  </Select>
+                </div>
+
+                {/* Investment Focus and Domain in one line */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Select
+                    label="Investment Focus"
+                    value={addInvestorFormData.investment_focus || ''}
+                    onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, investment_focus: e.target.value })}
+                  >
+                    <option value="">Select Investment Focus</option>
+                    {loadingInvestmentStages ? (
+                      <option>Loading...</option>
+                    ) : (
+                      investmentStages.map(stage => (
+                        <option key={stage} value={stage}>{stage}</option>
+                      ))
+                    )}
+                  </Select>
+                  <Select
+                    label="Domain"
+                    value={addInvestorFormData.domain || ''}
+                    onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, domain: e.target.value })}
+                  >
+                    <option value="">Select Domain</option>
+                    {loadingDomains ? (
+                      <option>Loading...</option>
+                    ) : (
+                      domains.map(domain => (
+                        <option key={domain} value={domain}>{domain}</option>
+                      ))
+                    )}
+                  </Select>
+                </div>
+
+                {/* Stage - Full width */}
+                <Select
+                  label="Stage"
+                  value={addInvestorFormData.stage || ''}
+                  onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, stage: e.target.value })}
+                >
+                  <option value="">Select Stage</option>
+                  {loadingStages ? (
+                    <option>Loading...</option>
+                  ) : (
+                    stages.map(stage => (
+                      <option key={stage} value={stage}>{stage}</option>
+                    ))
+                  )}
+                </Select>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Notes
+                  </label>
+                  <textarea
+                    value={addInvestorFormData.notes || ''}
+                    onChange={(e) => setAddInvestorFormData({ ...addInvestorFormData, notes: e.target.value })}
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Additional notes about this investor"
+                  />
+                </div>
+              </div>
+            )}
             <div className="flex justify-end gap-3 pt-4">
               <button
                 onClick={() => {
                   setShowAddInvestorModal(false);
                   setEditingAddedInvestor(null);
+                  setInvestorEmailValidationError(null);
+                  setShowMoreInvestorFields(false);
                 }}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
               >
@@ -5782,7 +5947,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               </button>
               <button
                 onClick={handleSaveAddedInvestor}
-                disabled={isLoading}
+                disabled={isLoading || !!investorEmailValidationError}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? 'Saving...' : editingAddedInvestor ? 'Update' : 'Add Investor'}

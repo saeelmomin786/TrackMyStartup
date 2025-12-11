@@ -14,6 +14,8 @@ import { storageService } from '../lib/storage';
 import { complianceRulesComprehensiveService } from '../lib/complianceRulesComprehensiveService';
 import { userComplianceService, CountryComplianceInfo } from '../lib/userComplianceService';
 import { getCurrencyForCountry, getCountryProfessionalTitles } from '../lib/utils';
+import { getQueryParam } from '../lib/urlState';
+import { supabase } from '../lib/supabase';
 
 interface Founder {
   id: string;
@@ -91,6 +93,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     csServiceCode: '',
     currency: 'USD',
     centerName: '', // For facilitators
+    investmentAdvisorCode: '', // Investment Advisor Code
   });
 
   // Share and equity information
@@ -124,6 +127,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   const [isCheckingUser, setIsCheckingUser] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [wasInvitedByAdvisor, setWasInvitedByAdvisor] = useState(false);
+  const [advisorCodeFromInvite, setAdvisorCodeFromInvite] = useState<string>('');
   // Incubation Center Invite
   const [inviteCenter, setInviteCenter] = useState<{ name: string; email: string; phone: string }>({ name: '', email: '', phone: '' });
   const [isSendingInvite, setIsSendingInvite] = useState(false);
@@ -403,12 +408,33 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
   const checkUserAndRedirect = async () => {
     try {
+      // Check if this is an invite link (has advisorCode in URL)
+      const advisorCodeFromUrl = getQueryParam('advisorCode');
+      const hasInviteParams = advisorCodeFromUrl || getQueryParam('type') === 'invite';
+      
+      // If this is an invite link but user is not authenticated yet,
+      // they need to set password first - don't redirect to register
+      // Supabase will handle the password setup flow
       const { data: { user }, error } = await authService.supabase.auth.getUser();
       
       if (error || !user) {
-        // No user found, redirect to login
-        onNavigateToRegister();
-        return;
+        // If this is an invite link, wait for Supabase to handle authentication
+        // Don't redirect to register - let Supabase's invite flow complete
+        if (hasInviteParams) {
+          console.log('📧 Invite link detected, waiting for password setup...');
+          // Check if there's a session being established
+          const { data: { session } } = await authService.supabase.auth.getSession();
+          if (!session) {
+            // No session yet - Supabase invite flow will handle this
+            // Just wait and don't redirect
+            console.log('⏳ Waiting for Supabase invite authentication...');
+            return;
+          }
+        } else {
+          // Not an invite link, redirect to register
+          onNavigateToRegister();
+          return;
+        }
       }
 
       // Get user profile (needed to determine role and email)
@@ -417,6 +443,50 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         .select('*')
         .eq('id', user.id)
         .single();
+
+      // advisorCodeFromUrl is already declared above (line 412)
+      // Check if user was invited by advisor
+      const invitedByAdvisor = user.user_metadata?.source === 'advisor_invite';
+      const codeFromMetadata = user.user_metadata?.investment_advisor_code_entered;
+      const codeFromProfile = (profile as any)?.investment_advisor_code_entered;
+      const finalAdvisorCode = advisorCodeFromUrl || codeFromMetadata || codeFromProfile || '';
+      
+      setWasInvitedByAdvisor(invitedByAdvisor);
+      setAdvisorCodeFromInvite(finalAdvisorCode);
+      
+      // If advisor code is in URL and user doesn't have it set, update user record
+      if (advisorCodeFromUrl && invitedByAdvisor) {
+        const currentAdvisorCode = (profile as any)?.investment_advisor_code_entered;
+        if (!currentAdvisorCode || currentAdvisorCode !== advisorCodeFromUrl) {
+          // Update user record with advisor code
+          await supabase
+            .from('users')
+            .update({
+              investment_advisor_code_entered: advisorCodeFromUrl,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', user.id);
+
+          // If user is a Startup, also update startup record
+          if ((profile as any)?.role === 'Startup') {
+            const { data: startupData } = await supabase
+              .from('startups')
+              .select('id')
+              .eq('user_id', user.id)
+              .maybeSingle();
+
+            if (startupData) {
+              await supabase
+                .from('startups')
+                .update({
+                  investment_advisor_code: advisorCodeFromUrl,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', startupData.id);
+            }
+          }
+        }
+      }
 
       // Check if user already has a complete profile using the new method
       const isComplete = await authService.isProfileComplete(user.id);
@@ -435,6 +505,19 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         role: (profile && (profile as any).role) || user.user_metadata?.role || 'Investor',
         startupName: (profile && (profile as any).startup_name) || user.user_metadata?.startupName
       });
+
+      // Initialize profileData with advisor code if invited
+      if (finalAdvisorCode && invitedByAdvisor) {
+        setProfileData(prev => ({
+          ...prev,
+          investmentAdvisorCode: finalAdvisorCode
+        }));
+      } else if ((profile as any)?.investment_advisor_code_entered) {
+        setProfileData(prev => ({
+          ...prev,
+          investmentAdvisorCode: (profile as any).investment_advisor_code_entered
+        }));
+      }
       
     } catch (err) {
       console.error('Error checking user:', err);
@@ -1234,6 +1317,105 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   .insert(internationalOpsData);
               }
             }
+
+            // Check if user was invited by Investment Advisor - auto-link if yes
+            const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+            const wasInvitedByAdvisor = authUser?.user_metadata?.source === 'advisor_invite';
+            const advisorCodeFromInvite = authUser?.user_metadata?.investment_advisor_code_entered || 
+                                         (profile as any)?.investment_advisor_code_entered;
+            
+            if (wasInvitedByAdvisor && advisorCodeFromInvite) {
+              console.log('🔗 User was invited by Investment Advisor, auto-linking...', {
+                advisorCode: advisorCodeFromInvite,
+                startupId: startup.id,
+                userId: userData.id
+              });
+
+              // Get advisor details
+              const { data: advisorData } = await authService.supabase
+                .from('users')
+                .select('id, investment_advisor_code, name')
+                .eq('investment_advisor_code', advisorCodeFromInvite)
+                .eq('role', 'Investment Advisor')
+                .maybeSingle();
+
+              if (advisorData) {
+                // Auto-accept: Set advisor_accepted = true in users table
+                // This makes startup appear directly in "My Startups" without approval
+                await authService.supabase
+                  .from('users')
+                  .update({
+                    advisor_accepted: true,
+                    investment_advisor_code_entered: advisorCodeFromInvite,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', userData.id);
+
+                // Update startup record with advisor code
+                await authService.supabase
+                  .from('startups')
+                  .update({
+                    investment_advisor_code: advisorCodeFromInvite,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', startup.id);
+
+                // Update advisor_added_startups if exists (link the manual entry)
+                const { data: advisorAddedStartup } = await authService.supabase
+                  .from('advisor_added_startups')
+                  .select('id')
+                  .eq('advisor_id', advisorData.id)
+                  .or(`tms_startup_id.eq.${startup.id},contact_email.eq.${userData.email}`)
+                  .maybeSingle();
+
+                if (advisorAddedStartup) {
+                  await authService.supabase
+                    .from('advisor_added_startups')
+                    .update({
+                      is_on_tms: true,
+                      tms_startup_id: startup.id,
+                      invite_status: 'accepted',
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq('id', advisorAddedStartup.id);
+                  
+                  console.log('✅ Updated advisor_added_startups record:', advisorAddedStartup.id);
+                }
+
+                console.log('✅ Startup auto-linked to Investment Advisor:', advisorData.name);
+                console.log('✅ Startup will now appear in advisor\'s "My Startups" section automatically');
+              } else {
+                console.warn('⚠️ Advisor not found for code:', advisorCodeFromInvite);
+              }
+            } else {
+              // Normal registration flow - startup entered advisor code manually
+              // They will appear in pending requests, advisor needs to accept
+              const enteredAdvisorCode = profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered;
+              if (enteredAdvisorCode) {
+                console.log('📋 Startup entered advisor code manually:', enteredAdvisorCode);
+                
+                // Save manually entered advisor code to users table
+                await authService.supabase
+                  .from('users')
+                  .update({
+                    investment_advisor_code_entered: enteredAdvisorCode,
+                    advisor_accepted: false, // Needs advisor approval
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', userData.id);
+
+                // Also update startup record
+                await authService.supabase
+                  .from('startups')
+                  .update({
+                    investment_advisor_code: enteredAdvisorCode,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', startup.id);
+
+                console.log('📋 Startup will appear in advisor\'s pending requests for approval');
+              }
+            }
           }
         } catch (error) {
           console.error('Error creating startup:', error);
@@ -1786,6 +1968,66 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   Add Another Founder
                 </Button>
               </div>
+            </div>
+          )}
+
+          {/* Investment Advisor Code - Only for Startup role */}
+          {userData.role === 'Startup' && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center">
+                <CheckCircle className="h-5 w-5 mr-2" />
+                Investment Advisor Code
+              </h3>
+              {wasInvitedByAdvisor && advisorCodeFromInvite ? (
+                <>
+                  <p className="text-sm text-slate-600">
+                    Your Investment Advisor code has been pre-assigned. This field cannot be changed.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Investment Advisor Code <span className="text-green-600">(Pre-assigned)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={advisorCodeFromInvite}
+                      readOnly
+                      disabled
+                      className="w-full bg-slate-100 border border-slate-300 rounded-md px-3 py-2 text-slate-700 cursor-not-allowed"
+                    />
+                    <p className="text-xs text-green-600 mt-1">
+                      ✓ This code was assigned by your Investment Advisor and cannot be modified.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-600">
+                    {profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered
+                      ? 'Your Investment Advisor code from Registration Form 1 is shown below. You can update it if needed.'
+                      : 'Enter your Investment Advisor code if you have one. This is optional and can be added later.'}
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Investment Advisor Code (optional)
+                      {(profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered) && (
+                        <span className="text-blue-600 text-xs ml-2">(From Form 1)</span>
+                      )}
+                    </label>
+                    <input
+                      type="text"
+                      value={profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered || ''}
+                      onChange={(e) => setProfileData(prev => ({ ...prev, investmentAdvisorCode: e.target.value }))}
+                      placeholder="Enter your Investment Advisor code (e.g., IA-XXXX)"
+                      className="w-full border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      {profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered
+                        ? 'You can update this code if needed.'
+                        : 'Leave blank if you don\'t have an Investment Advisor code yet.'}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

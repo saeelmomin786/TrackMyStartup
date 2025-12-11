@@ -229,7 +229,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
     };
     loadAdvisorAddedInvestors();
-  }, [activeTab, currentUser?.id]);
+  }, [activeTab, managementSubTab, currentUser?.id]);
 
   // Load advisor-added startups
   useEffect(() => {
@@ -247,7 +247,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
     };
     loadAdvisorAddedStartups();
-  }, [activeTab, currentUser?.id]);
+  }, [activeTab, managementSubTab, currentUser?.id]);
+
+  // Keep add-startup form advisor id in sync
+  useEffect(() => {
+    setAddStartupFormData(prev => ({
+      ...prev,
+      advisor_id: currentUser?.id || ''
+    }));
+  }, [currentUser?.id]);
 
   // Load accepted collaborators (needed for recommendation modal)
   useEffect(() => {
@@ -758,6 +766,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle save added startup
   const handleSaveAddedStartup = async () => {
+    const advisorId = currentUser?.id;
+    if (!advisorId) {
+      alert('Missing advisor id. Please re-login and try again.');
+      return;
+    }
+
     if (!addStartupFormData.startup_name || !addStartupFormData.contact_email || !addStartupFormData.contact_name) {
       alert('Please fill in startup name, contact name, and contact email');
       return;
@@ -765,9 +779,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
     setIsLoading(true);
     try {
-      if (editingAddedStartup) {
+      if (editingAddedStartup && editingAddedStartup.id) {
         // Update existing
-        const updated = await advisorAddedStartupService.updateStartup(editingAddedStartup.id, addStartupFormData);
+        const updated = await advisorAddedStartupService.updateStartup(editingAddedStartup.id, {
+          ...addStartupFormData,
+          advisor_id: advisorId
+        });
         if (updated) {
           setAdvisorAddedStartups(prev => prev.map(s => s.id === updated.id ? updated : s));
           alert('Startup updated successfully!');
@@ -776,7 +793,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
       } else {
         // Create new
-        const created = await advisorAddedStartupService.createStartup(addStartupFormData);
+        const created = await advisorAddedStartupService.createStartup({
+          ...addStartupFormData,
+          advisor_id: advisorId
+        });
         if (created) {
           setAdvisorAddedStartups(prev => [created, ...prev]);
           alert('Startup added successfully!');
@@ -819,24 +839,60 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Handle send invite to TMS for advisor-added startups
   const handleSendInviteToTMS = async (startupId: number) => {
+    if (!currentUser?.id || !advisorCode) {
+      alert('Advisor information not available. Please refresh and try again.');
+      return;
+    }
+
+    const startup = advisorAddedStartups.find(s => s.id === startupId);
+    if (!startup) {
+      alert('Startup not found');
+      return;
+    }
+
+    // Check if already linked to TMS
+    if (startup.is_on_tms && startup.tms_startup_id) {
+      alert('This startup is already linked to TMS. No invite needed.');
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const success = await advisorAddedStartupService.sendInviteToTMS(startupId);
-      if (success) {
+      const result = await advisorAddedStartupService.sendInviteToTMS(
+        startupId,
+        currentUser.id,
+        advisorCode
+      );
+      
+      if (result.success) {
+        const updatedStartup = {
+          ...startup,
+          invite_status: result.isExistingTMSStartup ? 'accepted' : 'sent',
+          invite_sent_at: new Date().toISOString(),
+          invited_user_id: result.userId,
+          is_on_tms: result.isExistingTMSStartup || false,
+          tms_startup_id: result.tmsStartupId || undefined
+        };
+
         setAdvisorAddedStartups(prev =>
-          prev.map(s =>
-            s.id === startupId
-              ? { ...s, invite_status: 'sent', invite_sent_at: new Date().toISOString() }
-              : s
-          )
+          prev.map(s => s.id === startupId ? updatedStartup : s)
         );
-        alert('Invite sent successfully!');
+
+        if (result.alreadyHasAdvisor) {
+          alert(`⚠️ This startup is already linked with another Investment Advisor (${result.existingAdvisorName || 'Unknown'}). Please contact the startup directly to change their Investment Advisor code.`);
+        } else if (result.requiresPermission) {
+          alert('Startup already exists on TMS. A permission request has been sent to the startup. You\'ll be notified when they respond.');
+        } else if (result.isExistingTMSStartup) {
+          alert('Startup already exists on TMS and has been linked to your account!');
+        } else {
+          alert('Invite sent successfully! The startup will receive an email to set up their account.');
+        }
       } else {
-        alert('Failed to send invite');
+        alert(result.error || 'Failed to send invite');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending invite to TMS:', error);
-      alert('Failed to send invite');
+      alert(error.message || 'Failed to send invite');
     } finally {
       setIsLoading(false);
     }
@@ -3430,7 +3486,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                 </svg>
-                Management
+                My Network
               </div>
             </button>
             <button
@@ -5209,13 +5265,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         </div>
       )}
 
-      {/* Management Tab */}
+      {/* My Network Tab */}
       {activeTab === 'management' && (
         <div className="space-y-6 animate-fade-in">
           {/* Sub-tabs Navigation */}
           <div className="bg-white rounded-lg shadow">
             <div className="border-b border-gray-200">
-              <nav className="flex space-x-8 px-6" aria-label="Management Tabs">
+              <nav className="flex space-x-8 px-6" aria-label="My Network Tabs">
                 <button
                   onClick={() => setManagementSubTab('myInvestments')}
                   className={`py-4 px-1 border-b-2 font-medium text-sm ${

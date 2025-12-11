@@ -50,6 +50,18 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
       // Also check for type parameter (Supabase sometimes uses this)
       const type = searchParams.get('type') || (hash.includes('type=') ? hash.split('type=')[1]?.split('&')[0] : null);
       
+      // Check for invite link errors
+      const error = searchParams.get('error') || (hash.includes('error=') ? hash.split('error=')[1]?.split('&')[0] : null);
+      const errorCode = searchParams.get('error_code') || (hash.includes('error_code=') ? hash.split('error_code=')[1]?.split('&')[0] : null);
+      const errorDescription = searchParams.get('error_description') || (hash.includes('error_description=') ? hash.split('error_description=')[1]?.split('&')[0] : null);
+      
+      // Handle invite link errors
+      if (errorCode === 'otp_expired' || (error === 'access_denied' && type === 'invite')) {
+        console.log('⚠️ Invite link expired or invalid:', { error, errorCode, errorDescription });
+        setError('This invite link has expired or is invalid. Please contact your Investment Advisor to send a new invite.');
+        return; // Don't proceed with password setup
+      }
+      
       console.log('Token extraction results:', { 
         accessToken: accessToken ? `${accessToken.substring(0, 20)}...` : null,
         refreshToken: refreshToken ? `${refreshToken.substring(0, 20)}...` : null,
@@ -236,6 +248,37 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
         } catch (err) {
           console.error('Error handling recovery session:', err);
           setError('Invalid or expired reset link. Please request a new password reset.');
+        }
+      } else if (type === 'invite') {
+        // Handle invite type links - user needs to set password
+        console.log('Found invite type link, attempting to handle...');
+        try {
+          // For invite links, we need to exchange the code for a session
+          if (code) {
+            const { data, error: exchangeError } = await authService.supabase.auth.exchangeCodeForSession(code);
+            if (!exchangeError && data) {
+              console.log('Invite code exchanged for session successfully:', data);
+              setIsSessionReady(true);
+              // Clean up URL
+              window.history.replaceState({}, document.title, window.location.pathname);
+            } else {
+              console.log('exchangeCodeForSession failed for invite:', exchangeError);
+              setError('Invalid or expired invite link. Please contact your Investment Advisor to send a new invite.');
+            }
+          } else {
+            // Check if there's already a session
+            const { data: { session }, error: sessionError } = await authService.supabase.auth.getSession();
+            if (session && !sessionError) {
+              console.log('Invite session found:', session.user.email);
+              setIsSessionReady(true);
+            } else {
+              console.log('No invite session found:', sessionError);
+              setError('Invalid or expired invite link. Please contact your Investment Advisor to send a new invite.');
+            }
+          }
+        } catch (err) {
+          console.error('Error handling invite session:', err);
+          setError('Invalid or expired invite link. Please contact your Investment Advisor to send a new invite.');
         }
       } else {
         // Check if user is already authenticated (might be from a previous session)

@@ -24,6 +24,8 @@ export interface AdvisorAddedStartup {
   tms_startup_id?: number;
   invite_sent_at?: string;
   invite_status: 'not_sent' | 'sent' | 'accepted' | 'declined';
+  invited_user_id?: string;
+  invited_email?: string;
   notes?: string;
   created_at: string;
   updated_at: string;
@@ -49,6 +51,17 @@ export interface CreateAdvisorAddedStartup {
   round_type?: string;
   country?: string;
   notes?: string;
+}
+
+export interface CreateStartupResult {
+  success: boolean;
+  data?: AdvisorAddedStartup;
+  error?: string;
+  isDuplicate?: boolean;
+  tmsStartupId?: number;
+  requiresPermission?: boolean;
+  alreadyHasAdvisor?: boolean;
+  existingAdvisorName?: string;
 }
 
 export interface UpdateAdvisorAddedStartup {
@@ -118,9 +131,152 @@ class AdvisorAddedStartupService {
     }
   }
 
-  // Create a new added startup
-  async createStartup(startup: CreateAdvisorAddedStartup): Promise<AdvisorAddedStartup | null> {
+  // Check if startup already exists on TMS (by email or name)
+  async checkStartupExistsOnTMS(email: string, startupName: string): Promise<{ exists: boolean; startupId?: number; userId?: string }> {
     try {
+      // Check by email in users table
+      const { data: userData } = await supabase
+        .from('users')
+        .select('id, role, startup_name')
+        .eq('email', email.toLowerCase().trim())
+        .eq('role', 'Startup')
+        .maybeSingle();
+
+      if (userData) {
+        // Find startup record for this user
+        const { data: startupData } = await supabase
+          .from('startups')
+          .select('id')
+          .eq('user_id', userData.id)
+          .maybeSingle();
+
+        if (startupData) {
+          return { exists: true, startupId: startupData.id, userId: userData.id };
+        }
+      }
+
+      // Also check by startup name (case-insensitive)
+      const { data: startupByName } = await supabase
+        .from('startups')
+        .select('id, user_id, name')
+        .ilike('name', startupName.trim())
+        .maybeSingle();
+
+      if (startupByName) {
+        return { exists: true, startupId: startupByName.id, userId: startupByName.user_id };
+      }
+
+      return { exists: false };
+    } catch (error) {
+      console.error('Error checking startup existence:', error);
+      return { exists: false };
+    }
+  }
+
+  // Create a new added startup
+  async createStartup(startup: CreateAdvisorAddedStartup): Promise<CreateStartupResult> {
+    try {
+      // Check if startup already exists on TMS
+      const existsCheck = await this.checkStartupExistsOnTMS(startup.contact_email, startup.startup_name);
+      
+      if (existsCheck.exists && existsCheck.startupId) {
+        // Startup already exists on TMS - create permission request instead of auto-linking
+        // First create the advisor_added_startups entry with pending status
+        const startupData: any = {
+          ...startup,
+          currency: startup.currency || 'USD',
+          is_on_tms: false, // Not linked yet, pending permission
+          tms_startup_id: existsCheck.startupId,
+          invite_status: 'not_sent' // Will be updated when permission is granted
+        };
+
+        const { data: addedStartupData, error: insertError } = await supabase
+          .from('advisor_added_startups')
+          .insert([startupData])
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('Error creating added startup entry:', insertError);
+          return { success: false, error: insertError.message, isDuplicate: true };
+        }
+
+        // Get advisor details
+        const { data: advisorData } = await supabase
+          .from('users')
+          .select('investment_advisor_code, name, email')
+          .eq('id', startup.advisor_id)
+          .maybeSingle();
+
+        // Get startup user details and check if already has an advisor
+        const { data: startupUserData } = await supabase
+          .from('users')
+          .select('email, investment_advisor_code_entered')
+          .eq('id', existsCheck.userId)
+          .maybeSingle();
+
+        // Check if startup already has a different advisor
+        let alreadyHasAdvisor = false;
+        let existingAdvisorName = '';
+        
+        if (startupUserData?.investment_advisor_code_entered && 
+            startupUserData.investment_advisor_code_entered !== advisorData?.investment_advisor_code) {
+          alreadyHasAdvisor = true;
+          
+          // Get existing advisor name
+          const { data: existingAdvisorData } = await supabase
+            .from('users')
+            .select('name, investment_advisor_code')
+            .eq('investment_advisor_code', startupUserData.investment_advisor_code_entered)
+            .eq('role', 'Investment Advisor')
+            .maybeSingle();
+          
+          existingAdvisorName = existingAdvisorData?.name || 'Another Investment Advisor';
+          
+          // Don't create permission request if already has advisor - return error instead
+          return {
+            success: false,
+            error: `This startup is already linked with another Investment Advisor (${existingAdvisorName}). Please contact the startup directly to change their Investment Advisor code.`,
+            isDuplicate: true,
+            tmsStartupId: existsCheck.startupId,
+            alreadyHasAdvisor: true,
+            existingAdvisorName
+          };
+        }
+
+        // Create permission request (only if startup doesn't already have an advisor)
+        const { advisorStartupLinkRequestService } = await import('./advisorStartupLinkRequestService');
+        try {
+          await advisorStartupLinkRequestService.createRequest({
+            advisor_id: startup.advisor_id,
+            advisor_code: advisorData?.investment_advisor_code || '',
+            advisor_name: advisorData?.name,
+            advisor_email: advisorData?.email,
+            startup_id: existsCheck.startupId,
+            startup_name: startup.startup_name,
+            startup_user_id: existsCheck.userId,
+            startup_email: startupUserData?.email || startup.contact_email,
+            advisor_added_startup_id: addedStartupData.id,
+            message: `Investment Advisor "${advisorData?.name || 'Unknown'}" wants to link your startup "${startup.startup_name}" to their account.`
+          });
+        } catch (requestError: any) {
+          // If request creation fails, still return success for the added startup entry
+          console.error('Error creating permission request:', requestError);
+          // Don't fail the whole operation, just log it
+        }
+
+        return { 
+          success: true, 
+          data: addedStartupData, 
+          isDuplicate: true, 
+          tmsStartupId: existsCheck.startupId,
+          requiresPermission: true,
+          alreadyHasAdvisor,
+          existingAdvisorName
+        };
+      }
+
+      // Startup doesn't exist on TMS - create new entry
       const startupData: any = {
         ...startup,
         currency: startup.currency || 'USD',
@@ -136,19 +292,25 @@ class AdvisorAddedStartupService {
 
       if (error) {
         console.error('Error creating added startup:', error);
-        throw error;
+        return { success: false, error: error.message };
       }
 
-      return data;
-    } catch (error) {
+      return { success: true, data };
+    } catch (error: any) {
       console.error('Error in createStartup:', error);
-      return null;
+      return { success: false, error: error.message };
     }
   }
 
   // Update an existing startup
   async updateStartup(startupId: number, updates: UpdateAdvisorAddedStartup): Promise<AdvisorAddedStartup | null> {
     try {
+      // Validate startupId
+      if (!startupId || startupId === undefined || isNaN(startupId)) {
+        console.error('Invalid startupId provided:', startupId);
+        throw new Error('Invalid startup ID. Cannot update startup.');
+      }
+
       const { data, error } = await supabase
         .from('advisor_added_startups')
         .update(updates)
@@ -188,26 +350,83 @@ class AdvisorAddedStartupService {
     }
   }
 
-  // Send invite to TMS (update invite status)
-  async sendInviteToTMS(startupId: number): Promise<boolean> {
+  // Send invite to TMS via API (creates user, sends email, updates status)
+  async sendInviteToTMS(
+    startupId: number,
+    advisorId: string,
+    advisorCode: string
+  ): Promise<{ success: boolean; userId?: string; error?: string; isExistingTMSStartup?: boolean; tmsStartupId?: number; requiresPermission?: boolean; alreadyHasAdvisor?: boolean; existingAdvisorName?: string }> {
     try {
-      const { error } = await supabase
-        .from('advisor_added_startups')
-        .update({
-          invite_status: 'sent',
-          invite_sent_at: new Date().toISOString()
-        })
-        .eq('id', startupId);
-
-      if (error) {
-        console.error('Error sending invite:', error);
-        throw error;
+      // Get startup details first
+      const startup = await this.getStartupById(startupId);
+      if (!startup) {
+        return { success: false, error: 'Startup not found' };
       }
 
-      return true;
-    } catch (error) {
+      // Call API endpoint to handle invite
+      const apiUrl = '/api/invite-startup-advisor';
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          startupId,
+          advisorId,
+          advisorCode,
+          startupName: startup.startup_name,
+          contactEmail: startup.contact_email,
+          contactName: startup.contact_name,
+          redirectUrl: typeof window !== 'undefined' ? window.location.origin : undefined
+        }),
+      });
+
+      if (!response.ok) {
+        let errorData;
+        const responseText = await response.text();
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('API error - could not parse JSON:', responseText);
+          errorData = { error: `Server error (${response.status}): ${responseText || 'Unknown error'}` };
+        }
+        console.error('API error response:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        return { 
+          success: false, 
+          error: errorData.error || errorData.message || `Failed to send invite (${response.status})`,
+          details: errorData.details
+        };
+      }
+
+      const result = await response.json();
+      
+      // Note: API already updates the advisor_added_startups record, so we don't need to update it here
+      // Just return the result
+
+      // Handle case where startup already has a different advisor
+      if (result.alreadyHasAdvisor) {
+        return {
+          success: false,
+          error: `This startup is already linked with another Investment Advisor (${result.existingAdvisorName || 'Unknown'}). Please contact the startup directly to change their Investment Advisor code.`,
+          alreadyHasAdvisor: true,
+          existingAdvisorName: result.existingAdvisorName
+        };
+      }
+
+      return { 
+        success: result.success, 
+        userId: result.userId,
+        isExistingTMSStartup: result.isExistingTMSStartup,
+        tmsStartupId: result.tmsStartupId,
+        requiresPermission: result.requiresPermission
+      };
+    } catch (error: any) {
       console.error('Error in sendInviteToTMS:', error);
-      return false;
+      return { success: false, error: error.message || 'Failed to send invite' };
     }
   }
 
@@ -237,6 +456,11 @@ class AdvisorAddedStartupService {
 }
 
 export const advisorAddedStartupService = new AdvisorAddedStartupService();
+
+
+
+
+
 
 
 

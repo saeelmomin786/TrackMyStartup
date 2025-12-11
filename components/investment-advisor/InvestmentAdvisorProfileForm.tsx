@@ -266,9 +266,6 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
           service_types: data.service_types || []
         });
         setProfile(loadedProfile);
-        if (onProfileChange) {
-          onProfileChange(loadedProfile);
-        }
       } else {
         // Initialize with user's name/email
         const initialProfile = applyComputedMetrics({
@@ -277,9 +274,6 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
           email: currentUser.email || ''
         });
         setProfile(initialProfile);
-        if (onProfileChange) {
-          onProfileChange(initialProfile);
-        }
       }
     } catch (error) {
       console.error('Error loading investment advisor profile:', error);
@@ -289,25 +283,13 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
   // Apply computed metrics whenever they change
   useEffect(() => {
     if (computedMetrics) {
-      setProfile(prev => {
-        const updated = applyComputedMetrics(prev);
-        if (onProfileChange) {
-          onProfileChange(updated);
-        }
-        return updated;
-      });
+      setProfile(prev => applyComputedMetrics(prev));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [computedMetrics]);
 
   const handleChange = (field: keyof InvestmentAdvisorProfile, value: any) => {
-    setProfile(prev => {
-      const updated = { ...prev, [field]: value };
-      if (onProfileChange) {
-        onProfileChange(updated);
-      }
-      return updated;
-    });
+    setProfile(prev => ({ ...prev, [field]: value }));
   };
 
   const handleArrayChange = (field: 'geography' | 'investment_stages' | 'domain' | 'service_types', value: string) => {
@@ -316,13 +298,17 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
       const newArray = currentArray.includes(value)
         ? currentArray.filter(item => item !== value)
         : [...currentArray, value];
-      const updated = { ...prev, [field]: newArray };
-      if (onProfileChange) {
-        onProfileChange(updated);
-      }
-      return updated;
+      return { ...prev, [field]: newArray };
     });
   };
+
+  // Notify parent after profile state updates to avoid setState during render
+  useEffect(() => {
+    if (onProfileChange) {
+      onProfileChange(profile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -731,7 +717,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               value={profile.startups_under_management ?? ''}
               onChange={(e) => handleChange('startups_under_management', e.target.value ? parseInt(e.target.value, 10) : 0)}
               disabled
-              helperText="Auto-calculated from My Startups & added startups"
+              helpText="Auto-calculated from My Startups & added startups"
             />
             <Input
               label="Investors Under Management"
@@ -739,7 +725,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               value={profile.investors_under_management ?? ''}
               onChange={(e) => handleChange('investors_under_management', e.target.value ? parseInt(e.target.value, 10) : 0)}
               disabled
-              helperText="Auto-calculated from My Investors & added investors"
+              helpText="Auto-calculated from My Investors & added investors"
             />
             <Input
               label="Successful Fundraises (Startups)"
@@ -747,7 +733,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               value={profile.successful_fundraises_startups ?? ''}
               onChange={(e) => handleChange('successful_fundraises_startups', e.target.value ? parseInt(e.target.value, 10) : 0)}
               disabled
-              helperText="Auto-calculated from My Investments (Stage 4)"
+              helpText="Auto-calculated from My Investments (Stage 4)"
             />
           </div>
         </div>
@@ -762,7 +748,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               value={profile.verified_startups_under_management ?? ''}
               onChange={(e) => handleChange('verified_startups_under_management', e.target.value ? parseInt(e.target.value, 10) : 0)}
               disabled
-              helperText="TMS startups only"
+              helpText="TMS startups only"
             />
             <Input
               label="Verified Investors Under Management"
@@ -770,7 +756,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               value={profile.verified_investors_under_management ?? ''}
               onChange={(e) => handleChange('verified_investors_under_management', e.target.value ? parseInt(e.target.value, 10) : 0)}
               disabled
-              helperText="TMS investors only"
+              helpText="TMS investors only"
             />
             <Input
               label="Verified Successful Fundraises"
@@ -778,7 +764,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               value={profile.verified_successful_fundraises_startups ?? ''}
               onChange={(e) => handleChange('verified_successful_fundraises_startups', e.target.value ? parseInt(e.target.value, 10) : 0)}
               disabled
-              helperText="Stage 4 investments with TMS parties"
+              helpText="Stage 4 investments with TMS parties"
             />
           </div>
         </div>

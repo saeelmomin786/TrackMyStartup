@@ -26,3 +26,8 @@ COMMENT ON COLUMN public.investor_profiles.allow_startup_requests IS 'Controls w
 
 
 
+
+
+
+
+

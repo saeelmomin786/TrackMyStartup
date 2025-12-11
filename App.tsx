@@ -122,13 +122,32 @@ const App: React.FC = () => {
       const pathname = window.location.pathname;
       const searchParams = new URLSearchParams(window.location.search);
       const hash = window.location.hash;
+      
+      // Check for invite link errors first (otp_expired, access_denied)
+      const error = searchParams.get('error') || (hash.includes('error=') ? hash.split('error=')[1]?.split('&')[0] : null);
+      const errorCode = searchParams.get('error_code') || (hash.includes('error_code=') ? hash.split('error_code=')[1]?.split('&')[0] : null);
+      const type = searchParams.get('type') || (hash.includes('type=') ? hash.split('type=')[1]?.split('&')[0] : null);
+      
+      // Check for invite link (type=invite) - should go to reset-password page for password setup
+      if (type === 'invite' || errorCode === 'otp_expired') {
+        console.log('📧 Invite link detected (type=invite or expired), routing to password setup');
+        return 'reset-password';
+      }
+      
       // Reset-password has priority over query param
       if (pathname === '/reset-password' || 
-          searchParams.get('type') === 'recovery' ||
+          type === 'recovery' ||
           hash.includes('type=recovery') ||
           searchParams.get('access_token') ||
           searchParams.get('refresh_token')) {
         return 'reset-password';
+      }
+      
+      // Check for invite link (has advisorCode) - should go to complete-registration AFTER password is set
+      const advisorCode = searchParams.get('advisorCode') || getQueryParam('advisorCode');
+      if (advisorCode && !error) {
+        console.log('📧 Invite link detected with advisorCode:', advisorCode);
+        return 'complete-registration';
       }
       const fromQuery = (getQueryParam('page') as any) || 'landing';
       const valid = ['landing','login','register','complete-registration','payment','reset-password'];

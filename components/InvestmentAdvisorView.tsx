@@ -6113,11 +6113,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                               <>
                                 <button
                                   onClick={() => handleSendInviteToTMS(startup.id)}
-                                  disabled={isLoading || startup.invite_status === 'sent'}
+                                  disabled={isLoading}
                                   className={`text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed`}
-                                  title={startup.invite_status === 'sent' ? 'Invite already sent' : 'Send invite'}
+                                  title="Send or resend invite"
                                 >
-                                  {startup.invite_status === 'sent' ? 'Invite Sent' : 'Invite to TMS'}
+                                  {startup.invite_status === 'sent' ? 'Resend Invite' : 'Invite to TMS'}
                                 </button>
                                 <button
                                   onClick={() => handleEditAddedStartup(startup)}

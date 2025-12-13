@@ -54,6 +54,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     password: string;
     role: UserRole;
     startupName?: string;
+    firmName?: string;
     country: string;
     investmentAdvisorCode?: string;
   } | null>(() => {
@@ -74,6 +75,7 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
     password: string;
     role: UserRole;
     startupName?: string;
+    firmName?: string;
   }) => {
     // Save data to sessionStorage (short-lived, cleared on tab close)
     sessionStorage.setItem('registrationData', JSON.stringify(data));
@@ -171,7 +173,8 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
       // Create user profile
       const { user, error: profileError } = await authService.createProfile(
         userData.name, 
-        userData.role
+        userData.role,
+        userData.firmName
       );
 
       if (profileError || !user) {

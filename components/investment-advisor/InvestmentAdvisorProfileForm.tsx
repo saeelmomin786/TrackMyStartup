@@ -98,9 +98,9 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
     if (!computedMetrics) return base;
     return {
       ...base,
-      startups_under_management: computedMetrics.startupsUnderManagement,
-      investors_under_management: computedMetrics.investorsUnderManagement,
-      successful_fundraises_startups: computedMetrics.successfulFundraisesStartups,
+      // Only apply computed metrics for verified fields (these remain auto-calculated)
+      // The three main metrics (startups_under_management, investors_under_management, successful_fundraises_startups)
+      // are now manually editable, so we preserve existing values from database
       verified_startups_under_management: computedMetrics.verifiedStartupsUnderManagement,
       verified_investors_under_management: computedMetrics.verifiedInvestorsUnderManagement,
       verified_successful_fundraises_startups: computedMetrics.verifiedSuccessfulFundraisesStartups
@@ -246,6 +246,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
 
   const loadProfile = async () => {
     try {
+      // Load profile data from investment_advisor_profiles
       const { data, error } = await supabase
         .from('investment_advisor_profiles')
         .select('*')
@@ -257,23 +258,66 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         return;
       }
 
+      // Load logo_url and firm_name from users table
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('logo_url, firm_name, name')
+        .eq('id', currentUser.id)
+        .maybeSingle();
+
+      if (userError && userError.code !== 'PGRST116') {
+        console.error('Error loading user logo:', userError);
+      }
+
       if (data) {
+        // Determine media_type: prefer video if video_url exists, otherwise use logo
+        const mediaType = data.video_url ? 'video' : (userData?.logo_url ? 'logo' : 'logo');
+        
         const loadedProfile = applyComputedMetrics({
           ...data,
           geography: data.geography || [],
           investment_stages: data.investment_stages || [],
           domain: data.domain || [],
-          service_types: data.service_types || []
+          service_types: data.service_types || [],
+          // Use logo_url from users table, not from investment_advisor_profiles
+          logo_url: userData?.logo_url || null,
+          // Use advisor_name and firm_name from users table
+          advisor_name: userData?.name || data.advisor_name || '',
+          firm_name: userData?.firm_name || data.firm_name || '',
+          // Set media_type based on whether video exists
+          media_type: mediaType
         });
         setProfile(loadedProfile);
+        // Set logo input if logo exists
+        if (userData?.logo_url) {
+          setLogoUrlInput(userData.logo_url);
+          if (userData.logo_url.includes('supabase.co') || userData.logo_url.includes('storage.googleapis.com')) {
+            setLogoInputMethod('upload');
+          } else {
+            setLogoInputMethod('url');
+          }
+        }
       } else {
-        // Initialize with user's name/email
+        // Initialize with data from users table
+        const mediaType = userData?.logo_url ? 'logo' : 'logo';
         const initialProfile = applyComputedMetrics({
           ...profile,
-          advisor_name: currentUser.name || currentUser.email?.split('@')[0] || '',
-          email: currentUser.email || ''
+          // Use name and firm_name from users table
+          advisor_name: userData?.name || currentUser.name || currentUser.email?.split('@')[0] || '',
+          firm_name: userData?.firm_name || '',
+          email: currentUser.email || '',
+          logo_url: userData?.logo_url || null,
+          media_type: mediaType
         });
         setProfile(initialProfile);
+        if (userData?.logo_url) {
+          setLogoUrlInput(userData.logo_url);
+          if (userData.logo_url.includes('supabase.co') || userData.logo_url.includes('storage.googleapis.com')) {
+            setLogoInputMethod('upload');
+          } else {
+            setLogoInputMethod('url');
+          }
+        }
       }
     } catch (error) {
       console.error('Error loading investment advisor profile:', error);
@@ -348,8 +392,23 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         .from('investor-assets')
         .getPublicUrl(filePath);
 
+      // Save logo_url to users table
+      const { error: updateUserError } = await supabase
+        .from('users')
+        .update({ logo_url: publicUrl })
+        .eq('id', currentUser.id);
+
+      if (updateUserError) {
+        console.error('Error saving logo to users table:', updateUserError);
+        alert('Logo uploaded but failed to save to profile. Please try again.');
+        return;
+      }
+
       handleChange('logo_url', publicUrl);
-      handleChange('media_type', 'logo');
+      // Only set media_type to 'logo' if no video exists
+      if (!profile.video_url) {
+        handleChange('media_type', 'logo');
+      }
       setLogoUrlInput(publicUrl);
       alert('Logo uploaded successfully!');
     } catch (error: any) {
@@ -358,11 +417,25 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
     }
   };
 
-  const handleLogoUrlChange = (url: string) => {
+  const handleLogoUrlChange = async (url: string) => {
     setLogoUrlInput(url);
     if (url.trim()) {
-      handleChange('logo_url', url.trim());
-      handleChange('media_type', 'logo');
+      const trimmedUrl = url.trim();
+      handleChange('logo_url', trimmedUrl);
+      // Only set media_type to 'logo' if no video exists
+      if (!profile.video_url) {
+        handleChange('media_type', 'logo');
+      }
+      
+      // Save logo_url to users table
+      const { error: updateUserError } = await supabase
+        .from('users')
+        .update({ logo_url: trimmedUrl })
+        .eq('id', currentUser.id);
+
+      if (updateUserError) {
+        console.error('Error saving logo URL to users table:', updateUserError);
+      }
     }
   };
 
@@ -385,8 +458,41 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
 
     setIsSaving(true);
     try {
+      // Save logo_url, name (advisor_name), and firm_name to users table
+      const userUpdates: any = {};
+      if (profile.logo_url) {
+        userUpdates.logo_url = profile.logo_url;
+      }
+      if (profile.firm_name !== undefined) {
+        userUpdates.firm_name = profile.firm_name;
+      }
+      // Save advisor_name to users.name (personal name)
+      if (profile.advisor_name !== undefined) {
+        userUpdates.name = profile.advisor_name;
+      }
+      
+      if (Object.keys(userUpdates).length > 0) {
+        const { error: updateUserError } = await supabase
+          .from('users')
+          .update(userUpdates)
+          .eq('id', currentUser.id);
+
+        if (updateUserError) {
+          console.error('Error saving to users table:', updateUserError);
+          // Continue with profile save even if user update fails
+        }
+      }
+
+      // Save profile data to investment_advisor_profiles
+      // Note: advisor_name is required in investment_advisor_profiles table (NOT NULL constraint)
+      // So we include it here even though it's also in users table
+      // firm_name is optional in investment_advisor_profiles, so we exclude it (it's only in users table)
+      // logo_url is stored in users table, not investment_advisor_profiles
+      const { logo_url, firm_name, ...profileDataWithoutUserFields } = profile;
       const profileData = {
-        ...profile,
+        ...profileDataWithoutUserFields,
+        // Ensure advisor_name is included (required field in investment_advisor_profiles)
+        advisor_name: profile.advisor_name,
         updated_at: new Date().toISOString()
       };
 
@@ -404,10 +510,18 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         return;
       }
 
-      setProfile(data);
+      // Add logo_url, advisor_name, and firm_name back to the data object for state (they're from users table)
+      const profileWithUserFields = {
+        ...data,
+        logo_url: profile.logo_url,
+        advisor_name: profile.advisor_name, // From users.name
+        firm_name: profile.firm_name // From users.firm_name
+      };
+
+      setProfile(profileWithUserFields);
       setIsEditing(false);
       if (onSave) {
-        onSave(data);
+        onSave(profileWithUserFields);
       }
       alert('Profile saved successfully!');
     } catch (error) {
@@ -716,24 +830,21 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               type="number"
               value={profile.startups_under_management ?? ''}
               onChange={(e) => handleChange('startups_under_management', e.target.value ? parseInt(e.target.value, 10) : 0)}
-              disabled
-              helpText="Auto-calculated from My Startups & added startups"
+              disabled={!isEditing || isViewOnly}
             />
             <Input
               label="Investors Under Management"
               type="number"
               value={profile.investors_under_management ?? ''}
               onChange={(e) => handleChange('investors_under_management', e.target.value ? parseInt(e.target.value, 10) : 0)}
-              disabled
-              helpText="Auto-calculated from My Investors & added investors"
+              disabled={!isEditing || isViewOnly}
             />
             <Input
               label="Successful Fundraises (Startups)"
               type="number"
               value={profile.successful_fundraises_startups ?? ''}
               onChange={(e) => handleChange('successful_fundraises_startups', e.target.value ? parseInt(e.target.value, 10) : 0)}
-              disabled
-              helpText="Auto-calculated from My Investments (Stage 4)"
+              disabled={!isEditing || isViewOnly}
             />
           </div>
         </div>
@@ -942,7 +1053,17 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               label="YouTube Video URL"
               type="url"
               value={profile.video_url || ''}
-              onChange={(e) => handleChange('video_url', e.target.value)}
+              onChange={(e) => {
+                const videoUrl = e.target.value;
+                handleChange('video_url', videoUrl);
+                // Set media_type to 'video' if video URL is provided, otherwise keep current or set to 'logo'
+                if (videoUrl.trim()) {
+                  handleChange('media_type', 'video');
+                } else {
+                  // If video is removed, fall back to logo if logo exists
+                  handleChange('media_type', profile.logo_url ? 'logo' : 'logo');
+                }
+              }}
               disabled={!isEditing || isViewOnly}
               placeholder="https://www.youtube.com/watch?v=..."
             />

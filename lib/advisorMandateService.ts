@@ -7,6 +7,7 @@ export interface AdvisorMandate {
   stage?: string;
   round_type?: string;
   domain?: string;
+  country?: string;
   amount_min?: number;
   amount_max?: number;
   equity_min?: number;
@@ -23,6 +24,7 @@ export interface CreateAdvisorMandate {
   stage?: string;
   round_type?: string;
   domain?: string;
+  country?: string;
   amount_min?: number;
   amount_max?: number;
   equity_min?: number;
@@ -36,6 +38,7 @@ export interface UpdateAdvisorMandate {
   stage?: string;
   round_type?: string;
   domain?: string;
+  country?: string;
   amount_min?: number;
   amount_max?: number;
   equity_min?: number;
@@ -201,6 +204,64 @@ class AdvisorMandateService {
       return true;
     } catch (error) {
       console.error('Error in reorderMandates:', error);
+      return false;
+    }
+  }
+
+  // Get investors associated with a mandate
+  async getMandateInvestors(mandateId: number): Promise<string[]> {
+    try {
+      const { data, error } = await supabase
+        .from('advisor_mandate_investors')
+        .select('investor_id')
+        .eq('mandate_id', mandateId);
+
+      if (error) {
+        console.error('Error fetching mandate investors:', error);
+        return [];
+      }
+
+      return data?.map(item => item.investor_id) || [];
+    } catch (error) {
+      console.error('Error in getMandateInvestors:', error);
+      return [];
+    }
+  }
+
+  // Set investors for a mandate (replaces existing associations)
+  async setMandateInvestors(mandateId: number, investorIds: string[]): Promise<boolean> {
+    try {
+      // First, delete all existing associations
+      const { error: deleteError } = await supabase
+        .from('advisor_mandate_investors')
+        .delete()
+        .eq('mandate_id', mandateId);
+
+      if (deleteError) {
+        console.error('Error deleting existing mandate investors:', deleteError);
+        throw deleteError;
+      }
+
+      // Then, insert new associations
+      if (investorIds.length > 0) {
+        const associations = investorIds.map(investorId => ({
+          mandate_id: mandateId,
+          investor_id: investorId
+        }));
+
+        const { error: insertError } = await supabase
+          .from('advisor_mandate_investors')
+          .insert(associations);
+
+        if (insertError) {
+          console.error('Error inserting mandate investors:', insertError);
+          throw insertError;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error in setMandateInvestors:', error);
       return false;
     }
   }

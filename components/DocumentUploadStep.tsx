@@ -7,6 +7,7 @@ import Select from './ui/Select';
 import { UserRole, InvestmentType, StartupDomain, StartupStage } from '../types';
 import { Upload, FileText, Users, CheckCircle } from 'lucide-react';
 import LogoTMS from './public/logoTMS.svg';
+import { generalDataService } from '../lib/generalDataService';
 
 interface Founder {
   id: string;
@@ -65,6 +66,8 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
   });
 
   const [country, setCountry] = useState('');
+  const [countries, setCountries] = useState<string[]>([]);
+  const [loadingCountries, setLoadingCountries] = useState(true);
 
   const [founders, setFounders] = useState<Founder[]>([
     { id: '1', name: '', email: '', equity: 0 }
@@ -103,6 +106,26 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
   // Debug: Log the user role
   console.log('DocumentUploadStep - User role:', userData.role);
   console.log('DocumentUploadStep - Is Investment Advisor?', userData.role === 'Investment Advisor');
+
+  // Load countries from general_data table
+  useEffect(() => {
+    const loadCountries = async () => {
+      try {
+        setLoadingCountries(true);
+        const countryData = await generalDataService.getItemsByCategory('country');
+        const countryNames = countryData.map(country => country.name);
+        setCountries(countryNames);
+      } catch (error) {
+        console.error('Error loading countries:', error);
+        // Fallback to common countries if general_data table fails
+        setCountries(['United States', 'India', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France', 'Singapore', 'Japan', 'China', 'Brazil', 'Mexico', 'South Africa', 'Nigeria', 'Kenya', 'Egypt', 'UAE', 'Saudi Arabia', 'Israel', 'Other']);
+      } finally {
+        setLoadingCountries(false);
+      }
+    };
+
+    loadCountries();
+  }, []);
 
   // Debug: Monitor fundraising state changes
   useEffect(() => {
@@ -341,28 +364,14 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
             value={country} 
             onChange={(e) => setCountry(e.target.value)}
             required
+            disabled={loadingCountries}
           >
-            <option value="">Select Country</option>
-            <option value="United States">United States</option>
-            <option value="India">India</option>
-            <option value="United Kingdom">United Kingdom</option>
-            <option value="Canada">Canada</option>
-            <option value="Australia">Australia</option>
-            <option value="Germany">Germany</option>
-            <option value="France">France</option>
-            <option value="Singapore">Singapore</option>
-            <option value="Japan">Japan</option>
-            <option value="China">China</option>
-            <option value="Brazil">Brazil</option>
-            <option value="Mexico">Mexico</option>
-            <option value="South Africa">South Africa</option>
-            <option value="Nigeria">Nigeria</option>
-            <option value="Kenya">Kenya</option>
-            <option value="Egypt">Egypt</option>
-            <option value="UAE">UAE</option>
-            <option value="Saudi Arabia">Saudi Arabia</option>
-            <option value="Israel">Israel</option>
-            <option value="Other">Other</option>
+            <option value="">{loadingCountries ? 'Loading countries...' : 'Select Country'}</option>
+            {countries.map((countryName) => (
+              <option key={countryName} value={countryName}>
+                {countryName}
+              </option>
+            ))}
           </Select>
         </div>
 

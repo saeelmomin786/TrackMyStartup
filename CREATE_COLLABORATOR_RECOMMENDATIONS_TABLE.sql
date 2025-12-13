@@ -68,6 +68,30 @@ WHERE status = 'pending';
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.collaborator_recommendations ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist (to allow re-running this script)
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_policies WHERE schemaname = 'public' AND tablename = 'collaborator_recommendations' AND policyname = 'Senders can view their own recommendations') THEN
+        DROP POLICY "Senders can view their own recommendations" ON public.collaborator_recommendations;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_policies WHERE schemaname = 'public' AND tablename = 'collaborator_recommendations' AND policyname = 'Collaborators can view recommendations sent to them') THEN
+        DROP POLICY "Collaborators can view recommendations sent to them" ON public.collaborator_recommendations;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_policies WHERE schemaname = 'public' AND tablename = 'collaborator_recommendations' AND policyname = 'Only senders can create recommendations') THEN
+        DROP POLICY "Only senders can create recommendations" ON public.collaborator_recommendations;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_policies WHERE schemaname = 'public' AND tablename = 'collaborator_recommendations' AND policyname = 'Collaborators can update recommendation status') THEN
+        DROP POLICY "Collaborators can update recommendation status" ON public.collaborator_recommendations;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_policies WHERE schemaname = 'public' AND tablename = 'collaborator_recommendations' AND policyname = 'Senders can delete their own recommendations') THEN
+        DROP POLICY "Senders can delete their own recommendations" ON public.collaborator_recommendations;
+    END IF;
+END $$;
+
 -- RLS Policies
 
 -- Policy 1: Senders can view their own sent recommendations
@@ -114,6 +138,9 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Drop trigger if it exists, then recreate
+DROP TRIGGER IF EXISTS update_collaborator_recommendations_updated_at ON public.collaborator_recommendations;
 
 CREATE TRIGGER update_collaborator_recommendations_updated_at
     BEFORE UPDATE ON public.collaborator_recommendations

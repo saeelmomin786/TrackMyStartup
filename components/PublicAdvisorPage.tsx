@@ -38,6 +38,7 @@ const PublicAdvisorPage: React.FC = () => {
   const [advisor, setAdvisor] = useState<InvestmentAdvisorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'none' | 'pending' | 'accepted' | 'checking'>('checking');
 
   useEffect(() => {
     const userId = getQueryParam('userId');
@@ -66,7 +67,24 @@ const PublicAdvisorPage: React.FC = () => {
         if (error) {
           throw error;
         }
-        setAdvisor(data as InvestmentAdvisorProfile);
+
+        // Load firm_name from users table (from registration)
+        const userIdToFetch = advisorId ? data.user_id : userId;
+        const { data: userData } = await supabase
+          .from('users')
+          .select('firm_name, name')
+          .eq('id', userIdToFetch)
+          .maybeSingle();
+
+        // Merge firm_name from users table into advisor profile
+        const advisorWithFirmName = {
+          ...data,
+          // Use firm_name from users table (registration) as primary, fallback to profile firm_name
+          firm_name: userData?.firm_name || data.firm_name,
+          user: userData ? { name: userData.name, email: '' } : undefined
+        } as InvestmentAdvisorProfile;
+
+        setAdvisor(advisorWithFirmName);
       } catch (err: any) {
         console.error('Error loading advisor profile', err);
         setError('Unable to load advisor profile.');
@@ -77,6 +95,41 @@ const PublicAdvisorPage: React.FC = () => {
 
     loadAdvisor();
   }, []);
+
+  // Check connection status when advisor is loaded
+  useEffect(() => {
+    const checkConnectionStatus = async () => {
+      if (!advisor?.user_id) {
+        setConnectionStatus('none');
+        return;
+      }
+
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const user = authData?.user;
+        
+        if (!user) {
+          setConnectionStatus('none');
+          return;
+        }
+
+        const existingCheck = await advisorConnectionRequestService.checkExistingRequest(advisor.user_id, user.id);
+        
+        if (existingCheck.exists) {
+          setConnectionStatus(existingCheck.status === 'accepted' ? 'accepted' : 'pending');
+        } else {
+          setConnectionStatus('none');
+        }
+      } catch (error) {
+        console.error('Error checking connection status:', error);
+        setConnectionStatus('none');
+      }
+    };
+
+    if (advisor) {
+      checkConnectionStatus();
+    }
+  }, [advisor]);
 
   if (loading) {
     return (
@@ -114,9 +167,26 @@ const PublicAdvisorPage: React.FC = () => {
           currentUser={null}
         />
         <div className="mt-4 flex flex-wrap gap-3">
-          <Button
-            variant="primary"
-            onClick={async () => {
+          {connectionStatus === 'accepted' ? (
+            <Button
+              variant="outline"
+              disabled
+              className="bg-green-50 text-green-700 border-green-200"
+            >
+              ✓ Already Connected
+            </Button>
+          ) : connectionStatus === 'pending' ? (
+            <Button
+              variant="outline"
+              disabled
+              className="bg-yellow-50 text-yellow-700 border-yellow-200"
+            >
+              ⏳ Request Pending
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              onClick={async () => {
               const { data: authData } = await supabase.auth.getUser();
               const user = authData?.user;
               const role = (user?.user_metadata as any)?.role;
@@ -142,6 +212,19 @@ const PublicAdvisorPage: React.FC = () => {
               }
 
               try {
+                // Check if request already exists before creating
+                const existingCheck = await advisorConnectionRequestService.checkExistingRequest(advisor.user_id, user.id);
+                
+                if (existingCheck.exists) {
+                  if (existingCheck.status === 'accepted') {
+                    alert('You are already connected with this advisor!');
+                    return;
+                  } else if (existingCheck.status === 'pending') {
+                    alert('You already have a pending connection request with this advisor. Please wait for their response.');
+                    return;
+                  }
+                }
+
                 // Create collaboration request in advisor_connection_requests
                 const collaboratorProfileUrl = window.location.origin + window.location.pathname + `?view=advisor&userId=${advisor.user_id}`;
                 
@@ -158,6 +241,8 @@ const PublicAdvisorPage: React.FC = () => {
                 
                 await advisorConnectionRequestService.createRequest(requestData);
 
+                // Update connection status
+                setConnectionStatus('pending');
                 alert('Connection request sent successfully! The advisor will review your request.');
               } catch (err: any) {
                 console.error('Error creating collaboration request', err);
@@ -167,12 +252,21 @@ const PublicAdvisorPage: React.FC = () => {
                   details: err.details,
                   hint: err.hint
                 });
-                alert(`Could not send connection request: ${err.message || 'Please check console for details'}`);
+                
+                // Show user-friendly error messages
+                if (err.message && err.message.includes('already connected')) {
+                  alert('You are already connected with this advisor!');
+                } else if (err.message && err.message.includes('pending')) {
+                  alert('You already have a pending connection request with this advisor. Please wait for their response.');
+                } else {
+                  alert(`Could not send connection request: ${err.message || 'Please check console for details'}`);
+                }
               }
             }}
           >
             Connect
           </Button>
+          )}
           <Button
             variant="secondary"
             onClick={async () => {

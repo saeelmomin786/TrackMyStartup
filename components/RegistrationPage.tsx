@@ -37,6 +37,7 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
     const [country, setCountry] = useState(allCountries[0]);
     const [role, setRole] = useState<UserRole>('Startup');
     const [startupName, setStartupName] = useState('');
+    const [firmName, setFirmName] = useState('');
     const [investmentAdvisorCode, setInvestmentAdvisorCode] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -131,6 +132,7 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
                 name,
                 role,
                 startupName: role === 'Startup' ? startupName : undefined,
+                firmName: role === 'Investment Advisor' ? firmName : undefined,
                 founders: role === 'Startup' ? founders.map(({ id, ...rest }) => rest) : [],
                 fileUrls: {
                     governmentId: governmentIdUrl,
@@ -352,6 +354,20 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
                         onChange={(e) => setStartupName(e.target.value)}
                         required
                         placeholder="Enter your startup name"
+                    />
+                )}
+                
+                {/* Firm Name Field - Only show for Investment Advisor role */}
+                {role === 'Investment Advisor' && (
+                    <Input 
+                        label="Firm Name"
+                        id="firmName"
+                        type="text"
+                        value={firmName}
+                        onChange={(e) => setFirmName(e.target.value)}
+                        required
+                        placeholder="Enter your firm/company name"
+                        helpText="This name will be displayed on your users dashboard"
                     />
                 )}
                 

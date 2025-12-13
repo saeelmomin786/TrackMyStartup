@@ -6,7 +6,7 @@ import { formatCurrency, formatCurrencyCompact, getCurrencySymbol } from '../lib
 import { useInvestmentAdvisorCurrency } from '../lib/hooks/useInvestmentAdvisorCurrency';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { AuthUser, authService } from '../lib/auth';
-import { Eye, Users, FileText, Globe, ExternalLink, Linkedin, HelpCircle, Heart, Share2, CheckCircle, Video } from 'lucide-react';
+import { Eye, Users, FileText, Globe, ExternalLink, Linkedin, HelpCircle, Heart, Share2, CheckCircle, Video, Star } from 'lucide-react';
 import ProfilePage from './ProfilePage';
 import InvestorView from './InvestorView';
 import StartupHealthView from './StartupHealthView';
@@ -64,8 +64,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [selectedStartupForRecommendation, setSelectedStartupForRecommendation] = useState<number | null>(null);
   const [selectedInvestors, setSelectedInvestors] = useState<Set<string>>(new Set());
   const [selectedCollaborators, setSelectedCollaborators] = useState<Set<string>>(new Set());
+  const [selectedMandates, setSelectedMandates] = useState<Set<number>>(new Set()); // Track selected mandates
+  const [mandatesWithInvestors, setMandatesWithInvestors] = useState<Array<{mandate: AdvisorMandate, investorIds: string[]}>>([]);
   const [existingRecommendations, setExistingRecommendations] = useState<Set<string>>(new Set()); // Track recipients who already have recommendations
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
+  const [isLoadingMandatesForRecommendation, setIsLoadingMandatesForRecommendation] = useState(false);
   
   const [isLoading, setIsLoading] = useState(false);
   
@@ -77,8 +80,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyValidated, setShowOnlyValidated] = useState(false);
   const [showOnlyDueDiligence, setShowOnlyDueDiligence] = useState(false);
+  const [showOnlyRecommendations, setShowOnlyRecommendations] = useState(false);
   const [dueDiligenceStartups, setDueDiligenceStartups] = useState<Set<number>>(new Set<number>());
   const [approvedDueDiligenceStartups, setApprovedDueDiligenceStartups] = useState<Set<number>>(new Set<number>());
+  const [receivedRecommendations, setReceivedRecommendations] = useState<Array<{startup_id: number, sender_name: string, message?: string, created_at: string}>>([]);
+  const [isLoadingReceivedRecommendations, setIsLoadingReceivedRecommendations] = useState(false);
   const addStartupToDueDiligenceSet = (startupId: number) => {
     setDueDiligenceStartups(prev => {
       if (prev.has(startupId)) {
@@ -136,14 +142,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     amount_min: undefined,
     amount_max: undefined,
     equity_min: undefined,
-    equity_max: undefined
+    equity_max: undefined,
+    country: ''
   });
   const [mandateFilterOptions, setMandateFilterOptions] = useState({
     stages: [] as string[],
     roundTypes: [] as string[],
-    domains: [] as string[]
+    domains: [] as string[],
+    countries: [] as string[]
   });
   const [isLoadingMandateFilters, setIsLoadingMandateFilters] = useState(false);
+  const [selectedMandateInvestors, setSelectedMandateInvestors] = useState<Set<string>>(new Set());
+  const [isLoadingMandateInvestors, setIsLoadingMandateInvestors] = useState(false);
 
   // Advisor-added investors state
   const [advisorAddedInvestors, setAdvisorAddedInvestors] = useState<AdvisorAddedInvestor[]>([]);
@@ -331,10 +341,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               .maybeSingle();
             if (data) {
               const requesterUser = users.find(u => u.id === request.requester_id);
+              // Load firm_name from users table for Investment Advisor
+              const { data: userData } = await supabase
+                .from('users')
+                .select('firm_name, name')
+                .eq('id', request.requester_id)
+                .maybeSingle();
+              
               profiles[request.requester_id] = {
                 ...data,
+                // Use firm_name from users table (registration) as primary
+                firm_name: (userData as any)?.firm_name || (data as any).firm_name,
                 user: requesterUser ? { name: requesterUser.name, email: requesterUser.email } : undefined
-              };
+              } as any;
             }
           } else if (request.requester_type === 'Mentor') {
             const { data } = await supabase
@@ -378,16 +397,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           }
           
           // Load filter options
-          const [stagesData, roundTypesData, domainsData] = await Promise.all([
+          const [stagesData, roundTypesData, domainsData, countriesData] = await Promise.all([
             generalDataService.getItemsByCategory('stage'),
             generalDataService.getItemsByCategory('round_type'),
-            generalDataService.getItemsByCategory('domain')
+            generalDataService.getItemsByCategory('domain'),
+            generalDataService.getItemsByCategory('country')
           ]);
           
           setMandateFilterOptions({
             stages: stagesData.map(s => s.name),
             roundTypes: roundTypesData.map(r => r.name),
-            domains: domainsData.map(d => d.name)
+            domains: domainsData.map(d => d.name),
+            countries: countriesData.map(c => c.name)
           });
         } catch (error) {
           console.error('Error loading mandate data:', error);
@@ -569,6 +590,134 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         url.searchParams.set('userId', String(investorUserId));
         window.open(url.toString(), '_blank');
       }
+    }
+  };
+
+  // Handle due diligence from Service Requests
+  const handleServiceRequestDueDiligence = async (request: any) => {
+    if (request.type !== 'startup') {
+      alert('Due diligence is only available for startups.');
+      return;
+    }
+
+    try {
+      if (!currentUser?.id) {
+        alert('Please log in to request due diligence access.');
+        return;
+      }
+
+      const startupId = request.id;
+      if (!startupId) {
+        alert('Startup ID not found.');
+        return;
+      }
+
+      // Check if already approved
+      const approved = await paymentService.hasApprovedDueDiligence(currentUser.id, String(startupId));
+      if (approved) {
+        // Update state
+        addStartupToDueDiligenceSet(startupId);
+        setApprovedDueDiligenceStartups(prev => new Set([...prev, startupId]));
+        // Open startup dashboard
+        (onViewStartup as any)(startupId, 'dashboard');
+        return;
+      }
+
+      // Create pending request
+      await paymentService.createPendingDueDiligenceIfNeeded(currentUser.id, String(startupId));
+      addStartupToDueDiligenceSet(startupId);
+      
+      // Reload due diligence status
+      const { data } = await supabase
+        .from('due_diligence_requests')
+        .select('startup_id, status')
+        .eq('user_id', currentUser.id)
+        .eq('startup_id', String(startupId))
+        .in('status', ['pending', 'approved', 'completed'])
+        .maybeSingle();
+      
+      if (data && (data.status === 'approved' || data.status === 'completed')) {
+        setApprovedDueDiligenceStartups(prev => new Set([...prev, Number(data.startup_id)]));
+      }
+      
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: 'Due diligence request sent. Access will unlock once the startup approves.',
+        type: 'success',
+        timestamp: new Date()
+      }]);
+    } catch (error) {
+      console.error('Due diligence request failed:', error);
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: 'Failed to send due diligence request. Please try again.',
+        type: 'error',
+        timestamp: new Date()
+      }]);
+    }
+  };
+
+  // Handle due diligence from Co-Investment Opportunities
+  const handleCoInvestmentDueDiligence = async (startupId: number) => {
+    try {
+      if (!currentUser?.id) {
+        alert('Please log in to request due diligence access.');
+        return;
+      }
+
+      if (!startupId) {
+        alert('Startup ID not found.');
+        return;
+      }
+
+      // Check if already approved
+      const approved = await paymentService.hasApprovedDueDiligence(currentUser.id, String(startupId));
+      if (approved) {
+        // Update state
+        addStartupToDueDiligenceSet(startupId);
+        setApprovedDueDiligenceStartups(prev => new Set([...prev, startupId]));
+        // Open startup dashboard
+        (onViewStartup as any)(startupId, 'dashboard');
+        return;
+      }
+
+      // Create pending request
+      await paymentService.createPendingDueDiligenceIfNeeded(currentUser.id, String(startupId));
+      addStartupToDueDiligenceSet(startupId);
+      
+      // Reload due diligence status
+      const { data } = await supabase
+        .from('due_diligence_requests')
+        .select('startup_id, status')
+        .eq('user_id', currentUser.id)
+        .eq('startup_id', String(startupId))
+        .in('status', ['pending', 'approved', 'completed'])
+        .maybeSingle();
+      
+      if (data && (data.status === 'approved' || data.status === 'completed')) {
+        setApprovedDueDiligenceStartups(prev => new Set([...prev, Number(data.startup_id)]));
+        // If immediately approved, open dashboard
+        setTimeout(() => {
+          (onViewStartup as any)(startupId, 'dashboard');
+        }, 500);
+      }
+      
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: data && (data.status === 'approved' || data.status === 'completed')
+          ? 'Due diligence access granted! Opening startup dashboard...'
+          : 'Due diligence request sent. Access will unlock once the startup approves.',
+        type: 'success',
+        timestamp: new Date()
+      }]);
+    } catch (error) {
+      console.error('Due diligence request failed:', error);
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: 'Failed to send due diligence request. Please try again.',
+        type: 'error',
+        timestamp: new Date()
+      }]);
     }
   };
 
@@ -971,6 +1120,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           alert(`⚠️ This investor is already linked with another Investment Advisor (${result.existingAdvisorName || 'Unknown'}). Please contact the investor directly to change their Investment Advisor code.`);
         } else if (result.isExistingTMSInvestor) {
           alert('Investor already exists on TMS and has been linked to your account!');
+          // Reload advisor-added investors to get updated data
+          try {
+            const updatedInvestors = await advisorAddedInvestorService.getInvestorsByAdvisor(currentUser.id);
+            setAdvisorAddedInvestors(updatedInvestors);
+          } catch (reloadError) {
+            console.error('Error reloading investors after link:', reloadError);
+          }
         } else {
           alert('Invite sent successfully! The investor will receive an email to set up their account.');
         }
@@ -1032,6 +1188,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           alert('Startup already exists on TMS. A permission request has been sent to the startup. You\'ll be notified when they respond.');
         } else if (result.isExistingTMSStartup) {
           alert('Startup already exists on TMS and has been linked to your account!');
+          // Reload advisor-added startups to get updated data
+          try {
+            const updatedStartups = await advisorAddedStartupService.getStartupsByAdvisor(currentUser.id);
+            setAdvisorAddedStartups(updatedStartups);
+          } catch (reloadError) {
+            console.error('Error reloading startups after link:', reloadError);
+          }
         } else {
           alert('Invite sent successfully! The startup will receive an email to set up their account.');
         }
@@ -1089,6 +1252,42 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     loadActiveFundraisingStartups();
   }, [activeTab]);
 
+  // Load received recommendations from investors/collaborators
+  useEffect(() => {
+    const loadReceivedRecommendations = async () => {
+      if (activeTab === 'discovery' && currentUser?.id) {
+        setIsLoadingReceivedRecommendations(true);
+        try {
+          const { data, error } = await supabase
+            .from('collaborator_recommendations')
+            .select(`
+              startup_id,
+              sender_name,
+              message,
+              created_at,
+              sender_user_id
+            `)
+            .eq('collaborator_user_id', currentUser.id)
+            .order('created_at', { ascending: false });
+
+          if (error) {
+            console.error('Error loading received recommendations:', error);
+            setReceivedRecommendations([]);
+          } else {
+            setReceivedRecommendations(data || []);
+          }
+        } catch (error) {
+          console.error('Error loading received recommendations:', error);
+          setReceivedRecommendations([]);
+        } finally {
+          setIsLoadingReceivedRecommendations(false);
+        }
+      }
+    };
+
+    loadReceivedRecommendations();
+  }, [activeTab, currentUser?.id]);
+
   // Load investment advisor's own favorites from database
   useEffect(() => {
     const loadFavorites = async () => {
@@ -1124,6 +1323,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     const loadDueDiligenceAccess = async () => {
       if (!currentUser?.id) {
         setDueDiligenceStartups(new Set<number>());
+        setApprovedDueDiligenceStartups(new Set<number>());
         return;
       }
       try {
@@ -1131,7 +1331,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           .from('due_diligence_requests')
           .select('startup_id, status')
           .eq('user_id', currentUser.id)
-          .in('status', ['pending', 'completed']);
+          .in('status', ['pending', 'approved', 'completed']);
         if (error) throw error;
 
         const allIds = new Set<number>();
@@ -1140,7 +1340,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           const startupId = Number(record.startup_id);
           if (!Number.isNaN(startupId)) {
             allIds.add(startupId);
-            if (record.status === 'completed') {
+            if (record.status === 'approved' || record.status === 'completed') {
               approvedIds.add(startupId);
             }
           }
@@ -1150,6 +1350,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       } catch (error) {
         console.error('Error loading due diligence access:', error);
         setDueDiligenceStartups(new Set<number>());
+        setApprovedDueDiligenceStartups(new Set<number>());
         setApprovedDueDiligenceStartups(new Set<number>());
       }
     };
@@ -1296,6 +1497,117 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     return acceptedStartups;
   }, [advisorCode, startups, users]);
 
+  // Filter advisor-added startups to exclude those already in myStartups (to prevent duplicates)
+  // Also matches by email to catch duplicates even if tms_startup_id is not set
+  const filteredAdvisorAddedStartups = useMemo(() => {
+    if (!advisorAddedStartups || advisorAddedStartups.length === 0) {
+      return [];
+    }
+
+    // Get IDs and emails of startups that are already in myStartups
+    const myStartupIds = new Set(myStartups.map(s => s.id));
+    const myStartupEmails = new Set<string>();
+    
+    // Get emails from TMS startups
+    myStartups.forEach(tmsStartup => {
+      const startupUser = users.find(u => u.id === tmsStartup.user_id && u.role === 'Startup');
+      if (startupUser?.email) {
+        myStartupEmails.add(startupUser.email.toLowerCase().trim());
+      }
+    });
+
+    // Filter out advisor-added startups that are already linked and appear in myStartups
+    return advisorAddedStartups.filter(addedStartup => {
+      // Check by TMS startup ID
+      if (addedStartup.is_on_tms && addedStartup.tms_startup_id) {
+        if (myStartupIds.has(addedStartup.tms_startup_id)) {
+          return false; // Exclude - already in myStartups
+        }
+      }
+      
+      // Check by email (case-insensitive)
+      if (addedStartup.contact_email) {
+        const normalizedEmail = addedStartup.contact_email.toLowerCase().trim();
+        if (myStartupEmails.has(normalizedEmail)) {
+          return false; // Exclude - email matches a TMS startup
+        }
+      }
+      
+      // If not matched, show it
+      return true;
+    });
+  }, [advisorAddedStartups, myStartups, users]);
+
+  // Auto-cleanup duplicates: Delete manual entries when startup joins TMS
+  useEffect(() => {
+    const cleanupDuplicates = async () => {
+      if (!currentUser?.id || advisorAddedStartups.length === 0 || myStartups.length === 0) {
+        return;
+      }
+
+      // Only run on My Startups tab
+      if (activeTab !== 'myStartups' && !(activeTab === 'management' && managementSubTab === 'myStartups')) {
+        return;
+      }
+
+      try {
+        const myStartupIds = new Set(myStartups.map(s => s.id));
+        const myStartupEmails = new Set<string>();
+        
+        // Get emails from TMS startups
+        myStartups.forEach(tmsStartup => {
+          const startupUser = users.find(u => u.id === tmsStartup.user_id && u.role === 'Startup');
+          if (startupUser?.email) {
+            myStartupEmails.add(startupUser.email.toLowerCase().trim());
+          }
+        });
+
+        // Find duplicates to delete
+        const duplicatesToDelete = advisorAddedStartups.filter(addedStartup => {
+          // Check by TMS startup ID
+          if (addedStartup.is_on_tms && addedStartup.tms_startup_id) {
+            if (myStartupIds.has(addedStartup.tms_startup_id)) {
+              return true; // Mark for deletion
+            }
+          }
+          
+          // Check by email
+          if (addedStartup.contact_email) {
+            const normalizedEmail = addedStartup.contact_email.toLowerCase().trim();
+            if (myStartupEmails.has(normalizedEmail)) {
+              return true; // Mark for deletion
+            }
+          }
+          
+          return false;
+        });
+
+        // Delete duplicates
+        if (duplicatesToDelete.length > 0) {
+          for (const duplicate of duplicatesToDelete) {
+            await supabase
+              .from('advisor_added_startups')
+              .delete()
+              .eq('id', duplicate.id);
+          }
+          
+          console.log(`✅ Auto-cleaned ${duplicatesToDelete.length} duplicate manual startup entries`);
+          
+          // Reload the list after cleanup
+          const updatedStartups = await advisorAddedStartupService.getStartupsByAdvisor(currentUser.id);
+          setAdvisorAddedStartups(updatedStartups);
+        }
+      } catch (cleanupError) {
+        console.error('Error auto-cleaning duplicates:', cleanupError);
+      }
+    };
+
+    // Run cleanup when data is loaded and on My Startups tab
+    if (!loadingAddedStartups && advisorAddedStartups.length > 0 && myStartups.length > 0) {
+      cleanupDuplicates();
+    }
+  }, [activeTab, managementSubTab, currentUser?.id, advisorAddedStartups, myStartups, users, loadingAddedStartups]);
+
   // Get accepted investors - FIXED VERSION
   // Includes: 1) Investors who entered advisor code and were accepted, 2) Investors who connected via connection requests
   const myInvestors = useMemo(() => {
@@ -1353,6 +1665,115 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
     return allInvestors;
   }, [advisorCode, users, acceptedCollaborators]);
+
+  // Filter advisor-added investors to exclude those already in myInvestors (to prevent duplicates)
+  // Also matches by email to catch duplicates even if tms_investor_id is not set
+  const filteredAdvisorAddedInvestors = useMemo(() => {
+    if (!advisorAddedInvestors || advisorAddedInvestors.length === 0) {
+      return [];
+    }
+
+    // Get IDs and emails of investors that are already in myInvestors
+    const myInvestorIds = new Set(myInvestors.map(inv => inv.id));
+    const myInvestorEmails = new Set<string>();
+    
+    // Get emails from TMS investors
+    myInvestors.forEach(tmsInvestor => {
+      if (tmsInvestor.email) {
+        myInvestorEmails.add(tmsInvestor.email.toLowerCase().trim());
+      }
+    });
+
+    // Filter out advisor-added investors that are already linked and appear in myInvestors
+    return advisorAddedInvestors.filter(addedInvestor => {
+      // Check by TMS investor ID
+      if (addedInvestor.is_on_tms && addedInvestor.tms_investor_id) {
+        if (myInvestorIds.has(addedInvestor.tms_investor_id)) {
+          return false; // Exclude - already in myInvestors
+        }
+      }
+      
+      // Check by email (case-insensitive)
+      if (addedInvestor.email) {
+        const normalizedEmail = addedInvestor.email.toLowerCase().trim();
+        if (myInvestorEmails.has(normalizedEmail)) {
+          return false; // Exclude - email matches a TMS investor
+        }
+      }
+      
+      // If not matched, show it
+      return true;
+    });
+  }, [advisorAddedInvestors, myInvestors]);
+
+  // Auto-cleanup duplicates: Delete manual entries when investor joins TMS
+  useEffect(() => {
+    const cleanupInvestorDuplicates = async () => {
+      if (!currentUser?.id || advisorAddedInvestors.length === 0 || myInvestors.length === 0) {
+        return;
+      }
+
+      // Only run on My Investors tab
+      if (activeTab !== 'myInvestors' && !(activeTab === 'management' && managementSubTab === 'myInvestors')) {
+        return;
+      }
+
+      try {
+        const myInvestorIds = new Set(myInvestors.map(inv => inv.id));
+        const myInvestorEmails = new Set<string>();
+        
+        // Get emails from TMS investors
+        myInvestors.forEach(tmsInvestor => {
+          if (tmsInvestor.email) {
+            myInvestorEmails.add(tmsInvestor.email.toLowerCase().trim());
+          }
+        });
+
+        // Find duplicates to delete
+        const duplicatesToDelete = advisorAddedInvestors.filter(addedInvestor => {
+          // Check by TMS investor ID
+          if (addedInvestor.is_on_tms && addedInvestor.tms_investor_id) {
+            if (myInvestorIds.has(addedInvestor.tms_investor_id)) {
+              return true; // Mark for deletion
+            }
+          }
+          
+          // Check by email
+          if (addedInvestor.email) {
+            const normalizedEmail = addedInvestor.email.toLowerCase().trim();
+            if (myInvestorEmails.has(normalizedEmail)) {
+              return true; // Mark for deletion
+            }
+          }
+          
+          return false;
+        });
+
+        // Delete duplicates
+        if (duplicatesToDelete.length > 0) {
+          for (const duplicate of duplicatesToDelete) {
+            await supabase
+              .from('advisor_added_investors')
+              .delete()
+              .eq('id', duplicate.id);
+          }
+          
+          console.log(`✅ Auto-cleaned ${duplicatesToDelete.length} duplicate manual investor entries`);
+          
+          // Reload the list after cleanup
+          const updatedInvestors = await advisorAddedInvestorService.getInvestorsByAdvisor(currentUser.id);
+          setAdvisorAddedInvestors(updatedInvestors);
+        }
+      } catch (cleanupError) {
+        console.error('Error auto-cleaning investor duplicates:', cleanupError);
+      }
+    };
+
+    // Run cleanup when data is loaded and on My Investors tab
+    if (!loadingAddedInvestors && advisorAddedInvestors.length > 0 && myInvestors.length > 0) {
+      cleanupInvestorDuplicates();
+    }
+  }, [activeTab, managementSubTab, currentUser?.id, advisorAddedInvestors, myInvestors, loadingAddedInvestors]);
 
   // Create serviceRequests - Startups (Pitch) + Investors (manual code entry from dashboard)
   // Note: Investors clicking "Connect" button go to Collaboration tab via advisor_connection_requests
@@ -2300,18 +2721,34 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     
     let filtered = [...activeFundraisingStartups];
 
-    // Filter by round type (fundraisingType)
-    if (mandate.round_type && mandate.round_type.trim() !== '') {
-      filtered = filtered.filter(startup => 
-        startup.fundraisingType === mandate.round_type
-      );
+    const normalize = (value?: string | null) => (value || '').trim().toLowerCase();
+    const mandateRound = normalize(mandate.round_type);
+    const mandateDomain = normalize(mandate.domain);
+    const mandateStage = normalize(mandate.stage);
+    const mandateCountry = normalize(mandate.country);
+
+    // Filter by round type (fundraisingType) - case-insensitive
+    if (mandateRound) {
+      filtered = filtered.filter(startup => normalize(startup.fundraisingType) === mandateRound);
     }
 
-    // Filter by domain (sector)
-    if (mandate.domain && mandate.domain.trim() !== '') {
-      filtered = filtered.filter(startup => 
-        startup.sector && startup.sector.toLowerCase() === mandate.domain!.toLowerCase()
-      );
+    // Filter by domain/sector (allow partial match, case-insensitive)
+    if (mandateDomain) {
+      filtered = filtered.filter(startup => {
+        const sector = normalize(startup.sector);
+        const domain = normalize((startup as any).domain);
+        return sector.includes(mandateDomain) || domain.includes(mandateDomain);
+      });
+    }
+
+    // Filter by stage (case-insensitive)
+    if (mandateStage) {
+      filtered = filtered.filter(startup => normalize(startup.stage) === mandateStage);
+    }
+
+    // Filter by country (case-insensitive)
+    if (mandateCountry) {
+      filtered = filtered.filter(startup => normalize((startup as any).country || (startup as any).country_of_registration) === mandateCountry);
     }
 
     // Filter by amount range
@@ -2355,6 +2792,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           stage: mandateFormData.stage || undefined,
           round_type: mandateFormData.round_type || undefined,
           domain: mandateFormData.domain || undefined,
+          country: mandateFormData.country || undefined,
           amount_min: mandateFormData.amount_min || undefined,
           amount_max: mandateFormData.amount_max || undefined,
           equity_min: mandateFormData.equity_min || undefined,
@@ -2364,11 +2802,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         // Create new mandate
         result = await advisorMandateService.createMandate({
           ...mandateFormData,
+          country: mandateFormData.country || undefined,
           advisor_id: currentUser.id
         });
       }
 
       if (result) {
+        // Save investor associations
+        if (result.id) {
+          const investorIds = Array.from(selectedMandateInvestors);
+          await advisorMandateService.setMandateInvestors(result.id, investorIds);
+        }
+        
         // Reload mandates
         const updatedMandates = await advisorMandateService.getMandatesByAdvisor(currentUser.id);
         setMandates(updatedMandates);
@@ -2379,6 +2824,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         
         setShowMandateModal(false);
         setEditingMandate(null);
+        setSelectedMandateInvestors(new Set());
         setMandateFormData({
           advisor_id: currentUser.id,
           name: '',
@@ -2388,7 +2834,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           amount_min: undefined,
           amount_max: undefined,
           equity_min: undefined,
-          equity_max: undefined
+          equity_max: undefined,
+          country: ''
         });
         alert(editingMandate ? 'Mandate updated successfully!' : 'Mandate created successfully!');
       } else {
@@ -2427,7 +2874,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   };
 
   // Handle edit mandate
-  const handleEditMandate = (mandate: AdvisorMandate) => {
+  const handleEditMandate = async (mandate: AdvisorMandate) => {
     setEditingMandate(mandate);
     setMandateFormData({
       advisor_id: mandate.advisor_id,
@@ -2438,14 +2885,29 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       amount_min: mandate.amount_min,
       amount_max: mandate.amount_max,
       equity_min: mandate.equity_min,
-      equity_max: mandate.equity_max
+      equity_max: mandate.equity_max,
+      country: mandate.country || ''
     });
+    
+    // Load existing investor associations
+    setIsLoadingMandateInvestors(true);
+    try {
+      const investorIds = await advisorMandateService.getMandateInvestors(mandate.id);
+      setSelectedMandateInvestors(new Set(investorIds));
+    } catch (error) {
+      console.error('Error loading mandate investors:', error);
+      setSelectedMandateInvestors(new Set());
+    } finally {
+      setIsLoadingMandateInvestors(false);
+    }
+    
     setShowMandateModal(true);
   };
 
   // Handle add mandate
   const handleAddMandate = () => {
     setEditingMandate(null);
+    setSelectedMandateInvestors(new Set());
     setMandateFormData({
       advisor_id: currentUser?.id || '',
       name: '',
@@ -2455,7 +2917,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       amount_min: undefined,
       amount_max: undefined,
       equity_min: undefined,
-      equity_max: undefined
+      equity_max: undefined,
+      country: ''
     });
     setShowMandateModal(true);
   };
@@ -2522,6 +2985,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     setSelectedStartupForRecommendation(startupId);
     setSelectedInvestors(new Set()); // Reset selection
     setSelectedCollaborators(new Set()); // Reset collaborator selection
+    setSelectedMandates(new Set()); // Reset mandate selection
     setExistingRecommendations(new Set()); // Reset existing recommendations
     
     // Ensure collaborators are loaded before opening modal
@@ -2533,6 +2997,27 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         console.log('📋 Loaded collaborators for recommendation modal:', accepted.length);
       } catch (error) {
         console.error('Error loading collaborators:', error);
+      }
+    }
+    
+    // Load mandates with their investors
+    if (currentUser?.id) {
+      setIsLoadingMandatesForRecommendation(true);
+      try {
+        const allMandates = await advisorMandateService.getMandatesByAdvisor(currentUser.id);
+        const mandatesWithInvestorsData = await Promise.all(
+          allMandates.map(async (mandate) => {
+            const investorIds = await advisorMandateService.getMandateInvestors(mandate.id);
+            return { mandate, investorIds };
+          })
+        );
+        // Only include mandates that have at least one investor
+        setMandatesWithInvestors(mandatesWithInvestorsData.filter(m => m.investorIds.length > 0));
+      } catch (error) {
+        console.error('Error loading mandates for recommendation:', error);
+        setMandatesWithInvestors([]);
+      } finally {
+        setIsLoadingMandatesForRecommendation(false);
       }
     }
     
@@ -2605,6 +3090,41 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     });
   };
 
+  // Toggle mandate selection - selects/deselects all investors in that mandate
+  const toggleMandateSelection = (mandateId: number) => {
+    const mandateData = mandatesWithInvestors.find(m => m.mandate.id === mandateId);
+    if (!mandateData) return;
+    
+    const isSelected = selectedMandates.has(mandateId);
+    
+    setSelectedMandates(prev => {
+      const newSet = new Set(prev);
+      if (isSelected) {
+        newSet.delete(mandateId);
+      } else {
+        newSet.add(mandateId);
+      }
+      return newSet;
+    });
+    
+    // Update investor selection based on mandate selection
+    setSelectedInvestors(prev => {
+      const newSet = new Set(prev);
+      if (isSelected) {
+        // Deselect all investors from this mandate
+        mandateData.investorIds.forEach(id => newSet.delete(id));
+      } else {
+        // Select all investors from this mandate (only if not already recommended)
+        mandateData.investorIds.forEach(id => {
+          if (!existingRecommendations.has(id)) {
+            newSet.add(id);
+          }
+        });
+      }
+      return newSet;
+    });
+  };
+
   // Select all available recipients (investors and collaborators who don't already have recommendations)
   const selectAllAvailable = () => {
     const availableInvestorIds = myInvestors
@@ -2616,12 +3136,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       .filter(collab => !existingRecommendations.has(collab.requester_id))
       .map(collab => collab.requester_id);
     setSelectedCollaborators(new Set(availableCollaboratorIds));
+    
+    // Also select all mandates that have at least one available investor
+    const availableMandateIds = mandatesWithInvestors
+      .filter(m => m.investorIds.some(id => !existingRecommendations.has(id)))
+      .map(m => m.mandate.id);
+    setSelectedMandates(new Set(availableMandateIds));
   };
 
   // Deselect all recipients
   const deselectAllRecipients = () => {
     setSelectedInvestors(new Set());
     setSelectedCollaborators(new Set());
+    setSelectedMandates(new Set());
   };
 
   // Submit recommendations to selected investors and collaborators
@@ -3454,10 +3981,44 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       await paymentService.createPendingDueDiligenceIfNeeded(currentUser.id, String(startup.id));
       addStartupToDueDiligenceSet(startup.id);
-      alert('Due diligence request sent. Access will unlock once the startup approves.');
+      
+      // Reload due diligence status to check if it was immediately approved
+      const { data } = await supabase
+        .from('due_diligence_requests')
+        .select('startup_id, status')
+        .eq('user_id', currentUser.id)
+        .eq('startup_id', String(startup.id))
+        .in('status', ['pending', 'approved', 'completed'])
+        .maybeSingle();
+      
+      if (data && (data.status === 'approved' || data.status === 'completed')) {
+        setApprovedDueDiligenceStartups(prev => new Set([...prev, Number(data.startup_id)]));
+        setNotifications(prev => [...prev, {
+          id: Date.now().toString(),
+          message: 'Due diligence access granted! Opening startup dashboard...',
+          type: 'success',
+          timestamp: new Date()
+        }]);
+        // Open dashboard if immediately approved
+        setTimeout(() => {
+          (onViewStartup as any)(startup.id, 'dashboard');
+        }, 500);
+      } else {
+        setNotifications(prev => [...prev, {
+          id: Date.now().toString(),
+          message: 'Due diligence request sent. Access will unlock once the startup approves.',
+          type: 'success',
+          timestamp: new Date()
+        }]);
+      }
     } catch (error) {
       console.error('Due diligence request failed:', error);
-      alert('Failed to send due diligence request. Please try again.');
+      setNotifications(prev => [...prev, {
+        id: Date.now().toString(),
+        message: 'Failed to send due diligence request. Please try again.',
+        type: 'error',
+        timestamp: new Date()
+      }]);
     }
   };
 
@@ -3783,13 +4344,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Request Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {serviceRequests.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="px-3 sm:px-6 py-8 text-center text-gray-500">
+                        <td colSpan={5} className="px-3 sm:px-6 py-8 text-center text-gray-500">
                           <div className="flex flex-col items-center">
                             <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -3800,7 +4362,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      serviceRequests.map((request) => (
+                      serviceRequests.map((request) => {
+                        const isStartup = request.type === 'startup';
+                        const hasDueDiligence = isStartup && approvedDueDiligenceStartups.has(request.id);
+                        const hasPendingDueDiligence = isStartup && dueDiligenceStartups.has(request.id) && !hasDueDiligence;
+                        
+                        return (
                         <tr key={request.id}>
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                             {request.name || 'N/A'}
@@ -3815,7 +4382,27 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {new Date(request.created_at || Date.now()).toLocaleDateString()}
                           </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium space-x-3">
+                            <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
+                              {isStartup ? (
+                                hasDueDiligence ? (
+                                  <span className="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                    Due Diligence Accepted
+                                  </span>
+                                ) : hasPendingDueDiligence ? (
+                                  <span className="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                    Due Diligence Pending
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                                    No Due Diligence
+                                  </span>
+                                )
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
+                            <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
+                              <div className="flex flex-wrap items-center gap-2">
                             <button
                               onClick={() => handleAcceptRequest(request)}
                               disabled={isLoading}
@@ -3836,9 +4423,25 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             >
                               View
                             </button>
+                                {isStartup && (
+                                  <button
+                                    onClick={() => handleServiceRequestDueDiligence(request)}
+                                    disabled={hasDueDiligence}
+                                    className={`px-2 py-1 text-xs rounded ${
+                                      hasDueDiligence
+                                        ? 'bg-blue-600 text-white cursor-default'
+                                        : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                                    } disabled:opacity-75 disabled:cursor-not-allowed`}
+                                    title={hasDueDiligence ? 'Due Diligence Already Accepted' : 'Request Due Diligence Access'}
+                                  >
+                                    {hasDueDiligence ? 'Due Diligence Accepted' : 'Due Diligence'}
+                                  </button>
+                                )}
+                              </div>
                           </td>
                         </tr>
-                      ))
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -4451,17 +5054,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
           {/* Startup Offers Section */}
           <div className="bg-white rounded-lg shadow">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Startup Offers</h3>
-                  <p className="text-sm text-gray-600">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">Startup Offers</h3>
+                  <p className="text-xs sm:text-sm text-gray-600">
                     Investment offers received by your assigned startups
                   </p>
                 </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-purple-600">{startupOffersList.length}</div>
-                  <div className="text-sm text-gray-500">Startup Offers</div>
+                <div className="text-left sm:text-right">
+                  <div className="text-xl sm:text-2xl font-bold text-purple-600">{startupOffersList.length}</div>
+                  <div className="text-xs sm:text-sm text-gray-500">Startup Offers</div>
                 </div>
               </div>
               
@@ -4481,19 +5084,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   <tbody className="bg-white divide-y divide-gray-200">
                     {loadingOffersMade ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
+                        <td colSpan={7} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                           Loading offers...
                         </td>
                       </tr>
                     ) : startupOffersList.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={7} className="px-3 sm:px-6 py-8 text-center text-gray-500">
                           <div className="flex flex-col items-center">
-                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="h-10 w-10 sm:h-12 sm:w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Startup Offers Found</h3>
-                            <p className="text-sm text-gray-500 mb-4">
+                            <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">No Startup Offers Found</h3>
+                            <p className="text-xs sm:text-sm text-gray-500 mb-4">
                               No investment offers received by your assigned startups at this time.
                             </p>
                           </div>
@@ -4507,7 +5110,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         
                         return (
                           <tr key={offer.id}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                               <div className="flex flex-col">
                                 <span>{offer.startup_name || 'Unknown Startup'}</span>
                                 {((offer as any).isCoInvestment || (offer as any).is_co_investment) && (
@@ -4518,11 +5121,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 )}
                               </div>
                             </td>
-                            <td className="px-3 py-4 text-sm text-gray-500">
-                              <span className="text-sm font-medium text-gray-900">{offer.investor_name || 'Unknown Investor'}</span>
+                            <td className="px-3 py-4 text-xs sm:text-sm text-gray-500">
+                              <span className="text-xs sm:text-sm font-medium text-gray-900">{offer.investor_name || 'Unknown Investor'}</span>
                             </td>
-                            <td className="px-3 py-4 text-sm text-gray-500">
-                              <div className="text-sm font-medium text-gray-900">
+                            <td className="px-3 py-4 text-xs sm:text-sm text-gray-500">
+                              <div className="text-xs sm:text-sm font-medium text-gray-900">
                                 {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
                                 {(offer as any).isCoInvestment && (offer as any).minimum_co_investment && (
                                   <div className="text-xs text-gray-500 mt-1">
@@ -4531,8 +5134,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 )}
                               </div>
                             </td>
-                            <td className="px-3 py-4 text-sm text-gray-500">
-                              <div className="text-sm font-medium text-gray-900">
+                            <td className="px-3 py-4 text-xs sm:text-sm text-gray-500">
+                              <div className="text-xs sm:text-sm font-medium text-gray-900">
                                 {(() => {
                                   const investmentValue = Number(offer.fundraising?.value) || 0;
                                   const equityAllocation = Number(offer.fundraising?.equity) || 0;
@@ -4895,25 +5498,25 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Name</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Investor</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Investment</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Investor Invested</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Remaining for Co-Investment</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Equity %</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View Startup</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Name</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Investor</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Investment</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Investor Invested</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Remaining for Co-Investment</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Equity %</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View Startup</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {loadingAdvisorCoOpps ? (
                       <tr>
-                        <td colSpan={9} className="px-6 py-8 text-center text-gray-500">Loading co-investment opportunities...</td>
+                        <td colSpan={9} className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">Loading co-investment opportunities...</td>
                       </tr>
                     ) : advisorCoOpps.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={9} className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
                           No Co-Investment Opportunities
                         </td>
                       </tr>
@@ -4932,33 +5535,35 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         
                         return (
                         <tr key={row.id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                             {row.startup?.name || 'Unknown Startup'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-700">
                             {row.listed_by_user?.name || 'Unknown'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {row.startup?.sector || 'Not specified'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${row.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
                               {row.stage === 4 ? 'Active' : row.status || 'Active'}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
                             {totalInvestment > 0 ? formatCurrency(totalInvestment, startupCurrency) : 'Not specified'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-blue-700">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold text-blue-700">
                             {leadInvestorInvested > 0 ? formatCurrency(leadInvestorInvested, startupCurrency) : '—'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-700">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold text-green-700">
                             {remaining > 0 ? formatCurrency(remaining, startupCurrency) : '—'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {row.equity_percentage ? `${row.equity_percentage}%` : '—'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
+                            <div className="flex flex-col gap-1">
+                              {approvedDueDiligenceStartups.has(row.startup_id) ? (
                             <button
                               onClick={() => {
                                 if (row.startup_id) {
@@ -4969,8 +5574,58 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                               }}
                               className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
                             >
-                              View Startup
+                                  View Dashboard
                             </button>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      if (row.startup_id) {
+                                        const url = new URL(window.location.origin + window.location.pathname);
+                                        url.searchParams.set('view', 'startup');
+                                        url.searchParams.set('startupId', String(row.startup_id));
+                                        window.open(url.toString(), '_blank');
+                                      } else {
+                                        alert('Startup information not available');
+                                      }
+                                    }}
+                                    className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                  >
+                                    View Profile
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      if (!row.startup_id) {
+                                        alert('Startup information not available');
+                                        return;
+                                      }
+                                      await handleCoInvestmentDueDiligence(row.startup_id);
+                                    }}
+                                    disabled={dueDiligenceStartups.has(row.startup_id) && !approvedDueDiligenceStartups.has(row.startup_id)}
+                                    className={`text-xs px-2 py-1 rounded ${
+                                      approvedDueDiligenceStartups.has(row.startup_id)
+                                        ? 'bg-blue-600 text-white cursor-default'
+                                        : dueDiligenceStartups.has(row.startup_id)
+                                        ? 'bg-yellow-100 text-yellow-700 cursor-not-allowed'
+                                        : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                                    } disabled:opacity-75 disabled:cursor-not-allowed`}
+                                    title={
+                                      approvedDueDiligenceStartups.has(row.startup_id)
+                                        ? 'Due Diligence Already Accepted'
+                                        : dueDiligenceStartups.has(row.startup_id)
+                                        ? 'Due Diligence Request Pending'
+                                        : 'Request Due Diligence Access'
+                                    }
+                                  >
+                                    {approvedDueDiligenceStartups.has(row.startup_id)
+                                      ? 'Due Diligence Accepted'
+                                      : dueDiligenceStartups.has(row.startup_id)
+                                      ? 'Due Diligence Pending'
+                                      : 'Due Diligence'}
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </td>
                         </tr>
                         );
@@ -5011,16 +5666,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             </div>
             
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border border-blue-100 gap-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 flex-1">
+                <div className="flex flex-nowrap items-center gap-2 sm:gap-3 overflow-x-auto">
                   <button
                     onClick={() => {
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(false);
                       setShowOnlyDueDiligence(false);
+                      setShowOnlyRecommendations(false);
                     }}
                     className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                      !showOnlyValidated && !showOnlyFavorites && !showOnlyDueDiligence
+                      !showOnlyValidated && !showOnlyFavorites && !showOnlyDueDiligence && !showOnlyRecommendations
                         ? 'bg-blue-600 text-white shadow-blue-200' 
                         : 'bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-600 border border-slate-200'
                     }`}
@@ -5036,9 +5692,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       setShowOnlyValidated(true);
                       setShowOnlyFavorites(false);
                       setShowOnlyDueDiligence(false);
+                      setShowOnlyRecommendations(false);
                     }}
                     className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                      showOnlyValidated && !showOnlyFavorites && !showOnlyDueDiligence
+                      showOnlyValidated && !showOnlyFavorites && !showOnlyDueDiligence && !showOnlyRecommendations
                         ? 'bg-green-600 text-white shadow-green-200' 
                         : 'bg-white text-slate-600 hover:bg-green-50 hover:text-green-600 border border-slate-200'
                     }`}
@@ -5054,6 +5711,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(true);
                       setShowOnlyDueDiligence(false);
+                      setShowOnlyRecommendations(false);
                     }}
                     className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
                       showOnlyFavorites
@@ -5072,6 +5730,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       setShowOnlyValidated(false);
                       setShowOnlyFavorites(false);
                       setShowOnlyDueDiligence(true);
+                      setShowOnlyRecommendations(false);
                     }}
                     className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
                       showOnlyDueDiligence
@@ -5084,19 +5743,29 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </svg>
                     <span className="hidden sm:inline">Due Diligence</span>
                   </button>
+                  
+                  <button
+                    onClick={() => {
+                      setShowOnlyValidated(false);
+                      setShowOnlyFavorites(false);
+                      setShowOnlyDueDiligence(false);
+                      setShowOnlyRecommendations(true);
+                    }}
+                    className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
+                      showOnlyRecommendations
+                        ? 'bg-orange-600 text-white shadow-orange-200' 
+                        : 'bg-white text-slate-600 hover:bg-orange-50 hover:text-orange-600 border border-slate-200'
+                    }`}
+                  >
+                    <Star className={`h-3 w-3 sm:h-4 sm:w-4 ${showOnlyRecommendations ? 'fill-current' : ''}`} />
+                    <span className="hidden sm:inline">Recommendations</span>
+                  </button>
                 </div>
                 
                 <div className="flex items-center gap-2 text-slate-600">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                   <span className="text-xs sm:text-sm font-medium">{activeFundraisingStartups.length} active pitches</span>
                 </div>
-              </div>
-              
-              <div className="flex items-center gap-2 text-slate-500">
-                <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <span className="text-xs sm:text-sm">Pitch Reels</span>
               </div>
             </div>
           </div>
@@ -5136,6 +5805,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               if (showOnlyDueDiligence) {
                 filteredPitches = filteredPitches.filter(inv => dueDiligenceStartups.has(inv.id));
               }
+
+              // Apply recommendations filter
+              if (showOnlyRecommendations) {
+                const recommendedStartupIds = new Set(receivedRecommendations.map(rec => rec.startup_id));
+                filteredPitches = filteredPitches.filter(inv => recommendedStartupIds.has(inv.id));
+              }
               
               if (filteredPitches.length === 0) {
                 return (
@@ -5153,6 +5828,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                               ? 'No Favorited Pitches'
                               : showOnlyDueDiligence
                                 ? 'No Due Diligence Access Yet'
+                                : showOnlyRecommendations
+                                  ? 'No Recommendations Received'
                                 : 'No Active Fundraising'
                         }
                       </h3>
@@ -5165,6 +5842,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                               ? 'Start favoriting pitches to see them here.'
                               : showOnlyDueDiligence
                                 ? 'Once due diligence access is granted for a startup, it will appear here for quick access.'
+                                : showOnlyRecommendations
+                                  ? 'No investors or collaborators have recommended any startups to you yet. Recommendations will appear here when received.'
                                 : 'No startups are currently fundraising. Check back later for new opportunities.'
                         }
                       </p>
@@ -5177,10 +5856,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
                 const embedUrl = videoEmbedInfo?.embedUrl || null;
                 const videoSource = videoEmbedInfo?.source || null;
+                // Find recommendation info for this startup
+                const recommendation = receivedRecommendations.find(rec => rec.startup_id === inv.id);
                 return (
                   <div key={inv.id} className="bg-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 overflow-hidden">
-                    {/* Enhanced Video/Logo Section */}
-                    <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+                    <div className="flex flex-col md:flex-row md:items-stretch gap-0">
+                      {/* Video/Logo Section - Left Side */}
+                      <div className="md:w-2/5 lg:w-1/3 relative aspect-[16/9] md:aspect-auto md:min-h-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
                       {embedUrl ? (
                         playingVideoId === inv.id ? (
                           <div className="relative w-full h-full">
@@ -5207,7 +5889,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             )}
                             <button
                               onClick={() => setPlayingVideoId(null)}
-                              className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"
+                                className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm z-10"
                             >
                               ×
                             </button>
@@ -5219,37 +5901,37 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           >
                             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
                             <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
-                                <svg className="w-10 h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                <div className="w-16 h-16 md:w-20 md:h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
+                                  <svg className="w-8 h-8 md:w-10 md:h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
                                   <path d="M8 5v14l11-7z" />
                                 </svg>
                               </div>
                             </div>
                             <div className="absolute bottom-4 left-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                              <p className="text-sm font-medium">Click to play</p>
+                                <p className="text-xs md:text-sm font-medium">Click to play</p>
                             </div>
                           </div>
                         )
                       ) : inv.logoUrl ? (
-                        <div className="w-full h-full flex items-center justify-center bg-slate-100">
+                          <div className="w-full h-full flex items-center justify-center bg-slate-100 p-4">
                           <img 
                             src={inv.logoUrl} 
                             alt={`${inv.name} Logo`} 
-                            className="object-contain w-full h-full" 
+                              className="object-contain w-full h-full max-h-full" 
                           />
                         </div>
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-slate-400">
                           <div className="text-center">
-                            <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">No video or logo available</p>
+                              <Video className="h-12 w-12 md:h-16 md:w-16 mx-auto mb-2 opacity-50" />
+                              <p className="text-xs md:text-sm">No video or logo available</p>
                           </div>
                         </div>
                       )}
                     </div>
 
-                    {/* Enhanced Content Section */}
-                    <div className="p-4 sm:p-6">
+                      {/* Content Section - Right Side */}
+                      <div className="md:w-3/5 lg:w-2/3 p-4 sm:p-6 flex flex-col">
                       <div className="flex flex-col sm:flex-row items-start justify-between mb-4 gap-3">
                         <div className="flex-1 min-w-0">
                           <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2 break-words">{inv.name}</h3>
@@ -5277,8 +5959,30 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                               </>
                             )}
                           </div>
+                          {/* Recommendation Badge and Sender Info */}
+                          {recommendation && (
+                            <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
+                              <div className="flex items-center gap-2">
+                                <Star className="h-4 w-4 text-orange-600 fill-current" />
+                                <p className="text-sm font-medium text-orange-800">
+                                  Recommended by {recommendation.sender_name || 'Unknown'}
+                                </p>
+                              </div>
+                              {recommendation.message && (
+                                <p className="text-xs text-orange-700 mt-1 italic">
+                                  "{recommendation.message}"
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
+                          {recommendation && (
+                            <div className="flex items-center gap-1 bg-gradient-to-r from-orange-500 to-orange-600 text-white px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-medium shadow-sm">
+                              <Star className="h-3 w-3 fill-current" />
+                              <span className="hidden xs:inline">Recommended</span>
+                            </div>
+                          )}
                           {inv.isStartupNationValidated && (
                             <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-medium shadow-sm">
                               <CheckCircle className="h-3 w-3" />
@@ -5358,11 +6062,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           <span className="hidden sm:inline">{recommendedStartups.has(inv.id) ? 'Recommended ✓' : 'Recommend'}</span>
                           <span className="sm:hidden">{recommendedStartups.has(inv.id) ? 'Rec ✓' : 'Recommend'}</span>
                         </button>
-                      </div>
                     </div>
 
-                    {/* Enhanced Investment Details Footer */}
-                    <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 border-t border-slate-200">
+                        {/* Investment Details Footer */}
+                        <div className="mt-auto pt-4 border-t border-slate-200">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
                       <div className="flex items-center gap-4 flex-wrap">
                       <div className="text-sm sm:text-base">
                           <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(inv.investmentValue, inv.currency || 'USD')} for <span className="font-semibold text-purple-600">{inv.equityAllocation}%</span> equity
@@ -5404,6 +6108,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           <span className="text-xs font-semibold">Verified</span>
                         </div>
                       )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -5419,17 +6126,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           {/* Sub-tabs Navigation */}
           <div className="bg-white rounded-lg shadow">
             <div className="border-b border-gray-200">
-              <nav className="flex space-x-8 px-6" aria-label="My Network Tabs">
+              <nav className="flex flex-wrap space-x-4 sm:space-x-8 px-4 sm:px-6 overflow-x-auto" aria-label="My Network Tabs">
                 <button
                   onClick={() => setManagementSubTab('myInvestments')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                     managementSubTab === 'myInvestments'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
                   <div className="flex items-center">
-                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                     </svg>
                     My Investments
@@ -5437,14 +6144,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 </button>
                 <button
                   onClick={() => setManagementSubTab('myInvestors')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                     managementSubTab === 'myInvestors'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
                   <div className="flex items-center">
-                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
                     </svg>
                     My Investors
@@ -5452,14 +6159,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 </button>
                 <button
                   onClick={() => setManagementSubTab('myStartups')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
                     managementSubTab === 'myStartups'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
                   <div className="flex items-center">
-                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                     </svg>
                     My Startups
@@ -5473,19 +6180,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           {managementSubTab === 'myInvestments' && (
         <div className="space-y-6">
         <div className="bg-white rounded-lg shadow">
-          <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
+          <div className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
                 <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">My Investments</h3>
-                  <p className="text-sm text-gray-600">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">My Investments</h3>
+                  <p className="text-xs sm:text-sm text-gray-600">
                     Track active investments (Stage 4) from your assigned clients
             </p>
             </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-green-600">
+                <div className="text-left sm:text-right">
+                  <div className="text-xl sm:text-2xl font-bold text-green-600">
                     {offersMade.filter(offer => (offer as any).stage === 4).length}
           </div>
-                  <div className="text-sm text-gray-500">Active Investments</div>
+                  <div className="text-xs sm:text-sm text-gray-500">Active Investments</div>
                 </div>
               </div>
               
@@ -5519,29 +6226,29 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     ) : (
                       offersMade.filter(offer => (offer as any).stage === 4).map((offer) => (
                         <tr key={offer.id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                             <div className="flex items-center">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-2">
+                              <span className="inline-flex items-center px-2 py-0.5 sm:px-2.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-1 sm:mr-2">
                                 Startup
                               </span>
-                              {offer.startup_name || 'Unknown Startup'}
+                              <span className="truncate">{offer.startup_name || 'Unknown Startup'}</span>
                             </div>
                           </td>
-                          <td className="px-3 py-4 text-sm text-gray-500">
+                          <td className="px-3 py-4 text-xs sm:text-sm text-gray-500">
                             <div className="space-y-1">
-                              <div className="flex items-center">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mr-2">
+                              <div className="flex items-center flex-wrap gap-1">
+                                <span className="inline-flex items-center px-2 py-0.5 sm:px-2.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                   Investor
                                 </span>
                                 <span className="text-xs truncate">{offer.investor_name || 'Unknown Investor'}</span>
                               </div>
-                              <div className="text-sm font-medium text-gray-900">
+                              <div className="text-xs sm:text-sm font-medium text-gray-900">
                                 {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
                               </div>
                             </div>
                           </td>
-                          <td className="px-3 py-4 text-sm text-gray-500">
-                            <div className="text-sm font-medium text-gray-900">
+                          <td className="px-3 py-4 text-xs sm:text-sm text-gray-500">
+                            <div className="text-xs sm:text-sm font-medium text-gray-900">
                               {(() => {
                                 // Use the correct column names from fundraising_details table
                                 const investmentValue = Number(offer.fundraising?.value) || 0;
@@ -5567,15 +6274,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                               🎉 Stage 4: Active Investment
                             </span>
                           </td>
-                          <td className="px-3 py-4 text-sm text-gray-500">
+                          <td className="px-3 py-4 text-xs sm:text-sm text-gray-500">
                             <div className="text-xs">
                               {offer.created_at ? new Date(offer.created_at).toLocaleDateString() : 'N/A'}
                             </div>
                           </td>
-                          <td className="px-3 py-4 text-sm font-medium">
+                          <td className="px-3 py-4 text-xs sm:text-sm font-medium">
                             <button
                               onClick={() => handleViewInvestmentDetails(offer)}
-                              className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                              className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
                             >
                               View Details
                             </button>
@@ -5595,17 +6302,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           {managementSubTab === 'myInvestors' && (
         <div className="space-y-6">
           <div className="bg-white rounded-lg shadow">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">My Investors</h3>
-                  <p className="text-sm text-gray-600">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">My Investors</h3>
+                  <p className="text-xs sm:text-sm text-gray-600">
                     TMS investors who have accepted your advisory services and manually added investors
                   </p>
                 </div>
                 <button
                   onClick={handleAddInvestor}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs sm:text-sm font-medium w-full sm:w-auto"
                 >
                   <PlusCircle className="h-4 w-4" />
                   Add Investor
@@ -5615,47 +6322,47 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name/VC Firm</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact Number</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Website</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name/VC Firm</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact Number</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Website</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {/* TMS Investors */}
                     {myInvestors.map((investor) => (
                       <tr key={`tms-${investor.id}`}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                           {investor.name || 'N/A'}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                           {investor.email}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                           -
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                           -
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
                             TMS
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                           {(investor as any).advisor_accepted_date 
                             ? new Date((investor as any).advisor_accepted_date).toLocaleDateString()
                             : investor.created_at 
                               ? new Date(investor.created_at).toLocaleDateString()
                               : 'N/A'}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
                           <button
                             onClick={() => handleViewInvestorDashboard(investor)}
-                            className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                            className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
                           >
                             View Dashboard
                           </button>
@@ -5666,58 +6373,66 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     {/* Advisor-Added Investors */}
                     {loadingAddedInvestors ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                        <td colSpan={7} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                           Loading added investors...
                         </td>
                       </tr>
-                    ) : advisorAddedInvestors.length === 0 && myInvestors.length === 0 ? (
+                    ) : (filteredAdvisorAddedInvestors.length === 0 && myInvestors.length === 0) ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                        <td colSpan={7} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                           No investors found. Click "Add Investor" to add investors who are not on TMS.
                         </td>
                       </tr>
                     ) : (
-                      advisorAddedInvestors.map((investor) => (
+                      filteredAdvisorAddedInvestors.map((investor) => (
                         <tr key={`added-${investor.id}`}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                             {investor.investor_name}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {investor.email}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {investor.contact_number || '-'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {investor.website ? (
-                              <a href={investor.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                              <a href={investor.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate block max-w-[150px] sm:max-w-none">
                                 {investor.website}
                               </a>
                             ) : '-'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                             <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
                               Added
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {new Date(investor.created_at).toLocaleDateString()}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <div className="flex items-center gap-2">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
+                            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
                               {investor.is_on_tms && investor.tms_investor_id ? (
+                                <>
                                 <button
                                   onClick={() => {
                                     const tmsInvestor = myInvestors.find(inv => inv.id === investor.tms_investor_id);
                                     if (tmsInvestor) {
-                                      // Handle view investor dashboard if needed
-                                      alert('Investor is already linked to TMS');
+                                        handleViewInvestorDashboard(tmsInvestor);
                                     }
                                   }}
-                                  className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                                  className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
                                 >
                                   View Dashboard
                                 </button>
+                                  <button
+                                    onClick={() => handleDeleteAddedInvestor(investor.id)}
+                                    className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                    title="Delete manual entry (investor is now on TMS)"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </>
                               ) : (
                                 <>
                                   <button
@@ -6226,17 +6941,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           {/* My Startups Sub-tab */}
           {managementSubTab === 'myStartups' && (
         <div className="bg-white rounded-lg shadow">
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-4">
+          <div className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">My Startups</h3>
-                <p className="text-sm text-gray-600">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">My Startups</h3>
+                <p className="text-xs sm:text-sm text-gray-600">
                   Startups that have accepted your advisory services
                 </p>
               </div>
               <button
                 onClick={handleAddStartup}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs sm:text-sm font-medium w-full sm:w-auto"
               >
                 <PlusCircle className="h-4 w-4" />
                 Add Startup
@@ -6246,25 +6961,25 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Ask</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Ask</th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {/* TMS Startups */}
                   {myStartups.map((startup) => (
                     <tr key={`tms-${startup.id}`}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                         {startup.name}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                         {startup.sector || 'Not specified'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
                         {(() => {
                           // Get startup ask from fundraising_details table
                           const fundraising = startupFundraisingData[startup.id];
@@ -6283,20 +6998,20 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           return `Seeking ${formatCurrency(investmentValue, currency)} for ${equityAllocation}% equity`;
                         })()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
                           TMS
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                         {startup.created_at 
                           ? new Date(startup.created_at).toLocaleDateString()
                           : 'N/A'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
                         <button
                           onClick={() => handleViewStartupDashboard(startup)}
-                          className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                          className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
                         >
                           View Dashboard
                         </button>
@@ -6307,43 +7022,44 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   {/* Advisor-Added Startups */}
                   {loadingAddedStartups ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                      <td colSpan={6} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                         Loading added startups...
                       </td>
                     </tr>
-                  ) : advisorAddedStartups.length === 0 && myStartups.length === 0 ? (
+                  ) : ((filteredAdvisorAddedStartups.length === 0 && myStartups.length === 0) ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                      <td colSpan={6} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                         No startups found. Click "Add Startup" to add startups who are not on TMS.
                       </td>
                     </tr>
                   ) : (
-                    advisorAddedStartups.map((startup) => (
+                    filteredAdvisorAddedStartups.map((startup) => (
                       <tr key={`added-${startup.id}`}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                           {startup.startup_name}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                           {startup.sector || startup.domain || 'Not specified'}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
                           {startup.investment_amount && startup.equity_percentage
                             ? `Seeking ${formatCurrency(startup.investment_amount, startup.currency || 'USD')} for ${startup.equity_percentage}% equity`
                             : startup.current_valuation
                               ? `Valuation: ${formatCurrency(startup.current_valuation, startup.currency || 'USD')}`
-                              : <span className="text-gray-500 italic">Funding ask not specified</span>}
+                              : (<span className="text-gray-500 italic">Funding ask not specified</span>)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
                             Added
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                           {new Date(startup.created_at).toLocaleDateString()}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <div className="flex items-center gap-2">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
+                          <div className="flex flex-wrap items-center gap-1 sm:gap-2">
                             {startup.is_on_tms && startup.tms_startup_id ? (
+                              <>
                               <button
                                 onClick={() => {
                                   const tmsStartup = startups.find(s => s.id === startup.tms_startup_id);
@@ -6351,10 +7067,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                     handleViewStartupDashboard(tmsStartup);
                                   }
                                 }}
-                                className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                                className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
                               >
                                 View Dashboard
                               </button>
+                                <button
+                                  onClick={() => handleDeleteAddedStartup(startup.id)}
+                                  className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                  title="Delete manual entry (startup is now on TMS)"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </>
                             ) : (
                               <>
                                 <button
@@ -6385,7 +7109,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         </td>
                       </tr>
                     ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -6399,19 +7123,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       {activeTab === 'interests' && (
         <div className="space-y-6">
         <div className="bg-white rounded-lg shadow">
-          <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
+          <div className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
                 <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Investment Interests</h3>
-                  <p className="text-sm text-gray-600">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">Investment Interests</h3>
+                  <p className="text-xs sm:text-sm text-gray-600">
                     Startups liked/favorited by your assigned investors from the Discover page
             </p>
             </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-purple-600">
+                <div className="text-left sm:text-right">
+                  <div className="text-xl sm:text-2xl font-bold text-purple-600">
                     {investmentInterests.length}
           </div>
-                  <div className="text-sm text-gray-500">Total Interests</div>
+                  <div className="text-xs sm:text-sm text-gray-500">Total Interests</div>
         </div>
               </div>
               
@@ -6419,29 +7143,29 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Investor Name</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Name</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Liked Date</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View in Discover</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Investor Name</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Name</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Liked Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View in Discover</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {loadingInvestmentInterests ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={5} className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
                           Loading investment interests...
                         </td>
                       </tr>
                     ) : investmentInterests.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                        <td colSpan={5} className="px-3 sm:px-6 py-8 text-center text-gray-500">
                           <div className="flex flex-col items-center">
-                            <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="h-10 w-10 sm:h-12 sm:w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                             </svg>
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Investment Interests</h3>
-                            <p className="text-sm text-gray-500">
+                            <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">No Investment Interests</h3>
+                            <p className="text-xs sm:text-sm text-gray-500">
                               Your assigned investors haven't liked any startups yet. Interests will appear here when investors favorite startups from the Discover page.
                             </p>
                 </div>
@@ -6450,19 +7174,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     ) : (
                       investmentInterests.map((interest) => (
                         <tr key={`${interest.investor_id}-${interest.startup_id}`}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                             {interest.investor_name || 'Unknown Investor'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
                             {interest.startup_name || 'Unknown Startup'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {interest.startup_sector || 'Not specified'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
                             {interest.created_at ? new Date(interest.created_at).toLocaleDateString() : 'N/A'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
                 <button
                               onClick={() => {
                                 // Switch to discovery tab and set the pitch ID
@@ -6597,7 +7321,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       // Get video URL and logo
                       const videoUrl = collaboratorProfile?.video_url || collaboratorProfile?.videoUrl;
                       const logoUrl = collaboratorProfile?.logo_url || requesterUser?.logo_url;
-                      const firmName = collaboratorProfile?.firm_name || collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || '';
+                      // For Investment Advisor: firm_name from users table is already loaded in profile
+                      // For others: use appropriate name field
+                      const firmName = request.requester_type === 'Investment Advisor'
+                        ? (collaboratorProfile?.firm_name || collaboratorProfile?.advisor_name || '')
+                        : (collaboratorProfile?.firm_name || collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || '');
                       const location = collaboratorProfile?.global_hq || collaboratorProfile?.location || '';
                       
                       // Get YouTube embed URL if video exists
@@ -6680,9 +7408,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 <div className="flex items-start justify-between mb-2 gap-3">
                                   <div className="flex-1 min-w-0">
                                     <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1 break-words">
-                                      {collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || requesterUser?.name || 'Unknown'}
+                                      {/* For Investment Advisor: prioritize firm_name from users table */}
+                                      {request.requester_type === 'Investment Advisor' 
+                                        ? (collaboratorProfile?.firm_name || collaboratorProfile?.advisor_name || requesterUser?.name || 'Unknown')
+                                        : (collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || requesterUser?.name || 'Unknown')}
                                     </h3>
-                                    {firmName && (
+                                    {/* Show advisor_name as subtitle if firm_name is being used as main name for Investment Advisor */}
+                                    {request.requester_type === 'Investment Advisor' && collaboratorProfile?.firm_name && collaboratorProfile?.advisor_name && collaboratorProfile?.advisor_name !== collaboratorProfile?.firm_name && (
+                                      <p className="text-sm text-slate-600 font-medium">{collaboratorProfile.advisor_name}</p>
+                                    )}
+                                    {request.requester_type !== 'Investment Advisor' && firmName && (
                                       <p className="text-sm text-slate-600 font-medium">{firmName}</p>
                                     )}
                                   </div>
@@ -7106,7 +7841,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       // Get video URL and logo
                       const videoUrl = collaboratorProfile?.video_url || collaboratorProfile?.videoUrl;
                       const logoUrl = collaboratorProfile?.logo_url || requesterUser?.logo_url;
-                      const firmName = collaboratorProfile?.firm_name || collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || '';
+                      // For Investment Advisor: firm_name from users table is already loaded in profile
+                      // For others: use appropriate name field
+                      const firmName = request.requester_type === 'Investment Advisor'
+                        ? (collaboratorProfile?.firm_name || collaboratorProfile?.advisor_name || '')
+                        : (collaboratorProfile?.firm_name || collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || '');
                       const location = collaboratorProfile?.global_hq || collaboratorProfile?.location || '';
                       
                       // Get YouTube embed URL if video exists
@@ -7189,9 +7928,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 <div className="flex items-start justify-between mb-2 gap-3">
                                   <div className="flex-1 min-w-0">
                                     <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1 break-words">
-                                      {collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || requesterUser?.name || 'Unknown'}
+                                      {/* For Investment Advisor: prioritize firm_name from users table */}
+                                      {request.requester_type === 'Investment Advisor' 
+                                        ? (collaboratorProfile?.firm_name || collaboratorProfile?.advisor_name || requesterUser?.name || 'Unknown')
+                                        : (collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || requesterUser?.name || 'Unknown')}
                                     </h3>
-                                    {firmName && (
+                                    {/* Show advisor_name as subtitle if firm_name is being used as main name for Investment Advisor */}
+                                    {request.requester_type === 'Investment Advisor' && collaboratorProfile?.firm_name && collaboratorProfile?.advisor_name && collaboratorProfile?.advisor_name !== collaboratorProfile?.firm_name && (
+                                      <p className="text-sm text-slate-600 font-medium">{collaboratorProfile.advisor_name}</p>
+                                    )}
+                                    {request.requester_type !== 'Investment Advisor' && firmName && (
                                       <p className="text-sm text-slate-600 font-medium">{firmName}</p>
                                     )}
                                   </div>
@@ -7835,52 +8581,119 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </Button>
                   </div>
                   {filteredStartups.map((startup) => {
-                    const videoUrl = investorService.getYoutubeEmbedUrl(startup.pitchVideoUrl);
+                    const videoEmbedInfo = startup.pitchVideoUrl ? getVideoEmbedUrl(startup.pitchVideoUrl, false) : null;
+                    const embedUrl = videoEmbedInfo?.embedUrl || investorService.getYoutubeEmbedUrl(startup.pitchVideoUrl || '');
+                    const videoSource = videoEmbedInfo?.source || null;
                     const isFavorited = favoritedPitches.has(startup.id);
 
                     return (
-                      <Card key={startup.id} className="p-6">
-                        <div className="flex flex-col md:flex-row gap-6">
-                          {/* Video/Logo Section */}
-                          <div className="md:w-1/3">
-                            {videoUrl ? (
-                              <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black">
+                      <div
+                        key={startup.id}
+                        className="bg-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 overflow-hidden"
+                      >
+                        <div className="flex flex-col md:flex-row md:items-stretch gap-0">
+                          {/* Media Section - Left */}
+                          <div className="md:w-2/5 lg:w-1/3 relative aspect-[16/9] md:aspect-auto md:min-h-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+                            {embedUrl ? (
+                              playingVideoId === startup.id ? (
+                                <div className="relative w-full h-full">
+                                  {videoSource === 'direct' ? (
+                                    <video
+                                      src={embedUrl}
+                                      controls
+                                      autoPlay
+                                      muted
+                                      playsInline
+                                      className="absolute top-0 left-0 w-full h-full object-cover"
+                                    >
+                                      Your browser does not support the video tag.
+                                    </video>
+                                  ) : (
                                 <iframe
-                                  src={videoUrl}
+                                      src={embedUrl}
                                   title={`Pitch video for ${startup.name}`}
                                   frameBorder="0"
                                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                   allowFullScreen
                                   className="absolute top-0 left-0 w-full h-full"
                                 />
+                                  )}
+                                  <button
+                                    onClick={() => setPlayingVideoId(null)}
+                                    className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm z-10"
+                                  >
+                                    ×
+                                  </button>
                               </div>
+                              ) : (
+                                <div
+                                  className="relative w-full h-full group cursor-pointer"
+                                  onClick={() => setPlayingVideoId(startup.id)}
+                                >
+                                  <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="w-16 h-16 md:w-20 md:h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
+                                      <svg className="w-8 h-8 md:w-10 md:h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M8 5v14l11-7z" />
+                                      </svg>
+                                    </div>
+                                  </div>
+                                  <div className="absolute bottom-4 left-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                    <p className="text-xs md:text-sm font-medium">Click to play</p>
+                                  </div>
+                                </div>
+                              )
                             ) : startup.logoUrl && startup.logoUrl !== '#' ? (
-                              <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white flex items-center justify-center">
+                              <div className="w-full h-full flex items-center justify-center bg-slate-100 p-4">
                                 <img
                                   src={startup.logoUrl}
                                   alt={`${startup.name} logo`}
-                                  className="w-full h-full object-contain"
+                                  className="object-contain w-full h-full max-h-full"
                                   onError={(e) => {
                                     (e.target as HTMLImageElement).style.display = 'none';
                                   }}
                                 />
                               </div>
                             ) : (
-                              <div className="w-full aspect-video bg-slate-200 rounded-lg flex items-center justify-center">
-                                <svg className="h-12 w-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                </svg>
+                              <div className="w-full h-full flex items-center justify-center text-slate-400">
+                                <div className="text-center">
+                                  <Video className="h-12 w-12 md:h-16 md:w-16 mx-auto mb-2 opacity-50" />
+                                  <p className="text-xs md:text-sm">No video or logo available</p>
+                                </div>
                               </div>
                             )}
                           </div>
 
-                          {/* Content Section */}
-                          <div className="md:w-2/3 flex flex-col">
-                            <div className="mb-3">
-                              <div className="flex items-start justify-between gap-3 mb-2">
-                                <h3 className="text-xl font-bold text-slate-800 flex-1">{startup.name}</h3>
+                          {/* Content Section - Right */}
+                          <div className="md:w-3/5 lg:w-2/3 p-4 sm:p-6 flex flex-col">
+                            <div className="flex flex-col sm:flex-row items-start justify-between mb-4 gap-3">
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2 break-words">{startup.name}</h3>
+                                <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                                  {startup.domain && (
+                                    <span>
+                                      <span className="font-medium text-slate-700">Domain:</span> {startup.domain}
+                                    </span>
+                                  )}
+                                  {startup.fundraisingType && (
+                                    <>
+                                      {startup.domain && <span className="text-slate-300">•</span>}
+                                      <span>
+                                        <span className="font-medium text-slate-700">Round:</span> {startup.fundraisingType}
+                                      </span>
+                                    </>
+                                  )}
+                                  {startup.stage && (
+                                    <>
+                                      {(startup.domain || startup.fundraisingType) && <span className="text-slate-300">•</span>}
+                                      <span>
+                                        <span className="font-medium text-slate-700">Stage:</span> {startup.stage}
+                                      </span>
+                                    </>
+                                  )}
                               </div>
-                              <div className="flex flex-wrap items-center gap-2">
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
                                 <Badge status={startup.complianceStatus} />
                                 {startup.isStartupNationValidated && (
                                   <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full flex items-center gap-1">
@@ -7890,12 +8703,38 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                     Verified
                                   </span>
                                 )}
-                                <span className="text-sm text-slate-600">{startup.sector}</span>
                               </div>
                             </div>
 
+                            {/* Document Buttons */}
+                            <div className="flex flex-wrap items-center gap-2 mt-3 sm:mt-4">
+                              {startup.pitchDeckUrl && startup.pitchDeckUrl !== '#' && (
+                                <a href={startup.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[120px]">
+                                  <button className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                                    <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> <span className="hidden xs:inline">View </span>Deck
+                                  </button>
+                                </a>
+                              )}
+
+                              {startup.businessPlanUrl && startup.businessPlanUrl !== '#' && (
+                                <a href={startup.businessPlanUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[140px]">
+                                  <button className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                                    <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> <span className="hidden xs:inline">Business </span>Plan
+                                  </button>
+                                </a>
+                              )}
+
+                              {startup.onePagerUrl && startup.onePagerUrl !== '#' && (
+                                <a href={startup.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[120px]">
+                                  <button className="w-full hover:bg-emerald-50 hover:text-emerald-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                                    <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> One-Pager
+                                  </button>
+                                </a>
+                              )}
+                            </div>
+
                             {/* Investment Details */}
-                            <div className="mb-4">
+                            <div className="mt-3 mb-3">
                               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-xs text-slate-500">Investment Ask:</span>
@@ -7929,23 +8768,72 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                     <span className="text-xs font-medium text-slate-600">{startup.domain}</span>
                                   </div>
                                 )}
+                                {startup.sector && (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs text-slate-500">Sector:</span>
+                                    <span className="text-xs font-medium text-slate-600">{startup.sector}</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
 
-                            {/* Action Buttons */}
-                            <div className="mt-auto flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => onViewStartup(startup.id, 'discovery')}
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                View Details
-                              </Button>
+                            {/* Action + Footer */}
+                            <div className="mt-auto pt-4 border-t border-slate-200">
+                              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-3">
+                                <button
+                                  onClick={() => handleFavoriteToggle(startup.id)}
+                                  className={`!rounded-full !p-1.5 sm:!p-2 transition-all duration-200 ${
+                                    isFavorited
+                                      ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
+                                      : 'hover:bg-red-50 hover:text-red-600 border border-slate-200 bg-white'
+                                  }`}
+                                >
+                                  <Heart className={`h-3 w-3 sm:h-4 sm:w-4 ${isFavorited ? 'fill-current' : ''}`} />
+                                </button>
+
+                                <button
+                                  onClick={() => handleDueDiligenceClick(startup)}
+                                  className={`flex-1 min-w-[90px] sm:min-w-[120px] transition-all duration-200 border px-2 py-1 rounded-lg text-xs font-medium ${
+                                    approvedDueDiligenceStartups.has(startup.id)
+                                      ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
+                                      : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
+                                  }`}
+                                >
+                                  <HelpCircle className="h-3 w-3 mr-1 inline" />
+                                  <span className="hidden sm:inline">{approvedDueDiligenceStartups.has(startup.id) ? 'Due Diligence Accepted' : 'Due Diligence'}</span>
+                                  <span className="sm:hidden">DD</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleRecommendCoInvestment(startup.id)}
+                                  className={`flex-1 min-w-[90px] sm:min-w-[120px] bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 transition-all duration-200 shadow-lg shadow-green-200 text-white px-2 py-1 rounded-lg text-xs font-medium ${
+                                    recommendedStartups.has(startup.id)
+                                      ? 'from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-blue-200'
+                                      : ''
+                                  }`}
+                                >
+                                  <span className="hidden sm:inline">{recommendedStartups.has(startup.id) ? 'Recommended ✓' : 'Recommend'}</span>
+                                  <span className="sm:hidden">{recommendedStartups.has(startup.id) ? 'Rec ✓' : 'Recommend'}</span>
+                                </button>
+                            </div>
+
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
+                                <div className="flex items-center gap-4 flex-wrap">
+                                  <div className="text-sm sm:text-base">
+                                    <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(startup.investmentValue, startup.currency || 'USD')} for <span className="font-semibold text-purple-600">{startup.equityAllocation}%</span> equity
+                          </div>
+                        </div>
+                                {startup.complianceStatus === ComplianceStatus.Compliant && (
+                                  <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
+                                    <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+                                    <span className="text-xs font-semibold">Verified</span>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </Card>
+                      </div>
                     );
                   })}
                 </div>
@@ -7964,7 +8852,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 setSelectedStartupForRecommendation(null);
                 setSelectedInvestors(new Set());
                 setSelectedCollaborators(new Set());
+                setSelectedMandates(new Set());
                 setExistingRecommendations(new Set());
+                setMandatesWithInvestors([]);
               }}
               title="Recommend"
               size="large"
@@ -8016,15 +8906,132 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
                 {/* Recipients List */}
                 <div className="max-h-[500px] overflow-y-auto space-y-4">
-                  {isLoadingRecommendations ? (
+                  {isLoadingRecommendations || isLoadingMandatesForRecommendation ? (
                     <div className="flex items-center justify-center py-8">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                       <span className="ml-3 text-sm text-slate-600">Loading recipients...</span>
                     </div>
                   ) : (
                     <>
-                      {/* My Investors Section */}
+                      {/* Mandates Section - Group Recommendations */}
+                      {mandatesWithInvestors.length > 0 && (
                       <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Filter className="h-4 w-4 text-green-600" />
+                            <h3 className="text-sm font-semibold text-slate-700">Mandates (Group Recommendations)</h3>
+                            <span className="text-xs text-slate-500">({mandatesWithInvestors.length})</span>
+                          </div>
+                          <div className="space-y-2">
+                            {mandatesWithInvestors.map(({ mandate, investorIds }) => {
+                              const isMandateSelected = selectedMandates.has(mandate.id);
+                              const availableInvestorIds = investorIds.filter(id => !existingRecommendations.has(id));
+                              const alreadyRecommendedCount = investorIds.filter(id => existingRecommendations.has(id)).length;
+                              const canSelect = availableInvestorIds.length > 0;
+                              
+                              return (
+                                <div
+                                  key={mandate.id}
+                                  className={`border rounded-lg transition-all ${
+                                    canSelect
+                                      ? isMandateSelected
+                                        ? 'bg-green-50 border-green-300 shadow-sm'
+                                        : 'bg-white border-slate-200 hover:border-green-200 hover:bg-slate-50'
+                                      : 'bg-slate-50 border-slate-200 opacity-60'
+                                  }`}
+                                >
+                                  <div
+                                    onClick={() => canSelect && toggleMandateSelection(mandate.id)}
+                                    className={`p-3 cursor-pointer ${canSelect ? '' : 'cursor-not-allowed'}`}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <input
+                                        type="checkbox"
+                                        checked={isMandateSelected}
+                                        disabled={!canSelect}
+                                        onChange={() => canSelect && toggleMandateSelection(mandate.id)}
+                                        className={`w-4 h-4 text-green-600 border-slate-300 rounded focus:ring-green-500 ${
+                                          !canSelect ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                                        }`}
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <p className={`text-sm font-semibold ${
+                                            !canSelect ? 'text-slate-500' : 'text-slate-800'
+                                          }`}>
+                                            {mandate.name}
+                                          </p>
+                                          {isMandateSelected && canSelect && (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                              Selected
+                                            </span>
+                                          )}
+                                          {alreadyRecommendedCount > 0 && (
+                                            <span className="text-xs text-slate-500">
+                                              ({alreadyRecommendedCount} already recommended)
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="text-xs text-slate-600 mt-1">
+                                          {investorIds.length} investor{investorIds.length !== 1 ? 's' : ''} in this mandate
+                                          {availableInvestorIds.length < investorIds.length && (
+                                            <span className="text-green-600 ml-1">
+                                              • {availableInvestorIds.length} available
+                                            </span>
+                                          )}
+                                        </p>
+                                      </div>
+                                      {isMandateSelected && canSelect && (
+                                        <div className="flex-shrink-0">
+                                          <CheckCircle className="h-5 w-5 text-green-600" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* Show investor list when mandate is selected */}
+                                  {isMandateSelected && (
+                                    <div className="border-t border-green-200 bg-green-50/50 px-3 py-2">
+                                      <p className="text-xs font-medium text-slate-700 mb-2">Investors in this mandate:</p>
+                                      <div className="space-y-1">
+                                        {investorIds.map(investorId => {
+                                          const investor = myInvestors.find(inv => inv.id === investorId);
+                                          const isSelected = selectedInvestors.has(investorId);
+                                          const alreadyRecommended = existingRecommendations.has(investorId);
+                                          
+                                          return (
+                                            <div
+                                              key={investorId}
+                                              className={`flex items-center gap-2 text-xs p-1.5 rounded ${
+                                                alreadyRecommended
+                                                  ? 'text-slate-400'
+                                                  : isSelected
+                                                  ? 'bg-green-100 text-green-800'
+                                                  : 'text-slate-600'
+                                              }`}
+                                            >
+                                              <CheckCircle className={`h-3 w-3 ${
+                                                isSelected ? 'text-green-600' : 'text-slate-300'
+                                              }`} />
+                                              <span>
+                                                {investor?.name || investor?.email || `Investor ${investorId}`}
+                                              </span>
+                                              {alreadyRecommended && (
+                                                <span className="text-xs text-slate-400 ml-auto">(Already recommended)</span>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* My Investors Section */}
+                      <div className={mandatesWithInvestors.length > 0 ? 'border-t border-slate-200 pt-4' : ''}>
                         <div className="flex items-center gap-2 mb-3">
                           <Users className="h-4 w-4 text-blue-600" />
                           <h3 className="text-sm font-semibold text-slate-700">My Investors</h3>
@@ -8108,14 +9115,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                               const alreadyRecommended = existingRecommendations.has(collaborator.requester_id);
                               const isDisabled = alreadyRecommended;
                               
-                              // Get collaborator name
-                              const collaboratorName = requesterUser?.name || 
-                                collaboratorProfile?.firm_name || 
-                                collaboratorProfile?.investor_name || 
-                                collaboratorProfile?.advisor_name || 
-                                collaboratorProfile?.mentor_name || 
-                                requesterUser?.email || 
-                                'Unknown Collaborator';
+                              // Get collaborator name - for Investment Advisor, prioritize firm_name from users table
+                              const isInvestmentAdvisor = requesterUser?.role === 'Investment Advisor';
+                              const collaboratorName = isInvestmentAdvisor
+                                ? ((requesterUser as any)?.firm_name || collaboratorProfile?.firm_name || collaboratorProfile?.advisor_name || requesterUser?.name || requesterUser?.email || 'Unknown Collaborator')
+                                : (collaboratorProfile?.firm_name || collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || requesterUser?.name || requesterUser?.email || 'Unknown Collaborator');
                               
                               return (
                                 <div
@@ -8171,10 +9175,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 </div>
 
                 {/* Selection Count */}
-                {(selectedInvestors.size > 0 || selectedCollaborators.size > 0) && (
+                {(selectedInvestors.size > 0 || selectedCollaborators.size > 0 || selectedMandates.size > 0) && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                     <p className="text-sm font-medium text-blue-800">
                       {selectedInvestors.size + selectedCollaborators.size} recipient{(selectedInvestors.size + selectedCollaborators.size) > 1 ? 's' : ''} selected
+                      {selectedMandates.size > 0 && (
+                        <span className="text-green-700"> • {selectedMandates.size} mandate{selectedMandates.size > 1 ? 's' : ''} selected</span>
+                      )}
                       {selectedInvestors.size > 0 && (
                         <span className="text-blue-600"> ({selectedInvestors.size} investor{selectedInvestors.size > 1 ? 's' : ''}</span>
                       )}
@@ -8228,6 +9235,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               onClose={() => {
                 setShowMandateModal(false);
                 setEditingMandate(null);
+                setSelectedMandateInvestors(new Set());
                 setMandateFormData({
                   advisor_id: currentUser?.id || '',
                   name: '',
@@ -8237,7 +9245,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   amount_min: undefined,
                   amount_max: undefined,
                   equity_min: undefined,
-                  equity_max: undefined
+                  equity_max: undefined,
+                  country: ''
                 });
               }}
               title={editingMandate ? 'Edit Mandate' : 'Create New Mandate'}
@@ -8251,6 +9260,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   placeholder="e.g., Early Stage SaaS, Healthcare Series A"
                   required
                 />
+
+                {/* Country Filter */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Country</label>
+                  <select
+                    value={mandateFormData.country || ''}
+                    onChange={(e) => setMandateFormData({ ...mandateFormData, country: e.target.value || '' })}
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  >
+                    <option value="">All Countries</option>
+                    {mandateFilterOptions.countries?.map(country => (
+                      <option key={country} value={country}>{country}</option>
+                    ))}
+                  </select>
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* Stage Filter */}
@@ -8339,12 +9363,66 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   />
                 </div>
 
+                {/* Investors Selection */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-2">
+                    Select Investors (Optional)
+                  </label>
+                  <p className="text-xs text-slate-500 mb-2">
+                    Choose investors from your assigned investors to associate with this mandate
+                  </p>
+                  {isLoadingMandateInvestors ? (
+                    <div className="text-sm text-slate-500 py-2">Loading investors...</div>
+                  ) : myInvestors.length === 0 ? (
+                    <div className="text-sm text-slate-500 py-2 border border-slate-200 rounded-md p-3 bg-slate-50">
+                      No investors assigned to you yet. Investors will appear here once they enter your advisor code and are accepted.
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 rounded-md p-3 bg-slate-50 max-h-48 overflow-y-auto">
+                      <div className="space-y-2">
+                        {myInvestors.map((investor) => (
+                          <label
+                            key={investor.id}
+                            className="flex items-center space-x-2 cursor-pointer hover:bg-slate-100 p-2 rounded"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedMandateInvestors.has(investor.id)}
+                              onChange={(e) => {
+                                const newSet = new Set(selectedMandateInvestors);
+                                if (e.target.checked) {
+                                  newSet.add(investor.id);
+                                } else {
+                                  newSet.delete(investor.id);
+                                }
+                                setSelectedMandateInvestors(newSet);
+                              }}
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm text-slate-700">
+                              {investor.name || investor.email || `Investor ${investor.id}`}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      {selectedMandateInvestors.size > 0 && (
+                        <div className="mt-3 pt-3 border-t border-slate-200">
+                          <p className="text-xs text-slate-600">
+                            {selectedMandateInvestors.size} investor{selectedMandateInvestors.size !== 1 ? 's' : ''} selected
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex justify-end gap-2 pt-4">
                   <Button
                     variant="outline"
                     onClick={() => {
                       setShowMandateModal(false);
                       setEditingMandate(null);
+                      setSelectedMandateInvestors(new Set());
                       setMandateFormData({
                         advisor_id: currentUser?.id || '',
                         name: '',
@@ -8354,7 +9432,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         amount_min: undefined,
                         amount_max: undefined,
                         equity_min: undefined,
-                        equity_max: undefined
+                        equity_max: undefined,
+                        country: ''
                       });
                     }}
                   >

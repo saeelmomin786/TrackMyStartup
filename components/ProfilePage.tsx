@@ -237,7 +237,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ currentUser, onBack, onProfil
 
           {/* User Info */}
           <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 mb-2 sm:mb-3">
-            {refreshedProfile?.name || refreshedProfile?.email?.split('@')[0] || 'User'}
+            {/* For Investment Advisor: show firm_name from users table, otherwise show name */}
+            {refreshedProfile?.role === 'Investment Advisor' 
+              ? (refreshedProfile?.firm_name || refreshedProfile?.name || refreshedProfile?.email?.split('@')[0] || 'User')
+              : (refreshedProfile?.name || refreshedProfile?.email?.split('@')[0] || 'User')}
           </h2>
           <p className="text-sm sm:text-base text-slate-600 mb-3 sm:mb-4 break-all px-2">{refreshedProfile?.email}</p>
           

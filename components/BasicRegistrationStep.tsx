@@ -14,6 +14,7 @@ interface BasicRegistrationStepProps {
     role: UserRole;
     startupName?: string;
     centerName?: string;
+    firmName?: string;
     investmentAdvisorCode?: string;
   }) => void;
   onNavigateToLogin: () => void;
@@ -33,6 +34,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
     role: 'Investor' as UserRole,
     startupName: '',
     centerName: '',
+    firmName: '',
     investmentAdvisorCode: ''
   });
 
@@ -154,6 +156,12 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
       return;
     }
 
+    if (formData.role === 'Investment Advisor' && !formData.firmName.trim()) {
+      setError('Firm name is required for Investment Advisor role');
+      setIsLoading(false);
+      return;
+    }
+
     // Additional email validation
     if (!formData.email || !formData.email.includes('@')) {
       setError('Please enter a valid email address');
@@ -238,6 +246,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
                     role: formData.role,
                     startupName: formData.role === 'Startup' ? formData.startupName : undefined,
                     centerName: formData.role === 'Startup Facilitation Center' ? formData.centerName : undefined,
+                    firmName: formData.role === 'Investment Advisor' ? formData.firmName : undefined,
                     investmentAdvisorCode: formData.investmentAdvisorCode || undefined
                   })
                 });
@@ -425,6 +434,21 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
             placeholder="Enter your startup name"
             value={formData.startupName}
             onChange={(e) => handleInputChange('startupName', e.target.value)}
+          />
+        )}
+
+        {/* Firm Name - Only show if role is Investment Advisor */}
+        {formData.role === 'Investment Advisor' && (
+          <Input
+            label="Firm Name"
+            id="firmName"
+            name="firmName"
+            type="text"
+            required
+            placeholder="Enter your firm/company name"
+            value={formData.firmName}
+            onChange={(e) => handleInputChange('firmName', e.target.value)}
+            helpText="This name will be displayed on your users dashboard"
           />
         )}
 

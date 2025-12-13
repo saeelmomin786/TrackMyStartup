@@ -10,6 +10,7 @@ export interface AuthUser {
   role: UserRole
   startup_name?: string
   center_name?: string
+  firm_name?: string
   investor_code?: string
   ca_code?: string
   cs_code?: string
@@ -46,6 +47,7 @@ export interface SignUpData {
   role: UserRole
   startupName?: string
   centerName?: string
+  firmName?: string
   investmentAdvisorCode?: string
 }
 
@@ -313,6 +315,7 @@ export const authService = {
         role: profile.role,
         startup_name: profile.startup_name,
         center_name: profile.center_name,
+        firm_name: profile.firm_name,
         investor_code: profile.investor_code,
         investment_advisor_code: profile.investment_advisor_code,
         investment_advisor_code_entered: profile.investment_advisor_code_entered,
@@ -416,6 +419,7 @@ export const authService = {
             role: data.role,
             startup_name: data.role === 'Startup' ? data.startupName : null,
             center_name: data.role === 'Startup Facilitation Center' ? data.centerName : null,
+            firm_name: data.role === 'Investment Advisor' ? data.firmName : null,
             investor_code: investorCode,
             investment_advisor_code: investmentAdvisorCode,
             // Store the Investment Advisor code entered by user (for Investors and Startups)
@@ -523,6 +527,7 @@ export const authService = {
             state: profile.state,
             country: profile.country,
             company: profile.company,
+            firm_name: profile.firm_name,
             // Include verification document fields
             government_id: profile.government_id,
             ca_license: profile.ca_license,
@@ -586,7 +591,7 @@ export const authService = {
   },
 
   // Create user profile (called from CompleteProfilePage)
-  async createProfile(name: string, role: UserRole): Promise<{ user: AuthUser | null; error: string | null }> {
+  async createProfile(name: string, role: UserRole, firmName?: string): Promise<{ user: AuthUser | null; error: string | null }> {
     try {
       const { data: { user }, error: userError } = await supabase.auth.getUser()
       
@@ -601,6 +606,7 @@ export const authService = {
           email: user.email,
           name: name,
           role: role,
+          firm_name: role === 'Investment Advisor' ? firmName : null,
           registration_date: new Date().toISOString().split('T')[0]
         })
         .select()
@@ -667,6 +673,7 @@ export const authService = {
           country: data.country,
           company: data.company,
           company_type: data.company_type,
+          firm_name: data.firm_name,
           profile_photo_url: data.profile_photo_url,
           government_id: data.government_id,
           ca_license: data.ca_license,

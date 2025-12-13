@@ -7,6 +7,7 @@ export interface InvestorMandate {
   stage?: string;
   round_type?: string;
   domain?: string;
+  country?: string;
   amount_min?: number;
   amount_max?: number;
   equity_min?: number;
@@ -23,6 +24,7 @@ export interface CreateInvestorMandate {
   stage?: string;
   round_type?: string;
   domain?: string;
+  country?: string;
   amount_min?: number;
   amount_max?: number;
   equity_min?: number;
@@ -36,6 +38,7 @@ export interface UpdateInvestorMandate {
   stage?: string;
   round_type?: string;
   domain?: string;
+  country?: string;
   amount_min?: number;
   amount_max?: number;
   equity_min?: number;

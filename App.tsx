@@ -1254,7 +1254,7 @@ const App: React.FC = () => {
       console.log('🔍 Fetching investment advisor data for code:', advisorCode);
       const { data: advisor, error } = await supabase
         .from('users')
-        .select('id, email, name, role, investment_advisor_code, logo_url')
+        .select('id, email, name, role, investment_advisor_code, logo_url, firm_name')
         .eq('investment_advisor_code', advisorCode)
         .eq('role', 'Investment Advisor')
         .single();
@@ -1268,6 +1268,7 @@ const App: React.FC = () => {
         console.log('✅ Found assigned investment advisor:', advisor);
         console.log('🔍 Advisor logo_url:', advisor.logo_url);
         console.log('🔍 Advisor has logo:', !!advisor.logo_url);
+        console.log('🔍 Advisor firm_name:', advisor.firm_name);
         setAssignedInvestmentAdvisor(advisor);
         return advisor;
       }
@@ -3347,8 +3348,8 @@ const App: React.FC = () => {
                   <div>
                     <h1 className="text-lg font-semibold text-gray-800">
                       {currentUser?.role === 'Investment Advisor' 
-                        ? (currentUser as any).name || 'Investment Advisor'
-                        : assignedInvestmentAdvisor?.name || 'Investment Advisor'}
+                        ? (currentUser as any).firm_name || (currentUser as any).name || 'Investment Advisor'
+                        : assignedInvestmentAdvisor?.firm_name || assignedInvestmentAdvisor?.name || 'Investment Advisor'}
                     </h1>
                     <p className="text-xs text-blue-600">Supported by Track My Startup</p>
                   </div>

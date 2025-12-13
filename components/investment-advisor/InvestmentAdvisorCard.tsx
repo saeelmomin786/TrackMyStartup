@@ -89,12 +89,13 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
     }
     const shareUrl = url.toString();
     
-    const shareText = `Investment Advisor: ${advisor.advisor_name || advisor.firm_name || 'Investment Advisor'}\nFirm: ${advisor.firm_name || 'N/A'}\nLocation: ${advisor.global_hq || 'N/A'}\nInvestment Range: ${advisor.minimum_investment && advisor.maximum_investment ? `${formatCurrency(advisor.minimum_investment, advisor.currency)} - ${formatCurrency(advisor.maximum_investment, advisor.currency)}` : 'N/A'}\n\nView advisor profile: ${shareUrl}`;
+    const displayName = advisor.firm_name || advisor.advisor_name || 'Investment Advisor';
+    const shareText = `Investment Advisor: ${displayName}\nFirm: ${advisor.firm_name || 'N/A'}\nLocation: ${advisor.global_hq || 'N/A'}\nInvestment Range: ${advisor.minimum_investment && advisor.maximum_investment ? `${formatCurrency(advisor.minimum_investment, advisor.currency)} - ${formatCurrency(advisor.maximum_investment, advisor.currency)}` : 'N/A'}\n\nView advisor profile: ${shareUrl}`;
 
     try {
       if (navigator.share) {
         await navigator.share({
-          title: advisor.advisor_name || advisor.firm_name || 'Investment Advisor Profile',
+          title: displayName + ' - Investment Advisor Profile',
           text: shareText,
           url: shareUrl,
         });
@@ -148,7 +149,7 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
           <div className="relative w-full h-full">
             <iframe
               src={videoEmbedUrl}
-              title={`Video for ${advisor.advisor_name || advisor.firm_name}`}
+              title={`Video for ${advisor.firm_name || advisor.advisor_name || 'Investment Advisor'}`}
               frameBorder="0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
@@ -159,7 +160,7 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
           <div className="w-full h-full flex items-center justify-center bg-white p-6">
             <img 
               src={advisor.logo_url} 
-              alt={`${advisor.advisor_name || advisor.firm_name || 'Advisor'} logo`}
+              alt={`${advisor.firm_name || advisor.advisor_name || 'Advisor'} logo`}
               className="max-w-full max-h-full object-contain"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -194,10 +195,12 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
         {/* Header Section */}
         <div className="mb-4 pr-10">
           <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1">
-            {advisor.advisor_name || advisor.user?.name || 'Investment Advisor'}
+            {/* Priority: firm_name (from users table/registration) > advisor_name (from profile) > user.name > default */}
+            {advisor.firm_name || advisor.advisor_name || advisor.user?.name || 'Investment Advisor'}
           </h3>
-          {advisor.firm_name && (
-            <p className="text-sm text-slate-600">{advisor.firm_name}</p>
+          {/* Show advisor_name as subtitle if firm_name is being used as main name */}
+          {advisor.firm_name && advisor.advisor_name && advisor.advisor_name !== advisor.firm_name && (
+            <p className="text-sm text-slate-600">{advisor.advisor_name}</p>
           )}
         </div>
 

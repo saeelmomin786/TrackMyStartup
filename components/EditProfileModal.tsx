@@ -32,6 +32,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
     government_id: currentUser?.government_id || '',
     ca_license: currentUser?.ca_license || '',
     // Investment Advisor specific fields
+    firm_name: (currentUser as any)?.firm_name || '',
     investor_code: currentUser?.investor_code || '',
     investment_advisor_code: currentUser?.investment_advisor_code || '',
     investment_advisor_code_entered: currentUser?.investment_advisor_code_entered || '',
@@ -39,11 +40,38 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
     financial_advisor_license_url: currentUser?.financial_advisor_license_url || '',
   });
 
+  // Update formData when currentUser changes (e.g., when modal reopens with fresh data)
+  React.useEffect(() => {
+    if (currentUser) {
+      setFormData({
+        name: currentUser?.name || '',
+        email: currentUser?.email || '',
+        phone: currentUser?.phone || '',
+        address: currentUser?.address || '',
+        city: currentUser?.city || '',
+        state: currentUser?.state || '',
+        country: currentUser?.country || '',
+        company: currentUser?.company || currentUser?.startup_name || '',
+        government_id: currentUser?.government_id || '',
+        ca_license: currentUser?.ca_license || '',
+        // Investment Advisor specific fields
+        firm_name: (currentUser as any)?.firm_name || '',
+        investor_code: currentUser?.investor_code || '',
+        investment_advisor_code: currentUser?.investment_advisor_code || '',
+        investment_advisor_code_entered: currentUser?.investment_advisor_code_entered || '',
+        logo_url: currentUser?.logo_url || '',
+        financial_advisor_license_url: currentUser?.financial_advisor_license_url || '',
+      });
+      setProfilePhoto(currentUser?.profile_photo_url || null);
+    }
+  }, [currentUser, isOpen]);
+
   // Debug logging for form initialization
   React.useEffect(() => {
     console.log('🔍 EditProfileModal - Form data initialized:', {
       currentUser: currentUser,
       investment_advisor_code_entered: currentUser?.investment_advisor_code_entered,
+      firm_name: (currentUser as any)?.firm_name,
       formData: formData
     });
   }, [currentUser, formData]);
@@ -317,7 +345,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
     setIsLoading(true);
     try {
       // Prepare profile data for update
-      const profileData = {
+      const profileData: any = {
         name: formData.name,
         phone: formData.phone,
         address: formData.address,
@@ -333,6 +361,11 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         logo_url: formData.logo_url,
         financial_advisor_license_url: formData.financial_advisor_license_url,
       };
+
+      // Add firm_name for Investment Advisor role
+      if (currentUser?.role === 'Investment Advisor') {
+        profileData.firm_name = formData.firm_name;
+      }
 
       // Update profile in database using authService
       const updateResult = await authService.updateProfile(currentUser.id, profileData);
@@ -386,7 +419,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
       }
 
       // Call onSave with updated data
-      const updatedData = {
+      const updatedData: any = {
         ...profileData,
         profilePhoto,
         profile_photo_url: formData.profile_photo_url,
@@ -397,6 +430,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         city: formData.city,
         state: formData.state,
         country: formData.country,
+        firm_name: currentUser?.role === 'Investment Advisor' ? formData.firm_name : undefined,
         company: formData.company,
         investment_advisor_code_entered: formData.investment_advisor_code_entered,
         logo_url: formData.logo_url,
@@ -548,6 +582,28 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   />
                 </div>
               </div>
+
+              {/* Firm Name - Only show for Investment Advisor */}
+              {currentUser?.role === 'Investment Advisor' && (
+                <div>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
+                    Firm Name *
+                  </label>
+                  <div className="relative">
+                    <Building className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      value={formData.firm_name}
+                      onChange={(e) => handleInputChange('firm_name', e.target.value)}
+                      className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="Enter your firm/company name"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    This name will be displayed on your dashboard instead of your personal name
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">

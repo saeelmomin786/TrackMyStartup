@@ -23,6 +23,7 @@ import { investorMandateService, InvestorMandate, CreateInvestorMandate } from '
 import { getVideoEmbedUrl } from '../lib/videoUtils';
 import { investorAddedStartupService, InvestorAddedStartup, CreateInvestorAddedStartup } from '../lib/investorAddedStartupService';
 import { investorConnectionRequestService, InvestorConnectionRequest } from '../lib/investorConnectionRequestService';
+import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../lib/advisorConnectionRequestService';
 
 interface InvestorViewProps {
   startups: Startup[];
@@ -240,20 +241,22 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const [selectedCollaboratorId, setSelectedCollaboratorId] = useState<string | null>(null);
     const [isSendingRecommendation, setIsSendingRecommendation] = useState(false);
     const [mandateFormData, setMandateFormData] = useState<CreateInvestorMandate>({
-      investor_id: currentUser?.id || '',
-      name: '',
-      stage: '',
-      round_type: '',
-      domain: '',
-      amount_min: undefined,
-      amount_max: undefined,
-      equity_min: undefined,
-      equity_max: undefined
+        investor_id: currentUser?.id || '',
+        name: '',
+        stage: '',
+        round_type: '',
+        domain: '',
+        country: '',
+        amount_min: undefined,
+        amount_max: undefined,
+        equity_min: undefined,
+        equity_max: undefined
     });
     const [mandateFilterOptions, setMandateFilterOptions] = useState({
       stages: [] as string[],
       roundTypes: [] as string[],
-      domains: [] as string[]
+      domains: [] as string[],
+      countries: [] as string[]
     });
     const [isLoadingMandateFilters, setIsLoadingMandateFilters] = useState(false);
     
@@ -1251,16 +1254,18 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     }
                     
                     // Load filter options
-                    const [stagesData, roundTypesData, domainsData] = await Promise.all([
+                    const [stagesData, roundTypesData, domainsData, countriesData] = await Promise.all([
                         generalDataService.getItemsByCategory('stage'),
                         generalDataService.getItemsByCategory('round_type'),
-                        generalDataService.getItemsByCategory('domain')
+                        generalDataService.getItemsByCategory('domain'),
+                        generalDataService.getItemsByCategory('country')
                     ]);
                     
                     setMandateFilterOptions({
                         stages: stagesData.map(s => s.name),
                         roundTypes: roundTypesData.map(r => r.name),
-                        domains: domainsData.map(d => d.name)
+                        domains: domainsData.map(d => d.name),
+                        countries: countriesData.map(c => c.name)
                     });
                 } catch (error) {
                     console.error('Error loading mandate data:', error);
@@ -1446,18 +1451,44 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setLoadingRequests(true);
                 }
                 try {
-                    const requests = await investorConnectionRequestService.getRequestsForInvestor(currentUser.id!);
-                    const startupOnlyRequests = (requests || []).filter(
+                    // Load from investor_connection_requests (for requests TO the investor)
+                    const investorRequests = await investorConnectionRequestService.getRequestsForInvestor(currentUser.id!);
+                    const startupOnlyRequests = (investorRequests || []).filter(
                         r => r.requester_type === 'Startup' && !!r.startup_id
                     );
-                    const collaboratorSide = (requests || []).filter(
+                    const collaboratorSide = (investorRequests || []).filter(
                         r => r.requester_type !== 'Startup'
                     );
 
+                    // Also load from advisor_connection_requests (for requests FROM the investor TO advisors)
+                    // This is where the investor appears as requester_id
+                    let advisorRequests: AdvisorConnectionRequest[] = [];
+                    try {
+                        advisorRequests = await advisorConnectionRequestService.getRequestsByRequester(currentUser.id!);
+                    } catch (error) {
+                        console.error('Error loading advisor connection requests:', error);
+                    }
+
+                    // Merge collaborator requests from both tables
+                    // Convert advisor_connection_requests to match the format expected
+                    const advisorCollaboratorRequests = advisorRequests
+                        .filter(r => r.requester_type !== 'Startup')
+                        .map(r => ({
+                            ...r,
+                            // Map advisor_id to investor_id for consistency in display
+                            investor_id: r.advisor_id,
+                            advisor_profile_url: r.collaborator_profile_url || undefined
+                        } as any));
+
+                    const allCollaboratorRequests = [...collaboratorSide, ...advisorCollaboratorRequests];
+
                     setConnectionRequests(startupOnlyRequests);
-                    setCollaboratorRequests(collaboratorSide);
+                    setCollaboratorRequests(allCollaboratorRequests);
                     // Always update collaborators list (needed for Recommend button in Discover tab)
-                    setCollaborators(collaboratorSide.filter(r => r.status === 'accepted'));
+                    // Include accepted requests from both tables
+                    const acceptedFromInvestorTable = collaboratorSide.filter(r => r.status === 'accepted');
+                    const acceptedFromAdvisorTable = advisorCollaboratorRequests.filter(r => r.status === 'accepted');
+                    setCollaborators([...acceptedFromInvestorTable, ...acceptedFromAdvisorTable]);
                     
                     // Load startup profiles for startup requests (only for requests tab)
                     if (activeTab === 'requests') {
@@ -1665,20 +1696,36 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const getFilteredMandateStartups = (mandate: InvestorMandate | null): ActiveFundraisingStartup[] => {
         if (!mandate) return [];
         
+        const normalize = (value?: string | null) => (value || '').trim().toLowerCase();
+        const mandateRound = normalize(mandate.round_type);
+        const mandateDomain = normalize(mandate.domain);
+        const mandateStage = normalize(mandate.stage);
+        const mandateCountry = normalize(mandate.country);
+        
         let filtered = [...activeFundraisingStartups];
 
-        // Filter by round type (fundraisingType)
-        if (mandate.round_type) {
-            filtered = filtered.filter(startup => 
-                startup.fundraisingType === mandate.round_type
-            );
+        // Filter by round type (fundraisingType) - case-insensitive
+        if (mandateRound) {
+            filtered = filtered.filter(startup => normalize(startup.fundraisingType) === mandateRound);
         }
 
-        // Filter by domain (sector)
-        if (mandate.domain) {
-            filtered = filtered.filter(startup => 
-                startup.sector.toLowerCase() === mandate.domain!.toLowerCase()
-            );
+        // Filter by domain/sector (allow partial, case-insensitive)
+        if (mandateDomain) {
+            filtered = filtered.filter(startup => {
+                const sector = normalize(startup.sector);
+                const domain = normalize((startup as any).domain);
+                return sector.includes(mandateDomain) || domain.includes(mandateDomain);
+            });
+        }
+
+        // Filter by stage (case-insensitive)
+        if (mandateStage) {
+            filtered = filtered.filter(startup => normalize(startup.stage) === mandateStage);
+        }
+
+        // Filter by country (case-insensitive)
+        if (mandateCountry) {
+            filtered = filtered.filter(startup => normalize((startup as any).country || (startup as any).country_of_registration) === mandateCountry);
         }
 
         // Filter by amount range
@@ -1722,6 +1769,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     stage: mandateFormData.stage || undefined,
                     round_type: mandateFormData.round_type || undefined,
                     domain: mandateFormData.domain || undefined,
+                    country: mandateFormData.country || undefined,
                     amount_min: mandateFormData.amount_min || undefined,
                     amount_max: mandateFormData.amount_max || undefined,
                     equity_min: mandateFormData.equity_min || undefined,
@@ -1731,6 +1779,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 // Create new mandate
                 result = await investorMandateService.createMandate({
                     ...mandateFormData,
+                    country: mandateFormData.country || undefined,
                     investor_id: currentUser.id
                 });
             }
@@ -1802,6 +1851,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             stage: mandate.stage || '',
             round_type: mandate.round_type || '',
             domain: mandate.domain || '',
+            country: mandate.country || '',
             amount_min: mandate.amount_min || undefined,
             amount_max: mandate.amount_max || undefined,
             equity_min: mandate.equity_min || undefined,
@@ -1819,6 +1869,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             stage: '',
             round_type: '',
             domain: '',
+            country: '',
             amount_min: undefined,
             amount_max: undefined,
             equity_min: undefined,
@@ -4314,7 +4365,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                   amount_min: undefined,
                   amount_max: undefined,
                   equity_min: undefined,
-                  equity_max: undefined
+                  equity_max: undefined,
+                  country: ''
                 });
               }}
               title={editingMandate ? 'Edit Mandate' : 'Create New Mandate'}
@@ -4328,6 +4380,21 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                   placeholder="e.g., Early Stage SaaS, Healthcare Series A"
                   required
                 />
+
+                {/* Country Filter */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Country</label>
+                  <select
+                    value={mandateFormData.country || ''}
+                    onChange={(e) => setMandateFormData({ ...mandateFormData, country: e.target.value || '' })}
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  >
+                    <option value="">All Countries</option>
+                    {mandateFilterOptions.countries.map(country => (
+                      <option key={country} value={country}>{country}</option>
+                    ))}
+                  </select>
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* Stage Filter */}

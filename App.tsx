@@ -1330,28 +1330,21 @@ const App: React.FC = () => {
   const fetchAssignedInvestmentAdvisor = useCallback(async (advisorCode: string) => {
     try {
       console.log('🔍 Fetching investment advisor data for code:', advisorCode);
-      const { data: advisor, error } = await supabase
-        .from('users')
-        .select('id, email, name, role, investment_advisor_code, logo_url, firm_name')
-        .eq('investment_advisor_code', advisorCode)
-        .eq('role', 'Investment Advisor')
-        .single();
+      // CRITICAL FIX: Use investmentService.getInvestmentAdvisorByCode instead of direct query
+      // This handles both old (users) and new (user_profiles) registrations
+      const advisor = await investmentService.getInvestmentAdvisorByCode(advisorCode);
       
-      if (error) {
-        console.error('❌ Error fetching investment advisor:', error);
+      if (!advisor) {
+        console.error('❌ Error fetching investment advisor: Not found');
         return null;
       }
       
-      if (advisor) {
-        console.log('✅ Found assigned investment advisor:', advisor);
-        console.log('🔍 Advisor logo_url:', advisor.logo_url);
-        console.log('🔍 Advisor has logo:', !!advisor.logo_url);
-        console.log('🔍 Advisor firm_name:', advisor.firm_name);
-        setAssignedInvestmentAdvisor(advisor);
-        return advisor;
-      }
-      
-      return null;
+      console.log('✅ Found assigned investment advisor:', advisor);
+      console.log('🔍 Advisor logo_url:', advisor.logo_url);
+      console.log('🔍 Advisor has logo:', !!advisor.logo_url);
+      console.log('🔍 Advisor firm_name:', advisor.firm_name);
+      setAssignedInvestmentAdvisor(advisor);
+      return advisor;
     } catch (error) {
       console.error('❌ Error in fetchAssignedInvestmentAdvisor:', error);
       return null;

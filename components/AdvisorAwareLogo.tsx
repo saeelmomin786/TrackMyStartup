@@ -36,6 +36,7 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
         setLoading(true);
         try {
           console.log('🔍 AdvisorAwareLogo: Fetching advisor for code:', currentUser.investment_advisor_code_entered);
+          // Add cache-busting timestamp to force refresh when advisor updates logo
           const advisor = await investmentService.getInvestmentAdvisorByCode(currentUser.investment_advisor_code_entered);
           console.log('🔍 AdvisorAwareLogo: Advisor data received:', advisor);
           setAdvisorInfo(advisor);
@@ -52,6 +53,16 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
     };
 
     fetchAdvisorInfo();
+    
+    // Refresh advisor info every 30 seconds to pick up logo updates
+    const refreshInterval = setInterval(() => {
+      if (currentUser?.investment_advisor_code_entered && 
+          (currentUser?.role === 'Investor' || currentUser?.role === 'Startup')) {
+        fetchAdvisorInfo();
+      }
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(refreshInterval);
   }, [currentUser?.investment_advisor_code_entered, currentUser?.role]);
 
   // Simple swapping logic: If advisor has logo, show it. Otherwise, show default.
@@ -61,8 +72,8 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
     return (
       <div className="flex items-center gap-2 sm:gap-3">
         <img 
-          src={advisorInfo.logo_url} 
-          alt={advisorInfo.name || 'Advisor Logo'} 
+          src={`${advisorInfo.logo_url}?t=${Date.now()}`} 
+          alt={advisorInfo.firm_name || advisorInfo.name || 'Advisor Logo'} 
           className={className}
           onClick={onClick}
           onError={() => {
@@ -73,7 +84,7 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
         {showText && (
           <div>
             <h1 className={textClassName}>
-              {advisorInfo.name || 'Advisor'}
+              {advisorInfo.firm_name || advisorInfo.name || 'Advisor'}
             </h1>
             <p className="text-xs text-blue-600 mt-1">Supported by Track My Startup</p>
           </div>

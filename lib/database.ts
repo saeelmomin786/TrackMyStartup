@@ -79,21 +79,76 @@ export const userService = {
   async getAllUsers(): Promise<any[]> {
     console.log('Fetching all users...');
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false })
-      
-      if (error) {
-        console.error('Error fetching users:', error)
-        return []
+      // Fetch from both users table (old registrations) and user_profiles table (new registrations)
+      const [usersData, profilesData] = await Promise.all([
+        supabase
+          .from('users')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('user_profiles')
+          .select('*')
+          .order('created_at', { ascending: false })
+      ]);
+
+      const usersError = usersData.error;
+      const profilesError = profilesData.error;
+
+      if (usersError) {
+        console.error('Error fetching users:', usersError);
       }
+      if (profilesError) {
+        console.error('Error fetching user_profiles:', profilesError);
+      }
+
+      // Combine both arrays, mapping user_profiles to match users structure
+      const users = (usersData.data || []).map(user => ({
+        ...user,
+        source: 'users'
+      }));
+
+      const profiles = (profilesData.data || []).map(profile => ({
+        id: profile.auth_user_id, // Use auth_user_id as id for compatibility
+        auth_user_id: profile.auth_user_id, // Keep auth_user_id for reference
+        email: profile.email,
+        name: profile.name,
+        role: profile.role,
+        investment_advisor_code: profile.investment_advisor_code,
+        investment_advisor_code_entered: profile.investment_advisor_code_entered,
+        advisor_accepted: profile.advisor_accepted,
+        logo_url: profile.logo_url,
+        firm_name: profile.firm_name,
+        startup_name: profile.startup_name,
+        created_at: profile.created_at,
+        updated_at: profile.updated_at,
+        source: 'user_profiles'
+      }));
+
+      // Merge: prefer user_profiles over users for same auth_user_id
+      const mergedUsers = new Map();
       
-      console.log('Users fetched successfully:', data?.length || 0);
-      return data || []
+      // Add users first
+      users.forEach(user => {
+        mergedUsers.set(user.id, user);
+      });
+
+      // Add/override with user_profiles (new registrations take precedence)
+      profiles.forEach(profile => {
+        mergedUsers.set(profile.id, profile);
+      });
+
+      const allUsers = Array.from(mergedUsers.values());
+      
+      console.log('Users fetched successfully:', {
+        fromUsers: users.length,
+        fromUserProfiles: profiles.length,
+        total: allUsers.length
+      });
+      
+      return allUsers;
     } catch (error) {
-      console.error('Error in getAllUsers:', error)
-      return []
+      console.error('Error in getAllUsers:', error);
+      return [];
     }
   },
 
@@ -1525,26 +1580,94 @@ export const investmentService = {
   },
 
   // Get investment advisor information by code
+  // CRITICAL: Check both users table (old registrations) and user_profiles table (new registrations)
   async getInvestmentAdvisorByCode(advisorCode: string) {
     try {
-      console.log('🔍 Database: Looking for advisor with code:', advisorCode);
+      // Trim and normalize the code to handle whitespace issues
+      const trimmedCode = advisorCode?.trim();
+      if (!trimmedCode || trimmedCode.length === 0) {
+        console.log('❌ Database: Empty advisor code provided');
+        return null;
+      }
+
+      console.log('🔍 Database: Looking for advisor with code:', trimmedCode);
       
+      // First try user_profiles table (new registrations)
+      // Use ilike for case-insensitive matching (codes might have case differences)
+      const { data: profileData, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('auth_user_id, email, name, role, investment_advisor_code, logo_url, firm_name')
+        .ilike('investment_advisor_code', trimmedCode) // Case-insensitive match
+        .eq('role', 'Investment Advisor')
+        .maybeSingle();
+
+      if (profileError) {
+        console.error('❌ Database: Error querying user_profiles for advisor:', {
+          error: profileError,
+          code: trimmedCode,
+          message: profileError.message,
+          details: profileError.details,
+          hint: profileError.hint
+        });
+      }
+
+      if (profileData && !profileError) {
+        console.log('✅ Database: Found advisor in user_profiles:', {
+          id: profileData.auth_user_id,
+          name: profileData.name,
+          code: profileData.investment_advisor_code,
+          hasLogo: !!profileData.logo_url,
+          logoUrl: profileData.logo_url
+        });
+        // Map user_profiles fields to expected format
+        return {
+          id: profileData.auth_user_id, // Use auth_user_id as id
+          email: profileData.email,
+          name: profileData.name,
+          role: profileData.role,
+          investment_advisor_code: profileData.investment_advisor_code,
+          logo_url: profileData.logo_url,
+          firm_name: profileData.firm_name
+        };
+      } else {
+        console.log('⚠️ Database: No advisor found in user_profiles with code:', trimmedCode);
+      }
+
+      // Fallback to users table (old registrations)
+      // Use ilike for case-insensitive matching
       const { data, error } = await supabase
         .from('users')
-        .select('id, email, name, role, investment_advisor_code, logo_url')
-        .eq('investment_advisor_code', advisorCode)
+        .select('id, email, name, role, investment_advisor_code, logo_url, firm_name')
+        .ilike('investment_advisor_code', trimmedCode) // Case-insensitive match
         .eq('role', 'Investment Advisor')
         .maybeSingle();
 
       if (error) {
-        console.error('❌ Database: Error fetching investment advisor:', error);
+        console.error('❌ Database: Error fetching investment advisor from users table:', {
+          error: error,
+          code: trimmedCode,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
         return null;
       }
 
-      console.log('✅ Database: Found advisor:', data);
-      return data;
+      if (data) {
+        console.log('✅ Database: Found advisor in users table:', {
+          id: data.id,
+          name: data.name,
+          code: data.investment_advisor_code,
+          hasLogo: !!data.logo_url,
+          logoUrl: data.logo_url
+        });
+        return data;
+      }
+
+      console.log('❌ Database: No advisor found with code:', trimmedCode, '(checked both user_profiles and users tables)');
+      return null;
     } catch (e) {
-      console.error('❌ Database: Error in getInvestmentAdvisorByCode:', e);
+      console.error('❌ Database: Exception fetching investment advisor:', e);
       return null;
     }
   },
@@ -1870,19 +1993,14 @@ export const investmentService = {
   async getOffersForStartup(startupId: number) {
     try {
       console.log('🔍 Fetching offers for startup:', startupId);
+      // CRITICAL FIX: Don't use foreign key join for startup_user
+      // New registrations are in user_profiles, not users table
+      // We'll fetch user data separately
       const { data, error } = await supabase
         .from('investment_offers')
         .select(`
           *,
-          startup:startups(
-            *,
-            startup_user:users!startups_user_id_fkey(
-              id,
-              email,
-              name,
-              investment_advisor_code
-            )
-          )
+          startup:startups(*)
         `)
         .eq('startup_id', startupId)
         .order('created_at', { ascending: false })
@@ -1890,6 +2008,49 @@ export const investmentService = {
       if (error) {
         console.error('Error fetching startup offers:', error);
         return [];
+      }
+
+      // CRITICAL FIX: Fetch startup user data separately (handles both old and new registrations)
+      if (data && data.length > 0 && data[0].startup?.user_id) {
+        const startupUserId = data[0].startup.user_id;
+        
+        // Try user_profiles first (new registrations)
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('id, auth_user_id, email, name, investment_advisor_code')
+          .eq('auth_user_id', startupUserId)
+          .eq('role', 'Startup')
+          .maybeSingle();
+        
+        // If not found in user_profiles, try users table (old registrations)
+        if (!profileData) {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('id, email, name, investment_advisor_code')
+            .eq('id', startupUserId)
+            .maybeSingle();
+          
+          if (userData) {
+            // Add startup_user to all offers
+            data.forEach(offer => {
+              if (offer.startup) {
+                offer.startup.startup_user = userData;
+              }
+            });
+          }
+        } else {
+          // Add startup_user to all offers (from user_profiles)
+          data.forEach(offer => {
+            if (offer.startup) {
+              offer.startup.startup_user = {
+                id: profileData.auth_user_id,
+                email: profileData.email,
+                name: profileData.name,
+                investment_advisor_code: profileData.investment_advisor_code
+              };
+            }
+          });
+        }
       }
 
       // Filter offers that should be visible to startup

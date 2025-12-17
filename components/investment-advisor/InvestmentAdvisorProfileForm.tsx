@@ -401,21 +401,37 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         .from('investor-assets')
         .getPublicUrl(filePath);
 
-      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      // CRITICAL FIX: Save logo_url to BOTH user_profiles (new registrations) AND users (old registrations)
       const { data: { user: authUser } } = await supabase.auth.getUser();
       const authUserId = authUser?.id || currentUser.id;
       
-      // Save logo_url to users table
+      // Save logo_url to user_profiles table (for new registrations)
+      // currentUser.id is the profile ID for user_profiles table
+      const { error: updateProfileError } = await supabase
+        .from('user_profiles')
+        // @ts-ignore - Supabase type inference issue with update method
+        .update({ logo_url: publicUrl })
+        .eq('id', currentUser.id); // Use profile ID for user_profiles table
+
+      if (updateProfileError) {
+        console.error('Error saving logo to user_profiles table:', updateProfileError);
+        // Continue - might be old registration
+      } else {
+        console.log('✅ Logo saved to user_profiles table');
+      }
+
+      // Also save to users table (for old registrations - backward compatibility)
       const { error: updateUserError } = await supabase
         .from('users')
         // @ts-ignore - Supabase type inference issue with update method
         .update({ logo_url: publicUrl })
-        .eq('id', authUserId); // Use auth.uid() instead of profile ID
+        .eq('id', authUserId); // Use auth.uid() for users table
 
       if (updateUserError) {
         console.error('Error saving logo to users table:', updateUserError);
-        alert('Logo uploaded but failed to save to profile. Please try again.');
-        return;
+        // Continue - might be new registration
+      } else {
+        console.log('✅ Logo saved to users table');
       }
 
       handleChange('logo_url', publicUrl);
@@ -441,19 +457,37 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         handleChange('media_type', 'logo');
       }
       
-      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      // CRITICAL FIX: Save logo_url to BOTH user_profiles (new registrations) AND users (old registrations)
       const { data: { user: authUser } } = await supabase.auth.getUser();
       const authUserId = authUser?.id || currentUser.id;
       
-      // Save logo_url to users table
+      // Save logo_url to user_profiles table (for new registrations)
+      // currentUser.id is the profile ID for user_profiles table
+      const { error: updateProfileError } = await supabase
+        .from('user_profiles')
+        // @ts-ignore - Supabase type inference issue with update method
+        .update({ logo_url: trimmedUrl })
+        .eq('id', currentUser.id); // Use profile ID for user_profiles table
+
+      if (updateProfileError) {
+        console.error('Error saving logo URL to user_profiles table:', updateProfileError);
+        // Continue - might be old registration
+      } else {
+        console.log('✅ Logo URL saved to user_profiles table');
+      }
+
+      // Also save to users table (for old registrations - backward compatibility)
       const { error: updateUserError } = await supabase
         .from('users')
         // @ts-ignore - Supabase type inference issue with update method
         .update({ logo_url: trimmedUrl })
-        .eq('id', authUserId); // Use auth.uid() instead of profile ID
+        .eq('id', authUserId); // Use auth.uid() for users table
 
       if (updateUserError) {
         console.error('Error saving logo URL to users table:', updateUserError);
+        // Continue - might be new registration
+      } else {
+        console.log('✅ Logo URL saved to users table');
       }
     }
   };

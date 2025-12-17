@@ -162,7 +162,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (roleProfile?.id) {
               return res.status(400).json({ error: `You already have a ${role || 'Investor'} profile. Please sign in instead.` });
             }
-            // User exists but doesn't have this role profile - we'll create it below
+            // User exists but doesn't have this role profile - update password and create profile below
+            // CRITICAL: Update password for existing user so they can login
+            const { error: passwordUpdateError } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+              password: newPassword,
+            });
+            if (passwordUpdateError) {
+              console.error('Error updating password for existing user:', passwordUpdateError);
+              return res.status(500).json({ error: 'Failed to set password. Please try again.' });
+            }
+            console.log('✅ Updated password for existing user during registration');
           } else {
             // User exists in auth but has no profiles yet - this shouldn't happen normally
             // But we'll handle it by trying to get auth_user_id via listUsers (only as fallback)
@@ -171,7 +180,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
               if (usersData?.users) {
                 const foundUser = usersData.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase().trim());
-                if (foundUser) authUserId = foundUser.id;
+                if (foundUser) {
+                  authUserId = foundUser.id;
+                  // CRITICAL: Update password for existing user so they can login
+                  const { error: passwordUpdateError } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+                    password: newPassword,
+                  });
+                  if (passwordUpdateError) {
+                    console.error('Error updating password for existing user:', passwordUpdateError);
+                    return res.status(500).json({ error: 'Failed to set password. Please try again.' });
+                  }
+                  console.log('✅ Updated password for existing user during registration (fallback)');
+                }
               }
             } catch (fallbackError) {
               console.error('Fallback lookup failed:', fallbackError);

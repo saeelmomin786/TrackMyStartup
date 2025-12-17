@@ -756,7 +756,8 @@ const App: React.FC = () => {
                   }
                   
                   setIsLoading(false);
-                  if (currentPage !== 'login' && currentPage !== 'register' && !isResetPasswordPage) {
+                  // Don't redirect if user is on public pages (landing, login, register, reset-password)
+                  if (currentPage !== 'login' && currentPage !== 'register' && currentPage !== 'landing' && !isResetPasswordPage) {
                     setCurrentPage('login');
                   }
                 }

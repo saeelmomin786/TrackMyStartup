@@ -458,14 +458,14 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
                   </div>
                 )}
                 
-                {!emailValidation.isValidating && !emailValidation.exists && emailValidation.lastChecked === formData.email && (
+                {!emailValidation.isValidating && !emailValidation.exists && !emailValidation.error && emailValidation.lastChecked === formData.email && (
                   <div className="flex items-center text-sm text-green-600">
                     <CheckCircle className="h-4 w-4 mr-1" />
                     Email is available
                   </div>
                 )}
                 
-                {emailValidation.error && (
+                {!emailValidation.isValidating && emailValidation.error && (
                   <div className="flex items-center text-sm text-amber-600">
                     <AlertCircle className="h-4 w-4 mr-1" />
                     {emailValidation.error}

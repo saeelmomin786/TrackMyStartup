@@ -253,3 +253,4 @@ advisor_id = auth.uid()  -- Checks "123"
 
 **That's why we shifted to using `auth.uid()` instead of profile IDs!**
 
+

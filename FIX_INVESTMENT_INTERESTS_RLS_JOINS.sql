@@ -101,3 +101,4 @@ SELECT
     'Verify users table RLS allows Investment Advisors to query their assigned investors' as step3;
 
 
+

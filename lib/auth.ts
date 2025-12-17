@@ -964,25 +964,16 @@ export const authService = {
         return { user: null, error: error?.message || 'No session found' }
       }
 
-      // Get user profile
-      const { data: profile, error: profileError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', session.user.id)
-        .single()
+      // Use getCurrentUser() which handles user_profiles first, then falls back to users table
+      // This ensures we use the correct table based on the multi-profile system
+      const user = await this.getCurrentUser();
 
-      if (profileError || !profile) {
+      if (!user) {
         return { user: null, error: 'Profile not found' }
       }
 
       return {
-        user: {
-          id: profile.id,
-          email: profile.email,
-          name: profile.name,
-          role: profile.role,
-          registration_date: profile.registration_date
-        },
+        user: user,
         error: null
       }
     } catch (error) {
@@ -996,30 +987,47 @@ export const authService = {
     try {
       console.log('Checking if email exists:', email);
       
-      // Check user_profiles table (new multi-profile system)
-      // This checks if any profile exists with this email
-      const { data: profiles, error: profileError } = await supabase
-        .from('user_profiles')
-        .select('id')
-        .eq('email', email.toLowerCase().trim())
-        .limit(1); // Only need to know if at least one exists
+      // Use database function to check email existence (bypasses RLS using SECURITY DEFINER)
+      // This is better than API endpoint - faster, no extra network call, works directly from frontend
+      const { data, error } = await supabase.rpc('check_email_exists', {
+        email_to_check: email.toLowerCase().trim()
+      });
 
-      if (profileError) {
-        console.error('Error checking user_profiles table:', profileError);
-        return { exists: false, error: 'Unable to check email availability' };
+      if (error) {
+        console.error('Error checking email via RPC:', error);
+        // If RPC function doesn't exist, fall back to direct query (may fail due to RLS)
+        console.warn('RPC function not available, falling back to direct query');
+        const { data: profiles, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('id')
+          .eq('email', email.toLowerCase().trim())
+          .limit(1);
+
+        if (profileError) {
+          console.error('Direct query also failed:', profileError);
+          return { exists: false, error: 'Unable to check email availability' };
+        }
+
+        if (profiles && profiles.length > 0) {
+          console.log('Email already exists in user_profiles:', email);
+          return { exists: true };
+        } else {
+          console.log('Email is available:', email);
+          return { exists: false };
+        }
       }
 
-      // Check if any profiles were returned
-      if (profiles && profiles.length > 0) {
+      // RPC function returned result
+      if (data === true) {
         console.log('Email already exists in user_profiles:', email);
         return { exists: true };
       } else {
         console.log('Email is available:', email);
         return { exists: false };
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error checking email existence:', error);
-      return { exists: false, error: 'Unable to check email availability' };
+      return { exists: false, error: error.message || 'Unable to check email availability. Please try again.' };
     }
   },
 

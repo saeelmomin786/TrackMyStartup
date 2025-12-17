@@ -142,32 +142,32 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 console.log('User authenticated:', user.email);
                 
                 // Check if user needs to complete Form 2 (document upload)
-                // Fetch from users table for documents
-                const { data: userProfiles, error: userProfileError } = await authService.supabase
-                    .from('users')
-                    .select('government_id, ca_license, startup_name')
-                    .eq('id', user.id);
+                // Use getCurrentUser() which handles user_profiles first, then falls back to users table
+                // This ensures we use the correct table based on the multi-profile system
+                const currentUser = await authService.getCurrentUser();
+                const userProfile = currentUser ? {
+                    government_id: currentUser.government_id,
+                    ca_license: currentUser.ca_license,
+                    startup_name: currentUser.startup_name
+                } : null;
                 
                 // Fetch from startups table for company info
-                // First try with user_id, then fallback to startup_name matching
-                let { data: startupProfiles, error: startupProfileError } = await authService.supabase
+                // Use auth_user_id (from auth.users) which matches startups.user_id
+                let { data: startupProfiles } = await authService.supabase
                     .from('startups')
                     .select('name, country, user_id')
                     .eq('user_id', user.id);
                 
-                const userProfile = userProfiles && userProfiles.length > 0 ? userProfiles[0] : null;
-                
                 // If no startup found by user_id, try matching by startup_name from user profile
                 if ((!startupProfiles || startupProfiles.length === 0) && userProfile?.startup_name) {
                     console.log('🔍 No startup found by user_id, trying startup_name match:', userProfile.startup_name);
-                    const { data: startupByName, error: startupByNameError } = await authService.supabase
+                    const { data: startupByName } = await authService.supabase
                         .from('startups')
                         .select('name, country, user_id')
                         .eq('name', userProfile.startup_name);
                     
                     if (startupByName && startupByName.length > 0) {
                         startupProfiles = startupByName;
-                        startupProfileError = startupByNameError;
                         console.log('✅ Found startup by name match:', startupByName[0]);
                     }
                 }
@@ -177,8 +177,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 console.log('Profile check result:', { 
                     userProfile, 
                     startupProfile,
-                    userProfileError,
-                    startupProfileError,
                     hasGovId: !!userProfile?.government_id, 
                     hasCaLicense: !!userProfile?.ca_license,
                     hasCompanyName: !!startupProfile?.name,
@@ -203,14 +201,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     startupProfileData: startupProfile
                 });
                 
-                if (userProfileError || startupProfileError) {
-                    console.error('Error fetching profiles:', { userProfileError, startupProfileError });
-                    // If error fetching profile, redirect to Form 2
-                    onNavigateToCompleteRegistration();
-                    return;
-                }
-                
-                if (!userProfile) {
+                if (!userProfile || !currentUser) {
                     // No user profile found - user needs to complete Form 2
                     console.log('No user profile found - redirecting to Form 2');
                     onNavigateToCompleteRegistration();

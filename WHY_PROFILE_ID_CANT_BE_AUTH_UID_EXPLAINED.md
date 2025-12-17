@@ -260,3 +260,4 @@ await switchProfile(currentProfile);  // Switch to this profile
 
 **This approach works perfectly and solves all data issues!**
 
+

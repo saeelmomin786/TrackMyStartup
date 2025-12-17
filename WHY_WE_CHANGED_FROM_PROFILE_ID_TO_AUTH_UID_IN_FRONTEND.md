@@ -342,3 +342,4 @@ advisor_id IN (
 
 **That's why we changed from profile ID to auth.uid() in the frontend!**
 
+

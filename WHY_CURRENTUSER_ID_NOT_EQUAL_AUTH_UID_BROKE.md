@@ -442,3 +442,4 @@ const { data: { user: authUser } } = await supabase.auth.getUser();
 
 **RLS is strict - it only allows exact matches. That's why the mismatch broke everything!**
 
+

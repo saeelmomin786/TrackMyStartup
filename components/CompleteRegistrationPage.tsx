@@ -485,23 +485,34 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         const currentAdvisorCode = (profileData as any)?.investment_advisor_code_entered;
         if (!currentAdvisorCode || currentAdvisorCode !== advisorCodeFromUrl) {
           // Check if profile is in user_profiles or users table
+          // user.id is auth_user_id, so check user_profiles by auth_user_id, not id
           const { data: profileCheck } = await authService.supabase
             .from('user_profiles')
-            .select('id')
-            .eq('id', user.id)
+            .select('id, auth_user_id')
+            .eq('auth_user_id', user.id)
             .maybeSingle();
           
-          const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
-          
-          // Update user record with advisor code
-          await supabase
-            .from(tableToUpdate)
-            // @ts-expect-error - Dynamic table name prevents type inference
-            .update({
-              investment_advisor_code_entered: advisorCodeFromUrl,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', user.id);
+          if (profileCheck) {
+            // Update in user_profiles table using profile ID
+            await supabase
+              .from('user_profiles')
+              // @ts-expect-error - Dynamic table name prevents type inference
+              .update({
+                investment_advisor_code_entered: advisorCodeFromUrl,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', (profileCheck as any).id); // Use profile ID for user_profiles
+          } else {
+            // Fallback to users table (old system - backward compatibility)
+            await supabase
+              .from('users')
+              // @ts-expect-error - Dynamic table name prevents type inference
+              .update({
+                investment_advisor_code_entered: advisorCodeFromUrl,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', user.id); // In users table, id = auth_user_id
+          }
 
           // If user is a Startup, also update startup record
           if ((profileData as any)?.role === 'Startup') {
@@ -525,8 +536,10 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         }
       }
 
-      // If using newProfileId, use that profile ID; otherwise use user.id
-      const profileIdToCheck = newProfileId || user.id;
+      // If using newProfileId, use that profile ID; otherwise use profile ID from profileData
+      // user.id is auth_user_id, not profile ID - use profileData.id if available
+      const actualProfileId = newProfileId || (profileData && (profileData as any).id) || user.id;
+      const profileIdToCheck = actualProfileId;
       
       // Check if user already has a complete profile using the new method
       // For Add Profile flow, always show Form 2 (don't skip)
@@ -541,9 +554,9 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       }
 
       // User needs to complete Step 2
-      // Use profile ID from newProfileId if provided, otherwise use user.id
+      // Use profile ID from newProfileId if provided, otherwise use profile ID from profileData
       setUserData({
-        id: newProfileId || user.id, // Use new profile ID if provided
+        id: actualProfileId, // Use actual profile ID (not auth_user_id)
         email: user.email,
         name: (profileData && (profileData as any).name) || user.user_metadata?.name || 'User',
         role: (profileData && (profileData as any).role) || user.user_metadata?.role || 'Investor',

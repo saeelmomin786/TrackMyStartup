@@ -5,17 +5,42 @@ import { DomainUpdateService } from './domainUpdateService'
 // User Management
 export const userService = {
   // Get current user profile
+  // Updated to check user_profiles first (new system), then fall back to users table (backward compatibility)
   async getCurrentUser() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return null
 
+    // First, try to get from user_profiles (new system)
+    // Get active profile from user_profile_sessions
+    const { data: sessionData } = await supabase
+      .from('user_profile_sessions')
+      .select('current_profile_id')
+      .eq('auth_user_id', user.id)
+      .maybeSingle();
+
+    if (sessionData?.current_profile_id) {
+      // Profile found in new system - get from user_profiles
+      const { data: profileData, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', sessionData.current_profile_id)
+        .maybeSingle();
+
+      if (!profileError && profileData) {
+        return profileData;
+      }
+    }
+
+    // Fallback: try users table (old system - backward compatibility)
     const { data, error } = await supabase
       .from('users')
       .select('*')
       .eq('id', user.id)
       .maybeSingle()
 
-    if (error) throw error
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned, which is OK
+      throw error
+    }
     return data
   },
 

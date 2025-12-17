@@ -307,12 +307,42 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
                     
                     console.log('🔍 Authenticated user:', user.id, user.email);
                     
-                    const { data: userProfiles, error: profileError } = await authService.supabase
-                        .from('users')
-                        .select('government_id, ca_license, verification_documents, logo_url, financial_advisor_license_url, investment_advisor_code')
-                        .eq('id', user.id);
+                    // Try user_profiles first (new system), then fall back to users table
+                    let userProfile: any = null;
                     
-                    const userProfile = userProfiles && userProfiles.length > 0 ? userProfiles[0] : null;
+                    // First, check user_profiles
+                    const { data: sessionData } = await authService.supabase
+                        .from('user_profile_sessions')
+                        .select('current_profile_id')
+                        .eq('auth_user_id', user.id)
+                        .maybeSingle();
+                    
+                    if (sessionData?.current_profile_id) {
+                        const { data: profileData } = await authService.supabase
+                            .from('user_profiles')
+                            .select('government_id, ca_license, verification_documents, logo_url, financial_advisor_license_url, investment_advisor_code_entered')
+                            .eq('id', sessionData.current_profile_id)
+                            .maybeSingle();
+                        
+                        if (profileData) {
+                            // Map investment_advisor_code_entered to investment_advisor_code for compatibility
+                            userProfile = {
+                                ...profileData,
+                                investment_advisor_code: profileData.investment_advisor_code_entered
+                            };
+                        }
+                    }
+                    
+                    // Fallback to users table if not found in user_profiles
+                    if (!userProfile) {
+                        const { data: userProfiles, error: profileError } = await authService.supabase
+                            .from('users')
+                            .select('government_id, ca_license, verification_documents, logo_url, financial_advisor_license_url, investment_advisor_code')
+                            .eq('id', user.id)
+                            .maybeSingle();
+                        
+                        userProfile = userProfiles;
+                    }
                     
                     if (profileError) {
                         console.error('❌ Profile fetch error:', profileError);

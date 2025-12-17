@@ -31,14 +31,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Lookup user id from auth.users (only for forgot/invite)
     let userId = null;
     if (purpose !== 'register') {
-      // Get auth user by email
-      const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserByEmail(email.toLowerCase().trim());
+      // Efficient approach: Check user_profiles table first (indexed query)
+      // This is much faster than listing all auth users
+      const { data: profileData } = await supabaseAdmin
+        .from('user_profiles')
+        .select('auth_user_id')
+        .eq('email', email.toLowerCase().trim())
+        .limit(1)
+        .maybeSingle();
       
-      if (purpose === 'forgot' && (!authUserData?.user || authUserError)) {
-        return res.status(404).json({ error: 'User not found' });
+      if (profileData?.auth_user_id) {
+        userId = profileData.auth_user_id;
+      } else if (purpose === 'forgot') {
+        // For forgot password, user must exist - try fallback lookup
+        // Use listUsers (fallback only - should rarely be needed)
+        try {
+          const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+          if (listError || !usersData?.users) {
+            return res.status(404).json({ error: 'User not found' });
+          }
+          const authUser = usersData.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase().trim());
+          if (!authUser) {
+            return res.status(404).json({ error: 'User not found' });
+          }
+          userId = authUser.id;
+        } catch (error) {
+          console.error('Error finding user:', error);
+          return res.status(404).json({ error: 'User not found' });
+        }
       }
-      
-      userId = authUserData?.user?.id || null;
+      // For invite, userId can be null (will be set when user creates account)
     }
 
     const code = Math.floor(10 ** (OTP_LENGTH - 1) + Math.random() * 9 * 10 ** (OTP_LENGTH - 1)).toString();

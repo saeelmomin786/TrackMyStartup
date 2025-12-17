@@ -66,8 +66,10 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  // Get auth_user_id - mentor_profiles uses auth_user_id, not profile ID
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<MentorProfile>({
-    user_id: currentUser.id,
+    user_id: '', // Will be set to auth_user_id after loading
     mentor_name: currentUser.name || '',
     media_type: 'logo',
     expertise_areas: [],
@@ -127,12 +129,16 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     try {
       // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id || currentUser.id;
+      if (!authUser) {
+        console.error('No auth user found');
+        return;
+      }
+      const userId = authUser.id;
       
       const { data, error } = await supabase
         .from('mentor_professional_experience')
         .select('*')
-        .eq('mentor_id', authUserId) // Use auth.uid() instead of profile ID
+        .eq('mentor_id', userId) // Use auth_user_id, not profile ID
         .order('from_date', { ascending: false });
 
       if (error && error.code !== 'PGRST116') {
@@ -180,11 +186,19 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     
     try {
       // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id || currentUser.id;
+      let userIdForExp = authUserId;
+      if (!userIdForExp) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) {
+          alert('Not authenticated');
+          return;
+        }
+        userIdForExp = authUser.id;
+        setAuthUserId(userIdForExp);
+      }
       
       const expData: any = {
-        mentor_id: authUserId, // Use auth.uid() instead of profile ID
+        mentor_id: userIdForExp, // Use auth_user_id, not profile ID
         company: expForm.company,
         position: expForm.position,
         description: expForm.description,
@@ -203,14 +217,14 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
           .from('mentor_professional_experience')
           .update(expData)
           .eq('id', editingExpId)
-          .eq('mentor_id', authUserId); // Use auth.uid() instead of profile ID
+          .eq('mentor_id', userIdForExp); // Use auth_user_id, not profile ID
         
         if (error) throw error;
       } else {
-        // Ensure mentor_id is set to auth.uid() in insert
+        // Ensure mentor_id is set to auth_user_id in insert
         const { error } = await supabase
           .from('mentor_professional_experience')
-          .insert({ ...expData, mentor_id: authUserId }); // Use auth.uid() instead of profile ID
+          .insert({ ...expData, mentor_id: userIdForExp }); // Use auth_user_id, not profile ID
         
         if (error) throw error;
       }
@@ -249,14 +263,22 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     
     try {
       // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id || currentUser.id;
+      let userIdForExp = authUserId;
+      if (!userIdForExp) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) {
+          alert('Not authenticated');
+          return;
+        }
+        userIdForExp = authUser.id;
+        setAuthUserId(userIdForExp);
+      }
       
       const { error } = await supabase
         .from('mentor_professional_experience')
         .delete()
         .eq('id', id)
-        .eq('mentor_id', authUserId); // Use auth.uid() instead of profile ID
+        .eq('mentor_id', userIdForExp); // Use auth_user_id, not profile ID
       
       if (error) throw error;
       loadProfessionalExperiences();
@@ -308,12 +330,17 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     try {
       // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id || currentUser.id;
+      if (!authUser) {
+        console.error('No auth user found');
+        return;
+      }
+      const userId = authUser.id;
+      setAuthUserId(userId); // Store auth_user_id
       
       const { data, error } = await supabase
         .from('mentor_profiles')
         .select('*')
-        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
+        .eq('user_id', userId) // Use auth_user_id, not profile ID
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
@@ -324,6 +351,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
       if (data) {
         const loadedProfile = {
           ...data,
+          user_id: userId, // Use auth_user_id, not profile ID
           expertise_areas: data.expertise_areas || [],
           sectors: data.sectors || [],
           mentoring_stages: data.mentoring_stages || [],
@@ -340,6 +368,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         // Initialize with metrics if available
         const initialProfile = {
           ...profile,
+          user_id: userId, // Use auth_user_id, not profile ID
           companies_mentored: mentorMetrics?.startupsMentoring || 0,
           companies_founded: mentorMetrics?.startupsFounded || 0
         };
@@ -416,9 +445,23 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
     setIsSaving(true);
     try {
+      // Get auth_user_id for saving (use stored authUserId or get fresh)
+      let userIdForSave = authUserId;
+      if (!userIdForSave) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) {
+          alert('Not authenticated');
+          setIsSaving(false);
+          return;
+        }
+        userIdForSave = authUser.id;
+        setAuthUserId(userIdForSave);
+      }
+      
       // Auto-populate counts from metrics before saving
       const profileData = {
         ...profile,
+        user_id: userIdForSave, // CRITICAL: Use auth_user_id, not profile ID
         companies_mentored: mentorMetrics 
           ? (mentorMetrics.startupsMentoring + mentorMetrics.startupsMentoredPreviously)
           : profile.companies_mentored || 0,

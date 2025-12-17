@@ -5922,8 +5922,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 if (!selectedCollaboratorId || !startupToRecommend || !currentUser?.id) return;
                 try {
                   setIsSendingRecommendation(true);
+                  // Get auth_user_id - collaborator_recommendations uses auth_user_id, not profile ID
+                  const { data: { user: authUser } } = await supabase.auth.getUser();
+                  if (!authUser) {
+                    alert('Not authenticated');
+                    setIsSendingRecommendation(false);
+                    return;
+                  }
                   const payload: any = {
-                    sender_user_id: currentUser.id,
+                    sender_user_id: authUser.id, // Use auth_user_id, not profile ID
                     collaborator_user_id: selectedCollaboratorId,
                     startup_id: startupToRecommend.id,
                     startup_name: startupToRecommend.name,

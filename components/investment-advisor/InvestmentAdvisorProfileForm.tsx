@@ -59,8 +59,10 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
 }) => {
   const [isEditing, setIsEditing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  // Get auth_user_id - investment_advisor_profiles uses auth_user_id, not profile ID
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<InvestmentAdvisorProfile>({
-    user_id: currentUser.id,
+    user_id: '', // Will be set to auth_user_id after loading
     media_type: 'logo',
     geography: [],
     investment_stages: [],
@@ -249,12 +251,17 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
       // Load profile data from investment_advisor_profiles
       // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id || currentUser.id;
+      if (!authUser) {
+        console.error('No auth user found');
+        return;
+      }
+      const userId = authUser.id;
+      setAuthUserId(userId); // Store auth_user_id
       
       const { data, error } = await supabase
         .from('investment_advisor_profiles')
         .select('*')
-        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
+        .eq('user_id', userId) // Use auth_user_id, not profile ID
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
@@ -262,61 +269,59 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         return;
       }
 
-      // Load logo_url and firm_name from users table
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('logo_url, firm_name, name')
-        .eq('id', authUserId) // Use auth.uid() instead of profile ID
-        .maybeSingle();
-
-      if (userError && userError.code !== 'PGRST116') {
-        console.error('Error loading user logo:', userError);
-      }
+      // Load logo_url and firm_name from user_profiles table (for current profile)
+      // logo_url and firm_name are stored in user_profiles table
+      const logoUrl = (currentUser as any).logo_url || null;
+      const firmName = (currentUser as any).firm_name || null;
+      const userName = currentUser.name || '';
 
       if (data) {
         // Determine media_type: prefer video if video_url exists, otherwise use logo
-        const mediaType = data.video_url ? 'video' : (userData?.logo_url ? 'logo' : 'logo');
+        const profileData = data as InvestmentAdvisorProfile;
+        const mediaType = profileData.video_url ? 'video' : (logoUrl ? 'logo' : 'logo');
         
         const loadedProfile = applyComputedMetrics({
-          ...data,
-          geography: data.geography || [],
-          investment_stages: data.investment_stages || [],
-          domain: data.domain || [],
-          service_types: data.service_types || [],
-          // Use logo_url from users table, not from investment_advisor_profiles
-          logo_url: userData?.logo_url || null,
-          // Use advisor_name and firm_name from users table
-          advisor_name: userData?.name || data.advisor_name || '',
-          firm_name: userData?.firm_name || data.firm_name || '',
+          ...profileData,
+          user_id: userId, // Use auth_user_id, not profile ID
+          geography: profileData.geography || [],
+          investment_stages: profileData.investment_stages || [],
+          domain: profileData.domain || [],
+          service_types: profileData.service_types || [],
+          // Use logo_url from user_profiles table
+          logo_url: logoUrl,
+          // Use advisor_name and firm_name from user_profiles table
+          advisor_name: userName || profileData.advisor_name || '',
+          firm_name: firmName || profileData.firm_name || '',
           // Set media_type based on whether video exists
           media_type: mediaType
         });
         setProfile(loadedProfile);
         // Set logo input if logo exists
-        if (userData?.logo_url) {
-          setLogoUrlInput(userData.logo_url);
-          if (userData.logo_url.includes('supabase.co') || userData.logo_url.includes('storage.googleapis.com')) {
+        if (logoUrl) {
+          setLogoUrlInput(logoUrl);
+          if (logoUrl.includes('supabase.co') || logoUrl.includes('storage.googleapis.com')) {
             setLogoInputMethod('upload');
           } else {
             setLogoInputMethod('url');
           }
         }
       } else {
-        // Initialize with data from users table
-        const mediaType = userData?.logo_url ? 'logo' : 'logo';
+        // Initialize with data from user_profiles (currentUser) - no existing investment_advisor_profiles record
+        const mediaType = logoUrl ? 'logo' : 'logo';
         const initialProfile = applyComputedMetrics({
           ...profile,
-          // Use name and firm_name from users table
-          advisor_name: userData?.name || currentUser.name || currentUser.email?.split('@')[0] || '',
-          firm_name: userData?.firm_name || '',
+          user_id: userId, // Use auth_user_id, not profile ID
+          // Use name and firm_name from user_profiles (currentUser)
+          advisor_name: userName || currentUser.name || currentUser.email?.split('@')[0] || '',
+          firm_name: firmName || '',
           email: currentUser.email || '',
-          logo_url: userData?.logo_url || null,
+          logo_url: logoUrl,
           media_type: mediaType
         });
         setProfile(initialProfile);
-        if (userData?.logo_url) {
-          setLogoUrlInput(userData.logo_url);
-          if (userData.logo_url.includes('supabase.co') || userData.logo_url.includes('storage.googleapis.com')) {
+        if (logoUrl) {
+          setLogoUrlInput(logoUrl);
+          if (logoUrl.includes('supabase.co') || logoUrl.includes('storage.googleapis.com')) {
             setLogoInputMethod('upload');
           } else {
             setLogoInputMethod('url');
@@ -403,6 +408,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
       // Save logo_url to users table
       const { error: updateUserError } = await supabase
         .from('users')
+        // @ts-ignore - Supabase type inference issue with update method
         .update({ logo_url: publicUrl })
         .eq('id', authUserId); // Use auth.uid() instead of profile ID
 
@@ -442,6 +448,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
       // Save logo_url to users table
       const { error: updateUserError } = await supabase
         .from('users')
+        // @ts-ignore - Supabase type inference issue with update method
         .update({ logo_url: trimmedUrl })
         .eq('id', authUserId); // Use auth.uid() instead of profile ID
 
@@ -470,7 +477,19 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
 
     setIsSaving(true);
     try {
-      // Save logo_url, name (advisor_name), and firm_name to users table
+      // Save logo_url, name (advisor_name), and firm_name to user_profiles table
+      // Get auth_user_id first
+      let userIdForUpdate = authUserId;
+      if (!userIdForUpdate) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) {
+          alert('Not authenticated');
+          return;
+        }
+        userIdForUpdate = authUser.id;
+        setAuthUserId(userIdForUpdate);
+      }
+      
       const userUpdates: any = {};
       if (profile.logo_url) {
         userUpdates.logo_url = profile.logo_url;
@@ -478,35 +497,46 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
       if (profile.firm_name !== undefined) {
         userUpdates.firm_name = profile.firm_name;
       }
-      // Save advisor_name to users.name (personal name)
+      // Save advisor_name to user_profiles.name (personal name)
       if (profile.advisor_name !== undefined) {
         userUpdates.name = profile.advisor_name;
       }
       
-      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id || currentUser.id;
-      
       if (Object.keys(userUpdates).length > 0) {
-        const { error: updateUserError } = await supabase
-          .from('users')
+        // Update user_profiles table using profile ID (currentUser.id is profile ID)
+        const { error: updateProfileError } = await supabase
+          .from('user_profiles')
+          // @ts-ignore - Supabase type inference issue with update method
           .update(userUpdates)
-          .eq('id', authUserId); // Use auth.uid() instead of profile ID
+          .eq('id', currentUser.id); // Use profile ID for user_profiles table
 
-        if (updateUserError) {
-          console.error('Error saving to users table:', updateUserError);
-          // Continue with profile save even if user update fails
+        if (updateProfileError) {
+          console.error('Error saving to user_profiles table:', updateProfileError);
+          // Continue with profile save even if user_profiles update fails
         }
       }
 
       // Save profile data to investment_advisor_profiles
-      // Note: advisor_name is required in investment_advisor_profiles table (NOT NULL constraint)
-      // So we include it here even though it's also in users table
-      // firm_name is optional in investment_advisor_profiles, so we exclude it (it's only in users table)
-      // logo_url is stored in users table, not investment_advisor_profiles
+      // Note: user_id must be auth_user_id (not profile ID)
+      // advisor_name is required in investment_advisor_profiles table (NOT NULL constraint)
+      // logo_url and firm_name are stored in user_profiles table, not investment_advisor_profiles
       const { logo_url, firm_name, ...profileDataWithoutUserFields } = profile;
+      
+      // Get auth_user_id for saving (use stored authUserId or get fresh)
+      let userIdForSave = authUserId;
+      if (!userIdForSave) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) {
+          alert('Not authenticated');
+          return;
+        }
+        userIdForSave = authUser.id;
+        setAuthUserId(userIdForSave);
+      }
+      
       const profileData = {
         ...profileDataWithoutUserFields,
+        user_id: userIdForSave, // CRITICAL: Use auth_user_id, not profile ID
         // Ensure advisor_name is included (required field in investment_advisor_profiles)
         advisor_name: profile.advisor_name,
         updated_at: new Date().toISOString()
@@ -527,8 +557,8 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
       }
 
       // Add logo_url, advisor_name, and firm_name back to the data object for state (they're from users table)
-      const profileWithUserFields = {
-        ...data,
+      const profileWithUserFields: InvestmentAdvisorProfile = {
+        ...(data as InvestmentAdvisorProfile),
         logo_url: profile.logo_url,
         advisor_name: profile.advisor_name, // From users.name
         firm_name: profile.firm_name // From users.firm_name

@@ -98,45 +98,99 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let userId = otpRow.user_id;
 
     if (purpose === 'register') {
-      // Check if auth user already exists
-      const { data: existingAuthUser } = await supabaseAdmin.auth.admin.getUserByEmail(email.toLowerCase().trim());
+      // Efficient approach: Try to create user first, if it fails with "already exists", 
+      // then we know user exists and can check for existing profiles
+      // This avoids listing all users (which is inefficient with many users)
+      let authUserId: string | null = null;
       
-      let authUserId: string;
+      // First check user_profiles table efficiently (indexed query)
+      // This is much faster than listing all auth users
+      const { data: existingProfileByEmail } = await supabaseAdmin
+        .from('user_profiles')
+        .select('auth_user_id, role')
+        .eq('email', email.toLowerCase().trim())
+        .eq('role', role || 'Investor')
+        .maybeSingle();
       
-      if (existingAuthUser?.user) {
-        // User exists, check if they already have this role profile
-        authUserId = existingAuthUser.user.id;
-        const { data: existingProfile } = await supabaseAdmin
-          .from('user_profiles')
-          .select('id')
-          .eq('auth_user_id', authUserId)
-          .eq('role', role || 'Investor')
-          .maybeSingle();
-        
-        if (existingProfile?.id) {
-          return res.status(400).json({ error: `You already have a ${role || 'Investor'} profile. Please sign in instead.` });
+      if (existingProfileByEmail?.auth_user_id) {
+        return res.status(400).json({ error: `You already have a ${role || 'Investor'} profile. Please sign in instead.` });
+      }
+      
+      // If profile doesn't exist, try to create auth user
+      // If user already exists in auth but has different role profile, we'll handle that
+      const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+        email: email.toLowerCase().trim(),
+        password: newPassword,
+        email_confirm: true,
+        user_metadata: {
+          name,
+          role,
+          startupName,
+          centerName,
+          firmName,
+          investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null,
+          source: 'otp_register'
         }
-      } else {
-        // Create new auth user
-        const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
-          email: email.toLowerCase().trim(),
-          password: newPassword,
-          email_confirm: true,
-          user_metadata: {
-            name,
-            role,
-            startupName,
-            centerName,
-            firmName,
-            investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null,
-            source: 'otp_register'
+      });
+      
+      if (createError) {
+        // Check if error is because user already exists
+        const errorMessage = createError.message?.toLowerCase() || '';
+        if (errorMessage.includes('already registered') || 
+            errorMessage.includes('already exists') || 
+            errorMessage.includes('user already') ||
+            createError.status === 422) {
+          // User exists in auth but might not have this role profile
+          // Query user_profiles to get auth_user_id for existing user
+          const { data: anyProfile } = await supabaseAdmin
+            .from('user_profiles')
+            .select('auth_user_id')
+            .eq('email', email.toLowerCase().trim())
+            .limit(1)
+            .maybeSingle();
+          
+          if (anyProfile && (anyProfile as any).auth_user_id) {
+            authUserId = (anyProfile as any).auth_user_id;
+            // Check if this specific role profile exists
+            const { data: roleProfile } = await supabaseAdmin
+              .from('user_profiles')
+              .select('id')
+              .eq('auth_user_id', authUserId)
+              .eq('role', role || 'Investor')
+              .maybeSingle();
+            
+            if (roleProfile?.id) {
+              return res.status(400).json({ error: `You already have a ${role || 'Investor'} profile. Please sign in instead.` });
+            }
+            // User exists but doesn't have this role profile - we'll create it below
+          } else {
+            // User exists in auth but has no profiles yet - this shouldn't happen normally
+            // But we'll handle it by trying to get auth_user_id via listUsers (only as fallback)
+            console.warn('User exists in auth but no profiles found, using fallback lookup');
+            try {
+              const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
+              if (usersData?.users) {
+                const foundUser = usersData.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase().trim());
+                if (foundUser) authUserId = foundUser.id;
+              }
+            } catch (fallbackError) {
+              console.error('Fallback lookup failed:', fallbackError);
+            }
+            
+            if (!authUserId) {
+              return res.status(500).json({ error: 'Account exists but could not be found. Please contact support.' });
+            }
           }
-        });
-        if (createError || !created?.user) {
+        } else {
+          // Different error, return it
           console.error('Error creating user via admin:', createError);
-          return res.status(500).json({ error: 'Failed to create user' });
+          return res.status(500).json({ error: createError.message || 'Failed to create user account' });
         }
+      } else if (created?.user) {
+        // Successfully created new auth user
         authUserId = created.user.id;
+      } else {
+        return res.status(500).json({ error: 'Failed to create user account' });
       }
 
       // Generate codes based on role
@@ -186,14 +240,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       userId = authUserId; // Set userId for OTP marking
     } else {
-      // Resolve user id for forgot/invite - use auth.users instead of users table
+      // Resolve user id for forgot/invite
       if (!userId) {
-        // Get auth user by email
-        const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserByEmail(email.toLowerCase().trim());
-        if (authUserError || !authUserData?.user) {
-          return res.status(404).json({ error: 'User not found' });
+        // Efficient approach: Check user_profiles table first (indexed query)
+        // This is much faster than listing all auth users
+        const { data: profileData } = await supabaseAdmin
+          .from('user_profiles')
+          .select('auth_user_id')
+          .eq('email', email.toLowerCase().trim())
+          .limit(1)
+          .maybeSingle();
+        
+        if (profileData?.auth_user_id) {
+          userId = profileData.auth_user_id;
+        } else {
+          // Fallback: User might exist in auth but not in user_profiles (shouldn't happen but handle it)
+          // Use listUsers (fallback only - should rarely be needed)
+          try {
+            const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+            if (listError || !usersData?.users) {
+              return res.status(404).json({ error: 'User not found' });
+            }
+            const authUser = usersData.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase().trim());
+            if (!authUser) {
+              return res.status(404).json({ error: 'User not found' });
+            }
+            userId = authUser.id;
+          } catch (error) {
+            console.error('Error finding user:', error);
+            return res.status(404).json({ error: 'User not found' });
+          }
         }
-        userId = authUserData.user.id;
       }
 
       // Update password via admin API

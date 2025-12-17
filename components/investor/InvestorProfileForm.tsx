@@ -53,8 +53,10 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  // Get auth_user_id - investor_profiles uses auth_user_id, not profile ID
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<InvestorProfile>({
-    user_id: currentUser.id,
+    user_id: '', // Will be set to auth_user_id after loading
     media_type: 'logo',
     geography: [],
     investment_stages: [],
@@ -231,12 +233,17 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
     try {
       // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id || currentUser.id;
+      if (!authUser) {
+        console.error('No auth user found');
+        return;
+      }
+      const userId = authUser.id;
+      setAuthUserId(userId); // Store auth_user_id
       
       const { data, error } = await supabase
         .from('investor_profiles')
         .select('*')
-        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
+        .eq('user_id', userId) // Use auth_user_id, not profile ID
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
@@ -245,20 +252,28 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
       }
 
       if (data) {
-        const loadedProfile = {
-          ...data,
-          geography: data.geography || [],
-          investment_stages: data.investment_stages || [],
-          domain: data.domain || []
+        const profileData = data as InvestorProfile;
+        const loadedProfile: InvestorProfile = {
+          ...profileData,
+          user_id: userId, // Use auth_user_id, not profile ID
+          geography: profileData.geography || [],
+          investment_stages: profileData.investment_stages || [],
+          domain: profileData.domain || []
         };
         setProfile(loadedProfile);
         if (onProfileChange) {
           onProfileChange(loadedProfile);
         }
       } else {
+        // Initialize with auth_user_id
+        const initialProfile: InvestorProfile = {
+          ...profile,
+          user_id: userId // Use auth_user_id, not profile ID
+        };
+        setProfile(initialProfile);
         // Set initial preview with default values
         if (onProfileChange) {
-          onProfileChange(profile);
+          onProfileChange(initialProfile);
         }
       }
     } catch (error) {
@@ -379,8 +394,22 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
 
     setIsSaving(true);
     try {
+      // Get auth_user_id for saving (use stored authUserId or get fresh)
+      let userIdForSave = authUserId;
+      if (!userIdForSave) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) {
+          alert('Not authenticated');
+          setIsSaving(false);
+          return;
+        }
+        userIdForSave = authUser.id;
+        setAuthUserId(userIdForSave);
+      }
+      
       const profileData = {
         ...profile,
+        user_id: userIdForSave, // CRITICAL: Use auth_user_id, not profile ID
         updated_at: new Date().toISOString()
       };
 

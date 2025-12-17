@@ -1163,7 +1163,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           logo_url: logoUrl || null,
           financial_advisor_license_url: licenseUrl || null,
           firm_name: userData.role === 'Investment Advisor' ? profileData.firmName || null : null,
-          website: userData.role === 'Investment Advisor' ? profileData.website || null : null,
+          // Note: website is NOT saved to user_profiles - it's saved to investment_advisor_profiles table
           // Add facilitator specific fields
           center_name: userData.role === 'Startup Facilitation Center' ? profileData.centerName : null,
           // Add Form 2 profile fields that are collected

@@ -226,43 +226,7 @@ export const authService = {
         }
       }
 
-      // Fallback to users table (old system)
-      const { data: profiles, error } = await supabase
-        .from('users')
-        .select('government_id, ca_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url')
-        .eq('id', userId);
-      
-      const profile = profiles && profiles.length > 0 ? profiles[0] : null;
-
-      if (error || !profile) {
-        return false;
-      }
-
-      // Check basic document requirements (government_id)
-      const hasBasicDocuments = !!(profile.government_id || 
-                                  (profile.verification_documents && profile.verification_documents.length > 0));
-
-      if (!hasBasicDocuments) {
-        return false;
-      }
-
-      // Role-specific completion requirements
-      switch (profile.role) {
-        case 'Startup Facilitation Center':
-          return !!(profile.center_name && profile.center_name.trim() !== '');
-        
-        case 'Investment Advisor':
-          return !!(profile.government_id && profile.ca_license && profile.financial_advisor_license_url);
-        
-        case 'Startup':
-          return !!(profile.government_id && profile.ca_license);
-        
-        case 'Investor':
-          return !!(profile.government_id && profile.ca_license);
-        
-        default:
-          return hasBasicDocuments;
-      }
+      // Only use user_profiles - no fallback to users table
     } catch (error) {
       console.error('Error checking profile completion:', error);
       return false;
@@ -356,53 +320,18 @@ export const authService = {
         }
       }
 
-      // If not found in new system, try old users table (backward compatibility)
-      if (!profile && !profileError) {
-        for (let attempt = 1; attempt <= 2; attempt++) { // Reduced to 2 attempts
-          try {
-            const profilePromise = supabase
-              .from('users')
-              .select('*')
-              .eq('id', user.id)
-              .maybeSingle();
-
-            const profileTimeoutPromise = new Promise((_, reject) => {
-              setTimeout(() => reject(new Error('Profile check timeout')), 3000); // Reduced timeout
-            });
-
-            const result = await Promise.race([profilePromise, profileTimeoutPromise]) as any;
-            profile = result.data;
-            profileError = result.error;
-            usingNewSystem = false;
-            
-            if (!profileError) {
-              break; // Success, exit retry loop
-            }
-            
-            if (attempt < 2) {
-              await new Promise(resolve => setTimeout(resolve, 500)); // Faster retry
-            }
-          } catch (retryError) {
-            console.error(`Fallback profile query attempt ${attempt} error:`, retryError);
-            if (attempt === 3) {
-              profileError = retryError;
-            }
-          }
-        }
-      }
-
+      // Only use user_profiles - no fallback to users table
       if (profileError || !profile) {
-        console.log('No profile found for user:', user.email);
+        console.log('No profile found in user_profiles for user:', user.email);
         return null
       }
 
-      // For new system, profile_id is the actual profile UUID
-      // For old system, id is the auth_user_id (same as profile ID)
-      const profileId = usingNewSystem ? (profile.profile_id || profile.id) : profile.id;
+      // Profile ID is the actual profile UUID from user_profiles
+      const profileId = profile.profile_id || profile.id;
       const isComplete = await this.isProfileComplete(profileId);
 
       const userData = {
-        id: usingNewSystem ? (profile.profile_id || profile.id) : profile.id,
+        id: profile.profile_id || profile.id,
         email: profile.email,
         name: profile.name,
         role: profile.role,
@@ -783,17 +712,9 @@ export const authService = {
           data = updatedProfileByAuth;
           error = null;
         } else {
-          // Profile not in user_profiles - update in users table (backward compatibility)
-          console.log('✅ Updating profile in users table (fallback)');
-          const { data: updatedUser, error: updateError } = await supabase
-            .from('users')
-            .update(updates)
-            .eq('id', userId)
-            .select()
-            .maybeSingle(); // Use maybeSingle() to avoid 406 error
-
-          data = updatedUser;
-          error = updateError;
+          // Profile not found in user_profiles - cannot update
+          console.log('❌ Profile not found in user_profiles table');
+          return { user: null, error: 'Profile not found in user_profiles table' };
         }
       }
 
@@ -857,84 +778,17 @@ export const authService = {
       console.log('User authenticated:', user.email);
       console.log('User metadata:', user.user_metadata);
 
-      // Check if user profile exists
+      // Check if user profile exists in user_profiles table
       console.log('Checking if profile exists in database...');
       const { data: profile, error: profileError } = await supabase
-        .from('users')
+        .from('user_profiles')
         .select('*')
-        .eq('id', user.id)
-        .single()
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
 
-      if (profileError) {
-        console.log('Profile not found, creating from metadata...');
-        // Profile doesn't exist, try to create it from metadata
-        const metadata = user.user_metadata
-        if (metadata?.name && metadata?.role) {
-          console.log('Creating profile with metadata:', { name: metadata.name, role: metadata.role });
-          const { data: newProfile, error: createError } = await supabase
-            .from('users')
-            .insert({
-              id: user.id,
-              email: user.email,
-              name: metadata.name,
-              role: metadata.role,
-              startup_name: metadata.startupName || null,
-              registration_date: new Date().toISOString().split('T')[0]
-            })
-            .select()
-            .single()
-
-          if (createError) {
-            console.error('Error creating profile from metadata:', createError);
-            return { user: null, error: 'Failed to create profile from metadata' }
-          }
-
-          console.log('Profile created successfully:', newProfile);
-          // If role is Startup and startup_name was provided in metadata, ensure a startups row exists
-          try {
-            if (metadata.role === 'Startup' && metadata.startupName) {
-              const { data: existingStartup } = await supabase
-                .from('startups')
-                .select('id')
-                .eq('name', metadata.startupName)
-                .single();
-
-              if (!existingStartup) {
-                await supabase
-                  .from('startups')
-                  .insert({
-                    name: metadata.startupName,
-                    investment_type: 'Seed',
-                    investment_value: 0,
-                    equity_allocation: 0,
-                    current_valuation: 0,
-                    compliance_status: 'Pending',
-                    sector: 'Technology',
-                    total_funding: 0,
-                    total_revenue: 0,
-                    registration_date: new Date().toISOString().split('T')[0],
-                    user_id: user.id
-                  });
-              }
-            }
-          } catch (e) {
-            console.warn('Failed to ensure startup row during email confirmation (non-blocking):', e);
-          }
-          console.log('=== EMAIL CONFIRMATION END ===');
-          return {
-            user: {
-              id: newProfile.id,
-              email: newProfile.email,
-              name: newProfile.name,
-              role: newProfile.role,
-              registration_date: newProfile.registration_date
-            },
-            error: null
-          }
-        } else {
-          console.error('No metadata found:', metadata);
-          return { user: null, error: 'No metadata found to create profile' }
-        }
+      if (profileError || !profile) {
+        console.log('Profile not found in user_profiles, cannot create from metadata (use registration flow)');
+        return { user: null, error: 'Profile not found. Please complete registration.' }
       }
 
       console.log('Profile found:', profile);

@@ -307,10 +307,10 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
                     
                     console.log('🔍 Authenticated user:', user.id, user.email);
                     
-                    // Try user_profiles first (new system), then fall back to users table
+                    // Use ONLY user_profiles table - no fallback to users table
                     let userProfile: any = null;
                     
-                    // First, check user_profiles
+                    // Get active profile from user_profile_sessions
                     const { data: sessionData } = await authService.supabase
                         .from('user_profile_sessions')
                         .select('current_profile_id')
@@ -331,22 +331,6 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
                                 investment_advisor_code: profileData.investment_advisor_code_entered
                             };
                         }
-                    }
-                    
-                    // Fallback to users table if not found in user_profiles
-                    if (!userProfile) {
-                        const { data: userProfiles, error: profileError } = await authService.supabase
-                            .from('users')
-                            .select('government_id, ca_license, verification_documents, logo_url, financial_advisor_license_url, investment_advisor_code')
-                            .eq('id', user.id)
-                            .maybeSingle();
-                        
-                        userProfile = userProfiles;
-                    }
-                    
-                    if (profileError) {
-                        console.error('❌ Profile fetch error:', profileError);
-                        return;
                     }
                     
                     console.log('🔍 User profile documents loaded:', userProfile);

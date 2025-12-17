@@ -458,16 +458,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         // Use getCurrentUser() which handles both user_profiles and users tables
         const profile = await authService.getCurrentUser();
         
-        // Fallback: if getCurrentUser returns null, try users table directly
+        // Use ONLY user_profiles - getCurrentUser() already queries user_profiles
         profileData = profile;
-        if (!profileData) {
-          const { data: usersProfile } = await authService.supabase
-            .from('users')
-            .select('*')
-            .eq('id', user.id)
-            .single();
-          profileData = usersProfile as any;
-        }
       }
 
       // advisorCodeFromUrl is already declared above (line 412)
@@ -484,8 +476,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       if (advisorCodeFromUrl && invitedByAdvisor) {
         const currentAdvisorCode = (profileData as any)?.investment_advisor_code_entered;
         if (!currentAdvisorCode || currentAdvisorCode !== advisorCodeFromUrl) {
-          // Check if profile is in user_profiles or users table
-          // user.id is auth_user_id, so check user_profiles by auth_user_id, not id
+          // Check profile in user_profiles table (only table we use)
+          // user.id is auth_user_id, so check user_profiles by auth_user_id
           const { data: profileCheck } = await authService.supabase
             .from('user_profiles')
             .select('id, auth_user_id')
@@ -502,16 +494,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 updated_at: new Date().toISOString()
               })
               .eq('id', (profileCheck as any).id); // Use profile ID for user_profiles
-          } else {
-            // Fallback to users table (old system - backward compatibility)
-            await supabase
-              .from('users')
-              // @ts-expect-error - Dynamic table name prevents type inference
-              .update({
-                investment_advisor_code_entered: advisorCodeFromUrl,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', user.id); // In users table, id = auth_user_id
           }
 
           // If user is a Startup, also update startup record
@@ -1161,7 +1143,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         hasVerificationDocuments: !!updateData.verification_documents
       });
 
-      // Check if this is a profile from user_profiles (new system) or users (old system)
+      // Use ONLY user_profiles table - no fallback to users table
       // Get current auth user ID to check properly
       const { data: { user: currentAuthUser } } = await authService.supabase.auth.getUser();
       const authUserId = currentAuthUser?.id;
@@ -1169,7 +1151,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       // Check if profile exists in user_profiles by both profile ID and auth_user_id
       // This handles both cases: when userData.id is profile ID or auth_user_id
       let profileCheck = null;
-      let profileCheckError = null;
       
       // First try by profile ID (if userData.id is the profile ID)
       const { data: profileById } = await (authService.supabase as any)
@@ -1195,10 +1176,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         }
       }
 
-      // Determine which table to update
-      // For new registrations, always use user_profiles (new users go there)
-      // Only use users table as fallback for old users
-      const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
+      // Always use user_profiles table
+      const tableToUpdate = 'user_profiles';
       console.log('💾 Updating profile in table:', tableToUpdate, 'Profile ID:', userData.id, 'Auth User ID:', authUserId);
       console.log('🔍 Profile check result:', { found: !!profileCheck, profileId: userData.id, authUserId });
       console.log('🔍 Current auth user:', { 
@@ -1206,16 +1185,31 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         email: currentAuthUser?.email 
       });
 
-      console.log('🔄 Attempting UPDATE operation...');
+      // CRITICAL: Check if profile exists before attempting update
+      if (!profileCheck) {
+        console.error('❌ ========== PROFILE NOT FOUND IN user_profiles ==========');
+        console.error('❌ Cannot update profile - profile not found in user_profiles table');
+        console.error('❌ Auth User ID:', authUserId);
+        console.error('❌ Attempted Profile ID:', userData.id);
+        console.error('❌ This means the profile was never created or the ID is incorrect');
+        console.error('❌ =======================================================');
+        throw new Error('Profile not found in user_profiles table. Please complete Form 1 registration first.');
+      }
+
+      // Use the correct profile ID from profileCheck
+      const profileIdToUpdate = profileCheck.id;
+      console.log('🔄 Attempting UPDATE operation with profile ID:', profileIdToUpdate);
+      
       const { data: updateResult, error: updateError } = await (authService.supabase as any)
         .from(tableToUpdate)
         .update(updateData as any)
-        .eq('id', userData.id)
+        .eq('id', profileIdToUpdate)  // Use the correct profile ID from profileCheck
         .select();
 
       console.log('📊 UPDATE operation result:', {
         success: !updateError,
-        hasData: !!updateResult,
+        hasData: !!updateResult && updateResult.length > 0,
+        rowsUpdated: updateResult?.length || 0,
         error: updateError ? {
           message: updateError.message,
           code: updateError.code,
@@ -1228,7 +1222,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         // Log to console
         console.error('❌ ========== DATABASE UPDATE FAILED ==========');
         console.error('❌ Table:', tableToUpdate);
-        console.error('❌ Profile ID:', userData.id);
+        console.error('❌ Profile ID:', profileIdToUpdate);
         console.error('❌ Auth User ID:', currentAuthUser?.id);
         console.error('❌ Error Message:', updateError.message);
         console.error('❌ Error Code:', updateError.code);
@@ -1243,32 +1237,42 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         }
         
         throw new Error(`Failed to update user profile: ${updateError.message || 'Unknown error'}`);
+      } else if (!updateResult || updateResult.length === 0) {
+        // No error but no rows updated - this means the profile ID doesn't exist
+        console.error('❌ ========== UPDATE RETURNED NO ROWS ==========');
+        console.error('❌ Update succeeded but 0 rows were updated');
+        console.error('❌ This means the profile ID does not exist in the database');
+        console.error('❌ Profile ID used:', profileIdToUpdate);
+        console.error('❌ Auth User ID:', authUserId);
+        console.error('❌ =============================================');
+        throw new Error('Profile update failed: Profile ID not found in database. Please contact support.');
       } else {
-        console.log('✅ UPDATE operation successful!', updateResult);
+        console.log('✅ UPDATE operation successful! Rows updated:', updateResult.length);
+        console.log('✅ Updated profile data:', updateResult[0]);
+        // Update userData.id to the correct profile ID for subsequent operations
+        userData.id = profileIdToUpdate;
       }
 
-      // If using new system, also update is_profile_complete flag
-      if (profileCheck) {
-        console.log('✅ Setting is_profile_complete = true for profile:', userData.id);
-        const { error: completeError, data: completeData } = await (authService.supabase as any)
-          .from('user_profiles')
-          .update({ is_profile_complete: true })
-          .eq('id', userData.id)
-          .select();
-        
-        if (completeError) {
-          console.error('❌ Failed to update is_profile_complete flag:', completeError);
-          console.error('Error details:', {
-            message: completeError.message,
-            details: completeError.details,
-            hint: completeError.hint,
-            code: completeError.code
-          });
-        } else {
-          console.log('✅ Successfully set is_profile_complete = true:', completeData);
-        }
+      // Update is_profile_complete flag (profileCheck is guaranteed to exist at this point)
+      const profileIdForComplete = profileCheck.id;
+      console.log('✅ Setting is_profile_complete = true for profile:', profileIdForComplete);
+      const { error: completeError, data: completeData } = await (authService.supabase as any)
+        .from('user_profiles')
+        .update({ is_profile_complete: true })
+        .eq('id', profileIdForComplete)
+        .select();
+      
+      if (completeError) {
+        console.error('❌ Failed to update is_profile_complete flag:', completeError);
+        console.error('Error details:', {
+          message: completeError.message,
+          details: completeError.details,
+          hint: completeError.hint,
+          code: completeError.code
+        });
+        // Don't throw - profile data was saved successfully
       } else {
-        console.log('⚠️ Profile not found in user_profiles, skipping is_profile_complete update');
+        console.log('✅ Successfully set is_profile_complete = true:', completeData);
       }
 
       console.log('✅ User profile updated successfully in database');
@@ -1332,6 +1336,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               .single();
 
             if (createError) {
+              console.error('❌ ========== STARTUP CREATION FAILED ==========');
               console.error('❌ Error creating startup:', createError);
               console.error('❌ Startup creation details:', {
                 error: createError,
@@ -1343,12 +1348,15 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 profile_id: userData.id,
                 startup_name: userData.startupName
               });
-              // Don't throw - allow profile completion even if startup creation fails
-              // Startup can be created later or manually
-              console.warn('⚠️ Profile marked complete, but startup creation failed. Startup can be created later.');
-              // Set startup to null so we don't try to create founders
-              startup = null;
+              console.error('❌ =============================================');
+              // Throw error to prevent silent failure
+              throw new Error(`Failed to create startup: ${createError.message || 'Unknown error'}`);
+            } else if (!newStartup) {
+              console.error('❌ ========== STARTUP CREATION RETURNED NO DATA ==========');
+              console.error('❌ Startup creation succeeded but returned no data');
+              throw new Error('Failed to create startup: No data returned');
             } else {
+              console.log('✅ Startup created successfully:', newStartup);
               startup = newStartup;
             }
           }
@@ -1401,10 +1409,27 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               .select();
             
             if (startupUpdateError) {
+              console.error('❌ ========== STARTUP UPDATE FAILED ==========');
               console.error('❌ Error updating startup with profile data:', startupUpdateError);
-              throw startupUpdateError;
+              console.error('❌ Startup ID:', startup.id);
+              console.error('❌ Error details:', {
+                message: startupUpdateError.message,
+                code: startupUpdateError.code,
+                details: startupUpdateError.details,
+                hint: startupUpdateError.hint
+              });
+              console.error('❌ Update data:', startupUpdateData);
+              console.error('❌ ==========================================');
+              throw new Error(`Failed to update startup: ${startupUpdateError.message || 'Unknown error'}`);
+            } else if (!updatedStartup || updatedStartup.length === 0) {
+              console.error('❌ ========== STARTUP UPDATE RETURNED NO ROWS ==========');
+              console.error('❌ Update succeeded but 0 rows were updated');
+              console.error('❌ Startup ID used:', startup.id);
+              throw new Error('Failed to update startup: No rows updated');
+            } else {
+              console.log('✅ Startup updated with profile data successfully! Rows updated:', updatedStartup.length);
+              console.log('✅ Updated startup data:', updatedStartup[0]);
             }
-            console.log('✅ Startup updated with profile data successfully:', updatedStartup);
 
             // Generate compliance tasks after saving profile data
             try {
@@ -1539,11 +1564,11 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 userId: userData.id
               });
 
-              // Get advisor details - Check user_profiles table first (new system)
+              // Get advisor details - Use ONLY user_profiles table
               let advisorData: any = null;
               let advisorAuthUserId: string | null = null;
               
-              // Try user_profiles first (new system)
+              // Query user_profiles table only
               const { data: advisorProfile } = await authService.supabase
                 .from('user_profiles')
                 .select('id, auth_user_id, investment_advisor_code, name')
@@ -1554,42 +1579,29 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               if (advisorProfile) {
                 advisorData = advisorProfile;
                 advisorAuthUserId = (advisorProfile as any).auth_user_id;
-              } else {
-                // Fallback to users table (old system - backward compatibility)
-                const { data: oldAdvisorData } = await authService.supabase
-                  .from('users')
-                  .select('id, investment_advisor_code, name')
-                  .eq('investment_advisor_code', advisorCodeFromInvite)
-                  .eq('role', 'Investment Advisor')
-                  .maybeSingle();
-                
-                if (oldAdvisorData) {
-                  advisorData = oldAdvisorData;
-                  advisorAuthUserId = (oldAdvisorData as any).id; // In old system, id = auth_user_id
-                }
               }
 
               if (advisorData && advisorAuthUserId) {
-                // Auto-accept: Set advisor_accepted = true in user_profiles or users table
+                // Auto-accept: Set advisor_accepted = true in user_profiles table
                 // This makes startup appear directly in "My Startups" without approval
-                // Check if profile is in user_profiles or users table
+                // Check if profile exists in user_profiles table
                 const { data: profileCheck } = await authService.supabase
                   .from('user_profiles')
                   .select('id')
                   .eq('id', userData.id)
                   .maybeSingle();
                 
-                const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
-                
-                await authService.supabase
-                  .from(tableToUpdate)
-                  // @ts-expect-error - Dynamic table name prevents type inference
-                  .update({
-                    advisor_accepted: true,
-                    investment_advisor_code_entered: advisorCodeFromInvite,
-                    updated_at: new Date().toISOString()
-                  })
-                  .eq('id', userData.id);
+                if (profileCheck) {
+                  await authService.supabase
+                    .from('user_profiles')
+                    // @ts-expect-error - Dynamic table name prevents type inference
+                    .update({
+                      advisor_accepted: true,
+                      investment_advisor_code_entered: advisorCodeFromInvite,
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq('id', userData.id);
+                }
 
                 // Update startup record with advisor code
                 await authService.supabase
@@ -1637,25 +1649,25 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               if (enteredAdvisorCode) {
                 console.log('📋 Startup entered advisor code manually:', enteredAdvisorCode);
                 
-                // Check if profile is in user_profiles or users table
+                // Check if profile exists in user_profiles table
                 const { data: profileCheck } = await authService.supabase
                   .from('user_profiles')
                   .select('id')
                   .eq('id', userData.id)
                   .maybeSingle();
                 
-                const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
-                
-                // Save manually entered advisor code to user_profiles or users table
-                await authService.supabase
-                  .from(tableToUpdate)
-                  // @ts-expect-error - Dynamic table name prevents type inference
-                  .update({
-                    investment_advisor_code_entered: enteredAdvisorCode,
-                    advisor_accepted: false, // Needs advisor approval
-                    updated_at: new Date().toISOString()
-                  })
-                  .eq('id', userData.id);
+                if (profileCheck) {
+                  // Save manually entered advisor code to user_profiles table
+                  await authService.supabase
+                    .from('user_profiles')
+                    // @ts-expect-error - Dynamic table name prevents type inference
+                    .update({
+                      investment_advisor_code_entered: enteredAdvisorCode,
+                      advisor_accepted: false, // Needs advisor approval
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq('id', userData.id);
+                }
 
                 // Also update startup record
                 await authService.supabase
@@ -1671,8 +1683,14 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               }
             }
           }
-        } catch (error) {
-          console.error('Error creating startup:', error);
+        } catch (error: any) {
+          console.error('❌ ========== STARTUP DATA SAVE ERROR ==========');
+          console.error('❌ Error in startup data save:', error);
+          console.error('❌ Error message:', error?.message);
+          console.error('❌ Error details:', error);
+          console.error('❌ =============================================');
+          // Re-throw error so it's caught by outer catch block and shown to user
+          throw new Error(`Failed to save startup data: ${error?.message || 'Unknown error'}`);
         }
       }
 

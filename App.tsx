@@ -1158,65 +1158,11 @@ const App: React.FC = () => {
                   if (metadata?.name && metadata?.role) {
                     console.log('Creating profile automatically with metadata:', { name: metadata.name, role: metadata.role });
                     
-                    // Create the profile
-                    const { data: newProfile, error: createError } = await authService.supabase
-                      .from('users')
-                      .insert({
-                        id: session.user.id,
-                        email: session.user.email,
-                        name: metadata.name,
-                        role: metadata.role,
-                        startup_name: metadata.startupName || null,
-                        registration_date: new Date().toISOString().split('T')[0]
-                      })
-                      .select()
-                      .single();
-
-                    if (createError) {
-                      console.error('Error creating profile automatically:', createError);
-                    } else {
-                      console.log('Profile created automatically:', newProfile);
-                      
-                      // If role is Startup and startup_name was provided, create startup record
-                      if (metadata.role === 'Startup' && metadata.startupName) {
-                        try {
-                          const { data: existingStartup } = await authService.supabase
-                            .from('startups')
-                            .select('id')
-                            .eq('name', metadata.startupName)
-                            .single();
-
-                          if (!existingStartup) {
-                            // Calculate current valuation from default price per share and total shares
-                            const defaultPricePerShare = 0.01;
-                            const defaultTotalShares = 1000000;
-                            const calculatedCurrentValuation = defaultPricePerShare * defaultTotalShares;
-                            
-                            await authService.supabase
-                              .from('startups')
-                              .insert({
-                                name: metadata.startupName,
-                                investment_type: 'Seed',
-                                investment_value: 0,
-                                equity_allocation: 0,
-                                current_valuation: calculatedCurrentValuation,
-                                compliance_status: 'Pending',
-                                sector: 'Unknown',
-                                total_funding: 0,
-                                total_revenue: 0,
-                                registration_date: new Date().toISOString().split('T')[0],
-                                user_id: session.user.id
-                              });
-                            console.log('Startup record created automatically');
-                          }
-                        } catch (e) {
-                          console.warn('Failed to create startup record automatically (non-blocking):', e);
-                        }
-                      }
-                      
-                      // Now try to get the profile again
-                      profileUser = await authService.getCurrentUser();
-                    }
+                    // Profile creation from metadata is deprecated - users should use registration flow
+                    // This will not work with user_profiles (requires proper profile creation flow)
+                    console.warn('⚠️ Automatic profile creation from metadata is deprecated. User should complete registration.');
+                    // Don't create profile - let user complete registration
+                    // Profile must be created through verify-otp.ts registration flow
                   }
                 }
                 
@@ -1414,45 +1360,58 @@ const App: React.FC = () => {
         const authUserId = authUser.id;
         console.log('🔍 Fetching startup for auth_user_id:', authUserId, 'Profile ID:', cu.id, 'Profile startup_name:', cu.startup_name);
         
-        // CRITICAL FIX: Match startup by both user_id AND startup_name from profile
-        // This ensures we get the correct startup for the current profile
+        // CRITICAL FIX: First try to find startup by user_id only (more flexible)
+        // This handles cases where startup name might differ slightly
         let query = authService.supabase
           .from('startups')
           .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
           .eq('user_id', authUserId);  // Use auth_user_id, not profile ID!
         
-        // If profile has startup_name, match by it to ensure correct startup
-        if (cu.startup_name) {
-          query = query.eq('name', cu.startup_name);
-          console.log('🔍 Matching startup by name:', cu.startup_name);
+        const { data: startupsByUserId, error: queryErr } = await query;
+        
+        let row: any = null;
+        if (startupsByUserId && startupsByUserId.length > 0) {
+          // If multiple startups for this user, prefer the one matching startup_name
+          if (cu.startup_name && startupsByUserId.length > 1) {
+            const matchedByName = startupsByUserId.find((s: any) => s.name === cu.startup_name);
+            row = matchedByName || startupsByUserId[0]; // Use matched one or first one
+          } else {
+            row = startupsByUserId[0]; // Use first (and likely only) startup
+          }
+          console.log('✅ Found startup by user_id:', (row as any).name);
+        } else if (queryErr) {
+          console.error('❌ Error fetching startup in Phase 0:', queryErr);
+        } else if (cu.startup_name) {
+          // Fallback: If not found by user_id, try by name (in case user_id is wrong)
+          console.log('🔍 No startup found by user_id, trying by name:', cu.startup_name);
+          const { data: startupByName, error: nameErr } = await authService.supabase
+            .from('startups')
+            .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
+            .eq('name', cu.startup_name)
+            .maybeSingle();
+          
+          if (startupByName && !nameErr) {
+            row = startupByName;
+            console.log('✅ Found startup by name:', row.name);
+          }
         }
         
-        const { data: row, error: rowErr } = await query.maybeSingle();
-        
-        if (row && !rowErr) {
-          // Verify the startup name matches (if profile has startup_name)
-          if (cu.startup_name && row.name !== cu.startup_name) {
-            console.warn('⚠️ Startup name mismatch! Profile startup_name:', cu.startup_name, 'Found startup name:', row.name);
-            // Don't set this startup, let the main fetch logic handle it
-          } else {
-            console.log('✅ Found matching startup:', row.name);
-            setStartups([row] as any);
-            setSelectedStartup(row as any);
-            setIsLoading(false);
-            setView('startupHealth');
-            // Load other data in background without blocking
-            (async () => {
-              try {
-                const bgOffers = await investmentService.getOffersForStartup(row.id);
-                setInvestmentOffers(bgOffers);
-              } catch {}
-            })();
-            // Mark as loaded so main batch doesn't run for Startup users
-            setHasInitialDataLoaded(true);
-            return;
-          }
-        } else if (rowErr) {
-          console.error('❌ Error fetching startup in Phase 0:', rowErr);
+        if (row) {
+          console.log('✅ Setting startup:', row.name);
+          setStartups([row] as any);
+          setSelectedStartup(row as any);
+          setIsLoading(false);
+          setView('startupHealth');
+          // Load other data in background without blocking
+          (async () => {
+            try {
+              const bgOffers = await investmentService.getOffersForStartup(row.id);
+              setInvestmentOffers(bgOffers);
+            } catch {}
+          })();
+          // Mark as loaded so main batch doesn't run for Startup users
+          setHasInitialDataLoaded(true);
+          return;
         }
       } catch (error) {
         console.error('❌ Exception in Phase 0 startup fetch:', error);

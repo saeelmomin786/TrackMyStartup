@@ -40,6 +40,10 @@ const VerificationStatusDisplay: React.FC<{ status: ComplianceStatus }> = ({ sta
             colorClass = "text-red-600"; 
             icon = <AlertCircle className="w-4 h-4" />;
             break;
+        case ComplianceStatus.Submitted:
+            colorClass = "text-blue-600";
+            icon = <Clock className="w-4 h-4" />;
+            break;
         case ComplianceStatus.Pending: 
             colorClass = "text-yellow-600"; 
             icon = <Clock className="w-4 h-4" />;
@@ -461,6 +465,7 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                     className="bg-white border border-gray-300 rounded-md px-2 py-1 text-xs focus:ring-blue-500 focus:border-blue-500"
                 >
                     <option value={ComplianceStatus.Pending}>Pending</option>
+                    <option value={ComplianceStatus.Submitted}>Submitted</option>
                     <option value={ComplianceStatus.Verified}>Verified</option>
                     <option value={ComplianceStatus.Rejected}>Rejected</option>
                 </select>
@@ -527,9 +532,27 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
             
             if (result && result.success) {
                 console.log('✅ Upload successful:', result);
+                
+                // Check if status update had any issues (it's logged but doesn't fail the upload)
+                if (result.statusUpdateError) {
+                    console.warn('⚠️ Upload succeeded but status update failed:', result.statusUpdateError);
+                    messageService.error(
+                        'Status Update Failed',
+                        'Document uploaded successfully, but status could not be updated to "Submitted". ' +
+                        'Please run the database migration: ADD_SUBMITTED_STATUS_TO_COMPLIANCE_CHECKS.sql'
+                    );
+                }
+                
                 setUploadSuccess(true);
                 setSelectedFile(null);
-                loadComplianceData(); // Refresh data
+                
+                // Wait a moment for database to commit, then refresh
+                console.log('[UPLOAD] Waiting for database to commit status update...');
+                setTimeout(async () => {
+                    console.log('[UPLOAD] Refreshing compliance data...');
+                    await loadComplianceData(); // Refresh data
+                    console.log('[UPLOAD] Compliance data refreshed');
+                }, 500); // Small delay to ensure DB commit
                 
                 // Close modal after 2 seconds
                 setTimeout(() => {
@@ -771,18 +794,16 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-semibold text-slate-700">Compliance Checklist</h2>
-                
-                {/* Compliance Submission Button - Only show for Startup users */}
-                {!isViewOnly && currentUser?.role === 'Startup' && (
-                    <ComplianceSubmissionButton 
-                        currentUser={currentUser} 
-                        userRole="Startup" 
-                        className="mb-0"
-                    />
-                )}
-            </div>
+            <h2 className="text-2xl font-semibold text-slate-700">Compliance Checklist</h2>
+            
+            {/* Submit New Compliance Section */}
+            {!isViewOnly && currentUser?.role === 'Startup' && (
+                <ComplianceSubmissionButton 
+                    currentUser={currentUser} 
+                    userRole="Startup" 
+                    className="mb-0"
+                />
+            )}
 
             {/* Company Documents Section */}
             <CompanyDocumentsSection 
@@ -888,6 +909,10 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                     const finalCountryCode = countryCode || 'US';
                     const professionalTitles = getCountryProfessionalTitles(finalCountryCode);
                     
+                    // Check if any tasks in this entity require CA or CS verification
+                    const hasCARequired = (tasks as IntegratedComplianceTask[]).some(task => task.caRequired);
+                    const hasCSRequired = (tasks as IntegratedComplianceTask[]).some(task => task.csRequired);
+                    
                     return (
                         <Card key={entityName}>
                             <h3 className="text-xl font-semibold text-slate-700 mb-4">{entityName}</h3>
@@ -897,8 +922,12 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                                         <tr>
                                             <th className="p-4 text-sm font-semibold text-slate-600 uppercase tracking-wider text-center w-20">Year</th>
                                             <th className="p-4 text-sm font-semibold text-slate-600 uppercase tracking-wider text-left w-48">Task</th>
-                                            <th className="p-4 text-sm font-semibold text-slate-600 uppercase tracking-wider text-center w-32">{professionalTitles.caTitle} Verified</th>
-                                            <th className="p-4 text-sm font-semibold text-slate-600 uppercase tracking-wider text-center w-32">{professionalTitles.csTitle} Verified</th>
+                                            {hasCARequired && (
+                                                <th className="p-4 text-sm font-semibold text-slate-600 uppercase tracking-wider text-center w-32">{professionalTitles.caTitle} Verified</th>
+                                            )}
+                                            {hasCSRequired && (
+                                                <th className="p-4 text-sm font-semibold text-slate-600 uppercase tracking-wider text-center w-32">{professionalTitles.csTitle} Verified</th>
+                                            )}
                                             <th className="p-4 text-sm font-semibold text-slate-600 uppercase tracking-wider text-center w-32">Action</th>
                                         </tr>
                                     </thead>
@@ -944,8 +973,12 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                                                         )}
                                                     </div>
                                                 </td>
-                                                <td className="p-4 whitespace-nowrap text-slate-600 text-center align-middle w-32">{getVerificationCell(item, 'ca')}</td>
-                                                <td className="p-4 whitespace-nowrap text-slate-600 text-center align-middle w-32">{getVerificationCell(item, 'cs')}</td>
+                                                {hasCARequired && (
+                                                    <td className="p-4 whitespace-nowrap text-slate-600 text-center align-middle w-32">{getVerificationCell(item, 'ca')}</td>
+                                                )}
+                                                {hasCSRequired && (
+                                                    <td className="p-4 whitespace-nowrap text-slate-600 text-center align-middle w-32">{getVerificationCell(item, 'cs')}</td>
+                                                )}
                                                 <td className="p-4 whitespace-nowrap text-center align-middle w-32">
                                                     <div className="flex items-center gap-2 justify-center">
                                                         {/* Anyone can view if a document exists */}

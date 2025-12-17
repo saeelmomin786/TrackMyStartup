@@ -871,7 +871,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     onChange={e => handleActiveToggle(e.target.checked)}
                     disabled={isSaving}
                   />
-                  <div className={`w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-brand-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-primary ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                  <div className={`w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-500/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500 ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
                 </label>
               </div>
             )}

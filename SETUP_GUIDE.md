@@ -55,6 +55,13 @@ Create these buckets one by one:
   - File size limit: 50MB
   - Allowed MIME types: `application/pdf`, `image/*`
 
+#### Bucket 7: `company-documents`
+- **Purpose**: Store company documents in the startup dashboard
+- **Settings**:
+  - Public bucket: ✅ Yes
+  - File size limit: 50MB
+  - Allowed MIME types: `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `application/vnd.ms-excel`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `application/vnd.ms-powerpoint`, `application/vnd.openxmlformats-officedocument.presentationml.presentation`, `text/plain`, `image/jpeg`, `image/jpg`, `image/png`, `image/gif`, `video/mp4`, `video/avi`, `application/zip`, `application/x-rar-compressed`
+
 ### 3. Storage Policies (Optional)
 
 After creating the buckets, you can set up storage policies for better security:
@@ -100,4 +107,13 @@ supabase storage create-bucket pitch-decks --public
 supabase storage create-bucket pitch-videos --public
 supabase storage create-bucket financial-documents --public
 supabase storage create-bucket employee-contracts --public
+supabase storage create-bucket company-documents --public
 ```
+
+## Quick Setup Using SQL
+
+Alternatively, you can run the SQL setup file to create the `company-documents` bucket and its policies:
+
+1. Open your Supabase Dashboard
+2. Go to **SQL Editor**
+3. Run the SQL from `COMPANY_DOCUMENTS_STORAGE_SETUP.sql` file

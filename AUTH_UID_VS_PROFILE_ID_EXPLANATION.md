@@ -222,3 +222,4 @@ USING (advisor_id = auth.uid());  -- ✅ Works! auth_user_id = auth.uid()
 
 
 
+

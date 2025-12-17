@@ -186,6 +186,8 @@ export const authService = {
   // Updated to check user_profiles table first, then fallback to users table
   async isProfileComplete(userId: string): Promise<boolean> {
     try {
+      console.log('🔍 isProfileComplete: Checking profile for userId:', userId);
+      
       // First try to get from user_profiles (new system)
       const { data: profileFromProfiles, error: profilesError } = await supabase
         .from('user_profiles')
@@ -193,42 +195,97 @@ export const authService = {
         .eq('id', userId)
         .maybeSingle();
       
-      if (!profilesError && profileFromProfiles) {
-        // Use is_profile_complete if available, otherwise check documents
-        if (profileFromProfiles.is_profile_complete !== undefined) {
-          return profileFromProfiles.is_profile_complete;
-        }
-        
-        // Check basic document requirements
-        const hasBasicDocuments = !!(profileFromProfiles.government_id || 
-                                    (profileFromProfiles.verification_documents && profileFromProfiles.verification_documents.length > 0));
+      if (profilesError) {
+        console.error('❌ isProfileComplete: Error fetching profile:', profilesError);
+        return false;
+      }
+      
+      if (!profileFromProfiles) {
+        console.log('❌ isProfileComplete: No profile found for userId:', userId);
+        return false;
+      }
+      
+      console.log('🔍 isProfileComplete: Profile found:', {
+        role: profileFromProfiles.role,
+        hasGovId: !!profileFromProfiles.government_id,
+        hasCaLicense: !!profileFromProfiles.ca_license,
+        hasVerificationDocs: !!(profileFromProfiles.verification_documents && profileFromProfiles.verification_documents.length > 0),
+        verificationDocsCount: profileFromProfiles.verification_documents?.length || 0,
+        is_profile_complete: profileFromProfiles.is_profile_complete
+      });
+      
+      // For older users, always check documents even if is_profile_complete flag exists
+      // This ensures users with documents aren't incorrectly marked as incomplete
+      // Only trust is_profile_complete=true, but always verify if it's false or undefined
+      if (profileFromProfiles.is_profile_complete === true) {
+        console.log('✅ isProfileComplete: is_profile_complete flag is true, returning true');
+        return true;
+      }
+      
+      // If is_profile_complete is false or undefined, check documents and role requirements
+      if (profileFromProfiles.is_profile_complete === false) {
+        console.log('⚠️ isProfileComplete: is_profile_complete is false, but checking documents anyway (for older users)');
+      } else {
+        console.log('🔍 isProfileComplete: is_profile_complete is undefined, checking documents');
+      }
+      
+      // Check basic document requirements
+      const hasBasicDocuments = !!(profileFromProfiles.government_id || 
+                                  (profileFromProfiles.verification_documents && profileFromProfiles.verification_documents.length > 0));
 
-        if (!hasBasicDocuments) {
-          return false;
-        }
-
-        // Role-specific completion requirements
-        switch (profileFromProfiles.role) {
-          case 'Startup Facilitation Center':
-            return !!(profileFromProfiles.center_name && profileFromProfiles.center_name.trim() !== '');
-          
-          case 'Investment Advisor':
-            return !!(profileFromProfiles.government_id && profileFromProfiles.ca_license && profileFromProfiles.financial_advisor_license_url);
-          
-          case 'Startup':
-            return !!(profileFromProfiles.government_id && profileFromProfiles.ca_license);
-          
-          case 'Investor':
-            return !!(profileFromProfiles.government_id && profileFromProfiles.ca_license);
-          
-          default:
-            return hasBasicDocuments;
-        }
+      if (!hasBasicDocuments) {
+        console.log('❌ isProfileComplete: No basic documents found');
+        return false;
       }
 
-      // Only use user_profiles - no fallback to users table
+      // Role-specific completion requirements
+      let result = false;
+      switch (profileFromProfiles.role) {
+        case 'Startup Facilitation Center':
+          result = !!(profileFromProfiles.center_name && profileFromProfiles.center_name.trim() !== '');
+          console.log('🔍 isProfileComplete: Startup Facilitation Center check:', result, { center_name: profileFromProfiles.center_name });
+          break;
+        
+        case 'Investment Advisor':
+          result = !!(profileFromProfiles.government_id && profileFromProfiles.ca_license && profileFromProfiles.financial_advisor_license_url);
+          console.log('🔍 isProfileComplete: Investment Advisor check:', result, {
+            hasGovId: !!profileFromProfiles.government_id,
+            hasCaLicense: !!profileFromProfiles.ca_license,
+            hasFinancialLicense: !!profileFromProfiles.financial_advisor_license_url
+          });
+          break;
+        
+        case 'Startup':
+          result = !!(profileFromProfiles.government_id && profileFromProfiles.ca_license);
+          console.log('🔍 isProfileComplete: Startup check:', result, {
+            hasGovId: !!profileFromProfiles.government_id,
+            hasCaLicense: !!profileFromProfiles.ca_license
+          });
+          break;
+        
+        case 'Investor':
+          // For Investors: require government_id and either ca_license OR verification_documents
+          // This allows older Investors who may have documents in verification_documents instead of ca_license
+          result = !!(profileFromProfiles.government_id && 
+                   (profileFromProfiles.ca_license || 
+                    (profileFromProfiles.verification_documents && profileFromProfiles.verification_documents.length > 0)));
+          console.log('🔍 isProfileComplete: Investor check:', result, {
+            hasGovId: !!profileFromProfiles.government_id,
+            hasCaLicense: !!profileFromProfiles.ca_license,
+            hasVerificationDocs: !!(profileFromProfiles.verification_documents && profileFromProfiles.verification_documents.length > 0),
+            verificationDocsCount: profileFromProfiles.verification_documents?.length || 0
+          });
+          break;
+        
+        default:
+          result = hasBasicDocuments;
+          console.log('🔍 isProfileComplete: Default role check:', result, { role: profileFromProfiles.role });
+      }
+      
+      console.log('✅ isProfileComplete: Final result:', result);
+      return result;
     } catch (error) {
-      console.error('Error checking profile completion:', error);
+      console.error('❌ Error checking profile completion:', error);
       return false;
     }
   },

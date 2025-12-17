@@ -1,6 +1,7 @@
 export enum ComplianceStatus {
   Compliant = 'Compliant',
   Pending = 'Pending',
+  Submitted = 'Submitted',
   NonCompliant = 'Non-Compliant',
   Verified = 'Verified',
   Rejected = 'Rejected',

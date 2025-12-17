@@ -50,3 +50,4 @@ CREATE POLICY "Public can view professional experiences" ON public.mentor_profes
 
 
 
+

@@ -4,9 +4,30 @@
 import { supabase } from './supabase';
 
 export class DomainUpdateService {
+  // Track if update is in progress to prevent multiple simultaneous calls
+  private static updateInProgress = false;
+  private static lastUpdateTime = 0;
+  private static readonly UPDATE_COOLDOWN_MS = 30000; // 30 seconds cooldown between updates
+  
   // Update startup sectors based on domain information from applications and fundraising
   static async updateStartupSectors(startupIds?: number[]): Promise<void> {
+    // Prevent multiple simultaneous updates
+    if (this.updateInProgress) {
+      console.log('⏭️ Domain update already in progress, skipping duplicate call');
+      return;
+    }
+    
+    // Check cooldown period
+    const now = Date.now();
+    const timeSinceLastUpdate = now - this.lastUpdateTime;
+    if (timeSinceLastUpdate < this.UPDATE_COOLDOWN_MS) {
+      console.log(`⏭️ Domain update on cooldown (${Math.round((this.UPDATE_COOLDOWN_MS - timeSinceLastUpdate) / 1000)}s remaining), skipping`);
+      return;
+    }
+    
     try {
+      this.updateInProgress = true;
+      this.lastUpdateTime = now;
       console.log('🔄 Starting automatic startup sector update...');
       
       // If no specific startup IDs provided, get all startups with default sectors
@@ -110,6 +131,8 @@ export class DomainUpdateService {
       
     } catch (error) {
       console.error('❌ Error in updateStartupSectors:', error);
+    } finally {
+      this.updateInProgress = false;
     }
   }
   

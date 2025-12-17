@@ -6,6 +6,7 @@ import {
     UserRole
 } from '../../types';
 import { companyDocumentsService } from '../../lib/companyDocumentsService';
+import { messageService } from '../../lib/messageService';
 import { 
     Plus, 
     Edit, 
@@ -17,7 +18,9 @@ import {
     User,
     Link,
     Globe,
-    ArrowUpRight
+    ArrowUpRight,
+    ChevronDown,
+    ChevronUp
 } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
@@ -44,6 +47,7 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [selectedDocument, setSelectedDocument] = useState<CompanyDocument | null>(null);
     const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+    const [showAllDocuments, setShowAllDocuments] = useState(false);
     const [formData, setFormData] = useState<CreateCompanyDocumentData>({
         documentName: '',
         description: '',
@@ -93,7 +97,10 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
             }
 
             if (!documentUrl) {
-                alert('Please provide either a cloud drive URL or upload a file');
+                messageService.warning(
+                    'Missing Document',
+                    'Please provide either a cloud drive URL or upload a file'
+                );
                 return;
             }
 
@@ -105,6 +112,10 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
             };
 
             await companyDocumentsService.createCompanyDocument(startupId, documentData);
+            messageService.success(
+                'Document Added',
+                'Company document has been added successfully'
+            );
             setShowAddModal(false);
             setFormData({
                 documentName: '',
@@ -113,9 +124,36 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
                 documentType: ''
             });
             setSelectedFile(null);
-            loadDocuments();
-        } catch (error) {
+            await loadDocuments();
+            // Reset show all to false when new document is added
+            setShowAllDocuments(false);
+        } catch (error: any) {
             console.error('Error adding document:', error);
+            
+            // Check if it's a storage bucket error
+            const errorMessage = error?.message || String(error);
+            if (errorMessage.includes('bucket') && errorMessage.includes('does not exist')) {
+                messageService.error(
+                    'Storage Bucket Missing',
+                    'The "company-documents" storage bucket does not exist. Please create it in your Supabase Dashboard:\n\n' +
+                    '1. Go to Supabase Dashboard → Storage\n' +
+                    '2. Click "Create a new bucket"\n' +
+                    '3. Name it "company-documents"\n' +
+                    '4. Set it as Public\n' +
+                    '5. Set file size limit to 50MB\n\n' +
+                    'Alternatively, run the SQL from COMPANY_DOCUMENTS_STORAGE_SETUP.sql in your Supabase SQL Editor.'
+                );
+            } else if (errorMessage.includes('Permission denied') || errorMessage.includes('unauthorized')) {
+                messageService.error(
+                    'Permission Denied',
+                    'You do not have permission to upload documents. Please check your storage policies in Supabase Dashboard.'
+                );
+            } else {
+                messageService.error(
+                    'Upload Failed',
+                    errorMessage || 'Failed to add company document. Please try again.'
+                );
+            }
         } finally {
             setUploading(false);
         }
@@ -246,76 +284,99 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
             </div>
 
             {documents.length > 0 ? (
-                <div className="grid gap-2">
-                    {documents.map((document) => (
-                        <Card key={document.id} className="group hover:shadow-md transition-all duration-200 border border-gray-200 bg-white">
-                            <div className="p-3">
-                                <div className="flex justify-between items-center">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <div className="p-1 bg-gray-100 rounded">
-                                                <span className="text-lg">
-                                                    {companyDocumentsService.getDocumentIcon(document.documentType || '')}
-                                                </span>
+                <>
+                    <div className="grid gap-2">
+                        {(showAllDocuments ? documents : documents.slice(0, 5)).map((document) => (
+                            <Card key={document.id} className="group hover:shadow-md transition-all duration-200 border border-gray-200 bg-white">
+                                <div className="p-3">
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <div className="p-1 bg-gray-100 rounded">
+                                                    <span className="text-lg">
+                                                        {companyDocumentsService.getDocumentIcon(document.documentType || '')}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <h4 className="text-sm font-semibold text-slate-900">
+                                                        {document.documentName}
+                                                    </h4>
+                                                    <p className="text-xs text-slate-500">
+                                                        {document.documentType}
+                                                    </p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <h4 className="text-sm font-semibold text-slate-900">
-                                                    {document.documentName}
-                                                </h4>
-                                                <p className="text-xs text-slate-500">
-                                                    {document.documentType}
+                                            
+                                            {document.description && (
+                                                <p className="text-xs text-slate-600 leading-relaxed">
+                                                    {document.description}
                                                 </p>
-                                            </div>
+                                            )}
+                                            
                                         </div>
                                         
-                                        {document.description && (
-                                            <p className="text-xs text-slate-600 leading-relaxed">
-                                                {document.description}
-                                            </p>
-                                        )}
-                                        
-                                    </div>
-                                    
-                                    <div className="flex gap-1 ml-3">
-                                        <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={() => {
-                                                console.log('Document data:', document);
-                                                console.log('Opening document URL:', document.documentUrl);
-                                                openDocument(document.documentUrl);
-                                            }}
-                                            className="bg-white hover:bg-gray-50 text-gray-600 border-gray-300 hover:scale-105 transition-all duration-200 text-xs px-2 py-1"
-                                        >
-                                            <ExternalLink className="w-3 h-3 mr-1" />
-                                            View
-                                        </Button>
-                                        {!isViewOnly && (
-                                            <>
-                                                <Button
-                                                    variant="secondary"
-                                                    size="sm"
-                                                    onClick={() => handleEdit(document)}
-                                                    className="bg-white hover:bg-gray-50 text-gray-600 border-gray-300 hover:scale-105 transition-all duration-200 px-2 py-1"
-                                                >
-                                                    <Edit className="w-3 h-3" />
-                                                </Button>
-                                                <Button
-                                                    variant="secondary"
-                                                    size="sm"
-                                                    onClick={() => handleDelete(document.id)}
-                                                    className="bg-white hover:bg-red-50 text-red-600 border-red-300 hover:scale-105 transition-all duration-200 px-2 py-1"
-                                                >
-                                                    <Trash2 className="w-3 h-3" />
-                                                </Button>
-                                            </>
-                                        )}
+                                        <div className="flex gap-1 ml-3">
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                onClick={() => {
+                                                    console.log('Document data:', document);
+                                                    console.log('Opening document URL:', document.documentUrl);
+                                                    openDocument(document.documentUrl);
+                                                }}
+                                                className="bg-white hover:bg-gray-50 text-gray-600 border-gray-300 hover:scale-105 transition-all duration-200 text-xs px-2 py-1"
+                                            >
+                                                <ExternalLink className="w-3 h-3 mr-1" />
+                                                View
+                                            </Button>
+                                            {!isViewOnly && (
+                                                <>
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="sm"
+                                                        onClick={() => handleEdit(document)}
+                                                        className="bg-white hover:bg-gray-50 text-gray-600 border-gray-300 hover:scale-105 transition-all duration-200 px-2 py-1"
+                                                    >
+                                                        <Edit className="w-3 h-3" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="sm"
+                                                        onClick={() => handleDelete(document.id)}
+                                                        className="bg-white hover:bg-red-50 text-red-600 border-red-300 hover:scale-105 transition-all duration-200 px-2 py-1"
+                                                    >
+                                                        <Trash2 className="w-3 h-3" />
+                                                    </Button>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </Card>
-                    ))}
-                </div>
+                            </Card>
+                        ))}
+                    </div>
+                    {documents.length > 5 && (
+                        <div className="text-center mt-2">
+                            <Button
+                                variant="outline"
+                                onClick={() => setShowAllDocuments(!showAllDocuments)}
+                                className="text-blue-600 border-blue-600 hover:bg-blue-50 text-xs px-3 py-1"
+                            >
+                                {showAllDocuments ? (
+                                    <>
+                                        <ChevronUp className="w-3 h-3 mr-1" />
+                                        Show Less
+                                    </>
+                                ) : (
+                                    <>
+                                        <ChevronDown className="w-3 h-3 mr-1" />
+                                        Show More ({documents.length - 5} more)
+                                    </>
+                                )}
+                            </Button>
+                        </div>
+                    )}
+                </>
             ) : (
                 <Card className="bg-gray-50 border border-gray-200">
                     <div className="p-6 text-center">
@@ -323,16 +384,7 @@ const CompanyDocumentsSection: React.FC<CompanyDocumentsSectionProps> = ({
                             <Link className="w-6 h-6 text-gray-500" />
                         </div>
                         <h4 className="text-sm font-semibold text-slate-700 mb-1">No Documents Yet</h4>
-                        <p className="text-slate-500 text-xs mb-4">Start building your company document library by adding important links and resources.</p>
-                         {!isViewOnly && (
-                             <Button 
-                                 onClick={() => setShowAddModal(true)}
-                                 className="bg-blue-600 hover:bg-blue-700 text-white border-blue-600 transition-all duration-200 text-sm px-3 py-1"
-                             >
-                                 <Plus className="w-3 h-3 mr-1" />
-                                 Add Your First Document
-                             </Button>
-                         )}
+                        <p className="text-slate-500 text-xs">Start building your company document library by adding important links and resources.</p>
                     </div>
                 </Card>
             )}

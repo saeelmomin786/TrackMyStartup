@@ -28,8 +28,42 @@ export interface ActiveFundraisingStartup {
 }
 
 class InvestorService {
-    // Fetch all active fundraising startups with their pitch data
+  // Cache to prevent duplicate simultaneous calls
+  private static activeFetchPromise: Promise<ActiveFundraisingStartup[]> | null = null;
+  private static lastFetchTime = 0;
+  private static readonly FETCH_CACHE_MS = 5000; // 5 second cache
+  
+  // Fetch all active fundraising startups with their pitch data
   async getActiveFundraisingStartups(): Promise<ActiveFundraisingStartup[]> {
+    // Check if there's an active fetch in progress
+    if (InvestorService.activeFetchPromise) {
+      console.log('⏭️ Active fetch already in progress, reusing promise');
+      return InvestorService.activeFetchPromise;
+    }
+    
+    // Check cache
+    const now = Date.now();
+    if (now - InvestorService.lastFetchTime < InvestorService.FETCH_CACHE_MS && InvestorService.activeFetchPromise) {
+      console.log('⏭️ Using cached fetch result');
+      return InvestorService.activeFetchPromise;
+    }
+    
+    // Create new fetch promise
+    const fetchPromise = this._doFetch();
+    InvestorService.activeFetchPromise = fetchPromise;
+    InvestorService.lastFetchTime = now;
+    
+    // Clear promise when done
+    fetchPromise.finally(() => {
+      if (InvestorService.activeFetchPromise === fetchPromise) {
+        InvestorService.activeFetchPromise = null;
+      }
+    });
+    
+    return fetchPromise;
+  }
+  
+  private async _doFetch(): Promise<ActiveFundraisingStartup[]> {
     try {
       console.log('🔍 investorService.getActiveFundraisingStartups() called');
       
@@ -63,12 +97,13 @@ class InvestorService {
 
       const filteredData = (data || []).filter(item => {
         const hasStartup = item.startups !== null;
-        console.log('🔍 Filtering item:', { 
-          fundraisingId: item.id, 
-          startupId: item.startup_id, 
-          hasStartup,
-          startupData: item.startups 
-        });
+        // Reduced logging - only log if there's an issue
+        if (!hasStartup) {
+          console.log('⚠️ Filtering out item with missing startup:', { 
+            fundraisingId: item.id, 
+            startupId: item.startup_id 
+          });
+        }
         return hasStartup;
       });
 
@@ -145,7 +180,10 @@ class InvestorService {
       return uniqueStartups.map(item => {
         // Use domain from applications/fundraising, fallback to startup sector, then to 'Unknown'
         const finalSector = domainMap[item.startups.id] || item.startups.sector || 'Unknown';
-        console.log(`🔍 Startup ${item.startups.name} (ID: ${item.startups.id}): original sector=${item.startups.sector}, domain=${domainMap[item.startups.id]}, final sector=${finalSector}`);
+        // Reduced logging - only log if sector changed
+        if (domainMap[item.startups.id] && domainMap[item.startups.id] !== item.startups.sector) {
+          console.log(`🔍 Startup ${item.startups.name} (ID: ${item.startups.id}): sector updated from "${item.startups.sector}" to "${finalSector}"`);
+        }
         
         return {
           id: item.startups.id,

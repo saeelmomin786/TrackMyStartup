@@ -78,3 +78,4 @@ LEFT JOIN user_profiles up ON up.id::text = aai.advisor_id::text;
 
 
 
+

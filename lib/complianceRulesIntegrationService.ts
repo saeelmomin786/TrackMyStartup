@@ -179,8 +179,31 @@ class ComplianceRulesIntegrationService {
           // Load existing uploads once and attach to tasks below
           const existingUploads = await complianceService.getAllComplianceUploads(startupId);
 
+          // Get status data from compliance_checks table
+          const taskIds = dbTasks.map((t: any) => t.task_id);
+          const { data: statusData, error: statusError } = await supabase
+            .from('compliance_checks')
+            .select('task_id, ca_status, cs_status')
+            .eq('startup_id', startupId)
+            .in('task_id', taskIds);
+
+          console.log('🔍 Status data from compliance_checks:', statusData, 'Error:', statusError);
+          
+          // Create a map of task_id -> status for quick lookup
+          const statusMap = new Map<string, { ca_status?: string; cs_status?: string }>();
+          if (statusData) {
+            statusData.forEach((item: any) => {
+              statusMap.set(item.task_id, {
+                ca_status: item.ca_status,
+                cs_status: item.cs_status
+              });
+            });
+          }
+
           // Transform database tasks to IntegratedComplianceTask format
           const integratedTasks: IntegratedComplianceTask[] = dbTasks.map((task: any) => {
+            // Get status from the map, fallback to 'Pending'
+            const statusInfo = statusMap.get(task.task_id) || {};
             // Normalize frequency coming from DB
             const rawType = (task.task_type || '').toString();
             const normalizedFrequency: 'first-year' | 'annual' | 'monthly' | 'quarterly' =
@@ -198,8 +221,9 @@ class ComplianceRulesIntegrationService {
               task: task.task_name,
               caRequired: !!task.ca_required,
               csRequired: !!task.cs_required,
-              caStatus: 'Pending' as any,
-              csStatus: 'Pending' as any,
+              // Read actual status from compliance_checks table, default to 'Pending' if not set
+              caStatus: (statusInfo.ca_status || 'Pending') as ComplianceStatus,
+              csStatus: (statusInfo.cs_status || 'Pending') as ComplianceStatus,
               uploads: existingUploads[task.task_id] || [],
               complianceRule: {
                 id: task.task_id,
@@ -435,20 +459,79 @@ class ComplianceRulesIntegrationService {
     verifiedBy: 'CA' | 'CS'
   ): Promise<void> {
     try {
-      // Update compliance status directly in the database
+      console.log('[STATUS UPDATE] updateComplianceStatus called:', {
+        startupId,
+        taskId,
+        status,
+        verifiedBy
+      });
+
+      // First, try to get existing record
+      const { data: existingRecord, error: fetchError } = await supabase
+        .from('compliance_checks')
+        .select('*')
+        .eq('startup_id', startupId)
+        .eq('task_id', taskId)
+        .maybeSingle();
+
+      // Get task information if record doesn't exist
+      let taskInfo: any = null;
+      if (!existingRecord) {
+        console.log('[STATUS UPDATE] Record not found, fetching task info from comprehensive rules...');
+        const tasks = await this.getComplianceTasksForStartup(startupId);
+        taskInfo = tasks.find(t => t.taskId === taskId);
+        if (!taskInfo) {
+          console.error('[STATUS UPDATE] Task not found in comprehensive rules:', taskId);
+          throw new Error(`Task ${taskId} not found`);
+        }
+      }
+
+      // Prepare update data
       const statusField = verifiedBy === 'CA' ? 'ca_status' : 'cs_status';
+      const updateData: any = {
+        startup_id: startupId,
+        task_id: taskId,
+        [statusField]: status
+      };
+
+      // Add required fields if record doesn't exist
+      if (!existingRecord && taskInfo) {
+        updateData.entity_identifier = taskInfo.entityIdentifier;
+        updateData.entity_display_name = taskInfo.entityDisplayName;
+        updateData.year = taskInfo.year;
+        updateData.task_name = taskInfo.task;
+        updateData.ca_required = taskInfo.caRequired;
+        updateData.cs_required = taskInfo.csRequired;
+        // Set default status for the other field
+        updateData[verifiedBy === 'CA' ? 'cs_status' : 'ca_status'] = 'Pending';
+      } else if (existingRecord) {
+        // Keep existing values for other fields
+        updateData.entity_identifier = existingRecord.entity_identifier;
+        updateData.entity_display_name = existingRecord.entity_display_name;
+        updateData.year = existingRecord.year;
+        updateData.task_name = existingRecord.task_name;
+        updateData.ca_required = existingRecord.ca_required;
+        updateData.cs_required = existingRecord.cs_required;
+        // Keep existing status for the other field
+        updateData[verifiedBy === 'CA' ? 'cs_status' : 'ca_status'] = existingRecord[verifiedBy === 'CA' ? 'cs_status' : 'ca_status'];
+      }
+
+      // Use upsert to create or update the record
+      console.log('[STATUS UPDATE] Upserting compliance_checks with:', updateData);
       const { error } = await supabase
         .from('compliance_checks')
-        .update({ [statusField]: status })
-        .eq('startup_id', startupId)
-        .eq('task_id', taskId);
+        .upsert(updateData, {
+          onConflict: 'startup_id,task_id'
+        });
 
       if (error) {
-        console.error('Error updating compliance status:', error);
+        console.error('[STATUS UPDATE] Error updating compliance status:', error);
         throw error;
       }
+
+      console.log('[STATUS UPDATE] ✅ Successfully updated status to', status, 'for', verifiedBy);
     } catch (error) {
-      console.error('Error updating compliance status:', error);
+      console.error('[STATUS UPDATE] Error updating compliance status:', error);
       throw error;
     }
   }
@@ -461,6 +544,42 @@ class ComplianceRulesIntegrationService {
     uploadedBy: string
   ): Promise<{ success: boolean; uploadId?: string; error?: string }> {
     try {
+      // Use alert for visibility - user needs to see this
+      console.log('========================================');
+      console.log('[UPLOAD] ========== STARTING UPLOAD ==========');
+      console.log('[UPLOAD] Parameters:', { startupId, taskId, fileName: file.name, uploadedBy });
+      console.log('========================================');
+      
+      // First, get the task information to check CA/CS requirements
+      const { data: taskData, error: taskError } = await supabase
+        .from('compliance_checks')
+        .select('ca_status, cs_status, ca_required, cs_required')
+        .eq('startup_id', startupId)
+        .eq('task_id', taskId)
+        .maybeSingle(); // Use maybeSingle() instead of single() to handle null gracefully
+
+      console.log('[UPLOAD] Task data from database:', taskData, 'Error:', taskError);
+
+      // Get task requirements - prefer from database, fallback to comprehensive rules
+      let caRequired = taskData?.ca_required ?? false;
+      let csRequired = taskData?.cs_required ?? false;
+
+      // If not in database or missing requirements, get from comprehensive rules
+      if (!taskData || (!caRequired && !csRequired)) {
+        console.log('[UPLOAD] Task not in database or missing requirements, checking comprehensive rules...');
+        const tasks = await this.getComplianceTasksForStartup(startupId);
+        const task = tasks.find(t => t.taskId === taskId);
+        if (task) {
+          caRequired = task.caRequired || false;
+          csRequired = task.csRequired || false;
+          console.log('[UPLOAD] Found task in comprehensive rules:', { caRequired, csRequired });
+        } else {
+          console.log('[UPLOAD] Task not found in comprehensive rules either');
+        }
+      }
+
+      console.log('[UPLOAD] Final requirements:', { caRequired, csRequired });
+
       // Check if this is a cloud drive URL (stored in file object)
       const cloudDriveUrl = (file as any).cloudDriveUrl;
       
@@ -483,12 +602,20 @@ class ComplianceRulesIntegrationService {
           .select()
           .single();
 
-        if (insertError) {
-          console.error('Error inserting cloud drive URL record:', insertError);
-          return { success: false, error: insertError.message };
-        }
+      if (insertError) {
+        console.error('Error inserting cloud drive URL record:', insertError);
+        return { success: false, error: insertError.message };
+      }
 
-        return { success: true, uploadId: insertData.id };
+      // Update status to Submitted after successful upload
+      console.log('[UPLOAD] Calling updateStatusToSubmitted for cloud drive URL...');
+      const statusUpdateResult = await this.updateStatusToSubmitted(startupId, taskId, caRequired, csRequired, taskData);
+      const result: any = { success: true, uploadId: insertData.id };
+      if (!statusUpdateResult.success) {
+        console.warn('[UPLOAD] Status update failed but upload succeeded:', statusUpdateResult.error);
+        result.statusUpdateError = statusUpdateResult.error;
+      }
+      return result;
       }
       
       // Handle regular file upload - upload to storage first
@@ -529,27 +656,194 @@ class ComplianceRulesIntegrationService {
         return { success: false, error: insertError.message };
       }
 
-      return { success: true, uploadId: insertData.id };
+      // Update status to Submitted after successful upload
+      console.log('[UPLOAD] Calling updateStatusToSubmitted for file upload...');
+      const statusUpdateResult = await this.updateStatusToSubmitted(startupId, taskId, caRequired, csRequired, taskData);
+      const result: any = { success: true, uploadId: insertData.id };
+      if (!statusUpdateResult.success) {
+        console.warn('[UPLOAD] Status update failed but upload succeeded:', statusUpdateResult.error);
+        result.statusUpdateError = statusUpdateResult.error;
+      }
+      return result;
     } catch (error) {
       console.error('Error uploading compliance document:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 
+  // Helper method to update status to Submitted
+  private async updateStatusToSubmitted(
+    startupId: number,
+    taskId: string,
+    caRequired: boolean,
+    csRequired: boolean,
+    existingTaskData: any
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log('[STATUS UPDATE] updateStatusToSubmitted called:', {
+        startupId,
+        taskId,
+        caRequired,
+        csRequired,
+        existingTaskData
+      });
+
+      // Helper function to check if status is Pending (handles both enum and string)
+      const isPending = (status: any): boolean => {
+        if (!status) return true; // null/undefined means pending
+        const statusStr = String(status).trim();
+        return statusStr === 'Pending' || statusStr === 'pending' || statusStr === ComplianceStatus.Pending;
+      };
+
+      // Get task information from comprehensive rules if we don't have it
+      let taskInfo: any = null;
+      if (!existingTaskData) {
+        console.log('[STATUS UPDATE] No existing task data, fetching from comprehensive rules...');
+        const tasks = await this.getComplianceTasksForStartup(startupId);
+        taskInfo = tasks.find(t => t.taskId === taskId);
+        if (taskInfo) {
+          console.log('[STATUS UPDATE] Found task info:', taskInfo);
+        }
+      }
+
+      // Determine what statuses to update
+      const updateData: any = {
+        startup_id: startupId,
+        task_id: taskId,
+        ca_required: caRequired,
+        cs_required: csRequired
+      };
+
+      // Add required fields if we have task info (for upsert)
+      if (taskInfo) {
+        updateData.entity_identifier = taskInfo.entityIdentifier;
+        updateData.entity_display_name = taskInfo.entityDisplayName;
+        updateData.year = taskInfo.year;
+        updateData.task_name = taskInfo.task;
+      } else if (existingTaskData) {
+        // Use existing data if available
+        updateData.entity_identifier = existingTaskData.entity_identifier;
+        updateData.entity_display_name = existingTaskData.entity_display_name;
+        updateData.year = existingTaskData.year;
+        updateData.task_name = existingTaskData.task_name;
+      }
+
+      // Only update to Submitted if current status is Pending
+      // Update CA status if CA is required and current status is Pending
+      if (caRequired) {
+        const currentCAStatus = existingTaskData?.ca_status;
+        const isPendingStatus = isPending(currentCAStatus);
+        console.log('[STATUS UPDATE] CA Status check:', { currentCAStatus, isPending: isPendingStatus, caRequired });
+        if (isPendingStatus) {
+          // Use string value 'Submitted' for database
+          updateData.ca_status = 'Submitted';
+          console.log('[STATUS UPDATE] Will update CA status to Submitted');
+        } else {
+          // Keep existing status if not pending
+          updateData.ca_status = existingTaskData?.ca_status || 'Pending';
+          console.log('[STATUS UPDATE] CA status is NOT Pending, keeping current. Current:', currentCAStatus);
+        }
+      } else {
+        updateData.ca_status = existingTaskData?.ca_status || 'Not Required';
+        console.log('[STATUS UPDATE] CA not required, setting to Not Required');
+      }
+
+      // Update CS status if CS is required and current status is Pending
+      if (csRequired) {
+        const currentCSStatus = existingTaskData?.cs_status;
+        const isPendingStatus = isPending(currentCSStatus);
+        console.log('[STATUS UPDATE] CS Status check:', { currentCSStatus, isPending: isPendingStatus, csRequired });
+        if (isPendingStatus) {
+          // Use string value 'Submitted' for database
+          updateData.cs_status = 'Submitted';
+          console.log('[STATUS UPDATE] Will update CS status to Submitted');
+        } else {
+          // Keep existing status if not pending
+          updateData.cs_status = existingTaskData?.cs_status || 'Pending';
+          console.log('[STATUS UPDATE] CS status is NOT Pending, keeping current. Current:', currentCSStatus);
+        }
+      } else {
+        updateData.cs_status = existingTaskData?.cs_status || 'Not Required';
+        console.log('[STATUS UPDATE] CS not required, setting to Not Required');
+      }
+
+      // Only upsert if we have all required fields
+      if (updateData.entity_identifier && updateData.entity_display_name && updateData.year && updateData.task_name) {
+        console.log('[STATUS UPDATE] Upserting compliance_checks with:', updateData);
+        const { data, error: updateError } = await supabase
+          .from('compliance_checks')
+          .upsert(updateData, {
+            onConflict: 'startup_id,task_id'
+          })
+          .select();
+
+        if (updateError) {
+          console.error('========================================');
+          console.error('[STATUS UPDATE] ERROR updating status to Submitted:', updateError);
+          console.error('[STATUS UPDATE] Error details:', JSON.stringify(updateError, null, 2));
+          console.error('========================================');
+          
+          // If error is about constraint violation, the database migration hasn't been run
+          let errorMessage = updateError.message || 'Unknown error';
+          if (updateError.message?.includes('check constraint') || 
+              updateError.message?.includes('violates check constraint') ||
+              updateError.message?.includes('Submitted')) {
+            errorMessage = 'DATABASE CONSTRAINT ERROR: The database does not allow "Submitted" status yet! Please run ADD_SUBMITTED_STATUS_TO_COMPLIANCE_CHECKS.sql migration.';
+            console.error('[STATUS UPDATE] DATABASE CONSTRAINT ERROR - The database does not allow "Submitted" status yet!');
+            console.error('[STATUS UPDATE] ACTION REQUIRED: Run the SQL migration: ADD_SUBMITTED_STATUS_TO_COMPLIANCE_CHECKS.sql');
+            console.error('[STATUS UPDATE] This will add "Submitted" to the allowed status values in the database.');
+          }
+          return { success: false, error: errorMessage };
+        } else {
+          console.log('========================================');
+          console.log('[STATUS UPDATE] ✅ SUCCESS - Status updated to Submitted for task:', taskId);
+          console.log('[STATUS UPDATE] Updated data:', data);
+          console.log('========================================');
+          return { success: true };
+        }
+      } else {
+        console.error('[STATUS UPDATE] ❌ ERROR - Missing required fields for upsert:', {
+          hasEntityIdentifier: !!updateData.entity_identifier,
+          hasEntityDisplayName: !!updateData.entity_display_name,
+          hasYear: !!updateData.year,
+          hasTaskName: !!updateData.task_name,
+          taskInfo: taskInfo,
+          existingTaskData: existingTaskData
+        });
+        return { success: false, error: 'Missing required fields to create compliance_checks record. Task information not found.' };
+      }
+    } catch (error) {
+      console.error('[STATUS UPDATE] ERROR in updateStatusToSubmitted:', error);
+      console.error('[STATUS UPDATE] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error in status update' 
+      };
+    }
+  }
+
   // Delete compliance upload
   async deleteComplianceUpload(uploadId: string): Promise<boolean> {
     try {
-      // Get the upload record first to get the file URL
+      console.log('[DELETE] ========== STARTING DELETE ==========');
+      console.log('[DELETE] Upload ID:', uploadId);
+      
+      // Get the upload record first to get the file URL, task_id, and startup_id
       const { data: uploadRecord, error: fetchError } = await supabase
         .from('compliance_uploads')
-        .select('file_url')
+        .select('file_url, task_id, startup_id')
         .eq('id', uploadId)
         .single();
 
       if (fetchError) {
-        console.error('Error fetching upload record:', fetchError);
+        console.error('[DELETE] Error fetching upload record:', fetchError);
         return false;
       }
+
+      const taskId = uploadRecord.task_id;
+      const startupId = uploadRecord.startup_id;
+
+      console.log('[DELETE] Task ID:', taskId, 'Startup ID:', startupId);
 
       // Delete from storage if file exists
       if (uploadRecord.file_url) {
@@ -560,7 +854,9 @@ class ComplianceRulesIntegrationService {
             .remove([fileName]);
           
           if (storageError) {
-            console.warn('Error deleting file from storage:', storageError);
+            console.warn('[DELETE] Error deleting file from storage:', storageError);
+          } else {
+            console.log('[DELETE] File deleted from storage');
           }
         }
       }
@@ -572,13 +868,77 @@ class ComplianceRulesIntegrationService {
         .eq('id', uploadId);
 
       if (deleteError) {
-        console.error('Error deleting upload record:', deleteError);
+        console.error('[DELETE] Error deleting upload record:', deleteError);
         return false;
       }
 
+      console.log('[DELETE] Upload record deleted successfully');
+
+      // Check if there are any remaining uploads for this task
+      const { data: remainingUploads, error: checkError } = await supabase
+        .from('compliance_uploads')
+        .select('id')
+        .eq('startup_id', startupId)
+        .eq('task_id', taskId);
+
+      if (checkError) {
+        console.warn('[DELETE] Error checking remaining uploads:', checkError);
+      } else {
+        console.log('[DELETE] Remaining uploads for task:', remainingUploads?.length || 0);
+        
+        // If no uploads remain, revert status back to "Pending" if it was "Submitted"
+        if (!remainingUploads || remainingUploads.length === 0) {
+          console.log('[DELETE] No remaining uploads, reverting status to Pending if it was Submitted');
+          
+          // Get current status
+          const { data: taskData, error: taskError } = await supabase
+            .from('compliance_checks')
+            .select('ca_status, cs_status, ca_required, cs_required')
+            .eq('startup_id', startupId)
+            .eq('task_id', taskId)
+            .maybeSingle();
+
+          if (!taskError && taskData) {
+            const updateData: any = {};
+            
+            // Revert CA status to Pending if it was Submitted (but not if it's Verified or Rejected)
+            if (taskData.ca_required && taskData.ca_status === 'Submitted') {
+              updateData.ca_status = 'Pending';
+              console.log('[DELETE] Reverting CA status from Submitted to Pending');
+            }
+            
+            // Revert CS status to Pending if it was Submitted (but not if it's Verified or Rejected)
+            if (taskData.cs_required && taskData.cs_status === 'Submitted') {
+              updateData.cs_status = 'Pending';
+              console.log('[DELETE] Reverting CS status from Submitted to Pending');
+            }
+
+            // Update status if needed
+            if (Object.keys(updateData).length > 0) {
+              const { error: updateError } = await supabase
+                .from('compliance_checks')
+                .update(updateData)
+                .eq('startup_id', startupId)
+                .eq('task_id', taskId);
+
+              if (updateError) {
+                console.error('[DELETE] Error reverting status:', updateError);
+              } else {
+                console.log('[DELETE] ✅ Status reverted to Pending');
+              }
+            } else {
+              console.log('[DELETE] No status reversion needed (status is not Submitted)');
+            }
+          }
+        } else {
+          console.log('[DELETE] Uploads still exist, keeping status as is');
+        }
+      }
+
+      console.log('[DELETE] ========== DELETE COMPLETE ==========');
       return true;
     } catch (error) {
-      console.error('Error deleting compliance upload:', error);
+      console.error('[DELETE] Error deleting compliance upload:', error);
       return false;
     }
   }

@@ -261,3 +261,4 @@ const authUserId = authUser?.id || currentUser.id; // Fallback for safety
 **It's not optional - it's required for RLS to work correctly!**
 
 
+

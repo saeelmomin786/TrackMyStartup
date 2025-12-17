@@ -299,3 +299,4 @@ const authUserId = authUser?.id || currentUser.id; // Fallback
 **All critical sections now use `auth.uid()` instead of profile IDs!**
 
 
+

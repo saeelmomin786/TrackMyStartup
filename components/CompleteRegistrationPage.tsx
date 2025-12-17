@@ -4,7 +4,7 @@ import Button from './ui/Button';
 import Input from './ui/Input';
 import CloudDriveInput from './ui/CloudDriveInput';
 import { UserRole } from '../types';
-import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2, LogOut } from 'lucide-react';
+import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2, LogOut, Briefcase, Link2, MapPin } from 'lucide-react';
 import Select from './ui/Select';
 import { InvestmentType, StartupDomain, StartupStage, FundraisingDetails } from '../types';
 import { capTableService } from '../lib/capTableService';
@@ -16,6 +16,7 @@ import { userComplianceService, CountryComplianceInfo } from '../lib/userComplia
 import { getCurrencyForCountry, getCountryProfessionalTitles } from '../lib/utils';
 import { getQueryParam } from '../lib/urlState';
 import { supabase } from '../lib/supabase';
+import { generalDataService } from '../lib/generalDataService';
 
 interface Founder {
   id: string;
@@ -97,6 +98,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     currency: 'USD',
     centerName: '', // For facilitators
     investmentAdvisorCode: '', // Investment Advisor Code
+    firmName: '', // For Investment Advisors
+    website: '', // For Investment Advisors
   });
 
   // Share and equity information
@@ -164,6 +167,9 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   // Admin-managed compliance rules for company types
   const [rulesMap, setRulesMap] = useState<any>({});
   const [allCountries, setAllCountries] = useState<string[]>([]);
+  // Countries from general_data table for Investment Advisor dropdown
+  const [countriesFromGeneralData, setCountriesFromGeneralData] = useState<string[]>([]);
+  const [loadingCountries, setLoadingCountries] = useState(false);
 
   // Compute company types for the currently selected country from admin-managed rules
   const companyTypesByCountry = React.useMemo<string[]>(() => {
@@ -279,6 +285,24 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
     loadComplianceRules();
     loadCountryComplianceInfo();
+    
+    // Load countries from general_data table for Investment Advisor dropdown
+    const loadCountriesFromGeneralData = async () => {
+      try {
+        setLoadingCountries(true);
+        const countryData = await generalDataService.getItemsByCategory('country');
+        const countryNames = countryData.map(country => country.name);
+        setCountriesFromGeneralData(countryNames.sort());
+      } catch (error) {
+        console.error('Error loading countries from general_data:', error);
+        // Fallback to common countries if general_data table fails
+        setCountriesFromGeneralData(['United States', 'India', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France', 'Singapore', 'Japan', 'China', 'Brazil', 'Mexico', 'South Africa', 'Nigeria', 'Kenya', 'Egypt', 'UAE', 'Saudi Arabia', 'Israel', 'Other']);
+      } finally {
+        setLoadingCountries(false);
+      }
+    };
+    
+    loadCountriesFromGeneralData();
   }, []);
 
   // Auto-update company type when country changes
@@ -555,6 +579,22 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         setProfileData(prev => ({
           ...prev,
           investmentAdvisorCode: (profileData as any).investment_advisor_code_entered
+        }));
+      }
+      
+      // Load existing profile data if available (for editing)
+      if (profileData) {
+        setProfileData(prev => ({
+          ...prev,
+          country: (profileData as any).country || prev.country,
+          companyType: (profileData as any).company_type || prev.companyType,
+          registrationDate: (profileData as any).registration_date || prev.registrationDate,
+          currency: (profileData as any).currency || prev.currency,
+          caServiceCode: (profileData as any).ca_service_code || prev.caServiceCode,
+          csServiceCode: (profileData as any).cs_service_code || prev.csServiceCode,
+          centerName: (profileData as any).center_name || prev.centerName,
+          firmName: (profileData as any).firm_name || prev.firmName,
+          website: (profileData as any).website || prev.website,
         }));
       }
       
@@ -1122,6 +1162,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           // Add Investment Advisor specific fields
           logo_url: logoUrl || null,
           financial_advisor_license_url: licenseUrl || null,
+          firm_name: userData.role === 'Investment Advisor' ? profileData.firmName || null : null,
+          website: userData.role === 'Investment Advisor' ? profileData.website || null : null,
           // Add facilitator specific fields
           center_name: userData.role === 'Startup Facilitation Center' ? profileData.centerName : null,
           // Add Form 2 profile fields that are collected
@@ -1251,6 +1293,50 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         console.log('✅ Updated profile data:', updateResult[0]);
         // Update userData.id to the correct profile ID for subsequent operations
         userData.id = profileIdToUpdate;
+      }
+
+      // For Investment Advisors, also save firm_name and website to investment_advisor_profiles table
+      if (userData.role === 'Investment Advisor' && authUserId) {
+        try {
+          console.log('💾 Saving Investment Advisor profile data to investment_advisor_profiles table...');
+          
+          // Get advisor_name from user_profiles (name field) or use userData.name
+          const advisorName = userData.name || (updateResult?.[0] as any)?.name || '';
+          
+          // Prepare data for investment_advisor_profiles
+          // If country is provided, add it to geography array
+          const geography = profileData.country ? [profileData.country] : [];
+          
+          const advisorProfileData: any = {
+            user_id: authUserId, // Use auth_user_id, not profile ID
+            advisor_name: advisorName || 'Investment Advisor', // Required field
+            firm_name: profileData.firmName || null,
+            website: profileData.website || null,
+            email: userData.email || null,
+            geography: geography.length > 0 ? geography : null, // Add country to geography array
+            updated_at: new Date().toISOString()
+          };
+
+          // Upsert to investment_advisor_profiles (create or update)
+          const { data: advisorProfileResult, error: advisorProfileError } = await (authService.supabase as any)
+            .from('investment_advisor_profiles')
+            .upsert(advisorProfileData, {
+              onConflict: 'user_id'
+            })
+            .select()
+            .single();
+
+          if (advisorProfileError) {
+            console.error('⚠️ Error saving to investment_advisor_profiles:', advisorProfileError);
+            // Don't throw error - user_profiles update succeeded, this is secondary
+            console.warn('⚠️ Investment Advisor profile data saved to user_profiles but failed to save to investment_advisor_profiles table');
+          } else {
+            console.log('✅ Investment Advisor profile saved to investment_advisor_profiles table:', advisorProfileResult);
+          }
+        } catch (advisorError) {
+          console.error('⚠️ Error in Investment Advisor profile save:', advisorError);
+          // Don't throw error - user_profiles update succeeded, this is secondary
+        }
       }
 
       // Update is_profile_complete flag (profileCheck is guaranteed to exist at this point)
@@ -1877,6 +1963,90 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                           <li>• Logo will be displayed as 64x64px with white background</li>
                           <li>• For best results, use a square logo or center your logo in a square canvas</li>
                         </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Firm Information Section */}
+                  <div className="mt-6 pt-6 border-t border-slate-200">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Briefcase className="h-5 w-5 text-brand-primary" />
+                      <h3 className="text-lg font-semibold text-slate-900">Firm Information</h3>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-6">
+                      Provide details about your investment advisory firm.
+                    </p>
+
+                    <div className="space-y-6">
+                      {/* Firm Name */}
+                      <div>
+                        <label htmlFor="firmName" className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-slate-500" />
+                          Firm Name <span className="text-red-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            id="firmName"
+                            type="text"
+                            value={profileData.firmName}
+                            onChange={(e) => setProfileData(prev => ({ ...prev, firmName: e.target.value }))}
+                            placeholder="Enter your firm/company name"
+                            required
+                            className="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm transition-colors"
+                          />
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1.5">
+                          This name will be displayed on your profile and dashboard
+                        </p>
+                      </div>
+
+                      {/* Website */}
+                      <div>
+                        <label htmlFor="website" className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                          <Link2 className="h-4 w-4 text-slate-500" />
+                          Website
+                        </label>
+                        <div className="relative">
+                          <input
+                            id="website"
+                            type="url"
+                            value={profileData.website}
+                            onChange={(e) => setProfileData(prev => ({ ...prev, website: e.target.value }))}
+                            placeholder="https://example.com"
+                            className="block w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm transition-colors"
+                          />
+                          <Link2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1.5">
+                          Your firm's website URL (optional)
+                        </p>
+                      </div>
+
+                      {/* Country */}
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                          <MapPin className="h-4 w-4 text-slate-500" />
+                          Country <span className="text-red-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={profileData.country}
+                            onChange={(e) => setProfileData(prev => ({ ...prev, country: e.target.value }))}
+                            className="w-full bg-white border border-slate-300 rounded-md px-10 py-2.5 text-slate-900 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition-colors disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed"
+                            required
+                            disabled={loadingCountries}
+                          >
+                            <option value="">{loadingCountries ? 'Loading countries...' : 'Select Country'}</option>
+                            {countriesFromGeneralData.map(country => (
+                              <option key={country} value={country}>{country}</option>
+                            ))}
+                          </select>
+                          <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1.5">
+                          Select the country where your firm is based
+                        </p>
                       </div>
                     </div>
                   </div>

@@ -1267,12 +1267,19 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     // Load mandates and filter options
     useEffect(() => {
         const loadMandateData = async () => {
-            if (activeTab === 'mandate' && currentUser?.id) {
+            if (activeTab === 'mandate') {
+                // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (!authUser?.id) {
+                    return;
+                }
+                const authUserId = authUser.id;
+
                 setIsLoadingMandates(true);
                 setIsLoadingMandateFilters(true);
                 try {
                     // Load mandates
-                    const mandatesData = await investorMandateService.getMandatesByInvestor(currentUser.id);
+                    const mandatesData = await investorMandateService.getMandatesByInvestor(authUserId); // Use auth.uid() instead of profile ID
                     setMandates(mandatesData);
                     
                     // Select first mandate if available
@@ -1304,13 +1311,20 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         };
         
         loadMandateData();
-    }, [activeTab, currentUser?.id]);
+    }, [activeTab]);
 
     // Load mandates when component mounts (for mandate tab)
     useEffect(() => {
-        if (currentUser?.id && activeTab === 'mandate') {
+        if (activeTab === 'mandate') {
             const loadMandates = async () => {
-                const mandatesData = await investorMandateService.getMandatesByInvestor(currentUser.id!);
+                // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (!authUser?.id) {
+                    return;
+                }
+                const authUserId = authUser.id;
+
+                const mandatesData = await investorMandateService.getMandatesByInvestor(authUserId); // Use auth.uid() instead of profile ID
                 setMandates(mandatesData);
                 if (mandatesData.length > 0 && !selectedMandateId) {
                     setSelectedMandateId(mandatesData[0].id);
@@ -1318,15 +1332,22 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             };
             loadMandates();
         }
-    }, [currentUser?.id, activeTab]);
+    }, [activeTab]);
 
     // Load investor added startups
     useEffect(() => {
-        if (currentUser?.id && (activeTab === 'dashboard' || activeTab === 'portfolio')) {
+        if (activeTab === 'dashboard' || activeTab === 'portfolio') {
             const loadAddedStartups = async () => {
+                // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (!authUser?.id) {
+                    return;
+                }
+                const authUserId = authUser.id;
+
                 setIsLoadingAddedStartups(true);
                 try {
-                    const data = await investorAddedStartupService.getStartupsByInvestor(currentUser.id!);
+                    const data = await investorAddedStartupService.getStartupsByInvestor(authUserId); // Use auth.uid() instead of profile ID
                     setInvestorAddedStartups(data);
                 } catch (error) {
                     console.error('Error loading added startups:', error);
@@ -1336,7 +1357,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             };
             loadAddedStartups();
         }
-    }, [currentUser?.id, activeTab]);
+    }, [activeTab]);
 
     // Load investor profile preference for startup requests
     useEffect(() => {
@@ -1371,10 +1392,17 @@ const InvestorView: React.FC<InvestorViewProps> = ({
 
     // Load mandates when requests tab is active
     useEffect(() => {
-        if (currentUser?.id && activeTab === 'requests') {
+        if (activeTab === 'requests') {
             const loadMandates = async () => {
                 try {
-                    const mandatesData = await investorMandateService.getMandatesByInvestor(currentUser.id!, false);
+                    // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                    const { data: { user: authUser } } = await supabase.auth.getUser();
+                    if (!authUser?.id) {
+                        return;
+                    }
+                    const authUserId = authUser.id;
+
+                    const mandatesData = await investorMandateService.getMandatesByInvestor(authUserId, false); // Use auth.uid() instead of profile ID
                     setMandates(mandatesData);
                 } catch (error) {
                     console.error('Error loading mandates:', error);
@@ -1382,7 +1410,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             };
             loadMandates();
         }
-    }, [currentUser?.id, activeTab]);
+    }, [activeTab]);
 
     // Function to calculate mandate match percentage
     const calculateMandateMatch = (startup: ActiveFundraisingStartup, mandate: InvestorMandate): number => {
@@ -1482,8 +1510,16 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     setLoadingRequests(true);
                 }
                 try {
+                    // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                    const { data: { user: authUser } } = await supabase.auth.getUser();
+                    if (!authUser?.id) {
+                        setLoadingRequests(false);
+                        return;
+                    }
+                    const authUserId = authUser.id;
+
                     // Load from investor_connection_requests (for requests TO the investor)
-                    const investorRequests = await investorConnectionRequestService.getRequestsForInvestor(currentUser.id!);
+                    const investorRequests = await investorConnectionRequestService.getRequestsForInvestor(authUserId); // Use auth.uid() instead of profile ID
                     const startupOnlyRequests = (investorRequests || []).filter(
                         r => r.requester_type === 'Startup' && !!r.startup_id
                     );
@@ -1495,7 +1531,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     // This is where the investor appears as requester_id
                     let advisorRequests: AdvisorConnectionRequest[] = [];
                     try {
-                        advisorRequests = await advisorConnectionRequestService.getRequestsByRequester(currentUser.id!);
+                        advisorRequests = await advisorConnectionRequestService.getRequestsByRequester(authUserId); // Use auth.uid() instead of profile ID
                     } catch (error) {
                         console.error('Error loading advisor connection requests:', error);
                     }
@@ -1789,10 +1825,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             return;
         }
 
-        if (!currentUser?.id) {
+        // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser?.id) {
             alert('User not found');
             return;
         }
+        const authUserId = authUser.id;
 
         try {
             let result: InvestorMandate | null = null;
@@ -1815,13 +1854,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 result = await investorMandateService.createMandate({
                     ...mandateFormData,
                     country: mandateFormData.country || undefined,
-                    investor_id: currentUser.id
+                    investor_id: authUserId // Use auth.uid() instead of profile ID
                 });
             }
 
             if (result) {
                 // Reload mandates
-                const updatedMandates = await investorMandateService.getMandatesByInvestor(currentUser.id);
+                const updatedMandates = await investorMandateService.getMandatesByInvestor(authUserId); // Use auth.uid() instead of profile ID
                 setMandates(updatedMandates);
                 
                 if (!editingMandate && result.id) {
@@ -1831,7 +1870,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 setShowMandateModal(false);
                 setEditingMandate(null);
                 setMandateFormData({
-                    investor_id: currentUser.id,
+                    investor_id: authUserId, // Use auth.uid() instead of profile ID
                     name: '',
                     stage: '',
                     round_type: '',
@@ -1858,9 +1897,17 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         }
 
         try {
+            // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser?.id) {
+                alert('User not found');
+                return;
+            }
+            const authUserId = authUser.id;
+
             const success = await investorMandateService.hardDeleteMandate(mandateId);
             if (success) {
-                const updatedMandates = await investorMandateService.getMandatesByInvestor(currentUser?.id || '');
+                const updatedMandates = await investorMandateService.getMandatesByInvestor(authUserId); // Use auth.uid() instead of profile ID
                 setMandates(updatedMandates);
                 
                 if (selectedMandateId === mandateId) {
@@ -1896,10 +1943,18 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     };
 
     // Handle add new mandate
-    const handleAddMandate = () => {
+    const handleAddMandate = async () => {
+        // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser?.id) {
+            alert('User not found');
+            return;
+        }
+        const authUserId = authUser.id;
+
         setEditingMandate(null);
         setMandateFormData({
-            investor_id: currentUser?.id || '',
+            investor_id: authUserId, // Use auth.uid() instead of profile ID
             name: '',
             stage: '',
             round_type: '',
@@ -1930,10 +1985,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             return;
         }
 
-        if (!currentUser?.id) {
+        // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser?.id) {
             alert('User not found');
             return;
         }
+        const authUserId = authUser.id;
 
         try {
             let result: InvestorAddedStartup | null = null;
@@ -1958,19 +2016,19 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 // Create new startup
                 result = await investorAddedStartupService.createStartup({
                     ...addStartupFormData,
-                    investor_id: currentUser.id
+                    investor_id: authUserId // Use auth.uid() instead of profile ID
                 });
             }
 
             if (result) {
                 // Reload added startups
-                const updatedStartups = await investorAddedStartupService.getStartupsByInvestor(currentUser.id);
+                const updatedStartups = await investorAddedStartupService.getStartupsByInvestor(authUserId); // Use auth.uid() instead of profile ID
                 setInvestorAddedStartups(updatedStartups);
                 
                 setShowAddStartupModal(false);
                 setEditingAddedStartup(null);
                 setAddStartupFormData({
-                  investor_id: currentUser.id,
+                  investor_id: authUserId, // Use auth.uid() instead of profile ID
                   startup_name: '',
                   sector: '',
                   website_url: '',
@@ -2001,9 +2059,17 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         }
 
         try {
+            // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser?.id) {
+                alert('User not found');
+                return;
+            }
+            const authUserId = authUser.id;
+
             const success = await investorAddedStartupService.deleteStartup(startupId);
             if (success) {
-                const updatedStartups = await investorAddedStartupService.getStartupsByInvestor(currentUser?.id || '');
+                const updatedStartups = await investorAddedStartupService.getStartupsByInvestor(authUserId); // Use auth.uid() instead of profile ID
                 setInvestorAddedStartups(updatedStartups);
                 alert('Startup deleted successfully!');
             } else {
@@ -2018,9 +2084,17 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     // Handle invite to TMS
     const handleInviteToTMS = async (startupId: number) => {
         try {
+            // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser?.id) {
+                alert('User not found');
+                return;
+            }
+            const authUserId = authUser.id;
+
             const success = await investorAddedStartupService.sendInviteToTMS(startupId);
             if (success) {
-                const updatedStartups = await investorAddedStartupService.getStartupsByInvestor(currentUser?.id || '');
+                const updatedStartups = await investorAddedStartupService.getStartupsByInvestor(authUserId); // Use auth.uid() instead of profile ID
                 setInvestorAddedStartups(updatedStartups);
                 alert('Invite sent to startup! They will receive an email invitation to join TMS.');
             } else {
@@ -5633,7 +5707,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             variant="primary"
                             onClick={async () => {
                               try {
-                                await investorConnectionRequestService.updateRequestStatus(request.id, 'accepted', currentUser?.id!);
+                                // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                                const { data: { user: authUser } } = await supabase.auth.getUser();
+                                if (!authUser?.id) {
+                                  alert('User not found');
+                                  return;
+                                }
+                                const authUserId = authUser.id;
+
+                                await investorConnectionRequestService.updateRequestStatus(request.id, 'accepted', authUserId); // Use auth.uid() instead of profile ID
                                 setConnectionRequests(prev => 
                                   prev.map(r => r.id === request.id ? { ...r, status: 'accepted' as const } : r)
                                 );
@@ -5651,7 +5733,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             variant="outline"
                             onClick={async () => {
                               try {
-                                await investorConnectionRequestService.updateRequestStatus(request.id, 'rejected', currentUser?.id!);
+                                // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                                const { data: { user: authUser } } = await supabase.auth.getUser();
+                                if (!authUser?.id) {
+                                  alert('User not found');
+                                  return;
+                                }
+                                const authUserId = authUser.id;
+
+                                await investorConnectionRequestService.updateRequestStatus(request.id, 'rejected', authUserId); // Use auth.uid() instead of profile ID
                                 setConnectionRequests(prev => 
                                   prev.map(r => r.id === request.id ? { ...r, status: 'rejected' as const } : r)
                                 );
@@ -5827,7 +5917,25 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             <Button
                               size="sm"
                               variant="primary"
-                              onClick={() => investorConnectionRequestService.updateRequestStatus(request.id, 'accepted', currentUser!.id)}
+                              onClick={async () => {
+                                try {
+                                  // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                                  const { data: { user: authUser } } = await supabase.auth.getUser();
+                                  if (!authUser?.id) {
+                                    alert('User not found');
+                                    return;
+                                  }
+                                  const authUserId = authUser.id;
+
+                                  await investorConnectionRequestService.updateRequestStatus(request.id, 'accepted', authUserId); // Use auth.uid() instead of profile ID
+                                  setConnectionRequests(prev => 
+                                    prev.map(r => r.id === request.id ? { ...r, status: 'accepted' as const } : r)
+                                  );
+                                } catch (error) {
+                                  console.error('Error accepting request:', error);
+                                  alert('Failed to accept request. Please try again.');
+                                }
+                              }}
                             >
                               <CheckSquare className="h-4 w-4 mr-2" />
                               Accept
@@ -5835,7 +5943,25 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => investorConnectionRequestService.updateRequestStatus(request.id, 'rejected', currentUser!.id)}
+                              onClick={async () => {
+                                try {
+                                  // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                                  const { data: { user: authUser } } = await supabase.auth.getUser();
+                                  if (!authUser?.id) {
+                                    alert('User not found');
+                                    return;
+                                  }
+                                  const authUserId = authUser.id;
+
+                                  await investorConnectionRequestService.updateRequestStatus(request.id, 'rejected', authUserId); // Use auth.uid() instead of profile ID
+                                  setConnectionRequests(prev => 
+                                    prev.map(r => r.id === request.id ? { ...r, status: 'rejected' as const } : r)
+                                  );
+                                } catch (error) {
+                                  console.error('Error rejecting request:', error);
+                                  alert('Failed to reject request. Please try again.');
+                                }
+                              }}
                             >
                               <XCircle className="h-4 w-4 mr-2" />
                               Reject

@@ -196,16 +196,24 @@ const App: React.FC = () => {
   // Use pushState to maintain browser history for back button
   // Only replace on initial load to avoid duplicate history entries
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  // Track when redirecting to complete-registration due to incomplete Form 2
+  // This prevents back button from going to dashboard when Form 2 is incomplete
+  const [shouldReplaceHistory, setShouldReplaceHistory] = useState(false);
   useEffect(() => {
     if (isInitialLoad) {
       // On initial load, use replaceState to avoid adding unnecessary history entry
       setQueryParam('page', currentPage, true);
       setIsInitialLoad(false);
+    } else if (shouldReplaceHistory && currentPage === 'complete-registration') {
+      // When redirecting to complete-registration due to incomplete Form 2,
+      // use replaceState to prevent back button from going to dashboard
+      setQueryParam('page', currentPage, true);
+      setShouldReplaceHistory(false); // Reset flag after using it
     } else {
       // On subsequent navigations, use pushState to maintain history
       setQueryParam('page', currentPage, false);
     }
-  }, [currentPage, isInitialLoad]);
+  }, [currentPage, isInitialLoad, shouldReplaceHistory]);
 
   // Redirect from complete-registration to reset-password for invite flows
   useEffect(() => {
@@ -247,6 +255,22 @@ const App: React.FC = () => {
   const [assignedInvestmentAdvisor, setAssignedInvestmentAdvisor] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Check Form 2 completion when navigating to dashboard via back button or when accessing dashboard
+  useEffect(() => {
+    if (isAuthenticated && currentUser && currentPage === 'login' && !isLoading) {
+      // Check if Form 2 is complete - if not, redirect to complete-registration
+      authService.isProfileComplete(currentUser.id).then((isComplete) => {
+        if (!isComplete) {
+          console.log('🔒 Profile incomplete - preventing dashboard access, redirecting to Form 2');
+          setShouldReplaceHistory(true);
+          setCurrentPage('complete-registration');
+        }
+      }).catch((error) => {
+        console.error('❌ Error checking profile completion:', error);
+      });
+    }
+  }, [isAuthenticated, currentUser, currentPage, isLoading]);
   const [isProcessingAuthChange, setIsProcessingAuthChange] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
@@ -3007,7 +3031,9 @@ const App: React.FC = () => {
                         onLogin={handleLogin} 
                         onNavigateToRegister={() => setCurrentPage('register')} 
                         onNavigateToCompleteRegistration={() => {
-                            console.log('🔄 Navigating to complete-registration page');
+                            console.log('🔄 Navigating to complete-registration page (Form 2 incomplete)');
+                            // Use replaceState to prevent back button from going to dashboard
+                            setShouldReplaceHistory(true);
                             setCurrentPage('complete-registration');
                         }}
                         onNavigateToLanding={() => setCurrentPage('landing')}

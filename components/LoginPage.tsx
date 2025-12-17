@@ -214,7 +214,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     });
                     onNavigateToCompleteRegistration();
                     return;
-                } else if (!startupProfile || !startupProfile.name || !startupProfile.country) {
+                } else if (currentUser.role === 'Startup' && (!startupProfile || !startupProfile.name || !startupProfile.country)) {
+                    // Only check startup profile for users with "Startup" role
                     // User documents complete but startup profile missing - check if user has startup_name in profile
                     console.log('User documents complete but startup profile missing - checking for startup_name in user profile');
                     console.log('Missing startup fields:', { 
@@ -236,8 +237,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                     return;
                 } else {
                     // User is complete, proceed to dashboard
+                    // For non-Startup roles (Investment Advisor, Investor, etc.), they don't need startup profile
                     console.log('User complete, proceeding to dashboard');
-                        resolveAndLogin(user);
+                    console.log('User role:', currentUser.role, '- startup profile check skipped for non-Startup roles');
+                    resolveAndLogin(user);
                     try { (window as any).forceDataRefresh?.(); } catch {}
                 }
             } else if (loginError) {

@@ -130,7 +130,19 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     totalTasks: number;
     completedTasks: number;
     percentage: number;
-  }>({ totalTasks: 0, completedTasks: 0, percentage: 0 });
+    submittedTasks: number;
+    submittedPercentage: number;
+    verifiedTasks: number;
+    verifiedPercentage: number;
+  }>({ 
+    totalTasks: 0, 
+    completedTasks: 0, 
+    percentage: 0,
+    submittedTasks: 0,
+    submittedPercentage: 0,
+    verifiedTasks: 0,
+    verifiedPercentage: 0
+  });
 
   // Load compliance data
   const loadComplianceData = async () => {
@@ -138,19 +150,72 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       const complianceTasks = await complianceRulesIntegrationService.getComplianceTasksForStartup(startup.id);
       
       const totalTasks = complianceTasks.length;
-      const completedTasks = complianceTasks.filter(task => 
-        task.caStatus === 'Compliant' && task.csStatus === 'Compliant'
-      ).length;
+      
+      // Calculate completed tasks (both CA and CS are Verified)
+      const completedTasks = complianceTasks.filter(task => {
+        const caVerified = !task.caRequired || task.caStatus === 'Verified';
+        const csVerified = !task.csRequired || task.csStatus === 'Verified';
+        return caVerified && csVerified;
+      }).length;
+      
+      // Calculate submitted tasks (at least one required status is Submitted or Verified)
+      // A task is considered submitted if at least one required verification (CA or CS) has status "Submitted" or "Verified"
+      const submittedTasks = complianceTasks.filter(task => {
+        const caSubmitted = task.caRequired && (task.caStatus === 'Submitted' || task.caStatus === 'Verified');
+        const csSubmitted = task.csRequired && (task.csStatus === 'Submitted' || task.csStatus === 'Verified');
+        // If task requires both, at least one must be submitted; if only one is required, that one must be submitted
+        if (task.caRequired && task.csRequired) {
+          return caSubmitted || csSubmitted;
+        } else if (task.caRequired) {
+          return caSubmitted;
+        } else if (task.csRequired) {
+          return csSubmitted;
+        }
+        // If neither is required, don't count it
+        return false;
+      }).length;
+      
+      // Calculate verified tasks (at least one required status is Verified)
+      // A task is considered verified if at least one required verification (CA or CS) has status "Verified"
+      const verifiedTasks = complianceTasks.filter(task => {
+        const caVerified = task.caRequired && task.caStatus === 'Verified';
+        const csVerified = task.csRequired && task.csStatus === 'Verified';
+        // If task requires both, at least one must be verified; if only one is required, that one must be verified
+        if (task.caRequired && task.csRequired) {
+          return caVerified || csVerified;
+        } else if (task.caRequired) {
+          return caVerified;
+        } else if (task.csRequired) {
+          return csVerified;
+        }
+        // If neither is required, don't count it
+        return false;
+      }).length;
+      
       const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+      const submittedPercentage = totalTasks > 0 ? Math.round((submittedTasks / totalTasks) * 100) : 0;
+      const verifiedPercentage = totalTasks > 0 ? Math.round((verifiedTasks / totalTasks) * 100) : 0;
       
       setComplianceData({
         totalTasks,
         completedTasks,
-        percentage
+        percentage,
+        submittedTasks,
+        submittedPercentage,
+        verifiedTasks,
+        verifiedPercentage
       });
     } catch (error) {
       console.error('Error loading compliance data:', error);
-      setComplianceData({ totalTasks: 0, completedTasks: 0, percentage: 0 });
+      setComplianceData({ 
+        totalTasks: 0, 
+        completedTasks: 0, 
+        percentage: 0,
+        submittedTasks: 0,
+        submittedPercentage: 0,
+        verifiedTasks: 0,
+        verifiedPercentage: 0
+      });
     }
   };
 
@@ -1964,38 +2029,55 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             <div className="flex-1 min-w-0">
               <p className="text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Compliance Status</p>
               {(() => {
-                const { totalTasks, completedTasks, percentage } = complianceData;
+                const { totalTasks, completedTasks, percentage, submittedPercentage, verifiedPercentage } = complianceData;
                 
                 return (
-                  <>
-                    <p className={`text-lg sm:text-xl lg:text-2xl font-bold ${
-                      percentage >= 100 
-                        ? 'text-green-600' 
-                        : percentage >= 50 
-                          ? 'text-yellow-600' 
-                          : 'text-red-600'
-                    }`}>
-                      {percentage}%
-                    </p>
-                    <p className="text-xs text-slate-400 mt-1 truncate">
-                      {percentage >= 100 
-                        ? 'All requirements met' 
-                        : `${completedTasks}/${totalTasks} tasks completed`}
-                    </p>
-                  </>
+                  <div className="space-y-2">
+                    {/* Submitted Percentage */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Submitted</span>
+                        <span className={`text-sm sm:text-base font-semibold ${
+                          submittedPercentage >= 100 
+                            ? 'text-green-600' 
+                            : submittedPercentage >= 50 
+                              ? 'text-blue-600' 
+                              : 'text-yellow-600'
+                        }`}>
+                          {submittedPercentage}%
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Verified Percentage */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Verified</span>
+                        <span className={`text-sm sm:text-base font-semibold ${
+                          verifiedPercentage >= 100 
+                            ? 'text-green-600' 
+                            : verifiedPercentage >= 50 
+                              ? 'text-yellow-600' 
+                              : 'text-red-600'
+                        }`}>
+                          {verifiedPercentage}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 );
               })()}
             </div>
             <div className={`flex-shrink-0 ml-2 ${
-              complianceData.percentage >= 100 
+              complianceData.verifiedPercentage >= 100 
                 ? 'text-green-600' 
-                : complianceData.percentage >= 50 
+                : complianceData.verifiedPercentage >= 50 
                   ? 'text-yellow-600' 
                   : 'text-red-600'
             }`}>
-              {complianceData.percentage >= 100 ? (
+              {complianceData.verifiedPercentage >= 100 ? (
                 <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6" />
-              ) : complianceData.percentage >= 50 ? (
+              ) : complianceData.verifiedPercentage >= 50 ? (
                 <Clock className="h-5 w-5 sm:h-6 sm:w-6" />
               ) : (
                 <XCircle className="h-5 w-5 sm:h-6 sm:w-6" />

@@ -383,3 +383,4 @@ WITH CHECK (advisor_id = auth.uid());
 **The main fix was changing frontend code to use `auth.uid()`, not changing RLS policies!**
 
 
+

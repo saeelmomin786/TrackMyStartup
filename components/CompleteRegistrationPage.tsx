@@ -1977,7 +1977,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                       Provide details about your investment advisory firm.
                     </p>
 
-                    <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {/* Firm Name */}
                       <div>
                         <label htmlFor="firmName" className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
@@ -1997,7 +1997,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                           <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
                         </div>
                         <p className="text-xs text-slate-500 mt-1.5">
-                          This name will be displayed on your profile and dashboard
+                          This name will be displayed on your profile
                         </p>
                       </div>
 
@@ -2022,32 +2022,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                           Your firm's website URL (optional)
                         </p>
                       </div>
-
-                      {/* Country */}
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
-                          <MapPin className="h-4 w-4 text-slate-500" />
-                          Country <span className="text-red-500">*</span>
-                        </label>
-                        <div className="relative">
-                          <select
-                            value={profileData.country}
-                            onChange={(e) => setProfileData(prev => ({ ...prev, country: e.target.value }))}
-                            className="w-full bg-white border border-slate-300 rounded-md px-10 py-2.5 text-slate-900 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition-colors disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed"
-                            required
-                            disabled={loadingCountries}
-                          >
-                            <option value="">{loadingCountries ? 'Loading countries...' : 'Select Country'}</option>
-                            {countriesFromGeneralData.map(country => (
-                              <option key={country} value={country}>{country}</option>
-                            ))}
-                          </select>
-                          <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                        </div>
-                        <p className="text-xs text-slate-500 mt-1.5">
-                          Select the country where your firm is based
-                        </p>
-                      </div>
                     </div>
                   </div>
                 </>
@@ -2066,35 +2040,28 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             </p>
             
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Country</label>
-              <select
-                value={profileData.country}
-                onChange={(e) => setProfileData(prev => ({ ...prev, country: e.target.value }))}
-                className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-slate-900 focus:ring-blue-500 focus:border-blue-500"
-                required
-              >
-                <option value="">Select Country</option>
-                <option value="United States">United States</option>
-                <option value="India">India</option>
-                <option value="United Kingdom">United Kingdom</option>
-                <option value="Canada">Canada</option>
-                <option value="Australia">Australia</option>
-                <option value="Germany">Germany</option>
-                <option value="France">France</option>
-                <option value="Singapore">Singapore</option>
-                <option value="Japan">Japan</option>
-                <option value="China">China</option>
-                <option value="Brazil">Brazil</option>
-                <option value="Mexico">Mexico</option>
-                <option value="South Africa">South Africa</option>
-                <option value="Nigeria">Nigeria</option>
-                <option value="Kenya">Kenya</option>
-                <option value="Egypt">Egypt</option>
-                <option value="UAE">UAE</option>
-                <option value="Saudi Arabia">Saudi Arabia</option>
-                <option value="Israel">Israel</option>
-                <option value="Other">Other</option>
-              </select>
+              <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-slate-500" />
+                Country <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  value={profileData.country}
+                  onChange={(e) => setProfileData(prev => ({ ...prev, country: e.target.value }))}
+                  className="w-full bg-white border border-slate-300 rounded-md px-10 py-2.5 text-slate-900 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition-colors disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed"
+                  required
+                  disabled={loadingCountries}
+                >
+                  <option value="">{loadingCountries ? 'Loading countries...' : 'Select Country'}</option>
+                  {countriesFromGeneralData.map(country => (
+                    <option key={country} value={country}>{country}</option>
+                  ))}
+                </select>
+                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              </div>
+              <p className="text-xs text-slate-500 mt-1.5">
+                Select the country where you operate (from general data table)
+              </p>
             </div>
           </div>
 

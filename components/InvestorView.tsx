@@ -349,6 +349,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     if (!currentUser?.id) return;
     try {
       setIsLoadingRecommendations(true);
+      
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       // If investor has advisor code, show advisor recommendations; otherwise show all active opportunities
       const hasAdvisor = !!((currentUser as any).investment_advisor_code || (currentUser as any).investment_advisor_code_entered);
       if (hasAdvisor) {
@@ -366,7 +371,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             investment_advisor:users!investment_advisor_recommendations_investment_advisor_id_fkey(name),
             startup:startups(name, sector, current_valuation, investment_value, equity_allocation)
           `)
-          .eq('investor_id', currentUser.id)
+          .eq('investor_id', authUserId) // Use auth.uid() instead of profile ID
           .order('created_at', { ascending: false });
         
         if (recError) {
@@ -539,10 +544,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             if (!currentUser?.id) return;
             
             try {
+                // Get auth user ID (required for foreign key constraint)
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (!authUser) return;
+                const authUserId = authUser.id;
+                
                 const { data, error } = await supabase
                     .from('investor_favorites')
                     .select('startup_id')
-                    .eq('investor_id', currentUser.id);
+                    .eq('investor_id', authUserId); // Use auth user ID, not profile ID
                 
                 if (error) {
                     // If table doesn't exist yet, silently fail (table will be created by SQL script)
@@ -711,13 +721,18 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       if (activeTab !== 'offers' || !currentUser?.id) return;
       try {
         setIsLoadingMyOpps(true);
-        console.log('🔎 Loading my co-investment opps for user:', currentUser.id);
+        
+        // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const authUserId = authUser?.id || currentUser.id;
+        
+        console.log('🔎 Loading my co-investment opps for user:', authUserId);
         const { data, error } = await supabase
           .from('co_investment_opportunities')
           .select(
             `id,startup_id,listed_by_user_id,listed_by_type,investment_amount,equity_percentage,minimum_co_investment,maximum_co_investment,description,status,stage,lead_investor_advisor_approval_status,startup_advisor_approval_status,startup_approval_status,created_at,updated_at, startup:startups!fk_startup_id(name, sector)`
           )
-          .eq('listed_by_user_id', currentUser.id)
+          .eq('listed_by_user_id', authUserId) // Use auth.uid() instead of profile ID
           .order('created_at', { ascending: false });
         if (error) {
           console.error('Error fetching my co-investment opportunities:', error);
@@ -725,7 +740,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
           const retry = await supabase
             .from('co_investment_opportunities')
             .select('*')
-            .eq('listed_by_user_id', currentUser.id)
+            .eq('listed_by_user_id', authUserId) // Use auth.uid() instead of profile ID
             .order('created_at', { ascending: false });
           if (retry.error) {
             console.error('Retry (no join) failed:', retry.error);
@@ -807,13 +822,17 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         setIsLoadingPendingOffers(true);
         console.log('🔍 Loading pending co-investment offers for lead investor:', currentUser.id);
         
+        // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const authUserId = authUser?.id || currentUser.id;
+        
         // Fetch co-investment offers that need this user's (lead investor's) approval
         // Now query from the new co_investment_offers table
         // Get co-investment opportunities created by this user
         const { data: myOpps } = await supabase
           .from('co_investment_opportunities')
           .select('id')
-          .eq('listed_by_user_id', currentUser.id);
+          .eq('listed_by_user_id', authUserId); // Use auth.uid() instead of profile ID
         
         if (!myOpps || myOpps.length === 0) {
           setPendingCoInvestmentOffers([]);
@@ -1043,11 +1062,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       console.log('✅ Lead investor approval result:', result);
       
       // Refresh co-investment offers after approval
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       // This will reload the offers list including approved ones
       const { data: myOpps } = await supabase
         .from('co_investment_opportunities')
         .select('id')
-        .eq('listed_by_user_id', currentUser.id);
+        .eq('listed_by_user_id', authUserId); // Use auth.uid() instead of profile ID
       
       if (myOpps && myOpps.length > 0) {
         const myOppIds = myOpps.map(opp => opp.id);
@@ -1207,10 +1230,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 return;
             }
             try {
+                // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                const authUserId = authUser?.id || currentUser.id;
+                
                 const { data, error } = await supabase
                     .from('due_diligence_requests')
                     .select('startup_id, status')
-                    .eq('user_id', currentUser.id)
+                    .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
                     .in('status', ['pending', 'completed']);
                 if (error) throw error;
 
@@ -1316,10 +1343,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         if (currentUser?.id) {
             const loadProfilePreference = async () => {
                 try {
+                    // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+                    const { data: { user: authUser } } = await supabase.auth.getUser();
+                    const authUserId = authUser?.id || currentUser.id;
+                    
                     const { data, error } = await supabase
                         .from('investor_profiles')
                         .select('allow_startup_requests')
-                        .eq('user_id', currentUser.id)
+                        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
                         .maybeSingle();
                     
                     if (error && error.code !== 'PGRST116') {
@@ -1518,11 +1549,15 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         setIsSavingToggle(true);
         
         try {
+            // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            const authUserId = authUser?.id || currentUser.id;
+            
             // First check if profile exists
             const { data: existingProfile, error: checkError } = await supabase
                 .from('investor_profiles')
                 .select('id')
-                .eq('user_id', currentUser.id)
+                .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
                 .maybeSingle();
             
             if (checkError && checkError.code !== 'PGRST116') {
@@ -1536,7 +1571,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 const { error } = await supabase
                     .from('investor_profiles')
                     .update({ allow_startup_requests: newValue })
-                    .eq('user_id', currentUser.id);
+                    .eq('user_id', authUserId); // Use auth.uid() instead of profile ID
                 
                 if (error) {
                     console.error('Error updating preference:', error);
@@ -1548,7 +1583,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 const { error } = await supabase
                     .from('investor_profiles')
                     .insert({
-                        user_id: currentUser.id,
+                        user_id: authUserId, // Use auth.uid() instead of profile ID
                         investor_name: currentUser.name || currentUser.email?.split('@')[0] || 'Investor',
                         allow_startup_requests: newValue
                     });
@@ -2138,10 +2173,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     
     const handleFavoriteToggle = async (pitchId: number) => {
         if (isViewOnly) return; // Prevent favoriting in view-only mode
-        if (!currentUser?.id) {
+        
+        // Get auth user ID (required for foreign key constraint)
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) {
             alert('Please log in to favorite startups.');
             return;
         }
+        const authUserId = authUser.id;
 
         const isCurrentlyFavorited = favoritedPitches.has(pitchId);
         
@@ -2151,7 +2190,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 const { error } = await supabase
                     .from('investor_favorites')
                     .delete()
-                    .eq('investor_id', currentUser.id)
+                    .eq('investor_id', authUserId) // Use auth user ID, not profile ID
                     .eq('startup_id', pitchId);
                 
                 if (error) throw error;
@@ -2166,7 +2205,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 const { error } = await supabase
                     .from('investor_favorites')
                     .insert([{
-                        investor_id: currentUser.id,
+                        investor_id: authUserId, // Use auth user ID, not profile ID (satisfies foreign key)
                         startup_id: pitchId
                     }]);
                 
@@ -2774,7 +2813,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       )}
 
        {activeTab === 'reels' && (
-        <div className="animate-fade-in max-w-4xl mx-auto w-full">
+        <div className="animate-fade-in max-w-6xl mx-auto w-full">
           {/* Enhanced Header */}
           <div className="mb-8">
             <div className="text-center mb-6">
@@ -3618,338 +3657,263 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               }
               
               return filteredPitches.map(inv => {
-                const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
-                const embedUrl = videoEmbedInfo?.embedUrl || null;
-                const videoSource = videoEmbedInfo?.source || null;
+                const videoUrl = investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
+                const isFavorited = favoritedPitches.has(inv.id);
+                const hasDueDiligence = dueDiligenceStartups.has(inv.id);
+                const isApprovedDueDiligence = approvedDueDiligenceStartups.has(inv.id);
+
                 return (
-                  <Card key={inv.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white max-w-4xl mx-auto">
-                    {/* Enhanced Video/Logo Section */}
-                    <div className="relative w-full aspect-[16/7] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-                      {embedUrl ? (
-                        playingVideoId === inv.id ? (
-                          <div className="relative w-full h-full">
-                            {videoSource === 'direct' ? (
-                              <video
-                                src={embedUrl}
-                                controls
-                                autoPlay
-                                muted
-                                playsInline
-                                className="absolute top-0 left-0 w-full h-full object-cover"
-                              >
-                                Your browser does not support the video tag.
-                              </video>
-                            ) : (
+                  <Card key={inv.id} className="p-6">
+                    <div className="flex flex-col md:flex-row gap-6">
+                      {/* Video/Logo Section */}
+                      <div className="md:w-1/3">
+                        {videoUrl ? (
+                          <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black">
                             <iframe
-                              src={embedUrl}
+                              src={videoUrl}
                               title={`Pitch video for ${inv.name}`}
                               frameBorder="0"
                               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                               allowFullScreen
                               className="absolute top-0 left-0 w-full h-full"
-                            ></iframe>
-                            )}
-                            <button
-                              onClick={() => setPlayingVideoId(null)}
-                              className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"
-                            >
-                              ×
-                            </button>
+                            />
+                          </div>
+                        ) : inv.logoUrl && inv.logoUrl !== '#' ? (
+                          <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white flex items-center justify-center">
+                            <img
+                              src={inv.logoUrl}
+                              alt={`${inv.name} logo`}
+                              className="w-full h-full object-contain"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
                           </div>
                         ) : (
-                          <div
-                            className="relative w-full h-full group cursor-pointer"
-                            onClick={() => { setPlayingVideoId(inv.id); setSelectedPitchId(inv.id); }}
-                          >
-                            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
-                                <svg className="w-10 h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M8 5v14l11-7z" />
-                                </svg>
-                              </div>
-                            </div>
-                            <div className="absolute bottom-4 left-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                              <p className="text-sm font-medium">Click to play</p>
-                            </div>
+                          <div className="w-full aspect-video bg-slate-200 rounded-lg flex items-center justify-center">
+                            <Video className="h-12 w-12 text-slate-400" />
                           </div>
-                        )
-                      ) : inv.logoUrl ? (
-                        <div className="w-full h-full flex items-center justify-center bg-slate-100">
-                          <img 
-                            src={inv.logoUrl} 
-                            alt={`${inv.name} Logo`} 
-                            className="object-contain w-full h-full" 
-                          />
-                        </div>
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-400">
-                          <div className="text-center">
-                            <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">No video or logo available</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Enhanced Content Section */}
-                    <div className="p-3 sm:p-4">
-                      <div className="flex flex-col sm:flex-row items-start justify-between mb-2 sm:mb-3 gap-2">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-lg sm:text-xl font-bold text-slate-800 mb-1 break-words">{inv.name}</h3>
-                          {/* Domain, Round, Stage, Website, LinkedIn in one line (desktop only) */}
-                          <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 text-xs text-slate-600">
-                            {inv.domain && (
-                              <span>
-                                <span className="font-medium text-slate-700">Domain:</span> {inv.domain}
-                              </span>
-                            )}
-                            {inv.fundraisingType && (
-                              <>
-                                {inv.domain && <span className="text-slate-300">•</span>}
-                                <span>
-                                  <span className="font-medium text-slate-700">Round:</span> {inv.fundraisingType}
-                                </span>
-                              </>
-                            )}
-                            {inv.stage && (
-                              <>
-                                {(inv.domain || inv.fundraisingType) && <span className="text-slate-300">•</span>}
-                                <span>
-                                  <span className="font-medium text-slate-700">Stage:</span> {inv.stage}
-                                </span>
-                              </>
-                            )}
-                            {/* Website and LinkedIn - Desktop only */}
-                            {(inv.websiteUrl || inv.linkedInUrl) && (
-                              <>
-                                {(inv.domain || inv.fundraisingType || inv.stage) && <span className="text-slate-300 hidden lg:inline">•</span>}
-                                <div className="hidden lg:flex items-center gap-2">
-                                  {inv.websiteUrl && inv.websiteUrl !== '#' && (
-                                    <a 
-                                      href={inv.websiteUrl} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      className="flex items-center gap-1 text-xs text-slate-600 hover:text-blue-600 transition-colors"
-                                      title={inv.websiteUrl}
-                                    >
-                                      <Globe className="h-3 w-3 flex-shrink-0" />
-                                      <span>Website</span>
-                                      <ExternalLink className="h-3 w-3 opacity-50 flex-shrink-0" />
-                                    </a>
-                                  )}
-                                  {inv.linkedInUrl && inv.linkedInUrl !== '#' && (
-                                    <>
-                                      {inv.websiteUrl && inv.websiteUrl !== '#' && <span className="text-slate-300">•</span>}
-                                      <a 
-                                        href={inv.linkedInUrl} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="flex items-center gap-1 text-xs text-slate-600 hover:text-blue-600 transition-colors"
-                                        title={inv.linkedInUrl}
-                                      >
-                                        <Linkedin className="h-3 w-3 flex-shrink-0" />
-                                        <span>LinkedIn</span>
-                                        <ExternalLink className="h-3 w-3 opacity-50 flex-shrink-0" />
-                                      </a>
-                                    </>
-                                  )}
-                        </div>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-                          {inv.isStartupNationValidated && (
-                            <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2 py-0.5 sm:py-1 rounded-full text-xs font-medium shadow-sm">
-                              <CheckCircle className="h-3 w-3" />
-                              <span className="hidden xs:inline">Verified</span>
-                            </div>
-                          )}
-                          {(() => {
-                            const existingOffer = investmentOffers.find(offer => 
-                              offer.startupName === inv.name && 
-                              offer.status === 'pending'
-                            );
-                            if (existingOffer) {
-                              return (
-                                <div className="flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-medium">
-                                  <CheckCircle className="h-3 w-3" />
-                                  <span className="hidden sm:inline">Offer Submitted</span>
-                                  <span className="sm:hidden">Offer</span>
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleShare(inv)}
-                            className="!rounded-full !p-1.5 sm:!p-2 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
-                        >
-                            <Share2 className="h-3 w-3 sm:h-4 sm:w-4" />
-                        </Button>
-                        </div>
-                      </div>
-
-                      {/* Document Buttons Row - First Row */}
-                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2">
-                        {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
-                          <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[80px] sm:min-w-[100px]">
-                            <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 text-xs py-1">
-                              <FileText className="h-3 w-3 mr-1" /> Deck
-                            </Button>
-                          </a>
-                        )}
-
-                        {inv.businessPlanUrl && inv.businessPlanUrl !== '#' && (
-                          <a href={inv.businessPlanUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[80px] sm:min-w-[110px]">
-                            <Button size="sm" variant="secondary" className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 text-xs py-1">
-                              <FileText className="h-3 w-3 mr-1" /> <span className="hidden sm:inline">Business </span>Plan
-                            </Button>
-                          </a>
-                        )}
-
-                        {inv.onePagerUrl && inv.onePagerUrl !== '#' && (
-                          <a href={inv.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[80px] sm:min-w-[100px]">
-                            <Button size="sm" variant="secondary" className="w-full hover:bg-emerald-50 hover:text-emerald-600 transition-all duration-200 border border-slate-200 text-xs py-1">
-                              <FileText className="h-3 w-3 mr-1" /> One-Pager
-                            </Button>
-                          </a>
                         )}
                       </div>
 
-                      {/* Action Buttons Row - Second Row */}
-                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2">
-                        {!isViewOnly && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className={`!rounded-full !p-1.5 sm:!p-2 transition-all duration-200 ${
-                            favoritedPitches.has(inv.id)
-                              ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
-                              : 'hover:bg-red-50 hover:text-red-600 border border-slate-200'
-                          }`}
-                          onClick={() => handleFavoriteToggle(inv.id)}
-                        >
-                          <Heart className={`h-3 w-3 sm:h-4 sm:w-4 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
-                        </Button>
-                        )}
-
-                        <button
-                          onClick={() => handleDueDiligenceClick(inv)}
-                          className={`flex-1 min-w-[90px] sm:min-w-[120px] transition-all duration-200 border px-2 py-1 rounded-lg text-xs font-medium ${
-                            approvedDueDiligenceStartups.has(inv.id)
-                              ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
-                              : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
-                          }`}
-                        >
-                          <HelpCircle className="h-3 w-3 mr-1 inline" />
-                          <span className="hidden sm:inline">{approvedDueDiligenceStartups.has(inv.id) ? 'Due Diligence Accepted' : 'Due Diligence'}</span>
-                          <span className="sm:hidden">DD</span>
-                        </button>
-
-                        {(() => {
-                          // Check if user has already submitted an offer for this startup
-                          const existingOffer = investmentOffers.find(offer => 
-                            offer.startupName === inv.name && 
-                            offer.status === 'pending'
-                          );
-                          
-                          if (existingOffer) {
-                            return (
-                              <div className="flex-1 min-w-[90px] sm:min-w-[120px]">
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  disabled
-                                  className="w-full bg-slate-100 text-slate-500 cursor-not-allowed border border-slate-200 text-xs py-1"
-                                  title="View and edit your offer in the Dashboard → Recent Activity"
-                                >
-                                  <CheckCircle className="h-3 w-3 mr-1" /> <span className="hidden sm:inline">Offer Submitted</span><span className="sm:hidden">Offer</span>
-                                </Button>
-                              </div>
-                            );
-                          } else {
-                            return !isViewOnly ? (
+                      {/* Content Section */}
+                      <div className="md:w-2/3 flex flex-col relative">
+                        {/* Header Section */}
+                        <div className="mb-3">
+                          <div className="flex items-start justify-between gap-3 mb-2">
+                            <h3 className="text-xl font-bold text-slate-800 flex-1">{inv.name}</h3>
+                            {!isViewOnly && (
                               <Button
                                 size="sm"
-                                variant="primary"
-                                onClick={() => handleMakeOfferClick(inv)}
-                                className="flex-1 min-w-[90px] sm:min-w-[120px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg shadow-blue-200 text-xs py-1"
+                                variant="outline"
+                                onClick={() => handleShare(inv)}
+                                className="flex-shrink-0"
                               >
-                                <DollarSign className="h-3 w-3 mr-1" /> <span className="hidden sm:inline">Make</span>Offer
+                                <Share2 className="h-4 w-4" />
                               </Button>
-                            ) : null;
-                          }
-                        })()}
-
-                        {!isViewOnly && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setStartupToRecommend(inv);
-                              setSelectedCollaboratorId(null);
-                              setShowRecommendModal(true);
-                            }}
-                            className="flex-1 min-w-[90px] sm:min-w-[120px] border border-slate-200 text-xs py-1 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300"
-                          >
-                            <Users className="h-3 w-3 mr-1" />
-                            <span className="hidden sm:inline">Recommend</span>
-                            <span className="sm:hidden">Rec</span>
-                          </Button>
-                        )}
-                      </div>
-                                    </div>
-
-                      {/* Enhanced Investment Details Footer */}
-                      <div className="bg-gradient-to-r from-slate-50 to-blue-50 px-3 sm:px-4 py-2 sm:py-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3 border-t border-slate-200">
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5 sm:gap-3 flex-wrap">
-                          <div className="text-xs sm:text-sm">
-                            <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(inv.investmentValue, inv.currency)} for <span className="font-semibold text-blue-600">{inv.equityAllocation}%</span> equity
+                            )}
                           </div>
-                          {/* Website and LinkedIn - Mobile/Tablet only (hidden on desktop as they're in header) */}
-                          {(inv.websiteUrl || inv.linkedInUrl) && (
-                            <div className="flex items-center gap-2 sm:gap-3 flex-wrap lg:hidden">
-                              {inv.websiteUrl && inv.websiteUrl !== '#' && (
-                                <a 
-                                  href={inv.websiteUrl} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1 text-xs text-slate-600 hover:text-blue-600 transition-colors"
-                                  title={inv.websiteUrl}
-                                >
-                                  <Globe className="h-3 w-3 flex-shrink-0" />
-                                  <span className="truncate max-w-[120px] sm:max-w-[150px]">Website</span>
-                                  <ExternalLink className="h-3 w-3 opacity-50 flex-shrink-0" />
-                                </a>
-                              )}
-                              {inv.linkedInUrl && inv.linkedInUrl !== '#' && (
-                                <a 
-                                  href={inv.linkedInUrl} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1 text-xs text-slate-600 hover:text-blue-600 transition-colors"
-                                  title={inv.linkedInUrl}
-                                >
-                                  <Linkedin className="h-3 w-3 flex-shrink-0" />
-                                  <span className="truncate max-w-[120px] sm:max-w-[150px]">LinkedIn</span>
-                                  <ExternalLink className="h-3 w-3 opacity-50 flex-shrink-0" />
-                                </a>
-                              )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge status={inv.complianceStatus} />
+                            {inv.isStartupNationValidated && (
+                              <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full flex items-center gap-1">
+                                <CheckCircle className="h-3 w-3" />
+                                Verified
+                              </span>
+                            )}
+                            <span className="text-sm text-slate-600">{inv.sector}</span>
+                          </div>
+                        </div>
+
+                        {/* Investment Details */}
+                        <div className="mb-4">
+                          {/* Investment Ask and Equity in one line */}
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-slate-500">Investment Ask:</span>
+                              <span className="text-xs font-medium text-slate-600">
+                                {investorService.formatCurrency(inv.investmentValue, inv.currency || 'USD')}
+                              </span>
                             </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-slate-500">Equity:</span>
+                              <span className="text-xs font-medium text-slate-600">{inv.equityAllocation}%</span>
+                            </div>
+                          </div>
+                          {/* Round Type, Currency, Stage, Domain in one line */}
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                            {inv.fundraisingType && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-slate-500">Round Type:</span>
+                                <span className="text-xs font-medium text-slate-600">{inv.fundraisingType}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-slate-500">Currency:</span>
+                              <span className="text-xs font-medium text-slate-600">{inv.currency || 'USD'}</span>
+                            </div>
+                            {inv.stage && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-slate-500">Stage:</span>
+                                <span className="text-xs font-medium text-slate-600">{inv.stage}</span>
+                              </div>
+                            )}
+                            {inv.domain && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-slate-500">Domain:</span>
+                                <span className="text-xs font-medium text-slate-600">{inv.domain}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Links & Documents Section */}
+                        <div className="mb-4 pb-3 border-b border-slate-200">
+                          <div className="text-xs font-medium text-slate-500 mb-2">Links & Documents</div>
+                          <div className="flex flex-wrap gap-2">
+                            {inv.websiteUrl && inv.websiteUrl !== '#' && (
+                              <a
+                                href={inv.websiteUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                              >
+                                <Globe className="h-3.5 w-3.5" />
+                                Website
+                                <ExternalLink className="h-3 w-3 opacity-50" />
+                              </a>
+                            )}
+                            {inv.linkedInUrl && inv.linkedInUrl !== '#' && (
+                              <a
+                                href={inv.linkedInUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                              >
+                                <Linkedin className="h-3.5 w-3.5" />
+                                LinkedIn
+                                <ExternalLink className="h-3 w-3 opacity-50" />
+                              </a>
+                            )}
+                            {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
+                              <a
+                                href={inv.pitchDeckUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                Pitch Deck
+                                <ExternalLink className="h-3 w-3 opacity-50" />
+                              </a>
+                            )}
+                            {inv.onePagerUrl && inv.onePagerUrl !== '#' && (
+                              <a
+                                href={inv.onePagerUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                One-Pager
+                                <ExternalLink className="h-3 w-3 opacity-50" />
+                              </a>
+                            )}
+                            {inv.businessPlanUrl && inv.businessPlanUrl !== '#' && (
+                              <a
+                                href={inv.businessPlanUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                Business Plan
+                                <ExternalLink className="h-3 w-3 opacity-50" />
+                              </a>
+                            )}
+                            {(!inv.websiteUrl || inv.websiteUrl === '#') && 
+                             (!inv.linkedInUrl || inv.linkedInUrl === '#') && 
+                             (!inv.pitchDeckUrl || inv.pitchDeckUrl === '#') && 
+                             (!inv.onePagerUrl || inv.onePagerUrl === '#') && 
+                             (!inv.businessPlanUrl || inv.businessPlanUrl === '#') && (
+                              <span className="text-xs text-slate-400 italic">No links available</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex flex-wrap gap-2 pt-3">
+                          {!isViewOnly && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleFavoriteToggle(inv.id)}
+                              >
+                                <Heart className={`h-4 w-4 mr-2 ${isFavorited ? 'fill-current text-red-500' : ''}`} />
+                                {isFavorited ? 'Favorited' : 'Favorite'}
+                              </Button>
+
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDueDiligenceClick(inv)}
+                              >
+                                <Shield className="h-4 w-4 mr-2" />
+                                {isApprovedDueDiligence ? 'Due Diligence Accepted' : 'Due Diligence'}
+                              </Button>
+
+                              {(() => {
+                                const existingOffer = investmentOffers.find(offer => 
+                                  offer.startupName === inv.name && 
+                                  offer.status === 'pending'
+                                );
+                                
+                                if (existingOffer) {
+                                  return (
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      disabled
+                                      className="bg-slate-100 text-slate-500 cursor-not-allowed"
+                                      title="View and edit your offer in the Dashboard → Recent Activity"
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-2" />
+                                      Offer Submitted
+                                    </Button>
+                                  );
+                                } else {
+                                  return (
+                                    <Button
+                                      size="sm"
+                                      variant="primary"
+                                      onClick={() => handleMakeOfferClick(inv)}
+                                    >
+                                      <DollarSign className="h-4 w-4 mr-2" />
+                                      Make Offer
+                                    </Button>
+                                  );
+                                }
+                              })()}
+                              
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setStartupToRecommend(inv);
+                                  setSelectedCollaboratorId(null);
+                                  setShowRecommendModal(true);
+                                }}
+                              >
+                                <Users className="h-4 w-4 mr-2" />
+                                Recommend
+                              </Button>
+                            </>
                           )}
                         </div>
-                        {inv.complianceStatus === ComplianceStatus.Compliant && (
-                          <div className="flex items-center gap-1 text-green-600 flex-shrink-0" title="This startup has been verified by Startup Nation">
-                            <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                            <span className="text-xs font-semibold">Verified</span>
-                          </div>
-                        )}
                       </div>
-                                              </Card>
+                    </div>
+                  </Card>
                 );
               });
             })()}

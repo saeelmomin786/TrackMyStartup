@@ -72,6 +72,7 @@ export interface Founder {
   email: string;
   shares?: number;
   equityPercentage?: number; // Direct equity percentage
+  mentorCode?: string; // Optional mentor code for founder
 }
 
 export interface Startup {

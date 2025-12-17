@@ -38,7 +38,7 @@ export class DomainUpdateService {
       // 1. Get domain information from opportunity_applications
       const { data: applicationData, error: applicationError } = await supabase
         .from('opportunity_applications')
-        .select('startup_id, domain, sector')
+        .select('startup_id, domain')
         .in('startup_id', startupIdsToCheck)
         .eq('status', 'accepted');
       
@@ -124,17 +124,13 @@ export class DomainUpdateService {
       // 1. Try opportunity_applications first
       const { data: applicationData, error: applicationError } = await supabase
         .from('opportunity_applications')
-        .select('domain, sector')
+        .select('domain')
         .eq('startup_id', startupId)
         .eq('status', 'accepted')
         .single();
       
-      if (!applicationError && applicationData) {
-        // Try domain field first, then fallback to sector field
-        const domainValue = applicationData.domain || applicationData.sector;
-        if (domainValue) {
-          return domainValue;
-        }
+      if (!applicationError && applicationData?.domain) {
+        return applicationData.domain;
       }
       
       // 2. Try fundraising_details

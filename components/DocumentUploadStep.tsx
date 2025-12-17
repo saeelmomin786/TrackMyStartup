@@ -14,6 +14,7 @@ interface Founder {
   name: string;
   email: string;
   equity: number;
+  mentorCode?: string;
 }
 
 interface FundraisingFormData {
@@ -70,7 +71,7 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
   const [loadingCountries, setLoadingCountries] = useState(true);
 
   const [founders, setFounders] = useState<Founder[]>([
-    { id: '1', name: '', email: '', equity: 0 }
+    { id: '1', name: '', email: '', equity: 0, mentorCode: '' }
   ]);
 
   // Incubation Center (Optional) - Only for Startup role
@@ -218,7 +219,7 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
 
   const addFounder = () => {
     const newId = (founders.length + 1).toString();
-    setFounders(prev => [...prev, { id: newId, name: '', email: '' }]);
+    setFounders(prev => [...prev, { id: newId, name: '', email: '', equity: 0, mentorCode: '' }]);
   };
 
   const removeFounder = (id: string) => {
@@ -227,7 +228,7 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
     }
   };
 
-  const updateFounder = (id: string, field: 'name' | 'email' | 'equity', value: string | number) => {
+  const updateFounder = (id: string, field: 'name' | 'email' | 'equity' | 'mentorCode', value: string | number) => {
     setFounders(prev => prev.map(founder => 
       founder.id === id ? { ...founder, [field]: value } : founder
     ));
@@ -263,7 +264,8 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
       return;
     }
 
-    if (!uploadedFiles.roleSpecific) {
+    // Role-specific document is not required for Mentor
+    if (userData.role !== 'Mentor' && !uploadedFiles.roleSpecific) {
       setError(`${getRoleSpecificDocumentType(userData.role)} is required`);
       setIsLoading(false);
       return;
@@ -410,32 +412,35 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
               )}
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                {getRoleSpecificDocumentType(userData.role)}
-              </label>
-              <CloudDriveInput
-                value=""
-                onChange={(url) => {
-                  const hiddenInput = document.getElementById('role-specific-url') as HTMLInputElement;
-                  if (hiddenInput) hiddenInput.value = url;
-                }}
-                onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'roleSpecific')}
-                placeholder="Paste your cloud drive link here..."
-                label=""
-                accept=".pdf,.jpg,.jpeg,.png"
-                maxSize={10}
-                documentType="role-specific document"
-                showPrivacyMessage={false}
-                required
-              />
-              <input type="hidden" id="role-specific-url" name="role-specific-url" />
-              {uploadedFiles.roleSpecific && (
-                <p className="text-sm text-green-600 mt-1">
-                  ✓ {uploadedFiles.roleSpecific.name} selected
-                </p>
-              )}
-            </div>
+            {/* Role-specific document - Not required for Mentor */}
+            {userData.role !== 'Mentor' && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  {getRoleSpecificDocumentType(userData.role)}
+                </label>
+                <CloudDriveInput
+                  value=""
+                  onChange={(url) => {
+                    const hiddenInput = document.getElementById('role-specific-url') as HTMLInputElement;
+                    if (hiddenInput) hiddenInput.value = url;
+                  }}
+                  onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'roleSpecific')}
+                  placeholder="Paste your cloud drive link here..."
+                  label=""
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  maxSize={10}
+                  documentType="role-specific document"
+                  showPrivacyMessage={false}
+                  required
+                />
+                <input type="hidden" id="role-specific-url" name="role-specific-url" />
+                {uploadedFiles.roleSpecific && (
+                  <p className="text-sm text-green-600 mt-1">
+                    ✓ {uploadedFiles.roleSpecific.name} selected
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* License Upload - Only for Investment Advisor */}
             {(userData.role === 'Investment Advisor' || userData.role?.trim() === 'Investment Advisor') && (
@@ -554,7 +559,7 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                     )}
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <Input
                       label="Name"
                       value={founder.name}
@@ -577,6 +582,13 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                       value={founder.equity}
                       onChange={(e) => updateFounder(founder.id, 'equity', parseFloat(e.target.value) || 0)}
                       required
+                    />
+                    <Input
+                      label="Mentor Code (Optional)"
+                      type="text"
+                      value={founder.mentorCode || ''}
+                      onChange={(e) => updateFounder(founder.id, 'mentorCode', e.target.value)}
+                      placeholder="e.g., MEN-ABC123"
                     />
                   </div>
                 </div>

@@ -82,16 +82,15 @@ class InvestorService {
         // 1. First, try to get domain data from opportunity_applications (most recent)
         const { data: applicationData, error: applicationError } = await supabase
           .from('opportunity_applications')
-          .select('startup_id, domain, sector')
+          .select('startup_id, domain')
           .in('startup_id', startupIds)
           .eq('status', 'accepted'); // Only get accepted applications
 
         if (!applicationError && applicationData) {
           applicationData.forEach(app => {
-            // Try domain field first, then fallback to sector field
-            const domainValue = app.domain || app.sector;
-            if (domainValue && !domainMap[app.startup_id]) {
-              domainMap[app.startup_id] = domainValue;
+            // Use domain field (sector column was renamed to domain)
+            if (app.domain && !domainMap[app.startup_id]) {
+              domainMap[app.startup_id] = app.domain;
             }
           });
         }

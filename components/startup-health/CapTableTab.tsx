@@ -1248,7 +1248,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             name: '', 
             email: '', 
             equityPercentage: undefined, 
-            shares: undefined 
+            shares: undefined,
+            mentorCode: undefined
         }]);
     };
     
@@ -2839,6 +2840,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             <div>
                                                 <p className="font-semibold">{founder.name}</p>
                                                 <p className="text-sm text-slate-500">{founder.email}</p>
+                                                {founder.mentorCode && (
+                                                    <p className="text-xs text-slate-400 mt-1">
+                                                        Mentor Code: <span className="font-medium">{founder.mentorCode}</span>
+                                                    </p>
+                                                )}
                                             </div>
                                             <div className="text-right">
                                                 {(() => {
@@ -3120,6 +3126,14 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 value={founder.shares || ''}
                                 onChange={e => handleFounderChange(founder.id, 'shares', e.target.value)}
                                 placeholder="e.g., 1000000"
+                            />
+                            <Input 
+                                label={'Mentor Code (Optional)'}
+                                id={'founder-mentor-code-' + founder.id}
+                                type="text"
+                                value={founder.mentorCode || ''}
+                                onChange={e => handleFounderChange(founder.id, 'mentorCode', e.target.value)}
+                                placeholder="e.g., MEN-ABC123"
                             />
                             {editingFounders.length > 1 && (
                                 <Button 

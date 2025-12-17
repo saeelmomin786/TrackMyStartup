@@ -218,6 +218,11 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
     const fileInputClassName = "block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-brand-light file:text-brand-primary hover:file:bg-blue-200 cursor-pointer";
 
     const renderRoleSpecificDocs = () => {
+        // Mentor role doesn't require role-specific document
+        if (role === 'Mentor') {
+            return null;
+        }
+
         const commonProps = {
             value: "",
             onChange: (url: string) => {

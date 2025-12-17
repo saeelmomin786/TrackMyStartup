@@ -92,10 +92,14 @@ class AdvisorAddedStartupService {
   // Get all startups added by an advisor
   async getStartupsByAdvisor(advisorId: string): Promise<AdvisorAddedStartup[]> {
     try {
+      // Get auth.uid() directly from Supabase (RLS policies use auth.uid())
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || advisorId; // Fallback to advisorId if auth.uid() not available
+      
       const { data, error } = await supabase
         .from('advisor_added_startups')
         .select('*')
-        .eq('advisor_id', advisorId)
+        .eq('advisor_id', authUserId)  // Use auth.uid() instead of advisorId
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -182,8 +186,13 @@ class AdvisorAddedStartupService {
       if (existsCheck.exists && existsCheck.startupId) {
         // Startup already exists on TMS - create permission request instead of auto-linking
         // First create the advisor_added_startups entry with pending status
+        // Get auth.uid() directly from Supabase (RLS policies use auth.uid())
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const authUserId = authUser?.id || startup.advisor_id; // Fallback to passed advisor_id if auth.uid() not available
+        
         const startupData: any = {
           ...startup,
+          advisor_id: authUserId,  // Use auth.uid() instead of passed advisor_id
           currency: startup.currency || 'USD',
           is_on_tms: false, // Not linked yet, pending permission
           tms_startup_id: existsCheck.startupId,
@@ -201,11 +210,11 @@ class AdvisorAddedStartupService {
           return { success: false, error: insertError.message, isDuplicate: true };
         }
 
-        // Get advisor details
+        // Get advisor details (use authUserId instead of startup.advisor_id)
         const { data: advisorData } = await supabase
           .from('users')
           .select('investment_advisor_code, name, email')
-          .eq('id', startup.advisor_id)
+          .eq('id', authUserId)
           .maybeSingle();
 
         // Get startup user details and check if already has an advisor
@@ -248,7 +257,7 @@ class AdvisorAddedStartupService {
         const { advisorStartupLinkRequestService } = await import('./advisorStartupLinkRequestService');
         try {
           await advisorStartupLinkRequestService.createRequest({
-            advisor_id: startup.advisor_id,
+            advisor_id: authUserId,  // Use auth.uid() instead of startup.advisor_id
             advisor_code: advisorData?.investment_advisor_code || '',
             advisor_name: advisorData?.name,
             advisor_email: advisorData?.email,
@@ -277,8 +286,13 @@ class AdvisorAddedStartupService {
       }
 
       // Startup doesn't exist on TMS - create new entry
+      // Get auth.uid() directly from Supabase (RLS policies use auth.uid())
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || startup.advisor_id; // Fallback to passed advisor_id if auth.uid() not available
+      
       const startupData: any = {
         ...startup,
+        advisor_id: authUserId,  // Use auth.uid() instead of passed advisor_id
         currency: startup.currency || 'USD',
         is_on_tms: false,
         invite_status: 'not_sent'

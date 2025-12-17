@@ -183,6 +183,65 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     }));
   };
 
+  // Auto-save handler for active toggle
+  const handleActiveToggle = async (checked: boolean) => {
+    if (!startup?.id) return;
+    
+    // Update local state immediately for responsive UI
+    setFundraising(prev => ({
+      ...prev,
+      active: checked,
+    }));
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      // Create a minimal update with just the active field changed
+      const toSave: FundraisingDetails = {
+        ...fundraising,
+        active: checked,
+      };
+
+      const saved = await capTableService.updateFundraisingDetails(startup.id, toSave);
+      
+      // Reload fundraising details to ensure sync
+      const refreshedRounds = await capTableService.getFundraisingDetails(startup.id);
+      setExistingRounds(refreshedRounds);
+      
+      // Update local state with saved data
+      const updatedRecord = saved.id 
+        ? refreshedRounds.find(r => r.id === saved.id) || saved
+        : refreshedRounds.find(r => r.active) || refreshedRounds[0] || saved;
+      
+      setFundraising(updatedRecord);
+
+      if (onActivateFundraising) {
+        onActivateFundraising(saved, startup);
+      }
+
+      // Show success message
+      messageService.success(
+        checked ? 'Fundraising Activated' : 'Fundraising Deactivated',
+        checked 
+          ? 'Your fundraising is now active and visible in the discover tab.' 
+          : 'Your fundraising is now inactive. Public profile sharing is closed.',
+        3000
+      );
+    } catch (e: any) {
+      console.error('Error saving fundraising active status:', e);
+      // Revert the toggle on error
+      setFundraising(prev => ({
+        ...prev,
+        active: !checked,
+      }));
+      setError(e?.message || 'Failed to save fundraising status');
+      messageService.error('Save Failed', 'Could not update fundraising status. Please try again.', 3000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleOnePagerChange = (field: keyof typeof onePager, value: string) => {
     const limit = ONE_PAGER_LIMITS[field];
     if (limit && value.length > limit) {
@@ -800,17 +859,21 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
               </p>
             </div>
             {canEdit && (
-              <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="rounded border-slate-300"
-                  checked={fundraising.active}
-                  onChange={e => handleChange('active', e.target.checked)}
-                />
-                <span className="font-semibold text-green-600 bg-green-50 px-3 py-1.5 rounded-md border border-green-200">
-                  Fundraising Active
+              <div className="flex items-center gap-3">
+                <span className={`text-sm font-medium ${fundraising.active ? 'text-slate-600' : 'text-slate-500'}`}>
+                  {isSaving ? 'Saving...' : (fundraising.active ? 'Active' : 'Inactive')}
                 </span>
-              </label>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="sr-only peer"
+                    checked={fundraising.active}
+                    onChange={e => handleActiveToggle(e.target.checked)}
+                    disabled={isSaving}
+                  />
+                  <div className={`w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-brand-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-primary ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                </label>
+              </div>
             )}
           </div>
 

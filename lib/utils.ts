@@ -40,6 +40,21 @@ export function generateInvestmentAdvisorCode(): string {
 }
 
 /**
+ * Generates a unique Mentor code in the format MEN-XXXXXX
+ * @returns A unique Mentor code
+ */
+export function generateMentorCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'MEN-';
+  
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  return result;
+}
+
+/**
  * Validates if a string is a valid Investment Advisor code format
  * @param code The code to validate
  * @returns True if valid, false otherwise

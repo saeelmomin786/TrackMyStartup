@@ -295,10 +295,14 @@ const PublicInvestorPage: React.FC = () => {
     }
 
     // Get user's startup
+    // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || currentUser.id;
+    
     const { data: userStartups } = await supabase
       .from('startups')
       .select('id, name')
-      .eq('user_id', currentUser.id)
+      .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
       .limit(1);
 
     if (!userStartups || userStartups.length === 0) {

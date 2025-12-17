@@ -55,10 +55,14 @@ class AdvisorAddedInvestorService {
   // Get all investors added by an advisor
   async getInvestorsByAdvisor(advisorId: string): Promise<AdvisorAddedInvestor[]> {
     try {
+      // Get auth.uid() directly from Supabase (RLS policies use auth.uid())
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || advisorId; // Fallback to advisorId if auth.uid() not available
+      
       const { data, error } = await supabase
         .from('advisor_added_investors')
         .select('*')
-        .eq('advisor_id', advisorId)
+        .eq('advisor_id', authUserId)  // Use auth.uid() instead of advisorId
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -97,8 +101,13 @@ class AdvisorAddedInvestorService {
   // Create a new added investor
   async createInvestor(investor: CreateAdvisorAddedInvestor): Promise<AdvisorAddedInvestor | null> {
     try {
+      // Get auth.uid() directly from Supabase (RLS policies use auth.uid())
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || investor.advisor_id; // Fallback to passed advisor_id if auth.uid() not available
+      
       const investorData: any = {
         ...investor,
+        advisor_id: authUserId,  // Use auth.uid() instead of passed advisor_id
         is_on_tms: false
       };
 

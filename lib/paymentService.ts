@@ -992,10 +992,14 @@ class PaymentService {
   // Create a due diligence request without payment
   async createDueDiligenceRequest(userId: string, startupId: string): Promise<any> {
     try {
+      // CRITICAL FIX: Use auth.uid() instead of profile ID for RLS policies
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || userId;
+      
       const { data, error } = await supabase
         .from('due_diligence_requests')
         .insert({
-          user_id: userId,
+          user_id: authUserId, // Use auth.uid() instead of profile ID
           startup_id: String(startupId),
           status: 'pending'
         })
@@ -1012,10 +1016,14 @@ class PaymentService {
 
   // Return true if investor already has an approved/completed due diligence for the startup
   async hasApprovedDueDiligence(userId: string, startupId: string): Promise<boolean> {
+    // CRITICAL FIX: Use auth.uid() instead of profile ID for RLS policies
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || userId;
+    
     const { data, error } = await supabase
       .from('due_diligence_requests')
       .select('id, status')
-      .eq('user_id', userId)
+      .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
       .eq('startup_id', String(startupId))
       .in('status', ['completed'])
       .limit(1);
@@ -1028,17 +1036,21 @@ class PaymentService {
 
   // Create pending request only if one doesn't already exist
   async createPendingDueDiligenceIfNeeded(userId: string, startupId: string): Promise<any> {
+    // CRITICAL FIX: Use auth.uid() instead of profile ID for RLS policies
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || userId;
+    
     const { data: existing, error: checkError } = await supabase
       .from('due_diligence_requests')
       .select('id, status')
-      .eq('user_id', userId)
+      .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
       .eq('startup_id', String(startupId))
       .in('status', ['pending'])
       .limit(1);
     if (!checkError && Array.isArray(existing) && existing.length > 0) {
       return existing[0];
     }
-    return this.createDueDiligenceRequest(userId, String(startupId));
+    return this.createDueDiligenceRequest(userId, String(startupId)); // This will also use auth.uid() internally
   }
 
   // Approve due diligence (for startup use) – marks as completed

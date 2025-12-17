@@ -27,6 +27,8 @@ interface MentorProfile {
   fee_amount_min?: number;
   fee_amount_max?: number;
   fee_currency?: string;
+  equity_amount_min?: number;
+  equity_amount_max?: number;
   fee_description?: string;
   logo_url?: string;
   video_url?: string;
@@ -220,21 +222,10 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView }) => {
             </div>
           )}
 
-          {(mentor.availability || mentor.preferred_engagement) && (
+          {mentor.availability && (
             <div className="flex items-center gap-2 text-sm text-slate-600">
-              {mentor.availability && (
-                <>
-                  <span className="font-medium">Availability:</span>
-                  <span>{mentor.availability}</span>
-                </>
-              )}
-              {mentor.preferred_engagement && (
-                <>
-                  {mentor.availability && <span className="text-slate-300">•</span>}
-                  <span className="font-medium">Engagement:</span>
-                  <span>{mentor.preferred_engagement}</span>
-                </>
-              )}
+              <span className="font-medium">Availability:</span>
+              <span>{mentor.availability}</span>
             </div>
           )}
 
@@ -260,7 +251,7 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView }) => {
         </div>
 
         {/* Contact Links */}
-        {(mentor.website || mentor.linkedin_link || mentor.email) && (
+        {(mentor.website || mentor.linkedin_link) && (
           <div className="pt-4 border-t border-slate-200 mt-4">
             <div className="flex flex-wrap items-center gap-4 sm:gap-6">
               {mentor.website && mentor.website.trim() && (
@@ -285,16 +276,6 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView }) => {
                 >
                   <Linkedin className="h-4 w-4 flex-shrink-0" />
                   <span className="whitespace-nowrap">LinkedIn</span>
-                </a>
-              )}
-              {mentor.email && mentor.email.trim() && (
-                <a
-                  href={`mailto:${mentor.email}`}
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors cursor-pointer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Mail className="h-4 w-4 flex-shrink-0" />
-                  <span className="whitespace-nowrap">Email</span>
                 </a>
               )}
             </div>

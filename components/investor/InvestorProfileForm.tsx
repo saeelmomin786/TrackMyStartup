@@ -229,10 +229,14 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
 
   const loadProfile = async () => {
     try {
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       const { data, error } = await supabase
         .from('investor_profiles')
         .select('*')
-        .eq('user_id', currentUser.id)
+        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {

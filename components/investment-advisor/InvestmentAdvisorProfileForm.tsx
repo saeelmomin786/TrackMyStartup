@@ -247,10 +247,14 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
   const loadProfile = async () => {
     try {
       // Load profile data from investment_advisor_profiles
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       const { data, error } = await supabase
         .from('investment_advisor_profiles')
         .select('*')
-        .eq('user_id', currentUser.id)
+        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
@@ -262,7 +266,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('logo_url, firm_name, name')
-        .eq('id', currentUser.id)
+        .eq('id', authUserId) // Use auth.uid() instead of profile ID
         .maybeSingle();
 
       if (userError && userError.code !== 'PGRST116') {
@@ -392,11 +396,15 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         .from('investor-assets')
         .getPublicUrl(filePath);
 
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       // Save logo_url to users table
       const { error: updateUserError } = await supabase
         .from('users')
         .update({ logo_url: publicUrl })
-        .eq('id', currentUser.id);
+        .eq('id', authUserId); // Use auth.uid() instead of profile ID
 
       if (updateUserError) {
         console.error('Error saving logo to users table:', updateUserError);
@@ -427,11 +435,15 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         handleChange('media_type', 'logo');
       }
       
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       // Save logo_url to users table
       const { error: updateUserError } = await supabase
         .from('users')
         .update({ logo_url: trimmedUrl })
-        .eq('id', currentUser.id);
+        .eq('id', authUserId); // Use auth.uid() instead of profile ID
 
       if (updateUserError) {
         console.error('Error saving logo URL to users table:', updateUserError);
@@ -471,11 +483,15 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         userUpdates.name = profile.advisor_name;
       }
       
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       if (Object.keys(userUpdates).length > 0) {
         const { error: updateUserError } = await supabase
           .from('users')
           .update(userUpdates)
-          .eq('id', currentUser.id);
+          .eq('id', authUserId); // Use auth.uid() instead of profile ID
 
         if (updateUserError) {
           console.error('Error saving to users table:', updateUserError);

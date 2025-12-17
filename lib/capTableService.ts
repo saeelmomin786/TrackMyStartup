@@ -656,7 +656,8 @@ class CapTableService {
       name: founder.name,
       email: founder.email,
       shares: founder.shares || 0,
-      equityPercentage: founder.equity_percentage ? Number(founder.equity_percentage) : 0
+      equityPercentage: founder.equity_percentage ? Number(founder.equity_percentage) : 0,
+      mentorCode: founder.mentor_code || undefined
     }));
     
     console.log('🔍 Mapped founders data:', mappedFounders);
@@ -679,7 +680,8 @@ class CapTableService {
         name: founder.name,
         email: founder.email,
         shares: founder.shares || 0,
-        equity_percentage: founder.equityPercentage || 0
+        equity_percentage: founder.equityPercentage || 0,
+        mentor_code: founder.mentorCode || null
       }));
 
       const { error: insertError } = await supabase
@@ -707,7 +709,8 @@ class CapTableService {
         name: founder.name,
         email: founder.email,
         equity_percentage: founder.equityPercentage || null,
-        shares: founder.shares || null
+        shares: founder.shares || null,
+        mentor_code: founder.mentorCode || null
       });
 
     if (error) throw error;

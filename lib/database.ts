@@ -3257,15 +3257,25 @@ export const investmentService = {
         startupApprovalStatus: o.startup_approval_status
       })));
 
-      // Additional logging for debugging
+      // Additional logging for debugging (only log once per unique set of opportunities)
       if (filtered.length === 0 && data && data.length > 0) {
-        console.warn('⚠️ No visible opportunities after filtering, but opportunities exist:', data.map(o => ({
-          id: o.id,
-          stage: o.stage,
-          leadInvestorAdvisorStatus: o.lead_investor_advisor_approval_status,
-          startupAdvisorStatus: o.startup_advisor_approval_status,
-          startupApprovalStatus: o.startup_approval_status
-        })));
+        // Only log if this is a new set of opportunities (avoid duplicate logs)
+        const opportunityIds = data.map(o => o.id).sort().join(',');
+        const lastLoggedIds = (globalThis as any).__lastCoInvestmentWarningIds;
+        if (lastLoggedIds !== opportunityIds) {
+          (globalThis as any).__lastCoInvestmentWarningIds = opportunityIds;
+          console.warn('⚠️ No visible opportunities after filtering, but opportunities exist:', {
+            count: data.length,
+            opportunityIds: data.map(o => o.id),
+            statuses: data.map(o => ({
+              id: o.id,
+              stage: o.stage,
+              leadInvestorAdvisorStatus: o.lead_investor_advisor_approval_status,
+              startupAdvisorStatus: o.startup_advisor_approval_status,
+              startupApprovalStatus: o.startup_approval_status
+            }))
+          });
+        }
       }
 
       return filtered;

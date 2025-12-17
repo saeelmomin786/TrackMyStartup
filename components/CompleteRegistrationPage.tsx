@@ -23,6 +23,7 @@ interface Founder {
   email: string;
   shares?: number;
   equity?: number;
+  mentorCode?: string;
 }
 
 interface Subsidiary {
@@ -44,11 +45,13 @@ interface InternationalOp {
 interface CompleteRegistrationPageProps {
   onNavigateToRegister: () => void;
   onNavigateToDashboard: () => void;
+  newProfileId?: string; // NEW: For Add Profile flow - use this profile ID instead of current
 }
 
 export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> = ({
   onNavigateToRegister,
-  onNavigateToDashboard
+  onNavigateToDashboard,
+  newProfileId
 }) => {
   const [userData, setUserData] = useState<any>(null);
   const [countryComplianceInfo, setCountryComplianceInfo] = useState<CountryComplianceInfo[]>([]);
@@ -438,17 +441,40 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       }
 
       // Get user profile (needed to determine role and email)
-      const { data: profile } = await authService.supabase
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single();
+      // If newProfileId is provided (from Add Profile flow), use that profile instead of current
+      let profileData = null;
+      if (newProfileId) {
+        console.log('🔍 Using new profile ID from Add Profile flow:', newProfileId);
+        const { data: newProfile } = await authService.supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', newProfileId)
+          .single();
+        profileData = newProfile as any;
+        if (!profileData) {
+          console.error('❌ New profile not found:', newProfileId);
+        }
+      } else {
+        // Use getCurrentUser() which handles both user_profiles and users tables
+        const profile = await authService.getCurrentUser();
+        
+        // Fallback: if getCurrentUser returns null, try users table directly
+        profileData = profile;
+        if (!profileData) {
+          const { data: usersProfile } = await authService.supabase
+            .from('users')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+          profileData = usersProfile as any;
+        }
+      }
 
       // advisorCodeFromUrl is already declared above (line 412)
       // Check if user was invited by advisor
       const invitedByAdvisor = user.user_metadata?.source === 'advisor_invite';
       const codeFromMetadata = user.user_metadata?.investment_advisor_code_entered;
-      const codeFromProfile = (profile as any)?.investment_advisor_code_entered;
+      const codeFromProfile = (profileData as any)?.investment_advisor_code_entered;
       const finalAdvisorCode = advisorCodeFromUrl || codeFromMetadata || codeFromProfile || '';
       
       setWasInvitedByAdvisor(invitedByAdvisor);
@@ -456,11 +482,21 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       
       // If advisor code is in URL and user doesn't have it set, update user record
       if (advisorCodeFromUrl && invitedByAdvisor) {
-        const currentAdvisorCode = (profile as any)?.investment_advisor_code_entered;
+        const currentAdvisorCode = (profileData as any)?.investment_advisor_code_entered;
         if (!currentAdvisorCode || currentAdvisorCode !== advisorCodeFromUrl) {
+          // Check if profile is in user_profiles or users table
+          const { data: profileCheck } = await authService.supabase
+            .from('user_profiles')
+            .select('id')
+            .eq('id', user.id)
+            .maybeSingle();
+          
+          const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
+          
           // Update user record with advisor code
           await supabase
-            .from('users')
+            .from(tableToUpdate)
+            // @ts-expect-error - Dynamic table name prevents type inference
             .update({
               investment_advisor_code_entered: advisorCodeFromUrl,
               updated_at: new Date().toISOString()
@@ -468,42 +504,50 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             .eq('id', user.id);
 
           // If user is a Startup, also update startup record
-          if ((profile as any)?.role === 'Startup') {
+          if ((profileData as any)?.role === 'Startup') {
             const { data: startupData } = await supabase
               .from('startups')
               .select('id')
               .eq('user_id', user.id)
               .maybeSingle();
 
-            if (startupData) {
+            if (startupData && (startupData as any).id) {
               await supabase
                 .from('startups')
+                // @ts-expect-error - Type inference issue with startupData.id
                 .update({
                   investment_advisor_code: advisorCodeFromUrl,
                   updated_at: new Date().toISOString()
                 })
-                .eq('id', startupData.id);
+                .eq('id', (startupData as any).id);
             }
           }
         }
       }
 
-      // Check if user already has a complete profile using the new method
-      const isComplete = await authService.isProfileComplete(user.id);
+      // If using newProfileId, use that profile ID; otherwise use user.id
+      const profileIdToCheck = newProfileId || user.id;
       
-      if (isComplete) {
-        // User profile is complete, proceed to dashboard
-        onNavigateToDashboard();
-        return;
+      // Check if user already has a complete profile using the new method
+      // For Add Profile flow, always show Form 2 (don't skip)
+      if (!newProfileId) {
+        const isComplete = await authService.isProfileComplete(profileIdToCheck);
+        
+        if (isComplete) {
+          // User profile is complete, proceed to dashboard
+          onNavigateToDashboard();
+          return;
+        }
       }
 
       // User needs to complete Step 2
+      // Use profile ID from newProfileId if provided, otherwise use user.id
       setUserData({
-        id: user.id,
+        id: newProfileId || user.id, // Use new profile ID if provided
         email: user.email,
-        name: (profile && (profile as any).name) || user.user_metadata?.name || 'User',
-        role: (profile && (profile as any).role) || user.user_metadata?.role || 'Investor',
-        startupName: (profile && (profile as any).startup_name) || user.user_metadata?.startupName
+        name: (profileData && (profileData as any).name) || user.user_metadata?.name || 'User',
+        role: (profileData && (profileData as any).role) || user.user_metadata?.role || 'Investor',
+        startupName: (profileData && (profileData as any).startup_name) || user.user_metadata?.startupName
       });
 
       // Initialize profileData with advisor code if invited
@@ -512,10 +556,10 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           ...prev,
           investmentAdvisorCode: finalAdvisorCode
         }));
-      } else if ((profile as any)?.investment_advisor_code_entered) {
+      } else if ((profileData as any)?.investment_advisor_code_entered) {
         setProfileData(prev => ({
           ...prev,
-          investmentAdvisorCode: (profile as any).investment_advisor_code_entered
+          investmentAdvisorCode: (profileData as any).investment_advisor_code_entered
         }));
       }
       
@@ -703,7 +747,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
   const addFounder = () => {
     const newId = (founders.length + 1).toString();
-    setFounders(prev => [...prev, { id: newId, name: '', email: '', shares: 0, equity: 0 }]);
+    setFounders(prev => [...prev, { id: newId, name: '', email: '', shares: 0, equity: 0, mentorCode: '' }]);
   };
 
   const removeFounder = (id: string) => {
@@ -712,7 +756,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     }
   };
 
-  const updateFounder = (id: string, field: 'name' | 'email' | 'shares' | 'equity', value: string | number) => {
+  const updateFounder = (id: string, field: 'name' | 'email' | 'shares' | 'equity' | 'mentorCode', value: string | number) => {
     setFounders(prev => prev.map(founder => 
       founder.id === id ? { ...founder, [field]: value } : founder
     ));
@@ -838,6 +882,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('🚀 ========== HANDLESUBMIT STARTED ==========');
+    console.log('🚀 Form submission started for profile:', userData?.id, userData?.role);
     setIsLoading(true);
     setError(null);
 
@@ -854,7 +900,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       return;
     }
 
-    if (!uploadedFiles.roleSpecific && !cloudDriveUrls.roleSpecific) {
+    // Role-specific document is not required for Mentor
+    if (userData.role !== 'Mentor' && !uploadedFiles.roleSpecific && !cloudDriveUrls.roleSpecific) {
       setError(`${getRoleSpecificDocumentType(userData.role)} is required`);
       setIsLoading(false);
       return;
@@ -1082,18 +1129,110 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           financial_advisor_license_url: licenseUrl || null,
           // Add facilitator specific fields
           center_name: userData.role === 'Startup Facilitation Center' ? profileData.centerName : null,
+          // Add Form 2 profile fields that are collected
+          country: profileData.country || null,
+          company_type: profileData.companyType || null,
+          registration_date: profileData.registrationDate || null,
+          currency: profileData.currency || null,
+          ca_service_code: profileData.caServiceCode || null,
+          cs_service_code: profileData.csServiceCode || null,
+          investment_advisor_code_entered: profileData.investmentAdvisorCode || null,
           updated_at: new Date().toISOString()
       };
 
+      console.log('📋 Update data prepared:', {
+        table: 'will be determined',
+        profileId: userData.id,
+        dataKeys: Object.keys(updateData),
+        hasGovernmentId: !!updateData.government_id,
+        hasVerificationDocuments: !!updateData.verification_documents
+      });
 
-      const { error: updateError } = await (authService.supabase as any)
-        .from('users')
+      // Check if this is a profile from user_profiles (new system) or users (old system)
+      const { data: profileCheck, error: profileCheckError } = await (authService.supabase as any)
+        .from('user_profiles')
+        .select('id')
+        .eq('id', userData.id)
+        .maybeSingle();
+
+      if (profileCheckError) {
+        console.error('❌ Error checking profile:', profileCheckError);
+      }
+
+      const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
+      console.log('💾 Updating profile in table:', tableToUpdate, 'Profile ID:', userData.id);
+      console.log('🔍 Profile check result:', { found: !!profileCheck, profileId: userData.id });
+
+      // Get current auth user for debugging
+      const { data: { user: currentAuthUser } } = await authService.supabase.auth.getUser();
+      console.log('🔍 Current auth user:', { 
+        id: currentAuthUser?.id, 
+        email: currentAuthUser?.email 
+      });
+
+      console.log('🔄 Attempting UPDATE operation...');
+      const { data: updateResult, error: updateError } = await (authService.supabase as any)
+        .from(tableToUpdate)
         .update(updateData as any)
-        .eq('id', userData.id);
+        .eq('id', userData.id)
+        .select();
+
+      console.log('📊 UPDATE operation result:', {
+        success: !updateError,
+        hasData: !!updateResult,
+        error: updateError ? {
+          message: updateError.message,
+          code: updateError.code,
+          details: updateError.details,
+          hint: updateError.hint
+        } : null
+      });
 
       if (updateError) {
-        console.error('❌ Database update failed:', updateError);
-        throw new Error('Failed to update user profile');
+        // Log to console
+        console.error('❌ ========== DATABASE UPDATE FAILED ==========');
+        console.error('❌ Table:', tableToUpdate);
+        console.error('❌ Profile ID:', userData.id);
+        console.error('❌ Auth User ID:', currentAuthUser?.id);
+        console.error('❌ Error Message:', updateError.message);
+        console.error('❌ Error Code:', updateError.code);
+        console.error('❌ Error Details:', updateError.details);
+        console.error('❌ Error Hint:', updateError.hint);
+        console.error('❌ Update Data Keys:', Object.keys(updateData));
+        console.error('❌ ============================================');
+        
+        // Also show alert for debugging (remove after fixing)
+        if (process.env.NODE_ENV === 'development') {
+          alert(`UPDATE FAILED!\n\nTable: ${tableToUpdate}\nError: ${updateError.message}\nCode: ${updateError.code}\n\nCheck console for details.`);
+        }
+        
+        throw new Error(`Failed to update user profile: ${updateError.message || 'Unknown error'}`);
+      } else {
+        console.log('✅ UPDATE operation successful!', updateResult);
+      }
+
+      // If using new system, also update is_profile_complete flag
+      if (profileCheck) {
+        console.log('✅ Setting is_profile_complete = true for profile:', userData.id);
+        const { error: completeError, data: completeData } = await (authService.supabase as any)
+          .from('user_profiles')
+          .update({ is_profile_complete: true })
+          .eq('id', userData.id)
+          .select();
+        
+        if (completeError) {
+          console.error('❌ Failed to update is_profile_complete flag:', completeError);
+          console.error('Error details:', {
+            message: completeError.message,
+            details: completeError.details,
+            hint: completeError.hint,
+            code: completeError.code
+          });
+        } else {
+          console.log('✅ Successfully set is_profile_complete = true:', completeData);
+        }
+      } else {
+        console.log('⚠️ Profile not found in user_profiles, skipping is_profile_complete update');
       }
 
       console.log('✅ User profile updated successfully in database');
@@ -1102,11 +1241,17 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       if (userData.role === 'Startup') {
         try {
           // First, try to find existing startup for this user
-          console.log('🔍 Looking for existing startup for user:', userData.id);
+          // IMPORTANT: startups table uses auth_user_id, not profile ID!
+          const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+          if (!authUser) {
+            throw new Error('Not authenticated');
+          }
+          const authUserId = authUser.id;
+          console.log('🔍 Looking for existing startup for auth_user_id:', authUserId, 'Profile ID:', userData.id);
           const { data: existingStartups, error: findError } = await authService.supabase
             .from('startups')
             .select('*')
-            .eq('user_id', userData.id);
+            .eq('user_id', authUserId);  // Use auth_user_id, not profile ID!
 
           if (findError) {
             console.error('❌ Error finding existing startup:', findError);
@@ -1121,6 +1266,17 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           } else {
             // Create new startup if none exists
             console.log('🆕 No existing startup found, creating new one');
+            
+            // Get auth_user_id (not profile ID) - startups table uses auth_user_id
+            const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+            if (!authUser) {
+              throw new Error('Not authenticated');
+            }
+            
+            // Use auth_user_id for startups table, not profile ID
+            const authUserId = authUser.id;
+            console.log('🆕 Creating startup with auth_user_id:', authUserId, 'Profile ID:', userData.id);
+            
             const { data: newStartup, error: createError } = await authService.supabase
               .from('startups')
               .insert({
@@ -1134,16 +1290,31 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 total_funding: 0,
                 total_revenue: 0,
                 registration_date: profileData.registrationDate,
-                user_id: userData.id
+                user_id: authUserId  // Use auth_user_id, not profile ID!
               } as any)
               .select()
               .single();
 
             if (createError) {
               console.error('❌ Error creating startup:', createError);
-              throw createError;
+              console.error('❌ Startup creation details:', {
+                error: createError,
+                message: createError.message,
+                details: createError.details,
+                hint: createError.hint,
+                code: createError.code,
+                auth_user_id: authUserId,
+                profile_id: userData.id,
+                startup_name: userData.startupName
+              });
+              // Don't throw - allow profile completion even if startup creation fails
+              // Startup can be created later or manually
+              console.warn('⚠️ Profile marked complete, but startup creation failed. Startup can be created later.');
+              // Set startup to null so we don't try to create founders
+              startup = null;
+            } else {
+              startup = newStartup;
             }
-            startup = newStartup;
           }
 
           if (startup) {
@@ -1154,7 +1325,8 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               name: founder.name,
               email: founder.email,
               shares: founder.shares || 0,
-              equity_percentage: founder.equity || 0
+              equity_percentage: founder.equity || 0,
+              mentor_code: founder.mentorCode || null
             }));
 
             console.log('💾 Saving founders data:', foundersData);
@@ -1322,7 +1494,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             const { data: { user: authUser } } = await authService.supabase.auth.getUser();
             const wasInvitedByAdvisor = authUser?.user_metadata?.source === 'advisor_invite';
             const advisorCodeFromInvite = authUser?.user_metadata?.investment_advisor_code_entered || 
-                                         (profile as any)?.investment_advisor_code_entered;
+                                         userData?.investment_advisor_code_entered;
             
             if (wasInvitedByAdvisor && advisorCodeFromInvite) {
               console.log('🔗 User was invited by Investment Advisor, auto-linking...', {
@@ -1340,10 +1512,20 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 .maybeSingle();
 
               if (advisorData) {
-                // Auto-accept: Set advisor_accepted = true in users table
+                // Auto-accept: Set advisor_accepted = true in user_profiles or users table
                 // This makes startup appear directly in "My Startups" without approval
+                // Check if profile is in user_profiles or users table
+                const { data: profileCheck } = await authService.supabase
+                  .from('user_profiles')
+                  .select('id')
+                  .eq('id', userData.id)
+                  .maybeSingle();
+                
+                const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
+                
                 await authService.supabase
-                  .from('users')
+                  .from(tableToUpdate)
+                  // @ts-expect-error - Dynamic table name prevents type inference
                   .update({
                     advisor_accepted: true,
                     investment_advisor_code_entered: advisorCodeFromInvite,
@@ -1354,6 +1536,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 // Update startup record with advisor code
                 await authService.supabase
                   .from('startups')
+                  // @ts-expect-error - Type inference issue
                   .update({
                     investment_advisor_code: advisorCodeFromInvite,
                     updated_at: new Date().toISOString()
@@ -1364,25 +1547,26 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 const { data: advisorAddedStartup } = await authService.supabase
                   .from('advisor_added_startups')
                   .select('id')
-                  .eq('advisor_id', advisorData.id)
+                  .eq('advisor_id', (advisorData as any).id)
                   .or(`tms_startup_id.eq.${startup.id},contact_email.eq.${userData.email}`)
                   .maybeSingle();
 
-                if (advisorAddedStartup) {
+                if (advisorAddedStartup && (advisorAddedStartup as any).id) {
                   await authService.supabase
                     .from('advisor_added_startups')
+                    // @ts-expect-error - Type inference issue with advisorAddedStartup.id
                     .update({
                       is_on_tms: true,
                       tms_startup_id: startup.id,
                       invite_status: 'accepted',
                       updated_at: new Date().toISOString()
                     })
-                    .eq('id', advisorAddedStartup.id);
+                    .eq('id', (advisorAddedStartup as any).id);
                   
-                  console.log('✅ Updated advisor_added_startups record:', advisorAddedStartup.id);
+                  console.log('✅ Updated advisor_added_startups record:', (advisorAddedStartup as any).id);
                 }
 
-                console.log('✅ Startup auto-linked to Investment Advisor:', advisorData.name);
+                console.log('✅ Startup auto-linked to Investment Advisor:', (advisorData as any).name);
                 console.log('✅ Startup will now appear in advisor\'s "My Startups" section automatically');
               } else {
                 console.warn('⚠️ Advisor not found for code:', advisorCodeFromInvite);
@@ -1390,13 +1574,23 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             } else {
               // Normal registration flow - startup entered advisor code manually
               // They will appear in pending requests, advisor needs to accept
-              const enteredAdvisorCode = profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered;
+              const enteredAdvisorCode = profileData.investmentAdvisorCode || userData?.investment_advisor_code_entered;
               if (enteredAdvisorCode) {
                 console.log('📋 Startup entered advisor code manually:', enteredAdvisorCode);
                 
-                // Save manually entered advisor code to users table
+                // Check if profile is in user_profiles or users table
+                const { data: profileCheck } = await authService.supabase
+                  .from('user_profiles')
+                  .select('id')
+                  .eq('id', userData.id)
+                  .maybeSingle();
+                
+                const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
+                
+                // Save manually entered advisor code to user_profiles or users table
                 await authService.supabase
-                  .from('users')
+                  .from(tableToUpdate)
+                  // @ts-expect-error - Dynamic table name prevents type inference
                   .update({
                     investment_advisor_code_entered: enteredAdvisorCode,
                     advisor_accepted: false, // Needs advisor approval
@@ -1407,6 +1601,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 // Also update startup record
                 await authService.supabase
                   .from('startups')
+                  // @ts-expect-error - Type inference issue
                   .update({
                     investment_advisor_code: enteredAdvisorCode,
                     updated_at: new Date().toISOString()
@@ -1426,6 +1621,12 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       onNavigateToDashboard();
       
     } catch (error: any) {
+      console.error('❌ ========== HANDLESUBMIT ERROR ==========');
+      console.error('❌ Error Type:', error?.constructor?.name);
+      console.error('❌ Error Message:', error?.message);
+      console.error('❌ Error Stack:', error?.stack);
+      console.error('❌ Full Error Object:', error);
+      console.error('❌ =========================================');
       setError(error.message || 'An error occurred');
     } finally {
       setIsLoading(false);
@@ -1509,29 +1710,32 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 )}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  {getRoleSpecificDocumentType(userData.role)}
-                </label>
-                <CloudDriveInput
-                  value={cloudDriveUrls.roleSpecific}
-                  onChange={(url) => handleCloudDriveUrlChange('roleSpecific', url)}
-                  onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'roleSpecific')}
-                  placeholder="Paste your cloud drive link here..."
-                  label=""
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  maxSize={10}
-                  documentType="role-specific document"
-                  showPrivacyMessage={false}
-                  required
-                />
+              {/* Role-specific document - Not required for Mentor */}
+              {userData.role !== 'Mentor' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    {getRoleSpecificDocumentType(userData.role)}
+                  </label>
+                  <CloudDriveInput
+                    value={cloudDriveUrls.roleSpecific}
+                    onChange={(url) => handleCloudDriveUrlChange('roleSpecific', url)}
+                    onFileSelect={(file) => handleFileChange({ target: { files: [file] } } as any, 'roleSpecific')}
+                    placeholder="Paste your cloud drive link here..."
+                    label=""
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    maxSize={10}
+                    documentType="role-specific document"
+                    showPrivacyMessage={false}
+                    required
+                  />
                 <input type="hidden" id="role-specific-url" name="role-specific-url" />
                 {(uploadedFiles.roleSpecific || cloudDriveUrls.roleSpecific) && (
                   <p className="text-sm text-green-600 mt-1">
                     ✓ {uploadedFiles.roleSpecific ? uploadedFiles.roleSpecific.name + ' selected' : 'Cloud drive link provided'}
                   </p>
                 )}
-              </div>
+                </div>
+              )}
 
               {/* Additional fields for Investment Advisor */}
               {userData.role === 'Investment Advisor' && (
@@ -1839,7 +2043,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                       )}
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                       <Input
                         label="Name"
                         value={founder.name}
@@ -1897,6 +2101,13 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                         }}
                         required
                         readOnly={false}
+                      />
+                      <Input
+                        label="Mentor Code (Optional)"
+                        type="text"
+                        value={founder.mentorCode || ''}
+                        onChange={(e) => updateFounder(founder.id, 'mentorCode', e.target.value)}
+                        placeholder="e.g., MEN-ABC123"
                       />
                     </div>
                   </div>
@@ -2002,26 +2213,26 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               ) : (
                 <>
                   <p className="text-sm text-slate-600">
-                    {profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered
+                    {profileData.investmentAdvisorCode || (userData as any)?.investment_advisor_code_entered
                       ? 'Your Investment Advisor code from Registration Form 1 is shown below. You can update it if needed.'
                       : 'Enter your Investment Advisor code if you have one. This is optional and can be added later.'}
                   </p>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
                       Investment Advisor Code (optional)
-                      {(profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered) && (
+                      {(profileData.investmentAdvisorCode || (userData as any)?.investment_advisor_code_entered) && (
                         <span className="text-blue-600 text-xs ml-2">(From Form 1)</span>
                       )}
                     </label>
                     <input
                       type="text"
-                      value={profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered || ''}
+                      value={profileData.investmentAdvisorCode || (userData as any)?.investment_advisor_code_entered || ''}
                       onChange={(e) => setProfileData(prev => ({ ...prev, investmentAdvisorCode: e.target.value }))}
                       placeholder="Enter your Investment Advisor code (e.g., IA-XXXX)"
                       className="w-full border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     <p className="text-xs text-slate-500 mt-1">
-                      {profileData.investmentAdvisorCode || (profile as any)?.investment_advisor_code_entered
+                      {profileData.investmentAdvisorCode || (userData as any)?.investment_advisor_code_entered
                         ? 'You can update this code if needed.'
                         : 'Leave blank if you don\'t have an Investment Advisor code yet.'}
                     </p>

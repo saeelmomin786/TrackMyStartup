@@ -283,7 +283,10 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         
         // Immediately save logo_url to database
         try {
-          const updateResult = await authService.updateProfile(currentUser.id, {
+          // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          const authUserId = authUser?.id || currentUser.id; // Fallback for safety
+          const updateResult = await authService.updateProfile(authUserId, {
             logo_url: result.url
           });
           
@@ -368,7 +371,10 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
       }
 
       // Update profile in database using authService
-      const updateResult = await authService.updateProfile(currentUser.id, profileData);
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id; // Fallback for safety
+      const updateResult = await authService.updateProfile(authUserId, profileData);
       if (updateResult.error) {
         throw new Error(updateResult.error);
       }
@@ -380,15 +386,19 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
           const { profileService } = await import('../lib/profileService');
           
           // Get the startup ID from the current user
+          // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          const authUserId = authUser?.id || currentUser.id;
+          
           const { data: startupData, error: startupError } = await supabase
             .from('startups')
             .select('id')
-            .eq('user_id', currentUser.id)
+            .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
             .single();
 
           if (startupError) {
             console.error('Error finding startup for user:', startupError);
-          } else if (startupData && startupData.id) {
+          } else if (startupData && (startupData as any).id) {
             // Prepare startup profile data
             const startupProfileData: any = {};
             
@@ -409,7 +419,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
             
             // Only update if there's data to update
             if (Object.keys(startupProfileData).length > 0) {
-              await profileService.updateStartupProfile(startupData.id, startupProfileData);
+              await profileService.updateStartupProfile((startupData as any).id, startupProfileData);
               console.log('✅ Startup profile updated with:', startupProfileData);
             }
           }

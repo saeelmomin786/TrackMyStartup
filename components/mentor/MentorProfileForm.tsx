@@ -4,7 +4,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
-import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X, Plus } from 'lucide-react';
+import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X, Plus, Edit, Trash2, Briefcase } from 'lucide-react';
 import { MentorMetrics } from '../../lib/mentorService';
 import Modal from '../ui/Modal';
 import MentorDataForm from '../MentorDataForm';
@@ -35,7 +35,8 @@ interface MentorProfile {
   fee_amount_min?: number;
   fee_amount_max?: number;
   fee_currency?: string;
-  equity_percentage?: number;
+  equity_amount_min?: number;
+  equity_amount_max?: number;
   fee_description?: string;
   logo_url?: string;
   video_url?: string;
@@ -48,7 +49,7 @@ interface MentorProfileFormProps {
   onSave?: (profile: MentorProfile) => void;
   onProfileChange?: (profile: MentorProfile) => void;
   isViewOnly?: boolean;
-  onNavigateToDashboard?: (section?: 'active' | 'completed' | 'founded') => void;
+  onNavigateToDashboard?: (section?: 'active' | 'founded') => void;
   startups?: Startup[];
   onMetricsUpdate?: () => void;
 }
@@ -78,12 +79,25 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   const [isSectorsOpen, setIsSectorsOpen] = useState(false);
   const [isStagesOpen, setIsStagesOpen] = useState(false);
   const [showAddFormModal, setShowAddFormModal] = useState(false);
-  const [formSection, setFormSection] = useState<'active' | 'completed' | 'founded'>('active');
+  const [formSection, setFormSection] = useState<'active' | 'founded'>('active');
+  const [showProfessionalExpModal, setShowProfessionalExpModal] = useState(false);
   const expertiseRef = useRef<HTMLDivElement>(null);
   const sectorsRef = useRef<HTMLDivElement>(null);
   const stagesRef = useRef<HTMLDivElement>(null);
   
-  const handleOpenAddForm = (section: 'active' | 'completed' | 'founded') => {
+  // Professional Experience state
+  const [professionalExperiences, setProfessionalExperiences] = useState<any[]>([]);
+  const [editingExpId, setEditingExpId] = useState<number | null>(null);
+  const [expForm, setExpForm] = useState({
+    company: '',
+    position: '',
+    description: '',
+    from_date: '',
+    to_date: '',
+    currently_working: false,
+  });
+  
+  const handleOpenAddForm = (section: 'active' | 'founded') => {
     setFormSection(section);
     setShowAddFormModal(true);
   };
@@ -106,7 +120,151 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
   useEffect(() => {
     loadProfile();
+    loadProfessionalExperiences();
   }, [currentUser.id]);
+  
+  const loadProfessionalExperiences = async () => {
+    try {
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
+      const { data, error } = await supabase
+        .from('mentor_professional_experience')
+        .select('*')
+        .eq('mentor_id', authUserId) // Use auth.uid() instead of profile ID
+        .order('from_date', { ascending: false });
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading professional experiences:', error);
+        return;
+      }
+
+      if (data) {
+        setProfessionalExperiences(data);
+      }
+    } catch (error) {
+      console.error('Error loading professional experiences:', error);
+    }
+  };
+  
+  const calculateTotalExperience = () => {
+    let totalMonths = 0;
+    
+    professionalExperiences.forEach(exp => {
+      const fromDate = new Date(exp.from_date);
+      const toDate = exp.currently_working || !exp.to_date 
+        ? new Date() 
+        : new Date(exp.to_date);
+      
+      const months = (toDate.getFullYear() - fromDate.getFullYear()) * 12 
+        + (toDate.getMonth() - fromDate.getMonth());
+      
+      totalMonths += months;
+    });
+    
+    const years = Math.floor(totalMonths / 12);
+    const months = totalMonths % 12;
+    
+    if (years === 0) {
+      return `${months} month${months !== 1 ? 's' : ''}`;
+    } else if (months === 0) {
+      return `${years} year${years !== 1 ? 's' : ''}`;
+    } else {
+      return `${years} year${years !== 1 ? 's' : ''} ${months} month${months !== 1 ? 's' : ''}`;
+    }
+  };
+  
+  const handleExpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
+      const expData: any = {
+        mentor_id: authUserId, // Use auth.uid() instead of profile ID
+        company: expForm.company,
+        position: expForm.position,
+        description: expForm.description,
+        from_date: expForm.from_date,
+        currently_working: expForm.currently_working,
+      };
+      
+      if (!expForm.currently_working && expForm.to_date) {
+        expData.to_date = expForm.to_date;
+      } else {
+        expData.to_date = null;
+      }
+      
+      if (editingExpId) {
+        const { error } = await supabase
+          .from('mentor_professional_experience')
+          .update(expData)
+          .eq('id', editingExpId)
+          .eq('mentor_id', authUserId); // Use auth.uid() instead of profile ID
+        
+        if (error) throw error;
+      } else {
+        // Ensure mentor_id is set to auth.uid() in insert
+        const { error } = await supabase
+          .from('mentor_professional_experience')
+          .insert({ ...expData, mentor_id: authUserId }); // Use auth.uid() instead of profile ID
+        
+        if (error) throw error;
+      }
+      
+      // Reset form
+      setExpForm({
+        company: '',
+        position: '',
+        description: '',
+        from_date: '',
+        to_date: '',
+        currently_working: false,
+      });
+      setEditingExpId(null);
+      loadProfessionalExperiences();
+    } catch (error) {
+      console.error('Error saving professional experience:', error);
+      alert('Error saving professional experience. Please try again.');
+    }
+  };
+  
+  const handleEditExp = (exp: any) => {
+    setExpForm({
+      company: exp.company || '',
+      position: exp.position || '',
+      description: exp.description || '',
+      from_date: exp.from_date || '',
+      to_date: exp.to_date || '',
+      currently_working: exp.currently_working || false,
+    });
+    setEditingExpId(exp.id);
+  };
+  
+  const handleDeleteExp = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this professional experience?')) return;
+    
+    try {
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
+      const { error } = await supabase
+        .from('mentor_professional_experience')
+        .delete()
+        .eq('id', id)
+        .eq('mentor_id', authUserId); // Use auth.uid() instead of profile ID
+      
+      if (error) throw error;
+      loadProfessionalExperiences();
+    } catch (error) {
+      console.error('Error deleting professional experience:', error);
+      alert('Error deleting professional experience. Please try again.');
+    }
+  };
 
   // Update counts when metrics change
   useEffect(() => {
@@ -148,10 +306,14 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
   const loadProfile = async () => {
     try {
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       const { data, error } = await supabase
         .from('mentor_profiles')
         .select('*')
-        .eq('user_id', currentUser.id)
+        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
@@ -529,17 +691,6 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Mentoring Experience</label>
-            <textarea
-              value={profile.mentoring_experience || ''}
-              onChange={(e) => handleChange('mentoring_experience', e.target.value)}
-              disabled={!isEditing || isViewOnly}
-              rows={4}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Describe your mentoring experience, achievements, and notable startups you've mentored..."
-            />
-          </div>
         </div>
 
         {/* Experience */}
@@ -559,7 +710,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Startups Mentored (Total)
-                <span className="ml-2 text-xs text-slate-500">(Calculated from your dashboard)</span>
+                <span className="ml-2 text-xs text-slate-500">(Verified from your dashboard)</span>
               </label>
               <div className="flex items-center gap-2">
                 <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
@@ -581,6 +732,11 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                   <span className="hidden sm:inline">Add</span>
                 </Button>
               </div>
+              {professionalExperiences.length > 0 && (
+                <div className="mt-2 text-xs text-slate-600">
+                  <span className="font-medium">Total Professional Experience:</span> {calculateTotalExperience()}
+                </div>
+              )}
               <input
                 type="hidden"
                 value={mentorMetrics ? (mentorMetrics.startupsMentoring + mentorMetrics.startupsMentoredPreviously) : (profile.companies_mentored || 0)}
@@ -591,7 +747,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Previously Mentored
-                <span className="ml-2 text-xs text-slate-500">(Calculated from your dashboard)</span>
+                <span className="ml-2 text-xs text-slate-500">(Verified from your dashboard)</span>
               </label>
               <div className="flex items-center gap-2">
                 <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
@@ -601,9 +757,9 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => handleOpenAddForm('completed')}
+                  onClick={() => handleOpenAddForm('active')}
                   className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add previously mentored startup to increase count"
+                  title="Add mentoring startup to increase count"
                 >
                   <Plus className="h-4 w-4" />
                   <span className="hidden sm:inline">Add</span>
@@ -618,8 +774,8 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
-                Startups Founded
-                <span className="ml-2 text-xs text-slate-500">(Calculated from your dashboard)</span>
+                Startup Experience
+                <span className="ml-2 text-xs text-slate-500">(Verified from your dashboard)</span>
               </label>
               <div className="flex items-center gap-2">
                 <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
@@ -631,7 +787,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                   variant="outline"
                   onClick={() => handleOpenAddForm('founded')}
                   className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add founded startup to increase count"
+                  title="Add startup experience to increase count"
                 >
                   <Plus className="h-4 w-4" />
                   <span className="hidden sm:inline">Add</span>
@@ -651,6 +807,20 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               disabled={!isEditing || isViewOnly}
               placeholder="e.g., CEO, CTO, Advisor"
             />
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Professional Experience</label>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowProfessionalExpModal(true)}
+                disabled={!isEditing || isViewOnly}
+                className="w-full flex items-center justify-center gap-2"
+              >
+                <Briefcase className="h-4 w-4" />
+                {professionalExperiences.length > 0 ? `Manage Experience (${professionalExperiences.length})` : 'Add Professional Experience'}
+              </Button>
+            </div>
           </div>
 
           <div>
@@ -747,31 +917,33 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               />
             )}
 
-            {/* Equity Percentage - Show for Equity and Hybrid */}
+            {/* Minimum Equity Amount (ESOP) - Show for Equity and Hybrid */}
             {(profile.fee_type === 'Equity' || profile.fee_type === 'Hybrid') && (
               <Input
-                label="Equity Percentage (%)"
+                label="Minimum Equity Amount (ESOP)"
                 type="number"
                 step="0.01"
-                value={profile.equity_percentage?.toString() || ''}
-                onChange={(e) => handleChange('equity_percentage', e.target.value ? parseFloat(e.target.value) : null)}
+                value={profile.equity_amount_min?.toString() || ''}
+                onChange={(e) => handleChange('equity_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
                 disabled={!isEditing || isViewOnly}
-                placeholder="e.g., 2.5"
+                placeholder="e.g., 1000"
+              />
+            )}
+
+            {/* Maximum Equity Amount (ESOP) - Show for Equity and Hybrid */}
+            {(profile.fee_type === 'Equity' || profile.fee_type === 'Hybrid') && (
+              <Input
+                label="Maximum Equity Amount (ESOP)"
+                type="number"
+                step="0.01"
+                value={profile.equity_amount_max?.toString() || ''}
+                onChange={(e) => handleChange('equity_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g., 5000"
               />
             )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Fee Description (Optional)</label>
-            <textarea
-              value={profile.fee_description || ''}
-              onChange={(e) => handleChange('fee_description', e.target.value)}
-              disabled={!isEditing || isViewOnly}
-              rows={3}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Additional details about your fee structure, payment terms, or negotiation options..."
-            />
-          </div>
         </div>
 
         {/* Media Section */}
@@ -880,10 +1052,8 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         onClose={handleCloseAddForm}
         title={
           formSection === 'active' 
-            ? 'Add Currently Mentoring Startup' 
-            : formSection === 'completed' 
-            ? 'Add Previously Mentored Startup' 
-            : 'Add Founded Startup'
+            ? 'Add Mentoring' 
+            : 'Add Startup Experience'
         }
         size="large"
       >
@@ -901,6 +1071,197 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             initialSection={formSection}
           />
         )}
+      </Modal>
+
+      {/* Professional Experience Modal */}
+      <Modal
+        isOpen={showProfessionalExpModal}
+        onClose={() => {
+          setShowProfessionalExpModal(false);
+          setEditingExpId(null);
+          setExpForm({
+            company: '',
+            position: '',
+            description: '',
+            from_date: '',
+            to_date: '',
+            currently_working: false,
+          });
+        }}
+        title="Professional Experience"
+        size="large"
+      >
+        <div className="space-y-6">
+          {/* List of Professional Experiences */}
+          {professionalExperiences.length > 0 && (
+            <div className="space-y-3">
+              {professionalExperiences.map((exp) => (
+                <div key={exp.id} className="p-4 border border-slate-200 rounded-md bg-slate-50">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex-1">
+                      <h5 className="font-semibold text-slate-800">{exp.position}</h5>
+                      <p className="text-sm text-slate-600">{exp.company}</p>
+                      {exp.description && (
+                        <p className="text-sm text-slate-600 mt-1">{exp.description}</p>
+                      )}
+                      <p className="text-xs text-slate-500 mt-1">
+                        {new Date(exp.from_date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} - {' '}
+                        {exp.currently_working || !exp.to_date 
+                          ? 'Present' 
+                          : new Date(exp.to_date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+                    {!isViewOnly && isEditing && (
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleEditExp(exp)}
+                          className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                        >
+                          <Edit className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteExp(exp.id)}
+                          className="text-red-600 border-red-300 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Add/Edit Form */}
+          {!isViewOnly && isEditing && (
+            <form onSubmit={handleExpSubmit} className="space-y-4 p-4 border border-slate-200 rounded-md bg-white">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Company"
+                  value={expForm.company}
+                  onChange={(e) => setExpForm({ ...expForm, company: e.target.value })}
+                  disabled={!isEditing || isViewOnly}
+                  placeholder="Company name"
+                  required
+                />
+                
+                <Input
+                  label="Position"
+                  value={expForm.position}
+                  onChange={(e) => setExpForm({ ...expForm, position: e.target.value })}
+                  disabled={!isEditing || isViewOnly}
+                  placeholder="e.g., CEO, CTO, Co-founder"
+                  required
+                />
+                
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Brief Description
+                  </label>
+                  <textarea
+                    value={expForm.description}
+                    onChange={(e) => setExpForm({ ...expForm, description: e.target.value })}
+                    disabled={!isEditing || isViewOnly}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Brief description of your role and achievements..."
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    From Date
+                  </label>
+                  <input
+                    type="date"
+                    value={expForm.from_date}
+                    onChange={(e) => setExpForm({ ...expForm, from_date: e.target.value })}
+                    disabled={!isEditing || isViewOnly}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                
+                {!expForm.currently_working && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      To Date
+                    </label>
+                    <input
+                      type="date"
+                      value={expForm.to_date}
+                      onChange={(e) => setExpForm({ ...expForm, to_date: e.target.value })}
+                      disabled={!isEditing || isViewOnly}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+                
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="currently_working_exp"
+                    checked={expForm.currently_working}
+                    onChange={(e) => {
+                      setExpForm({ 
+                        ...expForm, 
+                        currently_working: e.target.checked,
+                        to_date: e.target.checked ? '' : expForm.to_date
+                      });
+                    }}
+                    disabled={!isEditing || isViewOnly}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded"
+                  />
+                  <label htmlFor="currently_working_exp" className="ml-2 block text-sm font-medium text-slate-700">
+                    Currently Working
+                  </label>
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-2">
+                {editingExpId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setEditingExpId(null);
+                      setExpForm({
+                        company: '',
+                        position: '',
+                        description: '',
+                        from_date: '',
+                        to_date: '',
+                        currently_working: false,
+                      });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+                <Button type="submit">
+                  <Save className="h-4 w-4 mr-2" />
+                  {editingExpId ? 'Update' : 'Add'} Experience
+                </Button>
+              </div>
+            </form>
+          )}
+          
+          {/* Total Experience Display */}
+          {professionalExperiences.length > 0 && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold">Total Professional Experience:</span> {calculateTotalExperience()}
+              </p>
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

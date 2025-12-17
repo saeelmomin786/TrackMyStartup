@@ -33,14 +33,17 @@ import PublicAdminProgramView from './components/PublicAdminProgramView';
 import PublicStartupPage from './components/PublicStartupPage';
 import PublicInvestorPage from './components/PublicInvestorPage';
 import PublicAdvisorPage from './components/PublicAdvisorPage';
+import ExploreProfilesPage from './components/ExploreProfilesPage';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
 import DiagnosticPage from './components/DiagnosticPage';
 
-import { Briefcase, BarChart3, LogOut } from 'lucide-react';
+import { Briefcase, BarChart3, LogOut, UserPlus } from 'lucide-react';
 import LogoTMS from './components/public/logoTMS.svg';
 import { FacilitatorCodeDisplay } from './components/FacilitatorCodeDisplay';
 import MessageContainer from './components/MessageContainer';
 import { messageService } from './lib/messageService';
+import { ProfileSwitcher } from './components/ProfileSwitcher';
+import { AddProfileModal } from './components/AddProfileModal';
 
 const App: React.FC = () => {
   // Check if we're on a standalone page (footer links)
@@ -59,6 +62,8 @@ const App: React.FC = () => {
   const isPublicInvestorPage = getQueryParam('view') === 'investor' && (getQueryParam('investorId') || getQueryParam('userId'));
   // Check if we're on a public investment advisor page
   const isPublicAdvisorPage = getQueryParam('view') === 'advisor' && (getQueryParam('advisorId') || getQueryParam('userId'));
+  // Check if we're on explore profiles page
+  const isExploreProfilesPage = getQueryParam('view') === 'explore' && getQueryParam('role');
   
   // Clean up page=landing from public startup URLs to avoid routing conflicts
   // Do this in useEffect to avoid side effects during render
@@ -246,6 +251,8 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
   const [ignoreAuthEvents, setIgnoreAuthEvents] = useState(false);
+  const ignoreAuthEventsRef = useRef(false);
+  const [showAddProfileModal, setShowAddProfileModal] = useState(false);
 
   // Refresh user data when accessing payment page to ensure Form 2 completion is checked with latest data
   useEffect(() => {
@@ -371,6 +378,39 @@ const App: React.FC = () => {
   const [startups, setStartups] = useState<Startup[]>([]);
   const [newInvestments, setNewInvestments] = useState<NewInvestment[]>([]);
   const [startupAdditionRequests, setStartupAdditionRequests] = useState<StartupAdditionRequest[]>([]);
+
+  // Check if Startup profile is incomplete and redirect to Form 2
+  // This must be after startups is declared
+  // IMPORTANT: Only check if we're NOT already on complete-registration page (prevents redirect loop)
+  useEffect(() => {
+    // Don't check if we're already on complete-registration page (prevents infinite redirect loop)
+    if (currentPage === 'complete-registration') {
+      return;
+    }
+    
+    if (isAuthenticated && currentUser && currentUser.role === 'Startup' && hasInitialDataLoaded && currentPage === 'login' && startups.length === 0) {
+      // Add a small delay to ensure any recent Form 2 completion has been saved
+      const checkTimer = setTimeout(() => {
+        // Check if profile is incomplete - if so, redirect to Form 2
+        authService.isProfileComplete(currentUser.id).then((isComplete) => {
+          // Double-check we're still on login page (might have changed during async check)
+          if (currentPage === 'complete-registration') {
+            return; // Already redirected, don't redirect again
+          }
+          
+          if (!isComplete) {
+            console.log('📝 Startup profile incomplete and no startup found, redirecting to Form 2');
+            setCurrentPage('complete-registration');
+            setHasInitialDataLoaded(false);
+          }
+        }).catch((error) => {
+          console.error('Error checking profile completion:', error);
+        });
+      }, 500); // Small delay to allow Form 2 completion to save
+      
+      return () => clearTimeout(checkTimer);
+    }
+  }, [isAuthenticated, currentUser, hasInitialDataLoaded, currentPage, startups.length]);
   
   // Admin-related state
   const [users, setUsers] = useState<User[]>([]);
@@ -658,19 +698,13 @@ const App: React.FC = () => {
 
     initializeAuth();
 
-    // Visibility/focus handlers: only refresh if away >= threshold
+    // Visibility/focus handlers: DISABLED to prevent reload on tab switch
+    // The old version didn't refresh on tab switch - only on actual long absences
+    // We'll keep the tracking but not trigger refresh automatically
     const maybeRefreshAfterAway = () => {
-      const now = Date.now();
-      const awayMs = lastHiddenAtRef.current ? now - lastHiddenAtRef.current : 0;
-      if (awayMs >= REFRESH_THRESHOLD_MS) {
-        if ((window as any).__isRefreshingData) return;
-        (window as any).__isRefreshingData = true;
-        console.log(`🔄 Returning after ${Math.round(awayMs/1000)}s away, refreshing data`);
-        // Background refresh only; keep current UI intact
-        fetchData(true)
-          .catch(() => {})
-          .finally(() => { (window as any).__isRefreshingData = false; });
-      }
+      // DISABLED: Don't refresh on tab switch
+      // Only track when user was away, but don't auto-refresh
+      // Users can manually refresh if needed
       lastHiddenAtRef.current = 0;
     };
 
@@ -739,9 +773,29 @@ const App: React.FC = () => {
     // Set up auth state listener
     const { data: { subscription } } = authService.onAuthStateChange(async (event, session) => {
       __initialAuthEventReceived = true;
-      // SIMPLE FIX: If we're ignoring auth events, skip everything
-      if (ignoreAuthEvents) {
+      
+      if (!isMounted) return;
+      
+      // Prevent unnecessary refreshes for TOKEN_REFRESHED events
+      if (event === 'TOKEN_REFRESHED') {
+        return;
+      }
+      
+      // AGGRESSIVE FIX: Check ignoreAuthEvents FIRST before any processing (using ref for immediate check)
+      if (ignoreAuthEventsRef.current || ignoreAuthEvents) {
         console.log('🚫 Ignoring auth event because ignoreAuthEvents flag is set');
+        return;
+      }
+      
+      // AGGRESSIVE FIX: If we already have data loaded and this is the same user, skip entirely
+      // This prevents any reload or view reset on tab switch
+      if (hasInitialDataLoadedRef.current && 
+          isAuthenticatedRef.current && 
+          currentUserRef.current && 
+          session?.user && 
+          currentUserRef.current.id === session.user.id &&
+          event !== 'SIGNED_OUT') {
+        console.log('🚫 Data already loaded for this user, skipping auth event to prevent reload');
         return;
       }
       
@@ -755,14 +809,6 @@ const App: React.FC = () => {
         `7. Is processing auth change: ${isProcessingAuthChange}`,
         `8. Ignore auth events: ${ignoreAuthEvents}`
       ];
-      
-      
-      if (!isMounted) return;
-      
-      // Prevent unnecessary refreshes for TOKEN_REFRESHED events
-      if (event === 'TOKEN_REFRESHED') {
-        return;
-      }
 
       // Note: Duplicate auth event filtering is now handled at the Supabase level in auth.ts
       
@@ -809,13 +855,13 @@ const App: React.FC = () => {
         if (session?.user && lastAuthUserId === session.user.id && lastAuthTimestamp) {
           const timeDiff = parseInt(currentTime) - parseInt(lastAuthTimestamp);
           console.log('🔍 Time difference:', timeDiff, 'ms');
-          // If less than 5 seconds have passed, it's likely a duplicate event from window focus
+          // If less than 30 seconds have passed AND we already have data loaded, it's likely a duplicate event from window focus
           // BUT do not skip during initial boot while the UI is still loading.
-          if (timeDiff < 5000) {
+          if (timeDiff < 30000 && hasInitialDataLoadedRef.current) {
             if (isLoading) {
               console.log('ℹ️ Duplicate auth event during initial boot – proceeding to finish initialization');
             } else {
-              console.log('🚫 Duplicate auth event detected (likely from window focus), skipping to prevent refresh');
+              console.log('🚫 Duplicate auth event detected (likely from tab switch), skipping to prevent refresh');
               return;
             }
           }
@@ -851,42 +897,49 @@ const App: React.FC = () => {
               };
               setCurrentUser(minimalUser);
               setIsAuthenticated(true);
-              // Critical: reset data-loaded flag on any fresh auth so initial fetch runs after refresh
-              setHasInitialDataLoaded(false);
-              // Kick off an immediate forced data fetch on refresh
-              try { fetchData(true).catch(() => {}); } catch {}
+              // Only reset data-loaded flag if we don't already have data loaded
+              // This prevents reload on tab switch
+              if (!hasInitialDataLoadedRef.current) {
+                setHasInitialDataLoaded(false);
+                // Only fetch data if we don't already have it loaded
+                try { fetchData(true).catch(() => {}); } catch {}
+              }
               // Proactively fetch the user's startup by user_id to avoid blank state on mobile refresh
-              (async () => {
-                try {
-                  if ((minimalUser as any).role === 'Startup') {
-                    console.log('🔍 Proactive fetch: loading startup by user_id after auth event...');
-                    const { data: startupsByUser, error: startupsByUserError } = await authService.supabase
-                      .from('startups')
-                      .select('*')
-                      .eq('user_id', session.user.id);
-                    if (!startupsByUserError && startupsByUser && startupsByUser.length > 0) {
-                      setStartups(startupsByUser as any);
-                      setSelectedStartup(startupsByUser[0] as any);
-                      setView('startupHealth');
-                      setIsLoading(false);
-                      // Persist startup_name to user profile to make next refresh instant
-                      try {
-                        await authService.supabase
-                          .from('users')
-                          .update({ startup_name: (startupsByUser[0] as any).name })
-                          .eq('id', session.user.id);
-                      } catch {}
+              // ONLY if we don't already have data loaded (prevents view reset on tab switch)
+              if (!hasInitialDataLoadedRef.current) {
+                (async () => {
+                  try {
+                    if ((minimalUser as any).role === 'Startup') {
+                      console.log('🔍 Proactive fetch: loading startup by user_id after auth event...');
+                      const { data: startupsByUser, error: startupsByUserError } = await authService.supabase
+                        .from('startups')
+                        .select('*')
+                        .eq('user_id', session.user.id);
+                      if (!startupsByUserError && startupsByUser && startupsByUser.length > 0) {
+                        setStartups(startupsByUser as any);
+                        setSelectedStartup(startupsByUser[0] as any);
+                        setView('startupHealth');
+                        setIsLoading(false);
+                        // Persist startup_name to user profile to make next refresh instant
+                        try {
+                          await authService.supabase
+                            .from('users')
+                            .update({ startup_name: (startupsByUser[0] as any).name })
+                            .eq('id', session.user.id);
+                        } catch {}
+                      }
                     }
+                  } catch (e) {
+                    console.warn('⚠️ Proactive startup fetch failed (non-blocking):', e);
                   }
-                } catch (e) {
-                  console.warn('⚠️ Proactive startup fetch failed (non-blocking):', e);
-                }
-              })();
+                })();
+              }
             }
 
             // Get complete user data from database
-            if (isMounted) {
-              console.log('🔄 Fetching complete user data from database...');
+            // Only fetch if we don't already have complete user data
+            // AND only if we haven't already loaded it (prevents multiple calls on tab switch)
+            if (isMounted && (!currentUserRef.current || !currentUserRef.current.role) && !hasInitialDataLoadedRef.current) {
               try {
                 const completeUser = await authService.getCurrentUser();
                 if (completeUser) {
@@ -915,27 +968,61 @@ const App: React.FC = () => {
                   }
                   
                   // ADDITIONAL FIX: If user has startup_name but no startup record, create one
+                  // BUT ONLY if profile is complete (Form 2 is done) - incomplete profiles should go to Form 2
                   if (completeUser.startup_name && completeUser.role === 'Startup') {
+                    // Check if profile is complete before trying to create startup
+                    const isProfileComplete = await authService.isProfileComplete(completeUser.id);
+                    
+                    if (!isProfileComplete) {
+                      console.log('⏭️ Profile incomplete - skipping startup creation. User should complete Form 2 first.');
+                      // Don't create startup - let Form 2 handle it when profile is completed
+                      return;
+                    }
+                    
                     console.log('🔍 User has startup_name, checking if startup record exists...');
                     try {
+                      // IMPORTANT: startups table uses auth_user_id, not profile ID!
+                      const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+                      if (!authUser) {
+                        console.error('❌ Cannot create startup: not authenticated');
+                        return;
+                      }
+                      const authUserId = authUser.id;
+                      
+                      // Check for existing startup by user_id (more reliable)
                       const { data: existingStartup, error: startupCheckError } = await authService.supabase
                         .from('startups')
-                        .select('id, name')
-                        .eq('user_id', completeUser.id)
+                        .select('id, name, user_id')
+                        .eq('user_id', authUserId)  // Use auth_user_id, not profile ID!
                         .maybeSingle();
                       
-                      if (!existingStartup && !startupCheckError) {
+                      // Also check by name as fallback (in case user_id check fails)
+                      let existingStartupByName = null;
+                      if (!existingStartup && completeUser.startup_name) {
+                        const { data: startupByName } = await authService.supabase
+                          .from('startups')
+                          .select('id, name, user_id')
+                          .eq('name', completeUser.startup_name)
+                          .maybeSingle();
+                        existingStartupByName = startupByName;
+                      }
+                      
+                      const finalExistingStartup = existingStartup || existingStartupByName;
+                      
+                      if (!finalExistingStartup && !startupCheckError) {
                         console.log('🔍 No startup record found, creating one for user:', completeUser.startup_name);
+                        console.log('🆕 Creating startup with auth_user_id:', authUserId, 'Profile ID:', completeUser.id);
+                        
                         const { data: newStartup, error: createStartupError } = await authService.supabase
                           .from('startups')
                           .insert({
                             name: completeUser.startup_name || 'Unnamed Startup',
-                            user_id: completeUser.id,
+                            user_id: authUserId,  // Use auth_user_id, not profile ID!
                             sector: 'Unknown', // Default sector - will be updated when domain is selected
                             current_valuation: 0,
                             total_funding: 0,
                             total_revenue: 0,
-                            compliance_status: 'pending',
+                            compliance_status: 'Pending',
                             registration_date: new Date().toISOString().split('T')[0],
                             investment_type: 'Seed',
                             investment_value: 0,
@@ -946,17 +1033,34 @@ const App: React.FC = () => {
                         
                         if (newStartup && !createStartupError) {
                           console.log('✅ Created startup record:', newStartup);
-                        } else {
-                          console.error('❌ Error creating startup record:', createStartupError);
-                          console.error('❌ Startup creation failed. Details:', {
-                            error: createStartupError,
-                            user_id: completeUser.id,
-                            startup_name: completeUser.startup_name,
-                            user_role: completeUser.role
-                          });
+                        } else if (createStartupError) {
+                          // Handle 409 Conflict (startup already exists) or other errors
+                          if (createStartupError.code === '23505' || createStartupError.message?.includes('duplicate') || createStartupError.message?.includes('409')) {
+                            console.log('ℹ️ Startup already exists (409/duplicate), fetching existing startup...');
+                            // Try to fetch the existing startup
+                            const { data: existingStartup, error: fetchError } = await authService.supabase
+                              .from('startups')
+                              .select('*')
+                              .eq('user_id', authUserId)
+                              .maybeSingle();
+                            
+                            if (existingStartup && !fetchError) {
+                              console.log('✅ Found existing startup:', existingStartup);
+                            } else {
+                              console.error('❌ Error fetching existing startup:', fetchError);
+                            }
+                          } else {
+                            console.error('❌ Error creating startup record:', createStartupError);
+                            console.error('❌ Startup creation failed. Details:', {
+                              error: createStartupError,
+                              user_id: completeUser.id,
+                              startup_name: completeUser.startup_name,
+                              user_role: completeUser.role
+                            });
+                          }
                         }
-                      } else if (existingStartup) {
-                        console.log('✅ Startup record already exists:', existingStartup.name);
+                      } else if (finalExistingStartup) {
+                        console.log('✅ Startup record already exists:', finalExistingStartup.name);
                       }
                     } catch (startupRecordError) {
                       console.error('❌ Error checking/creating startup record:', startupRecordError);
@@ -1039,10 +1143,12 @@ const App: React.FC = () => {
             }
 
             // Try to get full profile, and if it doesn't exist, create it automatically
-            (async () => {
-              try {
-                console.log('Fetching full profile after sign-in...');
-                let profileUser = await authService.getCurrentUser();
+            // ONLY if we don't already have data loaded (prevents reload on tab switch)
+            if (!hasInitialDataLoadedRef.current) {
+              (async () => {
+                try {
+                  console.log('Fetching full profile after sign-in...');
+                  let profileUser = await authService.getCurrentUser();
                 
                 if (!profileUser) {
                   console.log('Profile not found, attempting to create it automatically...');
@@ -1113,7 +1219,7 @@ const App: React.FC = () => {
                   }
                 }
                 
-                if (profileUser && isMounted) {
+                if (profileUser && isMounted && !hasInitialDataLoadedRef.current) {
                   console.log('Full profile loaded. Updating currentUser with startup_name:', profileUser.startup_name);
                   
                   // Check if profile is complete using the proper method
@@ -1175,6 +1281,7 @@ const App: React.FC = () => {
                 }
               }
             })();
+            }
           } else {
             // No existing session; show login page
             if (isMounted) {
@@ -1296,28 +1403,59 @@ const App: React.FC = () => {
     const cu = currentUserRef.current;
     if (cu?.role === 'Startup' && !selectedStartupRef.current) {
       try {
-        const { data: row, error: rowErr } = await authService.supabase
-          .from('startups')
-          .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
-          .eq('user_id', cu.id)
-          .maybeSingle();
-        if (row && !rowErr) {
-          setStartups([row] as any);
-          setSelectedStartup(row as any);
-          setIsLoading(false);
-          setView('startupHealth');
-          // Load other data in background without blocking
-          (async () => {
-            try {
-              const bgOffers = await investmentService.getOffersForStartup(row.id);
-              setInvestmentOffers(bgOffers);
-            } catch {}
-          })();
-          // Mark as loaded so main batch doesn't run for Startup users
-          setHasInitialDataLoaded(true);
+        // IMPORTANT: startups table uses auth_user_id, not profile ID!
+        // Get auth_user_id from auth session
+        const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+        if (!authUser) {
+          console.warn('No auth user found, skipping startup fetch');
           return;
         }
-      } catch {}
+        const authUserId = authUser.id;
+        console.log('🔍 Fetching startup for auth_user_id:', authUserId, 'Profile ID:', cu.id, 'Profile startup_name:', cu.startup_name);
+        
+        // CRITICAL FIX: Match startup by both user_id AND startup_name from profile
+        // This ensures we get the correct startup for the current profile
+        let query = authService.supabase
+          .from('startups')
+          .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
+          .eq('user_id', authUserId);  // Use auth_user_id, not profile ID!
+        
+        // If profile has startup_name, match by it to ensure correct startup
+        if (cu.startup_name) {
+          query = query.eq('name', cu.startup_name);
+          console.log('🔍 Matching startup by name:', cu.startup_name);
+        }
+        
+        const { data: row, error: rowErr } = await query.maybeSingle();
+        
+        if (row && !rowErr) {
+          // Verify the startup name matches (if profile has startup_name)
+          if (cu.startup_name && row.name !== cu.startup_name) {
+            console.warn('⚠️ Startup name mismatch! Profile startup_name:', cu.startup_name, 'Found startup name:', row.name);
+            // Don't set this startup, let the main fetch logic handle it
+          } else {
+            console.log('✅ Found matching startup:', row.name);
+            setStartups([row] as any);
+            setSelectedStartup(row as any);
+            setIsLoading(false);
+            setView('startupHealth');
+            // Load other data in background without blocking
+            (async () => {
+              try {
+                const bgOffers = await investmentService.getOffersForStartup(row.id);
+                setInvestmentOffers(bgOffers);
+              } catch {}
+            })();
+            // Mark as loaded so main batch doesn't run for Startup users
+            setHasInitialDataLoaded(true);
+            return;
+          }
+        } else if (rowErr) {
+          console.error('❌ Error fetching startup in Phase 0:', rowErr);
+        }
+      } catch (error) {
+        console.error('❌ Exception in Phase 0 startup fetch:', error);
+      }
     }
     try {
       console.log('Fetching data for authenticated user...', { forceRefresh, hasInitialDataLoaded: hasInitialDataLoadedRef.current });
@@ -1511,40 +1649,61 @@ const App: React.FC = () => {
         setAssignedInvestmentAdvisor(null);
       }
       
-      // For startup users, automatically find their startup (only if not already set)
-      if (currentUserRef.current?.role === 'Startup' && startupsData.status === 'fulfilled' && !selectedStartupRef.current) {
+      // For startup users, automatically find their startup
+      if (currentUserRef.current?.role === 'Startup' && startupsData.status === 'fulfilled') {
         console.log('🔍 Auto-finding startup for user:', currentUserRef.current.email);
         console.log('🔍 User startup_name:', currentUserRef.current.startup_name);
         console.log('🔍 Available startups:', startupsData.value.map(s => ({ name: s.name, id: s.id })));
+        console.log('🔍 Current selectedStartup:', selectedStartupRef.current?.name, selectedStartupRef.current?.id);
         
-        // Primary: match by startup_name from user profile
-        let userStartup = startupsData.value.find(startup => startup.name === currentUserRef.current.startup_name);
-
-        // Fallback: if startup_name missing or mismatch, but user has exactly one startup, use it
-        if (!userStartup && startupsData.value.length === 1) {
-          console.log('🔁 Fallback: selecting the only startup available for this user');
-          userStartup = startupsData.value[0];
+        // CRITICAL FIX: Verify selectedStartup matches current profile's startup_name
+        // If it doesn't match, clear it and re-match
+        if (selectedStartupRef.current) {
+          const currentStartupName = currentUserRef.current.startup_name;
+          const selectedStartupName = selectedStartupRef.current.name;
+          
+          if (currentStartupName && selectedStartupName !== currentStartupName) {
+            console.log('⚠️ Selected startup does not match profile startup_name!');
+            console.log('⚠️ Profile startup_name:', currentStartupName);
+            console.log('⚠️ Selected startup name:', selectedStartupName);
+            console.log('🔄 Clearing selectedStartup to re-match based on profile');
+            setSelectedStartup(null);
+            selectedStartupRef.current = null;
+          }
         }
         
-        console.log('🔍 Auto-found startup:', userStartup);
-        
-        if (userStartup) {
-          setSelectedStartup(userStartup);
-          // Only set view to startupHealth on initial load, not on subsequent data fetches
-          if (!hasInitialDataLoadedRef.current) {
-            setView('startupHealth');
+        // If no selectedStartup, find it based on profile's startup_name
+        if (!selectedStartupRef.current) {
+          // Primary: match by startup_name from user profile
+          let userStartup = startupsData.value.find(startup => startup.name === currentUserRef.current.startup_name);
+
+          // Fallback: if startup_name missing or mismatch, but user has exactly one startup, use it
+          if (!userStartup && startupsData.value.length === 1) {
+            console.log('🔁 Fallback: selecting the only startup available for this user');
+            userStartup = startupsData.value[0];
+          }
+          
+          console.log('🔍 Auto-found startup:', userStartup);
+          
+          if (userStartup) {
+            setSelectedStartup(userStartup);
+            // Only set view to startupHealth on initial load, not on subsequent data fetches
+            if (!hasInitialDataLoadedRef.current) {
+              setView('startupHealth');
+            }
           } else {
+            console.warn('⚠️ No startup found matching profile startup_name:', currentUserRef.current.startup_name);
           }
         } else {
-        }
-      } else if (currentUserRef.current?.role === 'Startup' && selectedStartupRef.current) {
-        console.log('🔍 Startup user already has selected startup, preserving current state');
-        // Update selectedStartup with fresh data from the startups array
-        if (startupsData.status === 'fulfilled') {
+          // Update selectedStartup with fresh data from the startups array
           const updatedStartup = startupsData.value.find(s => s.id === selectedStartupRef.current?.id);
           if (updatedStartup) {
             console.log('🔄 Updating selectedStartup with fresh data from database');
             setSelectedStartup(updatedStartup);
+          } else {
+            console.warn('⚠️ Selected startup not found in startups array, clearing it');
+            setSelectedStartup(null);
+            selectedStartupRef.current = null;
           }
         }
       }
@@ -1629,12 +1788,16 @@ const App: React.FC = () => {
   }, [currentUser?.role, currentUser?.email]);
 
   // Set ignore flag when user is fully authenticated and has data
+  // This prevents auth events from triggering reloads on tab switch
   useEffect(() => {
     if (isAuthenticated && currentUser && hasInitialDataLoaded) {
       console.log('✅ User fully authenticated with data loaded, setting ignoreAuthEvents flag');
       setIgnoreAuthEvents(true);
+      // Also update the ref immediately for synchronous checks in auth handler
+      ignoreAuthEventsRef.current = true;
     } else {
       setIgnoreAuthEvents(false);
+      ignoreAuthEventsRef.current = false;
     }
   }, [isAuthenticated, currentUser, hasInitialDataLoaded]);
 
@@ -2866,6 +3029,9 @@ const App: React.FC = () => {
   if (isPublicAdvisorPage) {
     return <PublicAdvisorPage />;
   }
+  if (isExploreProfilesPage) {
+    return <ExploreProfilesPage />;
+  }
   
   if (!isAuthenticated) {
     return (
@@ -3267,6 +3433,7 @@ const App: React.FC = () => {
             </div>
           );
         }
+        
         console.log('❌ No startup found for user:', currentUser.email);
         return (
           <div className="text-center py-20">
@@ -3401,6 +3568,102 @@ const App: React.FC = () => {
                   </div>
               )}
 
+              {/* Profile Switcher and Add Profile */}
+              {isAuthenticated && currentUser && (
+                <>
+                  <ProfileSwitcher
+                    currentProfileId={currentUser.id}
+                    onProfileSwitch={async (profile) => {
+                      console.log('🔄 Profile switched to:', profile.role, profile.id);
+                      
+                      try {
+                        // Wait a moment for the database to update (switchProfile already waits 300ms)
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        
+                        // Reload user data after profile switch - try multiple times if needed
+                        let refreshedUser = null;
+                        for (let attempt = 1; attempt <= 3; attempt++) {
+                          refreshedUser = await authService.getCurrentUser();
+                          console.log(`🔄 Attempt ${attempt}: Refreshed user after switch:`, refreshedUser?.role, refreshedUser?.id, 'Expected:', profile.role, profile.id);
+                          
+                          // Check if we got the correct profile
+                          if (refreshedUser && refreshedUser.id === profile.id) {
+                            console.log('✅ Got correct profile!');
+                            break;
+                          }
+                          
+                          if (attempt < 3) {
+                            console.log(`⏳ Waiting for profile to update (attempt ${attempt}/3)...`);
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                          }
+                        }
+                        
+                        if (!refreshedUser) {
+                          console.error('❌ Could not get refreshed user after switch');
+                          alert('Failed to load profile. Please refresh the page.');
+                          window.location.reload();
+                          return;
+                        }
+                        
+                        // Verify we got the right profile
+                        if (refreshedUser.id !== profile.id) {
+                          console.warn('⚠️ Profile ID mismatch! Expected:', profile.id, 'Got:', refreshedUser.id);
+                          console.warn('⚠️ Expected role:', profile.role, 'Got role:', refreshedUser.role);
+                          // Still proceed, but log the issue
+                        }
+                        
+                        console.log('✅ Updating currentUser state with:', refreshedUser.role);
+                        
+                        // CRITICAL FIX: Clear selectedStartup when switching profiles
+                        // This ensures we don't show old startup data when switching between profiles
+                        console.log('🔄 Clearing selectedStartup to prevent showing old data');
+                        setSelectedStartup(null);
+                        selectedStartupRef.current = null;
+                        
+                        // Update current user state
+                        setCurrentUser(refreshedUser);
+                        
+                        // Check if profile is complete
+                        const isComplete = await authService.isProfileComplete(refreshedUser.id);
+                        console.log('🔄 Profile complete status:', isComplete, 'for role:', refreshedUser.role);
+                        
+                        if (!isComplete) {
+                          // Profile not complete - redirect to Form 2 (complete-registration)
+                          console.log('📝 Profile incomplete, redirecting to complete-registration page');
+                          setCurrentPage('complete-registration');
+                          setHasInitialDataLoaded(false); // Reset so Form 2 can load properly
+                          setIsLoading(false);
+                          // Force re-render to show Form 2
+                          setViewKey(prev => prev + 1);
+                          return; // Don't proceed to dashboard
+                        }
+                        
+                        // Profile is complete - reload all data for new profile and show correct dashboard
+                        console.log('🔄 Profile complete, reloading data for role:', refreshedUser.role);
+                        setHasInitialDataLoaded(false);
+                        // Reset view to dashboard for the new role
+                        setView('dashboard');
+                        setViewKey(prev => prev + 1);
+                        // Fetch data for the new profile
+                        fetchData(true);
+                      } catch (error) {
+                        console.error('❌ Error switching profile:', error);
+                        alert('Failed to switch profile. Please refresh the page.');
+                        window.location.reload();
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => setShowAddProfileModal(true)}
+                    className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors px-3 py-1.5 rounded-md hover:bg-slate-50"
+                    title="Add New Profile"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    <span className="hidden sm:inline">Add Profile</span>
+                  </button>
+                </>
+              )}
+
               <button onClick={handleLogout} className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors">
                   <LogOut className="h-4 w-4" />
                   Logout
@@ -3443,6 +3706,24 @@ const App: React.FC = () => {
         {/* Razorpay Subscription Modal removed */}
 
         {/* Trial Subscription Modal removed */}
+
+        {/* Add Profile Modal */}
+        {isAuthenticated && currentUser && (
+          <AddProfileModal
+            isOpen={showAddProfileModal}
+            onClose={() => setShowAddProfileModal(false)}
+            onProfileCreated={async () => {
+              // Reload user data after profile creation
+              const refreshedUser = await authService.getCurrentUser();
+              if (refreshedUser) {
+                setCurrentUser(refreshedUser);
+                // Reload all data for new profile
+                setHasInitialDataLoaded(false);
+                fetchData(true);
+              }
+            }}
+          />
+        )}
       
       {/* Footer removed - only shows on landing page */}
       <Analytics />

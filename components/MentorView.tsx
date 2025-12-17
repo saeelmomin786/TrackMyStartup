@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AuthUser, User, Startup, InvestmentType, ComplianceStatus } from '../types';
-import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2 } from 'lucide-react';
+import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { mentorService, MentorMetrics, MentorRequest, MentorAssignment } from '../lib/mentorService';
+import { supabase } from '../lib/supabase';
+import { getVideoEmbedUrl } from '../lib/videoUtils';
+import { investorConnectionRequestService, InvestorConnectionRequest } from '../lib/investorConnectionRequestService';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Badge from './ui/Badge';
@@ -27,9 +30,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   startups,
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discover' | 'portfolio'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discover' | 'portfolio' | 'collaboration'>(() => {
     const fromUrl = (getQueryParam('tab') as any) || 'dashboard';
-    const valid = ['dashboard', 'discover', 'portfolio'];
+    const valid = ['dashboard', 'discover', 'portfolio', 'collaboration'];
     return valid.includes(fromUrl) ? fromUrl : 'dashboard';
   });
 
@@ -50,6 +53,12 @@ const MentorView: React.FC<MentorViewProps> = ({
   const [showOnlyValidated, setShowOnlyValidated] = useState(false);
   const [playingVideoId, setPlayingVideoId] = useState<number | null>(null);
   const [selectedPitchId, setSelectedPitchId] = useState<number | null>(null);
+
+  // Collaboration state
+  const [collaborationSubTab, setCollaborationSubTab] = useState<'explore-collaborators' | 'my-collaborators' | 'requests'>('explore-collaborators');
+  const [collaboratorRequests, setCollaboratorRequests] = useState<InvestorConnectionRequest[]>([]);
+  const [collaborators, setCollaborators] = useState<InvestorConnectionRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
 
   // Mentor metrics state
   const [mentorMetrics, setMentorMetrics] = useState<MentorMetrics | null>(null);
@@ -139,6 +148,59 @@ const MentorView: React.FC<MentorViewProps> = ({
     }
   }, [activeTab]);
 
+  // Load collaborator requests
+  useEffect(() => {
+    if (currentUser?.id && activeTab === 'collaboration') {
+      const loadConnectionRequests = async () => {
+        setLoadingRequests(true);
+        try {
+          // Load from investor_connection_requests (for requests TO the mentor)
+          // This includes requests from ALL profile types: Investor, Investment Advisor, Mentor, CA, CS, Incubator, etc.
+          const investorRequests = await investorConnectionRequestService.getRequestsForInvestor(currentUser.id!);
+          // Filter out only Startup requests (startups go to Service Requests, not Collaboration)
+          // All other profiles (Investor, Advisor, Mentor, CA, CS, Incubator, etc.) are collaborators
+          const collaboratorSide = (investorRequests || []).filter(
+            r => r.requester_type !== 'Startup'
+          );
+
+          // Also load requests FROM the mentor to other profiles (where mentor is the requester)
+          // This ensures both parties see each other in "My Collaborators"
+          // Supports collaboration with ALL profile types
+          // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          const authUserId = authUser?.id || currentUser.id;
+          
+          const { data: requestsFromMentor, error: requesterError } = await supabase
+            .from('investor_connection_requests')
+            .select('*')
+            .eq('requester_id', authUserId) // Use auth.uid() instead of profile ID
+            .neq('requester_type', 'Startup') // Exclude startup requests (those are handled separately)
+            .order('created_at', { ascending: false });
+
+          if (requesterError) {
+            console.error('Error loading requests from mentor:', requesterError);
+          }
+
+          // Merge both sides - requests TO mentor and FROM mentor
+          const allCollaboratorRequests = [...collaboratorSide, ...(requestsFromMentor || [])];
+          
+          setCollaboratorRequests(collaboratorSide); // Only show incoming requests in "Collaborator Requests" tab
+          
+          // Set accepted requests as collaborators from BOTH sides
+          // This ensures both parties see each other after acceptance
+          const acceptedToMentor = collaboratorSide.filter(r => r.status === 'accepted');
+          const acceptedFromMentor = (requestsFromMentor || []).filter(r => r.status === 'accepted');
+          setCollaborators([...acceptedToMentor, ...acceptedFromMentor]);
+        } catch (error) {
+          console.error('Error loading connection requests:', error);
+        } finally {
+          setLoadingRequests(false);
+        }
+      };
+      loadConnectionRequests();
+    }
+  }, [currentUser?.id, activeTab]);
+
   // Filter pitches based on search and sub-tabs
   const filteredPitches = useMemo(() => {
     let filtered = [...activeFundraisingStartups];
@@ -195,6 +257,8 @@ const MentorView: React.FC<MentorViewProps> = ({
     });
   };
 
+  const handleFavoriteToggle = toggleFavorite;
+
   const handleShare = (pitch: ActiveFundraisingStartup) => {
     const url = window.location.href.split('?')[0] + `?startup=${pitch.id}`;
     if (navigator.share) {
@@ -225,6 +289,58 @@ const MentorView: React.FC<MentorViewProps> = ({
         next.add(pitch.id);
         return next;
       });
+    }
+  };
+
+  const handleConnect = async (pitch: ActiveFundraisingStartup) => {
+    if (!currentUser?.id) {
+      alert('Please log in to connect with startups.');
+      return;
+    }
+
+    // Find the startup in the startups array to get the user_id
+    const startup = startups.find(s => s.id === pitch.id);
+    if (!startup) {
+      alert('Startup information not found.');
+      return;
+    }
+
+    try {
+      // Check if a request already exists (pending or accepted)
+      const existingCheck = await investorConnectionRequestService.checkExistingRequest(
+        startup.user_id, // investor_id (the startup owner)
+        currentUser.id    // requester_id (the mentor)
+      );
+
+      if (existingCheck.exists) {
+        if (existingCheck.status === 'accepted') {
+          alert('You are already connected with this startup!');
+          return;
+        } else if (existingCheck.status === 'pending') {
+          alert('You already have a pending connection request with this startup. Please wait for their response.');
+          return;
+        }
+      }
+
+      // Create a connection request using investor_connection_requests table
+      // This allows mentors to connect with startups and other users
+      await investorConnectionRequestService.createRequest({
+        investor_id: startup.user_id,
+        requester_id: currentUser.id,
+        requester_type: 'Mentor',
+        startup_id: startup.id,
+        startup_profile_url: window.location.origin + window.location.pathname + `?view=startup&startupId=${startup.id}`,
+        message: `${currentUser.name || 'A mentor'} wants to connect with your startup.`
+      });
+
+      alert(`Connection request sent to ${pitch.name}!`);
+    } catch (error: any) {
+      console.error('Error in handleConnect:', error);
+      if (error.message && error.message.includes('already connected')) {
+        alert(error.message);
+      } else {
+        alert('Failed to send connection request. Please try again.');
+      }
     }
   };
 
@@ -361,6 +477,22 @@ ${mentorName}`;
               <Briefcase className="h-5 w-5 mr-2" />
               Portfolio
             </button>
+            <button
+              onClick={() => setActiveTab('collaboration')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center relative ${
+                activeTab === 'collaboration'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <Users className="h-5 w-5 mr-2" />
+              Collaboration
+              {collaboratorRequests.filter(r => r.status === 'pending').length > 0 && (
+                <span className="ml-2 px-2 py-0.5 text-xs font-semibold text-white bg-amber-500 rounded-full">
+                  {collaboratorRequests.filter(r => r.status === 'pending').length}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </div>
@@ -417,7 +549,7 @@ ${mentorName}`;
                   <Card className="flex-1">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-slate-500">Startups Founded</p>
+                        <p className="text-sm font-medium text-slate-500">Startup Experience</p>
                         <p className="text-2xl font-bold text-slate-800">{mentorMetrics?.startupsFounded || 0}</p>
                       </div>
                       <div className="p-3 bg-orange-100 rounded-full">
@@ -680,7 +812,7 @@ ${mentorName}`;
                           >
                             <div className="flex items-center gap-2">
                               <Star className="h-4 w-4" />
-                              Startups Founded ({mentorMetrics.foundedStartups.length})
+                              Startup Experience ({mentorMetrics.foundedStartups.length})
                             </div>
                           </button>
                         </nav>
@@ -907,7 +1039,7 @@ ${mentorName}`;
                     </div>
                     )}
 
-                    {/* Founded Startups Tab Content */}
+                    {/* Startup Experience Tab Content */}
                     {mentorStartupsTab === 'founded' && mentorMetrics.foundedStartups.length > 0 && (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-slate-200">
@@ -984,7 +1116,7 @@ ${mentorName}`;
                     {mentorStartupsTab === 'founded' && mentorMetrics.foundedStartups.length === 0 && (
                       <div className="text-center py-8 text-slate-500">
                         <Star className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                        <p className="text-sm">No founded startups.</p>
+                        <p className="text-sm">No startup experience.</p>
                       </div>
                     )}
                   </Card>
@@ -996,7 +1128,7 @@ ${mentorName}`;
         )}
 
         {activeTab === 'discover' && (
-          <div className="animate-fade-in max-w-3xl mx-auto w-full px-4">
+          <div className="animate-fade-in max-w-6xl mx-auto w-full">
             {/* Enhanced Header */}
             <div className="mb-8">
               <div className="text-center mb-6">
@@ -1072,7 +1204,7 @@ ${mentorName}`;
                     <span className="hidden sm:inline">Favorites</span>
                     <span className="sm:hidden">Fav</span>
                   </button>
-                  
+                
                   <button
                     onClick={() => {
                       setDiscoverySubTab('due-diligence');
@@ -1092,7 +1224,7 @@ ${mentorName}`;
                   </button>
                 </nav>
               </div>
-              
+                
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-gradient-to-r from-blue-50 to-purple-50 p-3 sm:p-4 rounded-xl border border-blue-100 gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div className="flex items-center gap-2 text-slate-600">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -1109,9 +1241,8 @@ ${mentorName}`;
                 </div>
               </div>
             </div>
-            
-            {/* Pitches Reels */}
-            <div className="space-y-4">
+                
+            <div className="space-y-6 sm:space-y-8">
               {isLoadingPitches ? (
                 <Card className="text-center py-20">
                   <div className="max-w-sm mx-auto">
@@ -1124,149 +1255,276 @@ ${mentorName}`;
                 <Card className="text-center py-20">
                   <div className="max-w-sm mx-auto">
                     <Film className="h-16 w-16 text-slate-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-slate-800 mb-2">No Pitches Found</h3>
+                    <h3 className="text-xl font-semibold text-slate-800 mb-2">
+                      {searchTerm.trim()
+                        ? 'No Matching Startups'
+                        : showOnlyValidated 
+                          ? 'No Verified Startups' 
+                          : showOnlyFavorites 
+                            ? 'No Favorited Pitches'
+                            : showOnlyDueDiligence
+                              ? 'No Due Diligence Access Yet'
+                              : 'No Active Fundraising'
+                      }
+                    </h3>
                     <p className="text-slate-500">
-                      {searchTerm ? 'No startups match your search criteria.' : 'No active fundraising pitches available at this time.'}
+                      {searchTerm.trim()
+                        ? 'No startups found matching your search. Try adjusting your search terms or filters.'
+                        : showOnlyValidated
+                          ? 'No Startup Nation verified startups are currently fundraising. Try removing the verification filter or check back later.'
+                          : showOnlyFavorites 
+                            ? 'Start favoriting pitches to see them here.'
+                            : showOnlyDueDiligence
+                              ? 'Due diligence requests you send will appear here immediately, even before startups approve them.'
+                              : 'No startups are currently fundraising. Check back later for new opportunities.'
+                      }
                     </p>
                   </div>
                 </Card>
               ) : (
-                filteredPitches.map(pitch => {
-                  const embedUrl = investorService.getYoutubeEmbedUrl(pitch.pitchVideoUrl);
-                  return (
-                    <Card key={pitch.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 border-0 bg-white relative max-w-4xl mx-auto">
+                filteredPitches.map(inv => {
+                  const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
+                  const embedUrl = videoEmbedInfo?.embedUrl || investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
+                  const videoSource = videoEmbedInfo?.source || null;
+                  const isFavorited = favoritedPitches.has(inv.id);
+                  const hasDueDiligence = dueDiligenceStartups.has(inv.id);
 
-                      {/* Video Section - Reels Style */}
-                      <div className="relative w-full aspect-video bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-                        {embedUrl ? (
-                          playingVideoId === pitch.id ? (
-                            <div className="relative w-full h-full">
-                              <iframe
-                                src={embedUrl}
-                                title={`Pitch video for ${pitch.name}`}
-                                frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                                className="absolute top-0 left-0 w-full h-full"
-                              ></iframe>
-                              <button
-                                onClick={() => setPlayingVideoId(null)}
-                                className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"
+                  return (
+                    <Card key={inv.id} className="p-6">
+                      <div className="flex flex-col md:flex-row gap-6">
+                        {/* Video/Logo Section */}
+                        <div className="md:w-1/3">
+                          {embedUrl ? (
+                            playingVideoId === inv.id ? (
+                              <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black">
+                                {videoSource === 'direct' ? (
+                                  <video
+                                    src={embedUrl}
+                                    controls
+                                    autoPlay
+                                    muted
+                                    playsInline
+                                    className="absolute top-0 left-0 w-full h-full object-cover"
+                                  >
+                                    Your browser does not support the video tag.
+                                  </video>
+                                ) : (
+                                  <iframe
+                                    src={embedUrl}
+                                    title={`Pitch video for ${inv.name}`}
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                    className="absolute top-0 left-0 w-full h-full"
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <div
+                                className="relative w-full aspect-video rounded-lg overflow-hidden bg-black cursor-pointer group"
+                                onClick={() => { setPlayingVideoId(inv.id); setSelectedPitchId(inv.id); }}
                               >
-                                ×
-                              </button>
-                            </div>
-                          ) : (
-                            <div
-                              className="relative w-full h-full group cursor-pointer"
-                              onClick={() => { setPlayingVideoId(pitch.id); setSelectedPitchId(pitch.id); }}
-                            >
-                              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
-                                  <svg className="w-10 h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="M8 5v14l11-7z" />
-                                  </svg>
+                                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300">
+                                    <svg className="w-10 h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                      <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                  </div>
                                 </div>
                               </div>
-                              <div className="absolute bottom-4 left-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                <p className="text-sm font-medium">Click to play</p>
+                            )
+                          ) : inv.logoUrl && inv.logoUrl !== '#' ? (
+                            <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white flex items-center justify-center">
+                              <img
+                                src={inv.logoUrl}
+                                alt={`${inv.name} logo`}
+                                className="w-full h-full object-contain"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-full aspect-video bg-slate-200 rounded-lg flex items-center justify-center">
+                              <Video className="h-12 w-12 text-slate-400" />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Content Section */}
+                        <div className="md:w-2/3 flex flex-col relative">
+                          {/* Header Section */}
+                          <div className="mb-3">
+                            <div className="flex items-start justify-between gap-3 mb-2">
+                              <h3 className="text-xl font-bold text-slate-800 flex-1">{inv.name}</h3>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleShare(inv)}
+                                className="flex-shrink-0"
+                              >
+                                <Share2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge status={inv.complianceStatus} />
+                              {inv.isStartupNationValidated && (
+                                <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full flex items-center gap-1">
+                                  <CheckCircle className="h-3 w-3" />
+                                  Verified
+                                </span>
+                              )}
+                              <span className="text-sm text-slate-600">{inv.sector}</span>
+                            </div>
+                          </div>
+
+                          {/* Investment Details */}
+                          <div className="mb-4">
+                            {/* Investment Ask and Equity in one line */}
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-slate-500">Investment Ask:</span>
+                                <span className="text-xs font-medium text-slate-600">
+                                  {investorService.formatCurrency(inv.investmentValue, inv.currency || 'USD')}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-slate-500">Equity:</span>
+                                <span className="text-xs font-medium text-slate-600">{inv.equityAllocation}%</span>
                               </div>
                             </div>
-                          )
-                        ) : (
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="text-center text-white">
-                              <Film className="h-16 w-16 mx-auto mb-4 opacity-50" />
-                              <p className="text-sm">No video available</p>
+                            {/* Round Type, Currency, Stage, Domain in one line */}
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                              {inv.fundraisingType && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500">Round Type:</span>
+                                  <span className="text-xs font-medium text-slate-600">{inv.fundraisingType}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-slate-500">Currency:</span>
+                                <span className="text-xs font-medium text-slate-600">{inv.currency || 'USD'}</span>
+                              </div>
+                              {inv.stage && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500">Stage:</span>
+                                  <span className="text-xs font-medium text-slate-600">{inv.stage}</span>
+                                </div>
+                              )}
+                              {inv.domain && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500">Domain:</span>
+                                  <span className="text-xs font-medium text-slate-600">{inv.domain}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
-                        )}
-                      </div>
 
-                      {/* Content Section - Compact Reels Style */}
-                      <div className="p-4 sm:p-5">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-1 break-words">{pitch.name}</h3>
-                            <p className="text-sm text-slate-600 font-medium">{pitch.sector}</p>
-                          </div>
-                          {pitch.isStartupNationValidated && (
-                            <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2.5 py-1 rounded-full text-xs font-medium shadow-sm ml-2">
-                              <CheckCircle className="h-3 w-3" />
-                              Verified
+                          {/* Links & Documents Section */}
+                          <div className="mb-4 pb-3 border-b border-slate-200">
+                            <div className="text-xs font-medium text-slate-500 mb-2">Links & Documents</div>
+                            <div className="flex flex-wrap gap-2">
+                              {inv.websiteUrl && inv.websiteUrl !== '#' && (
+                                <a
+                                  href={inv.websiteUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                                >
+                                  <Globe className="h-3.5 w-3.5" />
+                                  Website
+                                  <ExternalLink className="h-3 w-3 opacity-50" />
+                                </a>
+                              )}
+                              {inv.linkedInUrl && inv.linkedInUrl !== '#' && (
+                                <a
+                                  href={inv.linkedInUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                                >
+                                  <Linkedin className="h-3.5 w-3.5" />
+                                  LinkedIn
+                                  <ExternalLink className="h-3 w-3 opacity-50" />
+                                </a>
+                              )}
+                              {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
+                                <a
+                                  href={inv.pitchDeckUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                  Pitch Deck
+                                  <ExternalLink className="h-3 w-3 opacity-50" />
+                                </a>
+                              )}
+                              {inv.onePagerUrl && inv.onePagerUrl !== '#' && (
+                                <a
+                                  href={inv.onePagerUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                  One-Pager
+                                  <ExternalLink className="h-3 w-3 opacity-50" />
+                                </a>
+                              )}
+                              {inv.businessPlanUrl && inv.businessPlanUrl !== '#' && (
+                                <a
+                                  href={inv.businessPlanUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                  Business Plan
+                                  <ExternalLink className="h-3 w-3 opacity-50" />
+                                </a>
+                              )}
+                              {(!inv.websiteUrl || inv.websiteUrl === '#') && 
+                               (!inv.linkedInUrl || inv.linkedInUrl === '#') && 
+                               (!inv.pitchDeckUrl || inv.pitchDeckUrl === '#') && 
+                               (!inv.onePagerUrl || inv.onePagerUrl === '#') && 
+                               (!inv.businessPlanUrl || inv.businessPlanUrl === '#') && (
+                                <span className="text-xs text-slate-400 italic">No links available</span>
+                              )}
                             </div>
-                          )}
-                        </div>
-                                            
-                        {/* Action Buttons - Compact */}
-                        <div className="flex flex-wrap items-center gap-2 mt-4">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            className={`!rounded-full !p-2 transition-all duration-200 ${
-                              favoritedPitches.has(pitch.id)
-                                ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
-                                : 'hover:bg-red-50 hover:text-red-600 border border-slate-200'
-                            }`}
-                            onClick={() => toggleFavorite(pitch.id)}
-                          >
-                            <Heart className={`h-4 w-4 ${favoritedPitches.has(pitch.id) ? 'fill-current' : ''}`} />
-                          </Button>
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleShare(pitch)}
-                            className="!rounded-full !p-2 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
-                          >
-                            <Share2 className="h-4 w-4" />
-                          </Button>
-
-                          {pitch.pitchDeckUrl && pitch.pitchDeckUrl !== '#' && (
-                            <a href={pitch.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px]">
-                              <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 text-xs">
-                                <FileText className="h-3 w-3 mr-1.5" /> Deck
-                              </Button>
-                            </a>
-                          )}
-
-                          <button
-                            onClick={() => handleDueDiligenceClick(pitch)}
-                            className={`flex-1 min-w-[120px] transition-all duration-200 border px-2.5 py-2 rounded-lg text-xs font-medium ${
-                              dueDiligenceStartups.has(pitch.id)
-                                ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:border-blue-700'
-                                : 'hover:bg-purple-50 hover:text-purple-600 hover:border-purple-300 border-slate-200 bg-white'
-                            }`}
-                          >
-                            <svg className="h-3 w-3 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            Due Diligence
-                          </button>
-
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            onClick={() => handleViewStartup(pitch)}
-                            className="flex-1 min-w-[120px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg shadow-blue-200 text-xs"
-                          >
-                            <Eye className="h-3 w-3 mr-1.5" /> View Details
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Investment Details Footer - Compact */}
-                      <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-4 sm:px-5 py-2.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-t border-slate-200">
-                        <div className="text-sm">
-                          <span className="font-semibold text-slate-800">Ask:</span> {investorService.formatCurrency(pitch.investmentValue || 0)} for <span className="font-semibold text-purple-600">{pitch.equityAllocation || 0}%</span> equity
-                        </div>
-                        {pitch.isStartupNationValidated && (
-                          <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
-                            <CheckCircle className="h-3 w-3" />
-                            <span className="text-xs font-semibold">Verified</span>
                           </div>
-                        )}
+
+                          {/* Action Buttons */}
+                          <div className="flex flex-wrap gap-2 pt-3">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleFavoriteToggle(inv.id)}
+                            >
+                              <Heart className={`h-4 w-4 mr-2 ${isFavorited ? 'fill-current text-red-500' : ''}`} />
+                              {isFavorited ? 'Favorited' : 'Favorite'}
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDueDiligenceClick(inv)}
+                            >
+                              <Shield className="h-4 w-4 mr-2" />
+                              {hasDueDiligence ? 'Due Diligence Requested' : 'Due Diligence'}
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="primary"
+                              onClick={() => handleConnect(inv)}
+                            >
+                              <UserPlus className="h-4 w-4 mr-2" />
+                              Connect
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     </Card>
                   );
@@ -1340,6 +1598,298 @@ ${mentorName}`;
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'collaboration' && (
+          <div className="space-y-6 animate-fade-in">
+            <Card>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">Collaboration</h2>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Manage collaboration with all profiles: Investors, Investment Advisors, Mentors, CA, CS, Incubators, and more
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 mb-4">
+                <Button
+                  size="sm"
+                  variant={collaborationSubTab === 'explore-collaborators' ? 'primary' : 'outline'}
+                  onClick={() => setCollaborationSubTab('explore-collaborators')}
+                >
+                  <Search className="h-4 w-4 mr-2" />
+                  Explore Collaborators
+                </Button>
+                <Button
+                  size="sm"
+                  variant={collaborationSubTab === 'my-collaborators' ? 'primary' : 'outline'}
+                  onClick={() => setCollaborationSubTab('my-collaborators')}
+                >
+                  My Collaborators
+                </Button>
+                <Button
+                  size="sm"
+                  variant={collaborationSubTab === 'requests' ? 'primary' : 'outline'}
+                  onClick={() => setCollaborationSubTab('requests')}
+                >
+                  Collaborator Requests
+                  {collaboratorRequests.filter(r => r.status === 'pending').length > 0 && (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-semibold text-white bg-amber-500 rounded-full">
+                      {collaboratorRequests.filter(r => r.status === 'pending').length}
+                    </span>
+                  )}
+                </Button>
+              </div>
+
+              {loadingRequests && collaborationSubTab !== 'explore-collaborators' ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-slate-600">Loading collaboration data...</p>
+                </div>
+              ) : collaborationSubTab === 'explore-collaborators' ? (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4">Explore by Profile Type</h3>
+                    <p className="text-sm text-slate-600 mb-6">Browse and connect with different types of collaborators</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {[
+                      { role: 'Investor', icon: DollarSign, color: 'bg-blue-100 text-blue-700 hover:bg-blue-200', description: 'Connect with investors' },
+                      { role: 'Investment Advisor', icon: Briefcase, color: 'bg-purple-100 text-purple-700 hover:bg-purple-200', description: 'Connect with investment advisors' },
+                      { role: 'Mentor', icon: Users, color: 'bg-green-100 text-green-700 hover:bg-green-200', description: 'Connect with mentors' },
+                      { role: 'CA', icon: FileText, color: 'bg-orange-100 text-orange-700 hover:bg-orange-200', description: 'Connect with Chartered Accountants' },
+                      { role: 'CS', icon: Shield, color: 'bg-pink-100 text-pink-700 hover:bg-pink-200', description: 'Connect with Company Secretaries' },
+                      { role: 'Incubation', icon: Building2, color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200', description: 'Connect with incubation centers' },
+                    ].map((profileType) => {
+                      const IconComponent = profileType.icon;
+                      return (
+                        <Card
+                          key={profileType.role}
+                          className="p-6 hover:shadow-lg transition-all duration-200 border border-slate-200 text-center"
+                        >
+                          <div className="flex flex-col items-center">
+                            <div className={`w-16 h-16 rounded-full ${profileType.color} flex items-center justify-center mb-4 transition-colors`}>
+                              <IconComponent className="h-8 w-8" />
+                            </div>
+                            <h4 className="text-lg font-semibold text-slate-900 mb-2">
+                              {profileType.role}
+                            </h4>
+                            <p className="text-sm text-slate-600 mb-4">
+                              {profileType.description}
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                // Navigate to explore users of this role type
+                                const baseUrl = window.location.origin + window.location.pathname;
+                                const url = new URL(baseUrl);
+                                // Clear any existing query parameters
+                                url.search = '';
+                                
+                                if (profileType.role === 'Investor') {
+                                  url.searchParams.set('view', 'explore');
+                                  url.searchParams.set('role', 'Investor');
+                                } else if (profileType.role === 'Investment Advisor') {
+                                  url.searchParams.set('view', 'explore');
+                                  url.searchParams.set('role', 'Investment Advisor');
+                                } else if (profileType.role === 'Incubation') {
+                                  url.searchParams.set('view', 'explore');
+                                  url.searchParams.set('role', 'Startup Facilitation Center');
+                                } else {
+                                  url.searchParams.set('view', 'explore');
+                                  url.searchParams.set('role', profileType.role);
+                                }
+                                
+                                // Open in new tab
+                                const newWindow = window.open(url.toString(), '_blank');
+                                if (!newWindow) {
+                                  // If popup blocked, fallback to same window
+                                  window.location.href = url.toString();
+                                }
+                              }}
+                            >
+                              <Eye className="h-3 w-3 mr-2" />
+                              Explore
+                            </Button>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : collaborationSubTab === 'my-collaborators' ? (
+                collaborators.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                    <p className="text-slate-600">No collaborators yet</p>
+                    <p className="text-sm text-slate-500 mt-1">Accepted collaboration requests from all profiles will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {collaborators.map((request) => (
+                      <Card key={request.id} className="p-0 overflow-hidden border border-slate-200">
+                        <div className="flex flex-col md:flex-row gap-4">
+                          {/* Media / Avatar */}
+                          <div className="md:w-1/4 bg-slate-50 flex items-center justify-center p-6">
+                            <div className="w-16 h-16 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xl font-semibold">
+                              {request.requester_type?.[0] || 'C'}
+                            </div>
+                          </div>
+
+                          {/* Content */}
+                          <div className="md:w-3/4 p-4 sm:p-6 flex flex-col gap-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Badge variant="success">Accepted</Badge>
+                                  <span className="text-xs text-slate-500">{new Date(request.created_at).toLocaleDateString()}</span>
+                                </div>
+                                <h3 className="text-lg font-semibold text-slate-900 capitalize">
+                                  {request.requester_type || 'Collaborator'}
+                                </h3>
+                                <p className="text-sm text-slate-600">Requester ID: {request.requester_id}</p>
+                              </div>
+                              {request.advisor_profile_url && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => window.open(request.advisor_profile_url!, '_blank')}
+                                  className="flex-shrink-0"
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View Profile
+                                </Button>
+                              )}
+                            </div>
+
+                            {request.message && request.message.trim() && (
+                              <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 whitespace-pre-wrap">
+                                {request.message}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )
+              ) : collaboratorRequests.length === 0 ? (
+                <div className="text-center py-12">
+                  <Bell className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                  <p className="text-slate-600">No collaborator requests yet</p>
+                  <p className="text-sm text-slate-500 mt-1">Connection requests from all profiles (Investors, Advisors, Mentors, CA, CS, Incubators, etc.) will appear here.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {collaboratorRequests.map((request) => (
+                    <Card key={request.id} className="p-0 overflow-hidden border border-slate-200">
+                      <div className="flex flex-col md:flex-row gap-4">
+                        {/* Media / Avatar */}
+                        <div className="md:w-1/4 bg-slate-50 flex items-center justify-center p-6">
+                          <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-xl font-semibold">
+                            {request.requester_type?.[0] || 'C'}
+                          </div>
+                        </div>
+
+                        {/* Content */}
+                        <div className="md:w-3/4 p-4 sm:p-6 flex flex-col gap-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <Badge variant={request.status === 'pending' ? 'warning' : request.status === 'accepted' ? 'success' : 'danger'}>
+                                  {request.status}
+                                </Badge>
+                                <span className="text-xs text-slate-500">{new Date(request.created_at).toLocaleDateString()}</span>
+                              </div>
+                              <h3 className="text-lg font-semibold text-slate-900 capitalize">
+                                {request.requester_type || 'Collaborator'} Request
+                              </h3>
+                              <p className="text-sm text-slate-600">Requester ID: {request.requester_id}</p>
+                            </div>
+                            {request.advisor_profile_url && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => window.open(request.advisor_profile_url!, '_blank')}
+                                className="flex-shrink-0"
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Profile
+                              </Button>
+                            )}
+                          </div>
+
+                          {request.message && request.message.trim() && (
+                            <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-700 whitespace-pre-wrap">
+                              {request.message}
+                            </div>
+                          )}
+
+                          {request.status === 'pending' && (
+                            <div className="flex gap-2 pt-2">
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                onClick={async () => {
+                                  if (!currentUser?.id) return;
+                                  try {
+                                    await investorConnectionRequestService.updateRequestStatus(request.id, 'accepted', currentUser.id);
+                                    // Reload requests
+                                    const investorRequests = await investorConnectionRequestService.getRequestsForInvestor(currentUser.id!);
+                                    const collaboratorSide = (investorRequests || []).filter(
+                                      r => r.requester_type !== 'Startup'
+                                    );
+                                    setCollaboratorRequests(collaboratorSide);
+                                    const accepted = collaboratorSide.filter(r => r.status === 'accepted');
+                                    setCollaborators(accepted);
+                                  } catch (error) {
+                                    console.error('Error accepting request:', error);
+                                    alert('Failed to accept request. Please try again.');
+                                  }
+                                }}
+                              >
+                                <CheckSquare className="h-4 w-4 mr-2" />
+                                Accept
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  if (!currentUser?.id) return;
+                                  try {
+                                    await investorConnectionRequestService.updateRequestStatus(request.id, 'rejected', currentUser.id);
+                                    // Reload requests
+                                    const investorRequests = await investorConnectionRequestService.getRequestsForInvestor(currentUser.id!);
+                                    const collaboratorSide = (investorRequests || []).filter(
+                                      r => r.requester_type !== 'Startup'
+                                    );
+                                    setCollaboratorRequests(collaboratorSide);
+                                    const accepted = collaboratorSide.filter(r => r.status === 'accepted');
+                                    setCollaborators(accepted);
+                                  } catch (error) {
+                                    console.error('Error rejecting request:', error);
+                                    alert('Failed to reject request. Please try again.');
+                                  }
+                                }}
+                              >
+                                <XCircle className="h-4 w-4 mr-2" />
+                                Reject
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </Card>
           </div>
         )}
       </div>

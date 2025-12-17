@@ -630,9 +630,14 @@ const PublicStartupPage: React.FC = () => {
     currency: startup.currency || 'INR',
   } : null;
 
-  // Show startup card even if fundraising is not active - just show basic info
+  // Show startup card only if fundraising is active
   const hasActiveFundraising = fundraisingDetails && fundraisingDetails.active;
   const hasFundraisingDetails = fundraisingDetails && (fundraisingDetails.value > 0 || fundraisingDetails.equity > 0);
+
+  // Check if fundraising is inactive - if so, show closed message
+  // Only show closed message if fundraising details exist AND active is explicitly false
+  // If no fundraising details exist, still show the profile (startup may not have set up fundraising yet)
+  const isFundraisingInactive = fundraisingDetails !== null && fundraisingDetails.active === false;
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -723,7 +728,28 @@ const PublicStartupPage: React.FC = () => {
           </Button>
         </div>
 
-        {/* Discover Page Style Card */}
+        {/* Show closed message if fundraising is inactive */}
+        {isFundraisingInactive && (
+          <Card className="mb-6">
+            <div className="text-center py-8 sm:py-12">
+              <div className="mx-auto w-16 h-16 sm:w-20 sm:h-20 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                <Building2 className="h-8 w-8 sm:h-10 sm:w-10 text-slate-400" />
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2">
+                Profile Sharing Inactive
+              </h2>
+              <p className="text-sm sm:text-base text-slate-600 max-w-md mx-auto">
+                This startup has inactive profile sharing.
+              </p>
+              <p className="text-xs sm:text-sm text-slate-500 mt-2">
+                Please contact the startup directly for more information.
+              </p>
+            </div>
+          </Card>
+        )}
+
+        {/* Discover Page Style Card - Only show if fundraising is active */}
+        {!isFundraisingInactive && (
         <Card className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white max-w-4xl mx-auto">
           {/* Video/Logo Section */}
           <div className="relative w-full aspect-[16/7] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -987,6 +1013,7 @@ const PublicStartupPage: React.FC = () => {
             </div>
           )}
         </Card>
+        )}
       </div>
     </div>
   );

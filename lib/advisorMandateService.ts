@@ -51,10 +51,14 @@ class AdvisorMandateService {
   // Get all mandates for an advisor
   async getMandatesByAdvisor(advisorId: string, includeInactive: boolean = false): Promise<AdvisorMandate[]> {
     try {
+      // CRITICAL FIX: Use auth.uid() instead of profile ID for RLS policies
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || advisorId;
+      
       let query = supabase
         .from('advisor_mandates')
         .select('*')
-        .eq('advisor_id', advisorId)
+        .eq('advisor_id', authUserId)
         .order('display_order', { ascending: true })
         .order('created_at', { ascending: false });
 
@@ -100,8 +104,13 @@ class AdvisorMandateService {
   // Create a new mandate
   async createMandate(mandate: CreateAdvisorMandate): Promise<AdvisorMandate | null> {
     try {
+      // CRITICAL FIX: Use auth.uid() instead of profile ID for RLS policies
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || mandate.advisor_id;
+      
       const mandateData: any = {
         ...mandate,
+        advisor_id: authUserId, // Override with auth.uid()
         is_active: mandate.is_active ?? true,
         display_order: mandate.display_order ?? 0
       };

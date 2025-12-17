@@ -26,6 +26,7 @@ import { advisorAddedStartupService, AdvisorAddedStartup, CreateAdvisorAddedStar
 import { generalDataService } from '../lib/generalDataService';
 import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../lib/advisorConnectionRequestService';
 import { advisorMandateService, AdvisorMandate, CreateAdvisorMandate } from '../lib/advisorMandateService';
+import { investorMandateService, InvestorMandate } from '../lib/investorMandateService';
 import { PlusCircle, Edit, Trash2, Filter, X } from 'lucide-react';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
 
@@ -52,6 +53,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'management' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'portfolio' | 'collaboration' | 'mandate'>('dashboard');
   const [managementSubTab, setManagementSubTab] = useState<'myInvestments' | 'myInvestors' | 'myStartups'>('myInvestments');
+  const [mandateSubTab, setMandateSubTab] = useState<'myMandates' | 'investorMandates'>('myMandates');
   const [showProfilePage, setShowProfilePage] = useState(false);
   const [agreementFile, setAgreementFile] = useState<File | null>(null);
   const [coInvestmentListings, setCoInvestmentListings] = useState<Set<number>>(new Set());
@@ -131,6 +133,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [mandates, setMandates] = useState<AdvisorMandate[]>([]);
   const [selectedMandateId, setSelectedMandateId] = useState<number | null>(null);
   const [isLoadingMandates, setIsLoadingMandates] = useState(false);
+  // Investor mandates state
+  const [selectedInvestorForMandates, setSelectedInvestorForMandates] = useState<string | null>(null);
+  const [investorMandates, setInvestorMandates] = useState<InvestorMandate[]>([]);
+  const [selectedInvestorMandateId, setSelectedInvestorMandateId] = useState<number | null>(null);
+  const [isLoadingInvestorMandates, setIsLoadingInvestorMandates] = useState(false);
   const [showMandateModal, setShowMandateModal] = useState(false);
   const [editingMandate, setEditingMandate] = useState<AdvisorMandate | null>(null);
   const [mandateFormData, setMandateFormData] = useState<CreateAdvisorMandate>({
@@ -231,40 +238,53 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const advisorCurrency = useInvestmentAdvisorCurrency(currentUser);
 
   // Load advisor-added investors
+  // Load always (not just on myInvestors tab) so myInvestors can include TMS investors from advisor_added_investors
   useEffect(() => {
     const loadAdvisorAddedInvestors = async () => {
-      if ((activeTab === 'myInvestors' || (activeTab === 'management' && managementSubTab === 'myInvestors')) && currentUser?.id) {
-        setLoadingAddedInvestors(true);
-        try {
-          const investors = await advisorAddedInvestorService.getInvestorsByAdvisor(currentUser.id);
-          setAdvisorAddedInvestors(investors);
-        } catch (error) {
-          console.error('Error loading advisor-added investors:', error);
-        } finally {
-          setLoadingAddedInvestors(false);
-        }
+      // Get auth.uid() directly from Supabase (RLS policies use auth.uid())
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser?.id) {
+        setAdvisorAddedInvestors([]);
+        return;
+      }
+      
+      setLoadingAddedInvestors(true);
+      try {
+        const investors = await advisorAddedInvestorService.getInvestorsByAdvisor(authUser.id);
+        setAdvisorAddedInvestors(investors);
+      } catch (error) {
+        console.error('Error loading advisor-added investors:', error);
+        setAdvisorAddedInvestors([]);
+      } finally {
+        setLoadingAddedInvestors(false);
       }
     };
     loadAdvisorAddedInvestors();
-  }, [activeTab, managementSubTab, currentUser?.id]);
+  }, [currentUser?.id]); // Load when currentUser changes
 
   // Load advisor-added startups
   useEffect(() => {
     const loadAdvisorAddedStartups = async () => {
-      if ((activeTab === 'myStartups' || (activeTab === 'management' && managementSubTab === 'myStartups')) && currentUser?.id) {
-        setLoadingAddedStartups(true);
-        try {
-          const startups = await advisorAddedStartupService.getStartupsByAdvisor(currentUser.id);
-          setAdvisorAddedStartups(startups);
-        } catch (error) {
-          console.error('Error loading advisor-added startups:', error);
-        } finally {
-          setLoadingAddedStartups(false);
-        }
+      // Get auth.uid() directly from Supabase (RLS policies use auth.uid())
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser?.id) {
+        setAdvisorAddedStartups([]);
+        return;
+      }
+      
+      setLoadingAddedStartups(true);
+      try {
+        const startups = await advisorAddedStartupService.getStartupsByAdvisor(authUser.id);
+        setAdvisorAddedStartups(startups);
+      } catch (error) {
+        console.error('Error loading advisor-added startups:', error);
+        setAdvisorAddedStartups([]);
+      } finally {
+        setLoadingAddedStartups(false);
       }
     };
     loadAdvisorAddedStartups();
-  }, [activeTab, managementSubTab, currentUser?.id]);
+  }, [currentUser?.id]); // Load when currentUser changes (always, not just on myStartups tab)
 
   // Keep add-startup form advisor id in sync
   useEffect(() => {
@@ -388,6 +408,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         setIsLoadingMandateFilters(true);
         try {
           // Load mandates
+          // CRITICAL FIX: Service now uses auth.uid() internally, but we still pass currentUser.id as fallback
           const mandatesData = await advisorMandateService.getMandatesByAdvisor(currentUser.id);
           setMandates(mandatesData);
           
@@ -422,19 +443,48 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     loadMandateData();
   }, [activeTab, currentUser?.id]);
 
+  // Load investor mandates when an investor is selected
+  useEffect(() => {
+    const loadInvestorMandates = async () => {
+      if (selectedInvestorForMandates && mandateSubTab === 'investorMandates') {
+        console.log('Loading investor mandates for:', selectedInvestorForMandates);
+        setIsLoadingInvestorMandates(true);
+        try {
+          const mandatesData = await investorMandateService.getMandatesByInvestor(selectedInvestorForMandates);
+          console.log('Loaded investor mandates:', mandatesData);
+          setInvestorMandates(mandatesData);
+          if (mandatesData.length > 0 && !selectedInvestorMandateId) {
+            setSelectedInvestorMandateId(mandatesData[0].id);
+          } else {
+            setSelectedInvestorMandateId(null);
+          }
+        } catch (error) {
+          console.error('Error loading investor mandates:', error);
+          setInvestorMandates([]);
+        } finally {
+          setIsLoadingInvestorMandates(false);
+        }
+      } else {
+        setInvestorMandates([]);
+        setSelectedInvestorMandateId(null);
+      }
+    };
+    loadInvestorMandates();
+  }, [selectedInvestorForMandates, mandateSubTab]);
+
   // Load mandates when component mounts (for mandate tab)
   useEffect(() => {
     if (currentUser?.id && activeTab === 'mandate') {
       const loadMandates = async () => {
         const mandatesData = await advisorMandateService.getMandatesByAdvisor(currentUser.id!);
         setMandates(mandatesData);
-        if (mandatesData.length > 0 && !selectedMandateId) {
+        if (mandatesData.length > 0 && !selectedMandateId && mandateSubTab === 'myMandates') {
           setSelectedMandateId(mandatesData[0].id);
         }
       };
       loadMandates();
     }
-  }, [currentUser?.id, activeTab]);
+  }, [currentUser?.id, activeTab, mandateSubTab]);
 
   // Load countries and investment stages for dropdowns
   useEffect(() => {
@@ -628,10 +678,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       addStartupToDueDiligenceSet(startupId);
       
       // Reload due diligence status
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       const { data } = await supabase
         .from('due_diligence_requests')
         .select('startup_id, status')
-        .eq('user_id', currentUser.id)
+        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .eq('startup_id', String(startupId))
         .in('status', ['pending', 'approved', 'completed'])
         .maybeSingle();
@@ -681,15 +735,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return;
       }
 
-      // Create pending request
+      // Create pending request (service now uses auth.uid() internally)
       await paymentService.createPendingDueDiligenceIfNeeded(currentUser.id, String(startupId));
       addStartupToDueDiligenceSet(startupId);
       
       // Reload due diligence status
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       const { data } = await supabase
         .from('due_diligence_requests')
         .select('startup_id, status')
-        .eq('user_id', currentUser.id)
+        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .eq('startup_id', String(startupId))
         .in('status', ['pending', 'approved', 'completed'])
         .maybeSingle();
@@ -1258,6 +1316,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       if (activeTab === 'discovery' && currentUser?.id) {
         setIsLoadingReceivedRecommendations(true);
         try {
+          // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (!authUser?.id) {
+            setReceivedRecommendations([]);
+            setIsLoadingReceivedRecommendations(false);
+            return;
+          }
+          
           const { data, error } = await supabase
             .from('collaborator_recommendations')
             .select(`
@@ -1267,7 +1333,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               created_at,
               sender_user_id
             `)
-            .eq('collaborator_user_id', currentUser.id)
+            .eq('collaborator_user_id', authUser.id) // Use auth.uid() instead of profile ID
             .order('created_at', { ascending: false });
 
           if (error) {
@@ -1291,13 +1357,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Load investment advisor's own favorites from database
   useEffect(() => {
     const loadFavorites = async () => {
-      if (!currentUser?.id) return;
+      // Get auth user ID (required for foreign key constraint)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+      const authUserId = authUser.id;
       
       try {
         const { data, error } = await supabase
           .from('investor_favorites')
           .select('startup_id')
-          .eq('investor_id', currentUser.id);
+          .eq('investor_id', authUserId); // Use auth user ID, not profile ID
         
         if (error) {
           // If table doesn't exist yet, silently fail (table will be created by SQL script)
@@ -1321,7 +1390,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   useEffect(() => {
     const loadDueDiligenceAccess = async () => {
-      if (!currentUser?.id) {
+      // Get auth.uid() directly from Supabase
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser?.id) {
         setDueDiligenceStartups(new Set<number>());
         setApprovedDueDiligenceStartups(new Set<number>());
         return;
@@ -1330,7 +1401,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         const { data, error } = await supabase
           .from('due_diligence_requests')
           .select('startup_id, status')
-          .eq('user_id', currentUser.id)
+          .eq('user_id', authUser.id)  // Use auth.uid() instead of currentUser.id
           .in('status', ['pending', 'approved', 'completed']);
         if (error) throw error;
 
@@ -1386,10 +1457,89 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     }
   }, [activeTab, activeFundraisingStartups]);
 
+  // State to store advisor code (fetched from DB if not in currentUser)
+  const [advisorCodeFromDB, setAdvisorCodeFromDB] = useState<string | null>(null);
+
+  // Fetch advisor code from database if not in currentUser
+  useEffect(() => {
+    const fetchAdvisorCode = async () => {
+      console.log('🔍 fetchAdvisorCode useEffect running:', {
+        hasCurrentUser: !!currentUser,
+        role: currentUser?.role,
+        id: currentUser?.id,
+        codeInCurrentUser: currentUser?.investment_advisor_code,
+        codeTrimmed: currentUser?.investment_advisor_code?.trim()
+      });
+
+      // If currentUser already has the code, use it
+      const trimmedCurrentCode = currentUser?.investment_advisor_code?.trim();
+      if (trimmedCurrentCode && trimmedCurrentCode.length > 0) {
+        console.log('✅ Advisor code already in currentUser:', trimmedCurrentCode);
+        setAdvisorCodeFromDB(null); // Clear DB-fetched code
+        return;
+      }
+
+      // If currentUser is an Investment Advisor but code is missing, fetch from DB
+      if (currentUser?.role === 'Investment Advisor' && currentUser?.id) {
+        console.log('🔍 Fetching advisor code from DB for Investment Advisor...');
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (!authUser?.id) {
+            console.log('⚠️ No auth user found');
+            return;
+          }
+
+          const { data: userData, error } = await supabase
+            .from('users')
+            .select('investment_advisor_code')
+            .eq('id', authUser.id)
+            .single();
+
+          if (error) {
+            console.error('❌ Error fetching advisor code from DB:', error);
+            return;
+          }
+
+          if (userData?.investment_advisor_code) {
+            const trimmed = userData.investment_advisor_code.trim();
+            if (trimmed && trimmed.length > 0) {
+              console.log('✅ Fetched advisor code from DB:', trimmed);
+              setAdvisorCodeFromDB(trimmed);
+            } else {
+              console.log('⚠️ Advisor code in DB is empty or whitespace');
+            }
+          } else {
+            console.log('⚠️ No advisor code found in DB for user');
+          }
+        } catch (error) {
+          console.error('❌ Error fetching advisor code from DB:', error);
+        }
+      } else {
+        console.log('⚠️ Not fetching advisor code - conditions not met:', {
+          isInvestmentAdvisor: currentUser?.role === 'Investment Advisor',
+          hasId: !!currentUser?.id
+        });
+      }
+    };
+
+    fetchAdvisorCode();
+  }, [currentUser?.id, currentUser?.role, currentUser?.investment_advisor_code]);
+
   const advisorCode = useMemo(() => {
+    // First try currentUser
     const trimmed = currentUser?.investment_advisor_code?.trim();
-    return trimmed && trimmed.length > 0 ? trimmed : null;
-  }, [currentUser?.investment_advisor_code]);
+    if (trimmed && trimmed.length > 0) {
+      console.log('🔍 advisorCode useMemo: Using code from currentUser:', trimmed);
+      return trimmed;
+    }
+    // Fallback to DB-fetched code
+    if (advisorCodeFromDB) {
+      console.log('🔍 advisorCode useMemo: Using code from DB:', advisorCodeFromDB);
+      return advisorCodeFromDB;
+    }
+    console.log('⚠️ advisorCode useMemo: No advisor code available');
+    return null;
+  }, [currentUser?.investment_advisor_code, advisorCodeFromDB]);
 
   // Get pending startup requests - FIXED VERSION
   const pendingStartupRequests = useMemo(() => {
@@ -1610,8 +1760,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
   // Get accepted investors - FIXED VERSION
   // Includes: 1) Investors who entered advisor code and were accepted, 2) Investors who connected via connection requests
+  // 3) TMS investors linked via advisor_added_investors (where is_on_tms = true)
   const myInvestors = useMemo(() => {
+    console.log('🔍 myInvestors useMemo running:', {
+      hasUsers: !!users,
+      usersLength: users?.length,
+      advisorCode: advisorCode,
+      advisorCodeType: typeof advisorCode,
+      advisorAddedInvestorsLength: advisorAddedInvestors?.length
+    });
+
     if (!users || !Array.isArray(users)) {
+      console.log('⚠️ myInvestors: No users array');
       return [];
     }
 
@@ -1620,6 +1780,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
     // 1. Find investors who have entered the investment advisor code AND have been accepted
     if (advisorCode && typeof advisorCode === 'string' && advisorCode.trim() !== '') {
+      console.log('✅ myInvestors: advisorCode is valid, searching for investors with code:', advisorCode);
       const codeEnteredInvestors = users.filter(user => {
         // Must be an investor
         if (user.role !== 'Investor') {
@@ -1639,6 +1800,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return hasEnteredCode && isAccepted; // Only include investors who have been accepted
       });
 
+      console.log('🔍 Found investors who entered advisor code:', codeEnteredInvestors.length);
       codeEnteredInvestors.forEach(investor => {
         if (!investorSet.has(investor.id)) {
           investorSet.add(investor.id);
@@ -1663,8 +1825,47 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
     });
 
+    // 3. Find TMS investors linked via advisor_added_investors (where is_on_tms = true and tms_investor_id is set)
+    if (advisorAddedInvestors && Array.isArray(advisorAddedInvestors)) {
+      const tmsLinkedInvestors = advisorAddedInvestors.filter(addedInvestor => 
+        addedInvestor.is_on_tms && addedInvestor.tms_investor_id
+      );
+      
+      if (tmsLinkedInvestors.length > 0) {
+        console.log('🔍 Found TMS-linked investors from advisor_added_investors:', tmsLinkedInvestors.length);
+      }
+      
+      tmsLinkedInvestors.forEach(addedInvestor => {
+        // Find the TMS investor user by tms_investor_id
+        // tms_investor_id is VARCHAR, users.id is UUID - compare as strings
+        const tmsInvestorId = String(addedInvestor.tms_investor_id).trim();
+        const tmsInvestor = users.find(user => 
+          String(user.id).trim() === tmsInvestorId && user.role === 'Investor'
+        );
+        
+        if (tmsInvestor) {
+          if (!investorSet.has(tmsInvestor.id)) {
+            investorSet.add(tmsInvestor.id);
+            allInvestors.push(tmsInvestor);
+            console.log('✅ Added TMS investor to myInvestors:', tmsInvestor.name, tmsInvestor.id);
+          }
+        } else {
+          console.warn('⚠️ TMS investor not found in users array:', {
+            tms_investor_id: tmsInvestorId,
+            addedInvestorName: addedInvestor.investor_name,
+            totalUsers: users.length
+          });
+        }
+      });
+    }
+
+    console.log('✅ myInvestors final result:', {
+      totalInvestors: allInvestors.length,
+      investorIds: allInvestors.map(inv => inv.id),
+      investorNames: allInvestors.map(inv => inv.name)
+    });
     return allInvestors;
-  }, [advisorCode, users, acceptedCollaborators]);
+  }, [advisorCode, users, acceptedCollaborators, advisorAddedInvestors]);
 
   // Filter advisor-added investors to exclude those already in myInvestors (to prevent duplicates)
   // Also matches by email to catch duplicates even if tms_investor_id is not set
@@ -2380,22 +2581,46 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Load investment interests (favorites from assigned investors)
   useEffect(() => {
     const loadInvestmentInterests = async () => {
-      if (activeTab !== 'interests' || !currentUser?.investment_advisor_code || myInvestors.length === 0) {
+      // Only load when on interests tab and have necessary data
+      if (activeTab !== 'interests' || !currentUser?.investment_advisor_code) {
         setInvestmentInterests([]);
+        return;
+      }
+
+      // Check if we have any investors - if not, clear and exit
+      if (!myInvestors || myInvestors.length === 0) {
+        setInvestmentInterests([]);
+        setLoadingInvestmentInterests(false);
         return;
       }
 
       setLoadingInvestmentInterests(true);
       try {
-        // Get investor IDs from myInvestors
-        const investorIds = myInvestors.map(investor => investor.id);
+        // CRITICAL: investor_favorites.investor_id stores auth.uid() (auth user ID)
+        // myInvestors contains users from users table where users.id should be auth.uid()
+        // But we need to verify this matches - use the investor.id directly as it should be auth.uid()
+        const investorIds = myInvestors.map(investor => investor.id).filter(Boolean);
         
         if (investorIds.length === 0) {
+          console.log('⚠️ No accepted investors found - investment interests will be empty');
           setInvestmentInterests([]);
+          setLoadingInvestmentInterests(false);
           return;
         }
 
+        console.log('🔍 Loading investment interests for investors:', investorIds.length, investorIds);
+        console.log('🔍 Advisor code:', currentUser?.investment_advisor_code);
+        console.log('🔍 myInvestors details:', myInvestors.map(inv => ({
+          id: inv.id,
+          name: inv.name,
+          email: inv.email,
+          code_entered: (inv as any).investment_advisor_code_entered,
+          advisor_accepted: (inv as any).advisor_accepted
+        })));
+
         // Fetch favorites from assigned investors
+        // Note: The RLS policy "Investment Advisors can view assigned investor favorites" 
+        // should automatically filter to only show favorites from accepted investors
         const { data: favoritesData, error: favoritesError } = await supabase
           .from('investor_favorites')
           .select(`
@@ -2408,33 +2633,111 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           `)
           .in('investor_id', investorIds)
           .order('created_at', { ascending: false });
+        
+        console.log('🔍 Query result:', { 
+          dataCount: favoritesData?.length || 0, 
+          error: favoritesError,
+          errorCode: favoritesError?.code,
+          errorMessage: favoritesError?.message,
+          errorDetails: favoritesError?.details,
+          errorHint: favoritesError?.hint,
+          sampleData: favoritesData?.slice(0, 2) // Show first 2 items for debugging
+        });
 
         if (favoritesError) {
           // If table doesn't exist yet, silently fail
-          if (favoritesError.code !== 'PGRST116') {
-            console.error('Error fetching investment interests with join:', favoritesError);
-            // Fallback: try without join if RLS blocks it
-            const { data: fallbackData, error: fallbackError } = await supabase
-              .from('investor_favorites')
-              .select('*')
-              .in('investor_id', investorIds)
-              .order('created_at', { ascending: false });
+          if (favoritesError.code === 'PGRST116') {
+            console.log('ℹ️ investor_favorites table does not exist yet');
+            setInvestmentInterests([]);
+            setLoadingInvestmentInterests(false);
+            return;
+          }
+          
+          console.error('Error fetching investment interests with join:', favoritesError);
+          // Fallback: try without join if RLS blocks it
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('investor_favorites')
+            .select('*')
+            .in('investor_id', investorIds)
+            .order('created_at', { ascending: false });
+          
+          if (fallbackError) {
+            console.error('Fallback fetch also failed:', fallbackError);
+            setInvestmentInterests([]);
+            setLoadingInvestmentInterests(false);
+            return;
+          }
+          
+          // Fetch investor names separately
+          const investorMap: Record<string, { name: string; email: string }> = {};
+          if (investorIds.length > 0) {
+            const { data: investorsData, error: investorsError } = await supabase
+              .from('users')
+              .select('id, name, email')
+              .in('id', investorIds);
             
-            if (fallbackError) {
-              console.error('Fallback fetch also failed:', fallbackError);
-              setInvestmentInterests([]);
-              return;
+            if (investorsError) {
+              console.error('Error fetching investor names:', investorsError);
+            } else if (investorsData) {
+              investorsData.forEach((investor: any) => {
+                investorMap[investor.id] = { name: investor.name || 'Unknown', email: investor.email || '' };
+              });
             }
+          }
+          
+          // Fetch startup names separately
+          const startupIds = Array.from(new Set((fallbackData || []).map((row: any) => row.startup_id).filter(Boolean)));
+          const startupMap: Record<number, { name: string; sector: string }> = {};
+          
+          if (startupIds.length > 0) {
+            const { data: startupsData, error: startupsError } = await supabase
+              .from('startups')
+              .select('id, name, sector')
+              .in('id', startupIds);
+            
+            if (startupsError) {
+              console.error('Error fetching startup names:', startupsError);
+            } else if (startupsData) {
+              startupsData.forEach((startup: any) => {
+                startupMap[startup.id] = { name: startup.name || 'Unknown Startup', sector: startup.sector || 'Unknown' };
+              });
+            }
+          }
+          
+          // Normalize fallback data with fetched investor and startup names
+          const normalized = (fallbackData || []).map((fav: any) => ({
+            id: fav.id,
+            investor_id: fav.investor_id,
+            startup_id: fav.startup_id,
+            investor_name: investorMap[fav.investor_id]?.name || 'Unknown Investor',
+            investor_email: investorMap[fav.investor_id]?.email || null,
+            startup_name: startupMap[fav.startup_id]?.name || 'Unknown Startup',
+            startup_sector: startupMap[fav.startup_id]?.sector || 'Not specified',
+            created_at: fav.created_at
+          }));
+          
+          console.log('✅ Loaded investment interests (fallback):', normalized.length);
+          setInvestmentInterests(normalized);
+          setLoadingInvestmentInterests(false);
+          return;
+        }
+
+        if (favoritesData && favoritesData.length > 0) {
+          // Check if joins worked - if investor/startup data is missing, fetch separately
+          const needsFallback = favoritesData.some((fav: any) => !fav.investor || !fav.startup);
+          
+          if (needsFallback) {
+            console.log('⚠️ Joins failed, fetching data separately...');
             
             // Fetch investor names separately
             const investorMap: Record<string, { name: string; email: string }> = {};
             if (investorIds.length > 0) {
-              const { data: investorsData } = await supabase
+              const { data: investorsData, error: investorsError } = await supabase
                 .from('users')
                 .select('id, name, email')
                 .in('id', investorIds);
               
-              if (investorsData) {
+              if (!investorsError && investorsData) {
                 investorsData.forEach((investor: any) => {
                   investorMap[investor.id] = { name: investor.name || 'Unknown', email: investor.email || '' };
                 });
@@ -2442,7 +2745,78 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             }
             
             // Fetch startup names separately
-            const startupIds = Array.from(new Set((fallbackData || []).map((row: any) => row.startup_id).filter(Boolean)));
+            const startupIds = Array.from(new Set(favoritesData.map((row: any) => row.startup_id).filter(Boolean)));
+            const startupMap: Record<number, { name: string; sector: string }> = {};
+            
+            if (startupIds.length > 0) {
+              const { data: startupsData, error: startupsError } = await supabase
+                .from('startups')
+                .select('id, name, sector')
+                .in('id', startupIds);
+              
+              if (!startupsError && startupsData) {
+                startupsData.forEach((startup: any) => {
+                  startupMap[startup.id] = { name: startup.name || 'Unknown Startup', sector: startup.sector || 'Unknown' };
+                });
+              }
+            }
+            
+            // Normalize with separately fetched data
+            const normalized = favoritesData.map((fav: any) => ({
+              id: fav.id,
+              investor_id: fav.investor_id,
+              startup_id: fav.startup_id,
+              investor_name: fav.investor?.name || investorMap[fav.investor_id]?.name || 'Unknown Investor',
+              investor_email: fav.investor?.email || investorMap[fav.investor_id]?.email || null,
+              startup_name: fav.startup?.name || startupMap[fav.startup_id]?.name || 'Unknown Startup',
+              startup_sector: fav.startup?.sector || startupMap[fav.startup_id]?.sector || 'Not specified',
+              created_at: fav.created_at
+            }));
+            
+            console.log('✅ Loaded investment interests (with fallback):', normalized.length);
+            setInvestmentInterests(normalized);
+          } else {
+            // Normalize the data (joins worked)
+            const normalized = favoritesData.map((fav: any) => ({
+              id: fav.id,
+              investor_id: fav.investor_id,
+              startup_id: fav.startup_id,
+              investor_name: fav.investor?.name || 'Unknown Investor',
+              investor_email: fav.investor?.email || null,
+              startup_name: fav.startup?.name || 'Unknown Startup',
+              startup_sector: fav.startup?.sector || 'Not specified',
+              created_at: fav.created_at
+            }));
+            
+            console.log('✅ Loaded investment interests:', normalized.length);
+            setInvestmentInterests(normalized);
+          }
+        } else {
+          // Try direct query without joins if main query returned empty
+          console.log('⚠️ Query with joins returned 0 results, trying direct query...');
+          const { data: directData, error: directError } = await supabase
+            .from('investor_favorites')
+            .select('id, investor_id, startup_id, created_at')
+            .in('investor_id', investorIds)
+            .order('created_at', { ascending: false });
+          
+          if (!directError && directData && directData.length > 0) {
+            console.log('✅ Found favorites via direct query:', directData.length);
+            
+            // Fetch investor and startup names separately
+            const investorMap: Record<string, { name: string; email: string }> = {};
+            const { data: investorsData } = await supabase
+              .from('users')
+              .select('id, name, email')
+              .in('id', investorIds);
+            
+            if (investorsData) {
+              investorsData.forEach((investor: any) => {
+                investorMap[investor.id] = { name: investor.name || 'Unknown', email: investor.email || '' };
+              });
+            }
+            
+            const startupIds = Array.from(new Set(directData.map((row: any) => row.startup_id).filter(Boolean)));
             const startupMap: Record<number, { name: string; sector: string }> = {};
             
             if (startupIds.length > 0) {
@@ -2458,8 +2832,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               }
             }
             
-            // Normalize fallback data with fetched investor and startup names
-            const normalized = (fallbackData || []).map((fav: any) => ({
+            const normalized = directData.map((fav: any) => ({
               id: fav.id,
               investor_id: fav.investor_id,
               startup_id: fav.startup_id,
@@ -2469,29 +2842,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               startup_sector: startupMap[fav.startup_id]?.sector || 'Not specified',
               created_at: fav.created_at
             }));
+            
+            console.log('✅ Loaded investment interests (direct query):', normalized.length);
             setInvestmentInterests(normalized);
           } else {
+            console.log('ℹ️ No investment interests found for assigned investors');
             setInvestmentInterests([]);
           }
-          return;
-        }
-
-        if (favoritesData && favoritesData.length > 0) {
-          // Normalize the data
-          const normalized = favoritesData.map((fav: any) => ({
-            id: fav.id,
-            investor_id: fav.investor_id,
-            startup_id: fav.startup_id,
-            investor_name: fav.investor?.name || 'Unknown Investor',
-            investor_email: fav.investor?.email || null,
-            startup_name: fav.startup?.name || 'Unknown Startup',
-            startup_sector: fav.startup?.sector || 'Not specified',
-            created_at: fav.created_at
-          }));
-          
-          setInvestmentInterests(normalized);
-        } else {
-          setInvestmentInterests([]);
         }
       } catch (error) {
         console.error('Error loading investment interests:', error);
@@ -2770,6 +3127,66 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     return filtered;
   };
 
+  // Filter startups based on investor mandate
+  const getFilteredInvestorMandateStartups = (mandate: InvestorMandate | null): ActiveFundraisingStartup[] => {
+    if (!mandate) return [];
+    
+    // If no active fundraising startups are loaded, return empty array
+    if (activeFundraisingStartups.length === 0) {
+      return [];
+    }
+    
+    let filtered = [...activeFundraisingStartups];
+
+    const normalize = (value?: string | null) => (value || '').trim().toLowerCase();
+    const mandateRound = normalize(mandate.round_type);
+    const mandateDomain = normalize(mandate.domain);
+    const mandateStage = normalize(mandate.stage);
+    const mandateCountry = normalize(mandate.country);
+
+    // Filter by round type (fundraisingType) - case-insensitive
+    if (mandateRound) {
+      filtered = filtered.filter(startup => normalize(startup.fundraisingType) === mandateRound);
+    }
+
+    // Filter by domain/sector (allow partial match, case-insensitive)
+    if (mandateDomain) {
+      filtered = filtered.filter(startup => {
+        const sector = normalize(startup.sector);
+        const domain = normalize((startup as any).domain);
+        return sector.includes(mandateDomain) || domain.includes(mandateDomain);
+      });
+    }
+
+    // Filter by stage (case-insensitive)
+    if (mandateStage) {
+      filtered = filtered.filter(startup => normalize(startup.stage) === mandateStage);
+    }
+
+    // Filter by country (case-insensitive)
+    if (mandateCountry) {
+      filtered = filtered.filter(startup => normalize((startup as any).country || (startup as any).country_of_registration) === mandateCountry);
+    }
+
+    // Filter by amount range
+    if (mandate.amount_min !== null && mandate.amount_min !== undefined) {
+      filtered = filtered.filter(startup => startup.investmentValue >= mandate.amount_min!);
+    }
+    if (mandate.amount_max !== null && mandate.amount_max !== undefined) {
+      filtered = filtered.filter(startup => startup.investmentValue <= mandate.amount_max!);
+    }
+
+    // Filter by equity range
+    if (mandate.equity_min !== null && mandate.equity_min !== undefined) {
+      filtered = filtered.filter(startup => startup.equityAllocation >= mandate.equity_min!);
+    }
+    if (mandate.equity_max !== null && mandate.equity_max !== undefined) {
+      filtered = filtered.filter(startup => startup.equityAllocation <= mandate.equity_max!);
+    }
+
+    return filtered;
+  };
+
   // Handle create/edit mandate
   const handleSaveMandate = async () => {
     if (!mandateFormData.name.trim()) {
@@ -2814,7 +3231,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           await advisorMandateService.setMandateInvestors(result.id, investorIds);
         }
         
-        // Reload mandates
+        // Reload mandates - service now uses auth.uid() internally
         const updatedMandates = await advisorMandateService.getMandatesByAdvisor(currentUser.id);
         setMandates(updatedMandates);
         
@@ -2825,8 +3242,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         setShowMandateModal(false);
         setEditingMandate(null);
         setSelectedMandateInvestors(new Set());
+        
+        // Get auth.uid() for form data (service will override anyway, but keep consistent)
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const authUserId = authUser?.id || currentUser.id;
+        
         setMandateFormData({
-          advisor_id: currentUser.id,
+          advisor_id: authUserId,
           name: '',
           stage: '',
           round_type: '',
@@ -3029,13 +3451,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     setShowRecommendModal(true);
     
     // Fetch existing recommendations for this startup (both investors and collaborators)
-    if (currentUser?.id) {
+    // Get auth.uid() directly from Supabase
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (authUser?.id) {
       setIsLoadingRecommendations(true);
       try {
         const { data, error } = await supabase
           .from('investment_advisor_recommendations')
           .select('investor_id')
-          .eq('investment_advisor_id', currentUser.id)
+          .eq('investment_advisor_id', authUser.id)  // Use auth.uid() instead of currentUser.id
           .eq('startup_id', startupId);
         
         if (error) {
@@ -3203,10 +3627,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
       
       // Check for duplicates before inserting
+      // Get auth.uid() directly from Supabase
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || '';
+      
       const { data: existingData } = await supabase
         .from('investment_advisor_recommendations')
         .select('investor_id')
-        .eq('investment_advisor_id', currentUser?.id || '')
+        .eq('investment_advisor_id', authUserId)  // Use auth.uid() instead of currentUser.id
         .eq('startup_id', selectedStartupForRecommendation)
         .in('investor_id', newRecipientIds);
       
@@ -3230,7 +3658,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         supabase
           .from('investment_advisor_recommendations')
           .insert({
-            investment_advisor_id: currentUser?.id || '',
+            investment_advisor_id: authUserId,  // Use auth.uid() instead of currentUser.id
             startup_id: selectedStartupForRecommendation,
             investor_id: recipientId,
             recommended_deal_value: 0,
@@ -3862,11 +4290,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     console.log('❤️ Current user ID:', currentUser?.id);
     console.log('❤️ Current user role:', currentUser?.role);
     
-    if (!currentUser?.id) {
+    // Get auth user ID (required for foreign key constraint)
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
       alert('Please log in to favorite startups.');
       return;
     }
-
+    const authUserId = authUser.id;
+    console.log('❤️ Auth user ID (for foreign key):', authUserId);
+    
     const isCurrentlyFavorited = favoritedPitches.has(startupId);
     console.log('❤️ Is currently favorited:', isCurrentlyFavorited);
     
@@ -3877,7 +4309,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         const { error, data } = await supabase
           .from('investor_favorites')
           .delete()
-          .eq('investor_id', currentUser.id)
+          .eq('investor_id', authUserId) // Use auth user ID, not profile ID
           .eq('startup_id', startupId)
           .select();
         
@@ -3901,7 +4333,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         const { error, data } = await supabase
           .from('investor_favorites')
           .insert([{
-            investor_id: currentUser.id,
+            investor_id: authUserId, // Use auth user ID, not profile ID (satisfies foreign key)
             startup_id: startupId
           }])
           .select();
@@ -3983,10 +4415,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       addStartupToDueDiligenceSet(startup.id);
       
       // Reload due diligence status to check if it was immediately approved
+      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || currentUser.id;
+      
       const { data } = await supabase
         .from('due_diligence_requests')
         .select('startup_id, status')
-        .eq('user_id', currentUser.id)
+        .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .eq('startup_id', String(startup.id))
         .in('status', ['pending', 'approved', 'completed'])
         .maybeSingle();
@@ -5861,9 +6297,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 return (
                   <div key={inv.id} className="bg-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 overflow-hidden">
                     <div className="flex flex-col md:flex-row md:items-stretch gap-0">
-                      {/* Video/Logo Section - Left Side */}
-                      <div className="md:w-2/5 lg:w-1/3 relative aspect-[16/9] md:aspect-auto md:min-h-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-                      {embedUrl ? (
+                      {/* Logo/Video Section - Left Side - Show logo first if available */}
+                      <div className="md:w-2/5 lg:w-1/3 relative aspect-[16/9] md:aspect-auto md:min-h-full bg-white">
+                      {/* Priority 1: Show logo if available (always show logo if it exists) */}
+                      {inv.logoUrl && inv.logoUrl !== '#' && inv.logoUrl.trim() !== '' ? (
+                          <div className="w-full h-full flex items-center justify-center bg-white p-4 sm:p-6">
+                          <img 
+                            src={inv.logoUrl} 
+                            alt={`${inv.name} Logo`} 
+                            className="object-contain w-full h-full max-w-full max-h-full" 
+                            onError={(e) => {
+                              // If image fails to load, hide it
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      ) : embedUrl ? (
+                        // Priority 2: Show video if available
                         playingVideoId === inv.id ? (
                           <div className="relative w-full h-full">
                             {videoSource === 'direct' ? (
@@ -5896,7 +6347,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           </div>
                         ) : (
                           <div
-                            className="relative w-full h-full group cursor-pointer"
+                            className="relative w-full h-full group cursor-pointer bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"
                             onClick={() => setPlayingVideoId(inv.id)}
                           >
                             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
@@ -5912,19 +6363,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </div>
                           </div>
                         )
-                      ) : inv.logoUrl ? (
-                          <div className="w-full h-full flex items-center justify-center bg-slate-100 p-4">
-                          <img 
-                            src={inv.logoUrl} 
-                            alt={`${inv.name} Logo`} 
-                              className="object-contain w-full h-full max-h-full" 
-                          />
-                        </div>
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-400">
-                          <div className="text-center">
+                        // Only show placeholder if no logo and no video
+                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-800">
+                          <div className="text-center text-slate-400">
                               <Video className="h-12 w-12 md:h-16 md:w-16 mx-auto mb-2 opacity-50" />
-                              <p className="text-xs md:text-sm">No video or logo available</p>
+                              <p className="text-xs md:text-sm">No media available</p>
                           </div>
                         </div>
                       )}
@@ -8443,83 +8887,296 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 mb-2">Mandate</h2>
                 <p className="text-sm text-slate-600">Create and manage investment mandates with specific criteria</p>
               </div>
-              <Button onClick={handleAddMandate} size="sm">
-                <PlusCircle className="h-4 w-4 mr-2" />
-                Add Mandate
-              </Button>
+              {mandateSubTab === 'myMandates' && (
+                <Button onClick={handleAddMandate} size="sm">
+                  <PlusCircle className="h-4 w-4 mr-2" />
+                  Add Mandate
+                </Button>
+              )}
             </div>
 
-            {/* Mandate Tabs */}
-            {isLoadingMandates ? (
-              <div className="text-center py-4 text-slate-500">Loading mandates...</div>
-            ) : mandates.length === 0 ? (
-              <Card className="text-center py-12">
-                <Filter className="h-16 w-16 text-slate-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-slate-800 mb-2">No Mandates Created</h3>
-                <p className="text-slate-500 mb-4">Create your first mandate to filter startups based on your investment criteria</p>
-                <Button onClick={handleAddMandate}>
-                  <PlusCircle className="h-4 w-4 mr-2" />
-                  Create Your First Mandate
-                </Button>
-              </Card>
-            ) : (
-              <div className="border-b border-slate-200 mb-6">
-                <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto pb-2" aria-label="Mandate Tabs">
-                  {mandates.map((mandate) => (
-                    <div
-                      key={mandate.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedMandateId(mandate.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setSelectedMandateId(mandate.id);
-                        }
-                      }}
-                      className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-2 cursor-pointer ${
-                        selectedMandateId === mandate.id
-                          ? 'border-blue-500 text-blue-600'
-                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                      }`}
-                    >
-                      <Filter className="h-4 w-4" />
-                      {mandate.name}
-                      <div className="flex items-center gap-1 ml-2" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEditMandate(mandate);
+            {/* Sub-tabs: My Mandates / Investor Mandates */}
+            <div className="border-b border-slate-200 mb-6">
+              <nav className="-mb-px flex space-x-4 sm:space-x-8" aria-label="Mandate Sub-tabs">
+                <button
+                  onClick={() => {
+                    setMandateSubTab('myMandates');
+                    setSelectedInvestorForMandates(null);
+                    setSelectedInvestorMandateId(null);
+                  }}
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+                    mandateSubTab === 'myMandates'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  My Mandates
+                </button>
+                <button
+                  onClick={() => {
+                    setMandateSubTab('investorMandates');
+                    setSelectedMandateId(null);
+                  }}
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+                    mandateSubTab === 'investorMandates'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Investor Mandates
+                </button>
+              </nav>
+            </div>
+
+            {/* My Mandates Section */}
+            {mandateSubTab === 'myMandates' && (
+              <div>
+                {isLoadingMandates ? (
+                  <div className="text-center py-4 text-slate-500">Loading mandates...</div>
+                ) : mandates.length === 0 ? (
+                  <Card className="text-center py-12">
+                    <Filter className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold text-slate-800 mb-2">No Mandates Created</h3>
+                    <p className="text-slate-500 mb-4">Create your first mandate to filter startups based on your investment criteria</p>
+                    <Button onClick={handleAddMandate}>
+                      <PlusCircle className="h-4 w-4 mr-2" />
+                      Create Your First Mandate
+                    </Button>
+                  </Card>
+                ) : (
+                  <div className="border-b border-slate-200 mb-6">
+                    <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto pb-2" aria-label="Mandate Tabs">
+                      {mandates.map((mandate) => (
+                        <div
+                          key={mandate.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setSelectedMandateId(mandate.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedMandateId(mandate.id);
+                            }
                           }}
-                          className="p-1 hover:bg-slate-100 rounded"
-                          title="Edit mandate"
-                          type="button"
+                          className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                            selectedMandateId === mandate.id
+                              ? 'border-blue-500 text-blue-600'
+                              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                          }`}
                         >
-                          <Edit className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteMandate(mandate.id);
+                          <Filter className="h-4 w-4" />
+                          {mandate.name}
+                          <div className="flex items-center gap-1 ml-2" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditMandate(mandate);
+                              }}
+                              className="p-1 hover:bg-slate-100 rounded"
+                              title="Edit mandate"
+                              type="button"
+                            >
+                              <Edit className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteMandate(mandate.id);
+                              }}
+                              className="p-1 hover:bg-red-100 rounded text-red-600"
+                              title="Delete mandate"
+                              type="button"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </nav>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Investor Mandates Section */}
+            {mandateSubTab === 'investorMandates' && (
+              <div className="space-y-6">
+                {/* Investor List */}
+                {myInvestors.length === 0 ? (
+                  <Card className="text-center py-12">
+                    <Users className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold text-slate-800 mb-2">No Investors Found</h3>
+                    <p className="text-slate-500">You don't have any assigned investors yet. Investor mandates will appear here once you have investors.</p>
+                  </Card>
+                ) : (
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-800 mb-4">Select an Investor</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {myInvestors.map((investor) => (
+                        <div
+                          key={investor.id}
+                          onClick={() => {
+                            console.log('Investor clicked:', investor.id, investor.name);
+                            setSelectedInvestorForMandates(investor.id);
                           }}
-                          className="p-1 hover:bg-red-100 rounded text-red-600"
-                          title="Delete mandate"
-                          type="button"
+                          className={`bg-white rounded-xl shadow-md p-4 cursor-pointer transition-all hover:shadow-lg ${
+                            selectedInvestorForMandates === investor.id
+                              ? 'border-2 border-blue-500 bg-blue-50'
+                              : 'border border-slate-200 hover:border-blue-300'
+                          }`}
                         >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
+                          <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0">
+                              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                                <Users className="h-5 w-5 text-blue-600" />
+                              </div>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-slate-800 truncate">{investor.name || 'Unknown Investor'}</p>
+                              <p className="text-xs text-slate-500 truncate">{investor.email}</p>
+                            </div>
+                            {selectedInvestorForMandates === investor.id && (
+                              <CheckCircle className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </nav>
+                  </div>
+                )}
+
+                {/* Investor Mandates List */}
+                {selectedInvestorForMandates && (
+                  <div>
+                    {isLoadingInvestorMandates ? (
+                      <Card className="text-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                        <p className="text-slate-500">Loading investor mandates...</p>
+                      </Card>
+                    ) : investorMandates.length === 0 ? (
+                      <Card className="text-center py-12">
+                        <Filter className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                        <h3 className="text-xl font-semibold text-slate-800 mb-2">No Mandates Found</h3>
+                        <p className="text-slate-500">This investor hasn't created any mandates yet.</p>
+                      </Card>
+                    ) : (
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-lg font-semibold text-slate-800">
+                            Mandates for {myInvestors.find(inv => inv.id === selectedInvestorForMandates)?.name || 'Investor'}
+                          </h3>
+                          <button
+                            onClick={() => {
+                              setSelectedInvestorForMandates(null);
+                              setSelectedInvestorMandateId(null);
+                            }}
+                            className="text-sm text-slate-600 hover:text-slate-800 flex items-center gap-1"
+                          >
+                            <X className="h-4 w-4" />
+                            Clear Selection
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {investorMandates.map((mandate) => (
+                            <div
+                              key={mandate.id}
+                              onClick={() => {
+                                console.log('Investor mandate clicked:', mandate.id, mandate.name);
+                                setSelectedInvestorMandateId(mandate.id);
+                              }}
+                              className={`bg-white rounded-xl shadow-md p-4 cursor-pointer transition-all hover:shadow-lg ${
+                                selectedInvestorMandateId === mandate.id
+                                  ? 'border-2 border-blue-500 bg-blue-50'
+                                  : 'border border-slate-200 hover:border-blue-300'
+                              }`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="flex-shrink-0">
+                                  <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                                    <Filter className="h-5 w-5 text-blue-600" />
+                                  </div>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-semibold text-slate-800 mb-2 truncate">{mandate.name}</h4>
+                                  <div className="space-y-1 text-xs text-slate-600">
+                                    {mandate.stage && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium">Stage:</span>
+                                        <span>{mandate.stage}</span>
+                                      </div>
+                                    )}
+                                    {mandate.round_type && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium">Round:</span>
+                                        <span>{mandate.round_type}</span>
+                                      </div>
+                                    )}
+                                    {mandate.domain && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium">Domain:</span>
+                                        <span className="truncate">{mandate.domain}</span>
+                                      </div>
+                                    )}
+                                    {mandate.country && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium">Country:</span>
+                                        <span>{mandate.country}</span>
+                                      </div>
+                                    )}
+                                    {(mandate.amount_min || mandate.amount_max) && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium">Amount:</span>
+                                        <span>
+                                          {mandate.amount_min ? formatCurrency(mandate.amount_min, 'USD') : 'Any'} - {mandate.amount_max ? formatCurrency(mandate.amount_max, 'USD') : 'Any'}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {(mandate.equity_min || mandate.equity_max) && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium">Equity:</span>
+                                        <span>
+                                          {mandate.equity_min ? `${mandate.equity_min}%` : 'Any'} - {mandate.equity_max ? `${mandate.equity_max}%` : 'Any'}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                {selectedInvestorMandateId === mandate.id && (
+                                  <CheckCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-1" />
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
           {/* Filtered Startups Display for Selected Mandate */}
-          {selectedMandateId ? (
+          {(selectedMandateId && mandateSubTab === 'myMandates') || (selectedInvestorMandateId && mandateSubTab === 'investorMandates') ? (
             (() => {
-              const selectedMandate = mandates.find(m => m.id === selectedMandateId);
+              // Determine which mandate to use (advisor or investor)
+              let selectedMandate: AdvisorMandate | InvestorMandate | null = null;
+              let mandateName = '';
+              
+              if (mandateSubTab === 'myMandates' && selectedMandateId) {
+                const advisorMandate = mandates.find(m => m.id === selectedMandateId);
+                if (advisorMandate) {
+                  selectedMandate = advisorMandate;
+                  mandateName = advisorMandate.name;
+                }
+              } else if (mandateSubTab === 'investorMandates' && selectedInvestorMandateId) {
+                const investorMandate = investorMandates.find(m => m.id === selectedInvestorMandateId);
+                if (investorMandate) {
+                  selectedMandate = investorMandate;
+                  mandateName = investorMandate.name;
+                }
+              }
+
               if (!selectedMandate) {
                 return (
                   <Card className="text-center py-20">
@@ -8532,7 +9189,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 );
               }
 
-              const filteredStartups = getFilteredMandateStartups(selectedMandate);
+              const filteredStartups = mandateSubTab === 'myMandates' 
+                ? getFilteredMandateStartups(selectedMandate as AdvisorMandate)
+                : getFilteredInvestorMandateStartups(selectedMandate as InvestorMandate);
               
               if (isLoadingPitches) {
                 return (
@@ -8552,14 +9211,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     <div className="max-w-sm mx-auto">
                       <Filter className="h-16 w-16 text-slate-400 mx-auto mb-4" />
                       <h3 className="text-xl font-semibold text-slate-800 mb-2">No Startups Found</h3>
-                      <p className="text-slate-500 mb-4">No startups match the criteria for "{selectedMandate.name}". Try adjusting the mandate filters or create a new mandate.</p>
-                      <Button
-                        variant="secondary"
-                        onClick={() => handleEditMandate(selectedMandate)}
-                      >
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit Mandate Criteria
-                      </Button>
+                      <p className="text-slate-500 mb-4">No startups match the criteria for "{mandateName}". Try adjusting the mandate filters or create a new mandate.</p>
+                      {mandateSubTab === 'myMandates' && selectedMandateId && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            const advisorMandate = mandates.find(m => m.id === selectedMandateId);
+                            if (advisorMandate) {
+                              handleEditMandate(advisorMandate);
+                            }
+                          }}
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit Mandate Criteria
+                        </Button>
+                      )}
                     </div>
                   </Card>
                 );
@@ -8569,16 +9235,26 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-slate-600">
-                      Showing <span className="font-semibold text-slate-800">{filteredStartups.length}</span> startup{filteredStartups.length !== 1 ? 's' : ''} matching <span className="font-semibold text-blue-600">"{selectedMandate.name}"</span>
+                      Showing <span className="font-semibold text-slate-800">{filteredStartups.length}</span> startup{filteredStartups.length !== 1 ? 's' : ''} matching <span className="font-semibold text-blue-600">"{mandateName}"</span>
+                      {mandateSubTab === 'investorMandates' && selectedInvestorForMandates && (
+                        <span className="text-slate-500"> for {myInvestors.find(inv => inv.id === selectedInvestorForMandates)?.name || 'Investor'}</span>
+                      )}
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleEditMandate(selectedMandate)}
-                    >
-                      <Edit className="h-4 w-4 mr-2" />
-                      Edit Mandate
-                    </Button>
+                    {mandateSubTab === 'myMandates' && selectedMandateId && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const advisorMandate = mandates.find(m => m.id === selectedMandateId);
+                          if (advisorMandate) {
+                            handleEditMandate(advisorMandate);
+                          }
+                        }}
+                      >
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit Mandate
+                      </Button>
+                    )}
                   </div>
                   {filteredStartups.map((startup) => {
                     const videoEmbedInfo = startup.pitchVideoUrl ? getVideoEmbedUrl(startup.pitchVideoUrl, false) : null;

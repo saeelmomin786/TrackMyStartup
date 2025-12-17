@@ -16,15 +16,18 @@ interface BasicRegistrationStepProps {
     centerName?: string;
     firmName?: string;
     investmentAdvisorCode?: string;
+    profileId?: string; // NEW: Profile ID when adding profile
   }) => void;
   onNavigateToLogin: () => void;
   onNavigateToLanding?: () => void;
+  isAddingProfile?: boolean; // NEW: If true, skip email/password (for adding profile to existing account)
 }
 
 export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
   onEmailVerified,
   onNavigateToLogin,
-  onNavigateToLanding
+  onNavigateToLanding,
+  isAddingProfile = false
 }) => {
   const [formData, setFormData] = useState({
     name: '',
@@ -47,6 +50,17 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
   
   // Role selection state
   const [availableRoles, setAvailableRoles] = useState<string[]>(['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Mentor']);
+  
+  // Get current user email if adding profile
+  useEffect(() => {
+    if (isAddingProfile) {
+      authService.getCurrentUser().then(user => {
+        if (user) {
+          setFormData(prev => ({ ...prev, email: user.email }));
+        }
+      });
+    }
+  }, [isAddingProfile]);
   
   // New state for email validation
   const [emailValidation, setEmailValidation] = useState<{
@@ -127,9 +141,101 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Form submitted, isAddingProfile:', isAddingProfile);
     setIsLoading(true);
     setError(null);
 
+    // If adding profile, skip email/password validation and create profile directly
+    if (isAddingProfile) {
+      console.log('Adding profile flow - form data:', formData);
+      // Basic validation
+      if (!formData.name || !formData.name.trim()) {
+        setError('Name is required');
+        setIsLoading(false);
+        return;
+      }
+
+      // Role-specific validation
+      if (formData.role === 'Startup' && !formData.startupName?.trim()) {
+        setError('Startup name is required for Startup role');
+        setIsLoading(false);
+        return;
+      }
+
+      if (formData.role === 'Startup Facilitation Center' && !formData.centerName?.trim()) {
+        setError('Center name is required for Startup Facilitation Center role');
+        setIsLoading(false);
+        return;
+      }
+
+      if (formData.role === 'Investment Advisor' && !formData.firmName?.trim()) {
+        setError('Firm name is required for Investment Advisor role');
+        setIsLoading(false);
+        return;
+      }
+
+      // Create profile directly
+      try {
+        console.log('Creating profile with data:', {
+          name: formData.name,
+          role: formData.role,
+          startupName: formData.startupName,
+          centerName: formData.centerName,
+          firmName: formData.firmName
+        });
+
+        // Create profile but DON'T switch to it yet - wait until Form 2 is complete
+        const result = await authService.createProfile({
+          name: formData.name,
+          role: formData.role,
+          startupName: formData.startupName,
+          centerName: formData.centerName,
+          firmName: formData.firmName,
+          investmentAdvisorCode: formData.investmentAdvisorCode
+        }, { skipSwitch: true }); // Don't switch profile until Form 2 is complete
+
+        console.log('Profile creation result:', result);
+
+        if (result.error) {
+          console.error('Profile creation error:', result.error);
+          setError(result.error);
+          setIsLoading(false);
+          return;
+        }
+
+        if (!result.profile) {
+          console.error('No profile returned from createProfile');
+          setError('Failed to create profile. Please try again.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Get current user email for callback
+        const { data: { user } } = await authService.supabase.auth.getUser();
+        
+        console.log('Profile created successfully, proceeding to Form 2. Profile ID:', result.profile.id);
+        
+        // Call onEmailVerified to proceed to Form 2, passing the profile ID
+        onEmailVerified({
+          name: formData.name,
+          email: user?.email || '',
+          password: '', // Not needed for adding profile
+          role: formData.role,
+          startupName: formData.startupName,
+          centerName: formData.centerName,
+          firmName: formData.firmName,
+          investmentAdvisorCode: formData.investmentAdvisorCode,
+          profileId: result.profile.id // Pass the new profile ID
+        });
+      } catch (err: any) {
+        console.error('Error creating profile:', err);
+        setError(err.message || 'Failed to create profile. Please try again.');
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // Normal registration flow (existing code)
     // Check if email already exists before proceeding
     if (emailValidation.exists) {
       setError('This email is already registered. Please sign in instead.');
@@ -274,17 +380,25 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
     <div className="w-full flex flex-col items-center">
     <Card className="w-full max-w-2xl">
       <div className="text-center mb-8">
-        <h2 className="text-3xl font-bold tracking-tight text-slate-900">Create a new account</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Or{' '}
-          <button
-            onClick={onNavigateToLogin}
-            className="text-brand-primary hover:text-brand-primary-dark underline"
-          >
-            sign in to your existing account
-          </button>
-        </p>
-
+        <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+          {isAddingProfile ? 'Add New Profile' : 'Create a new account'}
+        </h2>
+        {!isAddingProfile && (
+          <p className="mt-2 text-sm text-slate-600">
+            Or{' '}
+            <button
+              onClick={onNavigateToLogin}
+              className="text-brand-primary hover:text-brand-primary-dark underline"
+            >
+              sign in to your existing account
+            </button>
+          </p>
+        )}
+        {isAddingProfile && (
+          <p className="mt-2 text-sm text-slate-600">
+            Create a new profile with a different role for your account
+          </p>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -314,17 +428,18 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
             onChange={(e) => handleInputChange('name', e.target.value)}
           />
           
-          <div>
-            <Input
-              label="Email address"
-              id="email"
-              name="email"
-              type="email"
-              required
-              value={formData.email}
-              onChange={(e) => handleInputChange('email', e.target.value)}
-              className={emailValidation.exists ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-slate-300'}
-            />
+          {!isAddingProfile ? (
+            <div>
+              <Input
+                label="Email address"
+                id="email"
+                name="email"
+                type="email"
+                required
+                value={formData.email}
+                onChange={(e) => handleInputChange('email', e.target.value)}
+                className={emailValidation.exists ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-slate-300'}
+              />
             
             {/* Email validation feedback */}
             {formData.email && (
@@ -359,29 +474,44 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
               </div>
             )}
           </div>
+          ) : (
+            <div className="bg-slate-50 p-3 rounded-md">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Email (Your Account)
+              </label>
+              <div className="text-sm text-slate-600">
+                {formData.email || 'Loading...'}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                This profile will be added to your existing account
+              </p>
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Input
-            label="Password"
-            id="password"
-            name="password"
-            type="password"
-            required
-            value={formData.password}
-            onChange={(e) => handleInputChange('password', e.target.value)}
-          />
-          
-          <Input
-            label="Confirm Password"
-            id="confirmPassword"
-            name="confirmPassword"
-            type="password"
-            required
-            value={formData.confirmPassword}
-            onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-          />
-        </div>
+        {!isAddingProfile && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Input
+              label="Password"
+              id="password"
+              name="password"
+              type="password"
+              required
+              value={formData.password}
+              onChange={(e) => handleInputChange('password', e.target.value)}
+            />
+            
+            <Input
+              label="Confirm Password"
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              required
+              value={formData.confirmPassword}
+              onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
+            />
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
@@ -456,8 +586,11 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
         {/* Error Display */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-md p-4">
-            <div className="text-sm text-red-800">
-              <strong>Error:</strong> {error}
+            <div className="flex items-start">
+              <AlertCircle className="h-5 w-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-red-800">
+                <strong>Error:</strong> {error}
+              </div>
             </div>
           </div>
         )}
@@ -466,9 +599,12 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
         <Button
           type="submit"
           className="w-full"
-          disabled={isLoading || emailValidation.exists}
+          disabled={isLoading || (!isAddingProfile && emailValidation.exists)}
         >
-          {isLoading ? 'Creating Account...' : 'Create Account'}
+          {isLoading 
+            ? (isAddingProfile ? 'Creating Profile...' : 'Creating Account...') 
+            : (isAddingProfile ? 'Continue to Profile Details' : 'Create Account')
+          }
         </Button>
       </form>
         </Card>

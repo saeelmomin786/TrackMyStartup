@@ -4,7 +4,7 @@ export interface InvestorConnectionRequest {
   id: string;
   investor_id: string;
   requester_id: string;
-  requester_type: 'Startup' | 'Investment Advisor' | 'Mentor' | 'CA' | 'CS' | 'Incubator' | string;
+  requester_type: 'Startup' | 'Investment Advisor' | 'Mentor' | 'CA' | 'CS' | 'Incubator' | 'Investor' | 'Startup Facilitation Center' | 'Admin' | string;
   startup_id?: number;
   startup_profile_url?: string;
   advisor_profile_url?: string;
@@ -19,7 +19,7 @@ export interface InvestorConnectionRequest {
 export interface CreateConnectionRequest {
   investor_id: string;
   requester_id: string;
-  requester_type: 'Startup' | 'Investment Advisor' | 'Mentor' | 'CA' | 'CS' | 'Incubator' | string;
+  requester_type: 'Startup' | 'Investment Advisor' | 'Mentor' | 'CA' | 'CS' | 'Incubator' | 'Investor' | 'Startup Facilitation Center' | 'Admin' | string;
   startup_id?: number;
   startup_profile_url?: string;
   advisor_profile_url?: string;
@@ -27,8 +27,34 @@ export interface CreateConnectionRequest {
 }
 
 export const investorConnectionRequestService = {
+  // Check if request already exists (for frontend validation)
+  async checkExistingRequest(investorId: string, requesterId: string): Promise<{ exists: boolean; status?: string; request?: InvestorConnectionRequest }> {
+    const { data, error } = await supabase
+      .from('investor_connection_requests')
+      .select('*')
+      .eq('investor_id', investorId)
+      .eq('requester_id', requesterId)
+      .in('status', ['pending', 'accepted'])
+      .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    if (data) {
+      return { exists: true, status: data.status, request: data as InvestorConnectionRequest };
+    }
+
+    return { exists: false };
+  },
+
   // Create a new connection request
   async createRequest(request: CreateConnectionRequest): Promise<InvestorConnectionRequest> {
+    // First check if an accepted request already exists
+    const existingCheck = await this.checkExistingRequest(request.investor_id, request.requester_id);
+    if (existingCheck.exists && existingCheck.status === 'accepted') {
+      throw new Error('You are already connected with this user. No new request needed.');
+    }
     const { data, error } = await supabase
       .from('investor_connection_requests')
       .insert(request)

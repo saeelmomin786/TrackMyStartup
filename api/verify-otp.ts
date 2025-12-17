@@ -1,6 +1,34 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
+// Code generation functions (simple implementations for server-side)
+function generateInvestorCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'INV-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+function generateInvestmentAdvisorCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'IA-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+function generateMentorCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'MEN-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 const MAX_ATTEMPTS = 5;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -9,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { email, code, newPassword, purpose, advisorCode, name, role, startupName, centerName, investmentAdvisorCode } = req.body as {
+    const { email, code, newPassword, purpose, advisorCode, name, role, startupName, centerName, firmName, investmentAdvisorCode } = req.body as {
       email: string;
       code: string;
       newPassword: string;
@@ -19,6 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       role?: string;
       startupName?: string;
       centerName?: string;
+      firmName?: string;
       investmentAdvisorCode?: string;
     };
 
@@ -69,64 +98,102 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let userId = otpRow.user_id;
 
     if (purpose === 'register') {
-      // Ensure user does not already exist
-      const { data: existingUser } = await supabaseAdmin
-        .from('users')
-        .select('id')
-        .eq('email', email.toLowerCase().trim())
-        .maybeSingle();
-      if (existingUser?.id) {
-        return res.status(400).json({ error: 'Email already registered' });
-      }
-
-      // Create auth user
-      const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
-        email: email.toLowerCase().trim(),
-        password: newPassword,
-        email_confirm: true,
-        user_metadata: {
-          name,
-          role,
-          startupName,
-          centerName,
-          investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null,
-          source: 'otp_register'
+      // Check if auth user already exists
+      const { data: existingAuthUser } = await supabaseAdmin.auth.admin.getUserByEmail(email.toLowerCase().trim());
+      
+      let authUserId: string;
+      
+      if (existingAuthUser?.user) {
+        // User exists, check if they already have this role profile
+        authUserId = existingAuthUser.user.id;
+        const { data: existingProfile } = await supabaseAdmin
+          .from('user_profiles')
+          .select('id')
+          .eq('auth_user_id', authUserId)
+          .eq('role', role || 'Investor')
+          .maybeSingle();
+        
+        if (existingProfile?.id) {
+          return res.status(400).json({ error: `You already have a ${role || 'Investor'} profile. Please sign in instead.` });
         }
-      });
-      if (createError || !created?.user) {
-        console.error('Error creating user via admin:', createError);
-        return res.status(500).json({ error: 'Failed to create user' });
+      } else {
+        // Create new auth user
+        const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+          email: email.toLowerCase().trim(),
+          password: newPassword,
+          email_confirm: true,
+          user_metadata: {
+            name,
+            role,
+            startupName,
+            centerName,
+            firmName,
+            investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null,
+            source: 'otp_register'
+          }
+        });
+        if (createError || !created?.user) {
+          console.error('Error creating user via admin:', createError);
+          return res.status(500).json({ error: 'Failed to create user' });
+        }
+        authUserId = created.user.id;
       }
-      userId = created.user.id;
 
-      // Upsert users table
-      const { error: userUpsertError } = await supabaseAdmin
-        .from('users')
-        .upsert({
-          id: userId,
+      // Generate codes based on role
+      const investorCode = role === 'Investor' ? generateInvestorCode() : null;
+      const investmentAdvisorCodeValue = role === 'Investment Advisor' ? generateInvestmentAdvisorCode() : null;
+      const mentorCode = role === 'Mentor' ? generateMentorCode() : null;
+
+      // Create user_profiles entry
+      const { data: newProfile, error: profileError } = await supabaseAdmin
+        .from('user_profiles')
+        .insert({
+          auth_user_id: authUserId,
           email: email.toLowerCase().trim(),
           name: name || '',
           role: role || 'Investor',
-          startup_name: startupName || null,
-          center_name: centerName || null,
-          investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null
-        }, { onConflict: 'id' });
-      if (userUpsertError) {
-        console.error('Error upserting users row:', userUpsertError);
-        return res.status(500).json({ error: 'Failed to save user profile' });
+          startup_name: role === 'Startup' ? startupName || null : null,
+          center_name: role === 'Startup Facilitation Center' ? centerName || null : null,
+          firm_name: role === 'Investment Advisor' ? firmName || null : null,
+          investor_code: investorCode,
+          investment_advisor_code: investmentAdvisorCodeValue,
+          mentor_code: mentorCode,
+          investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null,
+          registration_date: new Date().toISOString().split('T')[0],
+          is_profile_complete: false
+        })
+        .select()
+        .single();
+      
+      if (profileError) {
+        console.error('Error creating user profile:', profileError);
+        return res.status(500).json({ error: 'Failed to create user profile' });
       }
+
+      // Set this profile as the active profile for the user
+      const { error: sessionError } = await supabaseAdmin
+        .from('user_profile_sessions')
+        .upsert({
+          auth_user_id: authUserId,
+          current_profile_id: newProfile.id,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'auth_user_id' });
+      
+      if (sessionError) {
+        console.error('Error setting active profile:', sessionError);
+        // Don't fail registration if session update fails
+      }
+      
+      userId = authUserId; // Set userId for OTP marking
     } else {
-      // Resolve user id for forgot/invite
+      // Resolve user id for forgot/invite - use auth.users instead of users table
       if (!userId) {
-        const { data: userRow, error: userError } = await supabaseAdmin
-          .from('users')
-          .select('id')
-          .eq('email', email.toLowerCase().trim())
-          .maybeSingle();
-        if (userError || !userRow) {
+        // Get auth user by email
+        const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserByEmail(email.toLowerCase().trim());
+        if (authUserError || !authUserData?.user) {
           return res.status(404).json({ error: 'User not found' });
         }
-        userId = userRow.id;
+        userId = authUserData.user.id;
       }
 
       // Update password via admin API

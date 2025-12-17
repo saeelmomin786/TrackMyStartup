@@ -28,19 +28,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Lookup user id from users table (only for forgot/invite)
-    let userRow = null;
+    // Lookup user id from auth.users (only for forgot/invite)
+    let userId = null;
     if (purpose !== 'register') {
-      const { data } = await supabaseAdmin
-        .from('users')
-        .select('id, role')
-        .eq('email', email.toLowerCase().trim())
-        .maybeSingle();
-      userRow = data || null;
-
-      if (!userRow && purpose === 'forgot') {
+      // Get auth user by email
+      const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserByEmail(email.toLowerCase().trim());
+      
+      if (purpose === 'forgot' && (!authUserData?.user || authUserError)) {
         return res.status(404).json({ error: 'User not found' });
       }
+      
+      userId = authUserData?.user?.id || null;
     }
 
     const code = Math.floor(10 ** (OTP_LENGTH - 1) + Math.random() * 9 * 10 ** (OTP_LENGTH - 1)).toString();
@@ -48,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { error: insertError } = await supabaseAdmin.from('password_otps').insert({
       email: email.toLowerCase().trim(),
-      user_id: userRow?.id || null,
+      user_id: userId || null,
       code,
       purpose,
       advisor_code: advisorCode || null,

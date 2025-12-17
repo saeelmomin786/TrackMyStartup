@@ -3,6 +3,25 @@ import { createClient } from '@supabase/supabase-js';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 
+// Code generation functions (simple implementations for server-side)
+function generateInvestorCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'INV-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+function generateInvestmentAdvisorCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'IA-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -51,10 +70,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    // First check if investor already exists on TMS
+    // First check if investor already exists on TMS - check user_profiles instead of users
     const { data: existingInvestorByEmail } = await supabaseAdmin
-      .from('users')
-      .select('id, role, investment_advisor_code_entered')
+      .from('user_profiles')
+      .select('auth_user_id, role, investment_advisor_code_entered')
       .eq('email', contactEmail.toLowerCase().trim())
       .eq('role', 'Investor')
       .maybeSingle();
@@ -66,11 +85,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (existingInvestorByEmail) {
       // User/Investor already exists on TMS
-      userId = existingInvestorByEmail.id;
+      userId = existingInvestorByEmail.auth_user_id; // Use auth_user_id, not profile id
       isExistingTMSInvestor = true;
       console.log('Investor already exists on TMS:', userId);
 
-      // Find investor record
+      // Find investor record (user_id in investors table is auth_user_id)
       const { data: investorRecord } = await supabaseAdmin
         .from('investors')
         .select('id, investment_advisor_code')
@@ -88,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else if (existingInvestorByEmail.investment_advisor_code_entered && existingInvestorByEmail.investment_advisor_code_entered !== advisorCode) {
           // Investor is already linked to a different advisor
           const { data: existingAdvisorData } = await supabaseAdmin
-            .from('users')
+            .from('user_profiles')
             .select('name, email, investment_advisor_code')
             .eq('investment_advisor_code', existingInvestorByEmail.investment_advisor_code_entered)
             .eq('role', 'Investment Advisor')
@@ -157,34 +176,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Create or update user record in users table
-    const userData = {
-      id: userId,
-      email: contactEmail.toLowerCase().trim(),
-      name: contactName,
-      role: 'Investor',
-      investment_advisor_code_entered: advisorCode
-    };
+    // Create or update user profile in user_profiles table
+    // Check if profile already exists for this auth user
+    const { data: existingProfile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id')
+      .eq('auth_user_id', userId)
+      .eq('role', 'Investor')
+      .maybeSingle();
 
-    console.log('Creating/updating user record:', { userId, email: userData.email, isNewUser });
+    if (!existingProfile) {
+      // Generate investor code
+      const investorCode = generateInvestorCode();
+      
+      // Create new profile
+      const { data: newProfile, error: profileError } = await supabaseAdmin
+        .from('user_profiles')
+        .insert({
+          auth_user_id: userId,
+          email: contactEmail.toLowerCase().trim(),
+          name: contactName,
+          role: 'Investor',
+          investor_code: investorCode,
+          investment_advisor_code_entered: advisorCode,
+          registration_date: new Date().toISOString().split('T')[0],
+          is_profile_complete: false
+        })
+        .select()
+        .single();
 
-    const { data: userRecord, error: userError } = await supabaseAdmin
-      .from('users')
-      .upsert(userData, {
-        onConflict: 'id'
-      })
-      .select()
-      .single();
+      if (profileError) {
+        console.error('Error creating user profile:', profileError);
+        return res.status(500).json({ 
+          error: 'Failed to create user profile',
+          details: profileError.message || profileError.details || 'Unknown error'
+        });
+      }
 
-    if (userError) {
-      console.error('Error creating user record:', userError);
-      return res.status(500).json({ 
-        error: 'Failed to create user record',
-        details: userError.message || userError.details || 'Unknown error'
-      });
+      console.log('User profile created successfully:', newProfile?.id);
+      
+      // Set as active profile if this is a new user
+      if (isNewUser) {
+        await supabaseAdmin
+          .from('user_profile_sessions')
+          .upsert({
+            auth_user_id: userId,
+            current_profile_id: newProfile.id,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'auth_user_id' });
+      }
+    } else {
+      // Update existing profile
+      const { error: updateError } = await supabaseAdmin
+        .from('user_profiles')
+        .update({
+          investment_advisor_code_entered: advisorCode
+        })
+        .eq('id', existingProfile.id);
+
+      if (updateError) {
+        console.error('Error updating user profile:', updateError);
+      } else {
+        console.log('User profile updated successfully:', existingProfile.id);
+      }
     }
-
-    console.log('User record created/updated successfully:', userRecord?.id);
 
     // Create investor record if user is new (and doesn't already exist)
     if (isNewUser && !existingInvestorId) {

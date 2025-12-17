@@ -996,20 +996,22 @@ export const authService = {
     try {
       console.log('Checking if email exists:', email);
       
-      // Check our users table directly - this is more reliable and doesn't require admin privileges
+      // Check user_profiles table (new multi-profile system)
+      // This checks if any profile exists with this email
       const { data: profiles, error: profileError } = await supabase
-        .from('users')
+        .from('user_profiles')
         .select('id')
-        .eq('email', email);
+        .eq('email', email.toLowerCase().trim())
+        .limit(1); // Only need to know if at least one exists
 
       if (profileError) {
-        console.error('Error checking users table:', profileError);
+        console.error('Error checking user_profiles table:', profileError);
         return { exists: false, error: 'Unable to check email availability' };
       }
 
       // Check if any profiles were returned
       if (profiles && profiles.length > 0) {
-        console.log('Email already exists:', email);
+        console.log('Email already exists in user_profiles:', email);
         return { exists: true };
       } else {
         console.log('Email is available:', email);

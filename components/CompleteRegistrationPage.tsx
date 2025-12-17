@@ -1149,22 +1149,45 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       });
 
       // Check if this is a profile from user_profiles (new system) or users (old system)
-      const { data: profileCheck, error: profileCheckError } = await (authService.supabase as any)
+      // Get current auth user ID to check properly
+      const { data: { user: currentAuthUser } } = await authService.supabase.auth.getUser();
+      const authUserId = currentAuthUser?.id;
+      
+      // Check if profile exists in user_profiles by both profile ID and auth_user_id
+      // This handles both cases: when userData.id is profile ID or auth_user_id
+      let profileCheck = null;
+      let profileCheckError = null;
+      
+      // First try by profile ID (if userData.id is the profile ID)
+      const { data: profileById } = await (authService.supabase as any)
         .from('user_profiles')
-        .select('id')
+        .select('id, auth_user_id')
         .eq('id', userData.id)
         .maybeSingle();
-
-      if (profileCheckError) {
-        console.error('❌ Error checking profile:', profileCheckError);
+      
+      if (profileById) {
+        profileCheck = profileById;
+      } else if (authUserId) {
+        // If not found by ID, try by auth_user_id (for new registrations)
+        const { data: profileByAuth } = await (authService.supabase as any)
+          .from('user_profiles')
+          .select('id, auth_user_id')
+          .eq('auth_user_id', authUserId)
+          .maybeSingle();
+        
+        if (profileByAuth) {
+          profileCheck = profileByAuth;
+          // Update userData.id to the actual profile ID for the update
+          userData.id = profileByAuth.id;
+        }
       }
 
+      // Determine which table to update
+      // For new registrations, always use user_profiles (new users go there)
+      // Only use users table as fallback for old users
       const tableToUpdate = profileCheck ? 'user_profiles' : 'users';
-      console.log('💾 Updating profile in table:', tableToUpdate, 'Profile ID:', userData.id);
-      console.log('🔍 Profile check result:', { found: !!profileCheck, profileId: userData.id });
-
-      // Get current auth user for debugging
-      const { data: { user: currentAuthUser } } = await authService.supabase.auth.getUser();
+      console.log('💾 Updating profile in table:', tableToUpdate, 'Profile ID:', userData.id, 'Auth User ID:', authUserId);
+      console.log('🔍 Profile check result:', { found: !!profileCheck, profileId: userData.id, authUserId });
       console.log('🔍 Current auth user:', { 
         id: currentAuthUser?.id, 
         email: currentAuthUser?.email 
@@ -1503,15 +1526,37 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 userId: userData.id
               });
 
-              // Get advisor details
-              const { data: advisorData } = await authService.supabase
-                .from('users')
-                .select('id, investment_advisor_code, name')
+              // Get advisor details - Check user_profiles table first (new system)
+              let advisorData: any = null;
+              let advisorAuthUserId: string | null = null;
+              
+              // Try user_profiles first (new system)
+              const { data: advisorProfile } = await authService.supabase
+                .from('user_profiles')
+                .select('id, auth_user_id, investment_advisor_code, name')
                 .eq('investment_advisor_code', advisorCodeFromInvite)
                 .eq('role', 'Investment Advisor')
                 .maybeSingle();
+              
+              if (advisorProfile) {
+                advisorData = advisorProfile;
+                advisorAuthUserId = (advisorProfile as any).auth_user_id;
+              } else {
+                // Fallback to users table (old system - backward compatibility)
+                const { data: oldAdvisorData } = await authService.supabase
+                  .from('users')
+                  .select('id, investment_advisor_code, name')
+                  .eq('investment_advisor_code', advisorCodeFromInvite)
+                  .eq('role', 'Investment Advisor')
+                  .maybeSingle();
+                
+                if (oldAdvisorData) {
+                  advisorData = oldAdvisorData;
+                  advisorAuthUserId = (oldAdvisorData as any).id; // In old system, id = auth_user_id
+                }
+              }
 
-              if (advisorData) {
+              if (advisorData && advisorAuthUserId) {
                 // Auto-accept: Set advisor_accepted = true in user_profiles or users table
                 // This makes startup appear directly in "My Startups" without approval
                 // Check if profile is in user_profiles or users table
@@ -1544,10 +1589,11 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   .eq('id', startup.id);
 
                 // Update advisor_added_startups if exists (link the manual entry)
+                // advisor_id should be auth_user_id (consistent with other tables)
                 const { data: advisorAddedStartup } = await authService.supabase
                   .from('advisor_added_startups')
                   .select('id')
-                  .eq('advisor_id', (advisorData as any).id)
+                  .eq('advisor_id', advisorAuthUserId) // Use auth_user_id, not profile ID
                   .or(`tms_startup_id.eq.${startup.id},contact_email.eq.${userData.email}`)
                   .maybeSingle();
 

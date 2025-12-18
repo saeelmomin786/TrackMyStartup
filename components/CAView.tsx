@@ -77,6 +77,10 @@ const CAView: React.FC<CAViewProps> = ({ startups, onUpdateCompliance, onViewSta
       }
     } catch (err) {
       console.error('Share failed', err);
+      if (err instanceof Error && err.name === 'AbortError') {
+        // User cancelled the share dialog; no need to show an error
+        return;
+      }
       alert('Unable to share. Try copying manually.');
     }
   };

@@ -174,3 +174,5 @@ SELECT
     '✅ Public read access restored for backward compatibility' as fix_3,
     '🔄 Please refresh your browser and try again' as next_step;
 
+
+

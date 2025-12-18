@@ -144,3 +144,4 @@ If the issue persists after running the fix:
 - `lib/capTableService.ts` - Service layer for fundraising operations
 
 
+

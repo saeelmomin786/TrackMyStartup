@@ -115,6 +115,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             }
         } catch (err) {
             console.error('Share failed', err);
+            if (err instanceof Error && err.name === 'AbortError') {
+                // User cancelled the share dialog; don't show an error
+                return;
+            }
             alert('Unable to share. Try copying manually.');
         }
     };

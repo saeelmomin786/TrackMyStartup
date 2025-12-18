@@ -4416,11 +4416,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         await navigator.clipboard.writeText(shareUrl);
         alert('Startup link copied to clipboard');
       } else {
-        await navigator.clipboard.writeText(`${shareData.title}\n${shareData.text}\n${shareData.url}`);
+        // Fallback: hidden textarea copy when Clipboard API is not available
+        const textarea = document.createElement('textarea');
+        textarea.value = `${shareData.title}\n${shareData.text}\n${shareData.url}`;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
         alert('Startup details copied to clipboard');
       }
     } catch (err) {
       console.error('Share failed', err);
+      if (err instanceof Error && err.name === 'AbortError') {
+        // User cancelled the share dialog; no need to show an error
+        return;
+      }
       alert('Unable to share. Try copying manually.');
     }
   };

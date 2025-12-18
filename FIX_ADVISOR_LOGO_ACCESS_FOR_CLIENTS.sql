@@ -188,3 +188,5 @@ SELECT
     '🔄 PLEASE REFRESH YOUR BROWSER (Ctrl+F5 or Cmd+Shift+R)' as next_step,
     '📝 If logo still not showing, check browser console for errors' as note;
 
+
+

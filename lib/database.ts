@@ -178,27 +178,33 @@ export const userService = {
   async acceptInvestmentAdvisorRequest(userId: string) {
     console.log('Accepting investment advisor request for user:', userId);
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .update({
-          advisor_accepted: true,
-          advisor_accepted_date: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId)
-        .select()
-        .single()
+      // Use the SECURITY DEFINER function to bypass RLS and update BOTH
+      // legacy `users` table and new `user_profiles` table.
+      // NOTE: We reuse `accept_startup_advisor_request` because it is
+      // implemented generically to work for any user (Investor or Startup)
+      // who has entered this advisor's code.
+      const currentUser = (await supabase.auth.getUser()).data.user
 
-      if (error) {
-        console.error('Error accepting investment advisor request:', error);
-        // Provide more specific error information
-        const errorMessage = error.message || 'Unknown database error';
-        const errorCode = error.code || 'UNKNOWN_ERROR';
-        throw new Error(`Database error (${errorCode}): ${errorMessage}`);
+      const { data: userData, error: userError } = await supabase.rpc(
+        'accept_startup_advisor_request',
+        {
+          p_user_id: userId,
+          p_advisor_id: currentUser?.id,
+          // Service Requests flow does not capture a financial matrix yet,
+          // so we pass null – the function handles this safely.
+          p_financial_matrix: null
+        }
+      )
+
+      if (userError) {
+        console.error('Error accepting investment advisor request (RPC):', userError)
+        const errorMessage = userError.message || 'Unknown database error'
+        const errorCode = userError.code || 'UNKNOWN_ERROR'
+        throw new Error(`Database error (${errorCode}): ${errorMessage}`)
       }
-      
-      console.log('Investment advisor request accepted successfully:', data);
-      return data
+
+      console.log('Investment advisor request accepted successfully:', userData);
+      return userData
     } catch (error) {
       console.error('Error in acceptInvestmentAdvisorRequest:', error);
       // Re-throw with better error context

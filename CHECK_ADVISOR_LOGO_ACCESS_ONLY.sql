@@ -197,3 +197,5 @@ SELECT
     '3. Whether required policies exist' as note_4,
     '4. If policies are missing, run FIX_ADVISOR_LOGO_ACCESS_FOR_CLIENTS.sql' as note_5;
 
+
+

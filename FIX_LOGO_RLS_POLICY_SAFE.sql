@@ -120,3 +120,5 @@ SELECT
     '✅ Logo should now work for investors/startups under investment advisors' as fix_3,
     '✅ Profile completion check should still work' as fix_4;
 
+
+

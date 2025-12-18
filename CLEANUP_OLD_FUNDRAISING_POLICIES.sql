@@ -54,3 +54,4 @@ ORDER BY policyname, cmd;
 -- - fundraising_details_update_own (UPDATE)
 
 
+

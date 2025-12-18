@@ -122,3 +122,5 @@ SELECT
     '3. Verify logo_url is not NULL or empty for advisors' as instruction_4,
     '4. Test with actual advisor code to see if query works' as instruction_5;
 
+
+

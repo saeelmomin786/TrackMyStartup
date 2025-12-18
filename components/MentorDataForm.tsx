@@ -58,6 +58,23 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
     setIsSubmitting(true);
 
     try {
+      // Verify authentication and get auth user ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      
+      // Use auth user ID instead of mentorId (which might be profile ID)
+      const actualMentorId = authUser.id;
+      
+      if (mentorId !== actualMentorId) {
+        console.warn('⚠️ mentorId mismatch - using auth.uid() instead:', { 
+          providedMentorId: mentorId, 
+          authUserId: actualMentorId 
+        });
+      }
+      
+      console.log('✅ Authentication verified:', { providedMentorId: mentorId, authUserId: actualMentorId });
       // Determine status based on currently_mentoring checkbox
       const status = mentoringForm.currently_mentoring ? 'active' : 'completed';
       
@@ -96,17 +113,22 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
           updateData.completed_at = null;
         }
         
-        const { error } = await supabase
-          .from('mentor_startup_assignments')
+        console.log('Updating mentoring data:', { editingId, actualMentorId, updateData });
+        const { error, data } = await (supabase
+          .from('mentor_startup_assignments') as any)
           .update(updateData)
           .eq('id', editingId)
-          .eq('mentor_id', mentorId);
+          .eq('mentor_id', actualMentorId)
+          .select();
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error updating mentoring assignment:', error);
+          throw error;
+        }
       } else {
-        // Create new assignment
+        // Create new assignment - use auth user ID (already fetched above)
         const insertData: any = {
-          mentor_id: mentorId,
+          mentor_id: actualMentorId,
           startup_id: null,
           status: status,
           fee_amount: parseFloat(mentoringForm.fee_amount) || 0,
@@ -127,11 +149,22 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
             : new Date().toISOString();
         }
         
-        const { error } = await supabase
+        console.log('Inserting mentoring data:', { actualMentorId, insertData });
+        const { error, data } = await supabase
           .from('mentor_startup_assignments')
-          .insert(insertData);
+          .insert(insertData as any)
+          .select();
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error inserting mentoring assignment:', error);
+          if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+            alert('Permission denied. Please ensure RLS policies are properly configured. Error: ' + error.message);
+          } else {
+            alert('Error saving data: ' + error.message);
+          }
+          throw error;
+        }
+        console.log('Successfully inserted:', data);
       }
 
       // Reset form
@@ -148,9 +181,12 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
       });
       setEditingId(null);
       onUpdate();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving mentoring:', error);
-      alert('Error saving data. Please try again.');
+      // Error message already shown in the specific error handlers above
+      if (!error?.message || (!error.message.includes('Permission') && !error.message.includes('permission'))) {
+        alert('Error saving data. Please try again.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -161,6 +197,23 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
     setIsSubmitting(true);
 
     try {
+      // Verify authentication and get auth user ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      
+      // Use auth user ID instead of mentorId (which might be profile ID)
+      const actualMentorId = authUser.id;
+      
+      if (mentorId !== actualMentorId) {
+        console.warn('⚠️ mentorId mismatch - using auth.uid() instead:', { 
+          providedMentorId: mentorId, 
+          authUserId: actualMentorId 
+        });
+      }
+      
+      console.log('✅ Authentication verified for founded startup:', { providedMentorId: mentorId, authUserId: actualMentorId });
       // Store startup_name, email_id, website, sector, position, dates, and currently_in_position in notes as JSON
       const notesData = JSON.stringify({
         startup_name: foundedForm.startup_name,
@@ -173,17 +226,52 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
         currently_in_position: foundedForm.currently_in_position,
       });
 
-      const { error } = await supabase
-        .from('mentor_founded_startups')
-        .insert({
-          mentor_id: mentorId,
-          startup_id: null, // Nullable for manually entered startups
-          notes: notesData,
-        });
+      if (editingId) {
+        // Update existing founded startup - use auth user ID (already fetched above)
+        console.log('Updating founded startup:', { editingId, actualMentorId });
+        const { error, data } = await (supabase
+          .from('mentor_founded_startups') as any)
+          .update({
+            notes: notesData,
+          })
+          .eq('id', editingId)
+          .eq('mentor_id', actualMentorId)
+          .select();
 
-      if (error) {
-        // If already exists or other error
-        if (error.code !== '23505') throw error;
+        if (error) {
+          console.error('Error updating founded startup:', error);
+          if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+            alert('Permission denied. Please ensure RLS policies are properly configured. Error: ' + error.message);
+          } else {
+            alert('Error updating data: ' + error.message);
+          }
+          throw error;
+        } else {
+          console.log('Successfully updated founded startup:', data);
+        }
+      } else {
+        // Create new founded startup - use auth user ID (already fetched above)
+        console.log('Inserting founded startup:', { actualMentorId });
+        const { error, data } = await supabase
+          .from('mentor_founded_startups')
+          .insert({
+            mentor_id: actualMentorId,
+            startup_id: null, // Nullable for manually entered startups
+            notes: notesData,
+          } as any)
+          .select();
+
+        if (error) {
+          console.error('Error inserting founded startup:', error);
+          if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+            alert('Permission denied. Please ensure RLS policies are properly configured. Error: ' + error.message);
+          } else if (error.code !== '23505') {
+            alert('Error updating data: ' + error.message);
+            throw error;
+          }
+        } else {
+          console.log('Successfully updated founded startup:', data);
+        }
       }
 
       // Reset form
@@ -197,6 +285,7 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
         to_date: '',
         currently_in_position: false,
       });
+      setEditingId(null);
       onUpdate();
     } catch (error) {
       console.error('Error saving founded startup:', error);
@@ -227,14 +316,14 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
       } catch (e) {
         // If notes is not JSON, use startup name from startup object if available
         startupName = assignment.startup?.name || '';
-        website = assignment.startup?.domain || '';
+        website = (assignment.startup as any)?.domain || '';
         sector = assignment.startup?.sector || '';
       }
-    } else if (assignment.startup) {
-      startupName = assignment.startup.name;
-      website = assignment.startup.domain || '';
-      sector = assignment.startup.sector || '';
-    }
+      } else if (assignment.startup) {
+        startupName = assignment.startup.name;
+        website = (assignment.startup as any).domain || '';
+        sector = assignment.startup.sector || '';
+      }
     
     // If from_date not in notes, use assigned_at
     if (!fromDate && assignment.assigned_at) {
@@ -301,6 +390,17 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
           onClick={() => {
             setActiveSection('active');
             setEditingId(null);
+            setMentoringForm({
+              startup_name: '',
+              email_id: '',
+              website: '',
+              sector: '',
+              fee_amount: '',
+              esop_percentage: '',
+              from_date: '',
+              to_date: '',
+              currently_mentoring: true,
+            });
           }}
           className={`py-2 px-4 border-b-2 font-medium text-sm ${
             activeSection === 'active'
@@ -314,6 +414,16 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
           onClick={() => {
             setActiveSection('founded');
             setEditingId(null);
+            setFoundedForm({ 
+              startup_name: '', 
+              email_id: '', 
+              website: '', 
+              sector: '', 
+              position: '',
+              from_date: '',
+              to_date: '',
+              currently_in_position: false,
+            });
           }}
           className={`py-2 px-4 border-b-2 font-medium text-sm ${
             activeSection === 'founded'
@@ -327,8 +437,143 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
 
       {/* Mentoring Form (Combined Active and Completed) */}
       {activeSection === 'active' && (
-        <Card>
-          <h3 className="text-lg font-semibold mb-4">Add Mentoring</h3>
+        <>
+          {/* Mentoring Data Table */}
+          {mentorMetrics && (mentorMetrics.activeAssignments.length > 0 || mentorMetrics.completedAssignments.length > 0) && (
+            <Card>
+              <h3 className="text-lg font-semibold mb-4">Mentoring Data</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ESOP %</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">To Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-200">
+                    {[...mentorMetrics.activeAssignments, ...mentorMetrics.completedAssignments].map(assignment => {
+                      // Parse notes to get startup_name, email_id, website, and sector
+                      let startupName = assignment.startup?.name || `Startup #${assignment.startup_id || 'N/A'}`;
+                      let emailId = '';
+                      let website = '';
+                      let sector = '';
+                      let fromDate = '';
+                      let toDate = '';
+                      
+                      if (assignment.notes) {
+                        try {
+                          const notesData = JSON.parse(assignment.notes);
+                          startupName = notesData.startup_name || startupName;
+                          emailId = notesData.email_id || '';
+                          website = notesData.website || '';
+                          sector = notesData.sector || '';
+                          fromDate = notesData.from_date || '';
+                          toDate = notesData.to_date || '';
+                          } catch (e) {
+                            // Notes is not JSON, use startup data
+                            website = (assignment.startup as any)?.domain || '';
+                            sector = assignment.startup?.sector || '';
+                          }
+                        } else if (assignment.startup) {
+                          website = (assignment.startup as any).domain || '';
+                          sector = assignment.startup.sector || '';
+                        }
+                      
+                      // If from_date not in notes, use assigned_at
+                      if (!fromDate && assignment.assigned_at) {
+                        fromDate = assignment.assigned_at.split('T')[0];
+                      }
+                      
+                      // If to_date not in notes but completed_at exists, use completed_at
+                      if (!toDate && assignment.completed_at) {
+                        toDate = assignment.completed_at.split('T')[0];
+                      }
+
+                      return (
+                        <tr key={assignment.id}>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-slate-900">
+                            {startupName}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {emailId || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {website ? (
+                              <a 
+                                href={website.startsWith('http') ? website : `https://${website}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-blue-600 hover:underline"
+                              >
+                                {website}
+                              </a>
+                            ) : 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {sector || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
+                            <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                              assignment.status === 'active' 
+                                ? 'bg-green-100 text-green-800' 
+                                : assignment.status === 'completed'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {assignment.status}
+                            </span>
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {assignment.esop_percentage > 0 ? `${assignment.esop_percentage}%` : 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {fromDate || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {toDate || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleEdit(assignment)}
+                                className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                              >
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDelete(assignment.id, assignment.status === 'active' ? 'active' : 'completed')}
+                                className="text-red-600 border-red-300 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit Mentoring' : 'Add Mentoring'}</h3>
           <form onSubmit={handleMentoringSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -492,13 +737,152 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
             </div>
           </form>
         </Card>
+        </>
       )}
 
 
       {/* Startup Experience Form */}
       {activeSection === 'founded' && (
-        <Card>
-          <h3 className="text-lg font-semibold mb-4">Add Startup Experience</h3>
+        <>
+          {/* Startup Experience Data Table */}
+          {mentorMetrics && mentorMetrics.foundedStartups.length > 0 && (
+            <Card>
+              <h3 className="text-lg font-semibold mb-4">Startup Experience Data</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Position</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">To Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-200">
+                    {mentorMetrics.foundedStartups.map(startup => {
+                      // Parse notes to get startup details
+                      let startupName = startup.name;
+                      let emailId = '';
+                      let website = (startup as any).domain || '';
+                      let sector = startup.sector || '';
+                      let position = '';
+                      let fromDate = '';
+                      let toDate = '';
+                      let currentlyInPosition = false;
+                      
+                      if (startup.notes) {
+                        try {
+                          const notesData = JSON.parse(startup.notes);
+                          startupName = notesData.startup_name || startupName;
+                          emailId = notesData.email_id || '';
+                          website = notesData.website || website;
+                          sector = notesData.sector || sector;
+                          position = notesData.position || '';
+                          fromDate = notesData.from_date || '';
+                          toDate = notesData.to_date || '';
+                          currentlyInPosition = notesData.currently_in_position || false;
+                        } catch (e) {
+                          // Notes is not JSON, use startup data
+                        }
+                      }
+
+                      return (
+                        <tr key={startup.id}>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-slate-900">
+                            {startupName}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {emailId || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {website ? (
+                              <a 
+                                href={website.startsWith('http') ? website : `https://${website}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-blue-600 hover:underline"
+                              >
+                                {website}
+                              </a>
+                            ) : 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {sector || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {position || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {fromDate || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {toDate || (currentlyInPosition ? 'Present' : 'N/A')}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
+                            <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                              currentlyInPosition 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {currentlyInPosition ? 'Current' : 'Past'}
+                            </span>
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  // Parse notes to populate form
+                                  if (startup.notes) {
+                                    try {
+                                      const notesData = JSON.parse(startup.notes);
+                                      setFoundedForm({
+                                        startup_name: notesData.startup_name || startup.name,
+                                        email_id: notesData.email_id || '',
+                                        website: notesData.website || (startup as any).domain || '',
+                                        sector: notesData.sector || startup.sector || '',
+                                        position: notesData.position || '',
+                                        from_date: notesData.from_date || '',
+                                        to_date: notesData.to_date || '',
+                                        currently_in_position: notesData.currently_in_position || false,
+                                      });
+                                      setEditingId(startup.id);
+                                    } catch (e) {
+                                      // Handle error
+                                    }
+                                  }
+                                }}
+                                className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                              >
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDelete(startup.id, 'founded')}
+                                className="text-red-600 border-red-300 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit Startup Experience' : 'Add Startup Experience'}</h3>
           <form onSubmit={handleFoundedSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -616,14 +1000,36 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
               </div>
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              {editingId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingId(null);
+                    setFoundedForm({ 
+                      startup_name: '', 
+                      email_id: '', 
+                      website: '', 
+                      sector: '', 
+                      position: '',
+                      from_date: '',
+                      to_date: '',
+                      currently_in_position: false,
+                    });
+                  }}
+                >
+                  Cancel
+                </Button>
+              )}
               <Button type="submit" disabled={isSubmitting}>
                 <Save className="h-4 w-4 mr-2" />
-                Add Startup Experience
+                {editingId ? 'Update' : 'Add'} Startup Experience
               </Button>
             </div>
           </form>
         </Card>
+        </>
       )}
     </div>
   );

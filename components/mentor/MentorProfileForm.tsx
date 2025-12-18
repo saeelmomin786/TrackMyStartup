@@ -141,8 +141,19 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         .eq('mentor_id', userId) // Use auth_user_id, not profile ID
         .order('from_date', { ascending: false });
 
-      if (error && error.code !== 'PGRST116') {
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No rows found - this is okay
+          setProfessionalExperiences([]);
+          return;
+        }
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          console.error('Table mentor_professional_experience does not exist. Please run CREATE_MENTOR_PROFESSIONAL_EXPERIENCE_TABLE.sql');
+          setProfessionalExperiences([]);
+          return;
+        }
         console.error('Error loading professional experiences:', error);
+        setProfessionalExperiences([]);
         return;
       }
 
@@ -213,20 +224,46 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
       }
       
       if (editingExpId) {
-        const { error } = await supabase
+        console.log('Updating professional experience:', { editingExpId, userIdForExp, expData });
+        const { error, data } = await supabase
           .from('mentor_professional_experience')
           .update(expData)
           .eq('id', editingExpId)
-          .eq('mentor_id', userIdForExp); // Use auth_user_id, not profile ID
+          .eq('mentor_id', userIdForExp) // Use auth_user_id, not profile ID
+          .select();
         
-        if (error) throw error;
+        if (error) {
+          console.error('Error updating professional experience:', error);
+          if (error.code === '42P01' || error.message?.includes('does not exist')) {
+            alert('The professional experience table does not exist. Please run the CREATE_MENTOR_PROFESSIONAL_EXPERIENCE_TABLE.sql script first.');
+          } else if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+            alert('Permission denied. Please ensure RLS policies are properly configured. Error: ' + error.message);
+          } else {
+            alert('Error updating professional experience: ' + error.message);
+          }
+          throw error;
+        }
+        console.log('Successfully updated professional experience:', data);
       } else {
         // Ensure mentor_id is set to auth_user_id in insert
-        const { error } = await supabase
+        console.log('Inserting professional experience:', { userIdForExp, expData });
+        const { error, data } = await supabase
           .from('mentor_professional_experience')
-          .insert({ ...expData, mentor_id: userIdForExp }); // Use auth_user_id, not profile ID
+          .insert({ ...expData, mentor_id: userIdForExp }) // Use auth_user_id, not profile ID
+          .select();
         
-        if (error) throw error;
+        if (error) {
+          console.error('Error inserting professional experience:', error);
+          if (error.code === '42P01' || error.message?.includes('does not exist')) {
+            alert('The professional experience table does not exist. Please run the CREATE_MENTOR_PROFESSIONAL_EXPERIENCE_TABLE.sql script first.');
+          } else if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+            alert('Permission denied. Please ensure RLS policies are properly configured. Error: ' + error.message);
+          } else {
+            alert('Error saving professional experience: ' + error.message);
+          }
+          throw error;
+        }
+        console.log('Successfully inserted professional experience:', data);
       }
       
       // Reset form
@@ -274,17 +311,31 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         setAuthUserId(userIdForExp);
       }
       
+      console.log('Deleting professional experience:', { id, userIdForExp });
       const { error } = await supabase
         .from('mentor_professional_experience')
         .delete()
         .eq('id', id)
         .eq('mentor_id', userIdForExp); // Use auth_user_id, not profile ID
       
-      if (error) throw error;
+      if (error) {
+        console.error('Error deleting professional experience:', error);
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          alert('The professional experience table does not exist. Please run the CREATE_MENTOR_PROFESSIONAL_EXPERIENCE_TABLE.sql script first.');
+        } else if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+          alert('Permission denied. Please ensure RLS policies are properly configured. Error: ' + error.message);
+        } else {
+          alert('Error deleting professional experience: ' + error.message);
+        }
+        throw error;
+      }
       loadProfessionalExperiences();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting professional experience:', error);
-      alert('Error deleting professional experience. Please try again.');
+      // Error message already shown above
+      if (!error?.message || (!error.message.includes('does not exist') && !error.message.includes('Permission'))) {
+        alert('Error deleting professional experience. Please try again.');
+      }
     }
   };
 
@@ -410,18 +461,54 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (!validTypes.includes(file.type)) {
+      alert('Invalid file type. Please upload an image (JPEG, PNG, GIF, WebP, or SVG)');
+      return;
+    }
+
+    // Validate file size (10MB limit)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      alert('File size too large. Please upload an image smaller than 10MB');
+      return;
+    }
+
     try {
+      // Get auth user ID for file naming
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        alert('Not authenticated. Please log in again.');
+        return;
+      }
+
       const fileExt = file.name.split('.').pop();
-      const fileName = `${currentUser.id}-${Date.now()}.${fileExt}`;
+      const fileName = `${authUser.id}-${Date.now()}.${fileExt}`;
       const filePath = `mentor-logos/${fileName}`;
+
+      console.log('Uploading logo:', { filePath, fileSize: file.size, fileType: file.type });
 
       const { error: uploadError } = await supabase.storage
         .from('mentor-assets')
-        .upload(filePath, file);
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
       if (uploadError) {
         console.error('Upload error:', uploadError);
-        alert('Failed to upload logo');
+        let errorMessage = 'Failed to upload logo';
+        
+        if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('does not exist')) {
+          errorMessage = 'Storage bucket not found. Please contact administrator to set up mentor-assets bucket.';
+        } else if (uploadError.message?.includes('new row violates row-level security') || uploadError.message?.includes('permission')) {
+          errorMessage = 'Permission denied. Please check storage bucket policies. Error: ' + uploadError.message;
+        } else if (uploadError.message) {
+          errorMessage = `Upload failed: ${uploadError.message}`;
+        }
+        
+        alert(errorMessage);
         return;
       }
 
@@ -429,11 +516,13 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         .from('mentor-assets')
         .getPublicUrl(filePath);
 
+      console.log('Logo uploaded successfully:', publicUrl);
       handleChange('logo_url', publicUrl);
       handleChange('media_type', 'logo');
-    } catch (error) {
+      alert('Logo uploaded successfully!');
+    } catch (error: any) {
       console.error('Error uploading logo:', error);
-      alert('Failed to upload logo');
+      alert(`Failed to upload logo: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -470,6 +559,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         updated_at: new Date().toISOString()
       };
 
+      console.log('Saving mentor profile:', { userIdForSave, profileData });
       const { data, error } = await supabase
         .from('mentor_profiles')
         .upsert(profileData, {
@@ -480,19 +570,30 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
       if (error) {
         console.error('Error saving profile:', error);
-        alert('Failed to save profile');
+        let errorMessage = 'Failed to save profile';
+        
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          errorMessage = 'The mentor_profiles table does not exist. Please run the UPDATE_MENTOR_PROFILES_TABLE.sql script first.';
+        } else if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+          errorMessage = 'Permission denied. Please ensure RLS policies are properly configured. Error: ' + error.message;
+        } else if (error.message) {
+          errorMessage = `Failed to save profile: ${error.message}`;
+        }
+        
+        alert(errorMessage);
         return;
       }
 
+      console.log('Profile saved successfully:', data);
       setProfile(data);
       setIsEditing(false);
       if (onSave) {
         onSave(data);
       }
       alert('Profile saved successfully!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving mentor profile:', error);
-      alert('Failed to save profile');
+      alert(`Failed to save profile: ${error.message || 'Unknown error'}`);
     } finally {
       setIsSaving(false);
     }
@@ -500,6 +601,20 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
   return (
     <div>
+      {/* Header with Edit/Save Button in Top Right */}
+      {!isViewOnly && (
+        <div className="flex justify-end mb-4">
+          <Button
+            size="md"
+            variant={isEditing ? "primary" : "secondary"}
+            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+            disabled={isSaving}
+          >
+            {isSaving ? 'Saving...' : isEditing ? <><Save className="h-4 w-4 mr-2" /> Save</> : <><Edit className="h-4 w-4 mr-2" /> Edit Profile</>}
+          </Button>
+        </div>
+      )}
+      
       <div className="space-y-6">
         {/* Basic Information */}
         <div className="space-y-4">
@@ -752,8 +867,92 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
+                Startup Mentoring
+                <span className="ml-2 text-xs text-slate-500">(Active - from dashboard)</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                  {mentorMetrics?.startupsMentoring || 0}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleOpenAddForm('active')}
+                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
+                  title="Add startup to increase count"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Add</span>
+                </Button>
+              </div>
+              <input
+                type="hidden"
+                value={mentorMetrics?.startupsMentoring || 0}
+                onChange={() => {}}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Previously Mentored (on TMS)
+                <span className="ml-2 text-xs text-slate-500">(Completed - from dashboard)</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                  {mentorMetrics?.startupsMentoredPreviously || 0}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleOpenAddForm('active')}
+                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
+                  title="Add mentoring startup to increase count"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Add</span>
+                </Button>
+              </div>
+              <input
+                type="hidden"
+                value={mentorMetrics?.startupsMentoredPreviously || 0}
+                onChange={() => {}}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Verified Startups Mentored (Total)
+                <span className="ml-2 text-xs text-slate-500">(Only registered users on TMS - from dashboard)</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 bg-blue-50 border border-blue-300 rounded-md text-slate-700 font-medium">
+                  {mentorMetrics?.verifiedStartupsMentored ?? 0}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleOpenAddForm('active')}
+                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
+                  title="Add startup to increase count"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Add</span>
+                </Button>
+              </div>
+              <input
+                type="hidden"
+                value={mentorMetrics?.verifiedStartupsMentored ?? 0}
+                onChange={() => {}}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
                 Startups Mentored (Total)
-                <span className="ml-2 text-xs text-slate-500">(Verified from your dashboard)</span>
+                <span className="ml-2 text-xs text-slate-500">(All mentoring - from dashboard)</span>
               </label>
               <div className="flex items-center gap-2">
                 <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
@@ -783,34 +982,6 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               <input
                 type="hidden"
                 value={mentorMetrics ? (mentorMetrics.startupsMentoring + mentorMetrics.startupsMentoredPreviously) : (profile.companies_mentored || 0)}
-                onChange={() => {}}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Previously Mentored
-                <span className="ml-2 text-xs text-slate-500">(Verified from your dashboard)</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                  {mentorMetrics?.startupsMentoredPreviously || 0}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleOpenAddForm('active')}
-                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add mentoring startup to increase count"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Add</span>
-                </Button>
-              </div>
-              <input
-                type="hidden"
-                value={mentorMetrics?.startupsMentoredPreviously || 0}
                 onChange={() => {}}
               />
             </div>
@@ -1074,20 +1245,6 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
           )}
         </div>
       </div>
-
-      {/* Save Button at the end */}
-      {!isViewOnly && (
-        <div className="flex justify-end mt-6 pt-6 border-t border-slate-200">
-          <Button
-            size="md"
-            variant={isEditing ? "primary" : "secondary"}
-            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-            disabled={isSaving}
-          >
-            {isSaving ? 'Saving...' : isEditing ? <><Save className="h-4 w-4 mr-2" /> Save</> : 'Edit Profile'}
-          </Button>
-        </div>
-      )}
 
       {/* Add Startup Form Modal */}
       <Modal

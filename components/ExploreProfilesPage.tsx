@@ -450,8 +450,39 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
               const companiesMentored = profile.companies_mentored;
               
               const handleShare = () => {
-                const url = window.location.origin + window.location.pathname + `?view=${role === 'Investor' ? 'investor' : role === 'Investment Advisor' ? 'advisor' : 'user'}&${role === 'Investor' ? 'investorId' : role === 'Investment Advisor' ? 'advisorId' : 'userId'}=${profile.id || profile.user_id}`;
-                navigator.clipboard.writeText(url).then(() => {
+                const url = new URL(window.location.origin + window.location.pathname);
+                if (role === 'Investor') {
+                  url.searchParams.set('view', 'investor');
+                  if (profile.id) {
+                    url.searchParams.set('investorId', profile.id);
+                  } else if (profile.user_id) {
+                    url.searchParams.set('userId', profile.user_id);
+                  }
+                } else if (role === 'Investment Advisor') {
+                  url.searchParams.set('view', 'advisor');
+                  if (profile.id) {
+                    url.searchParams.set('advisorId', profile.id);
+                  } else if (profile.user_id) {
+                    url.searchParams.set('userId', profile.user_id);
+                  }
+                } else if (role === 'Mentor') {
+                  url.searchParams.set('view', 'mentor');
+                  if (profile.id) {
+                    url.searchParams.set('mentorId', profile.id);
+                  } else if (profile.user_id) {
+                    url.searchParams.set('userId', profile.user_id);
+                  }
+                } else {
+                  url.searchParams.set('view', 'explore');
+                  url.searchParams.set('role', role);
+                  if (profile.id || profile.user_id) {
+                    url.searchParams.set('userId', profile.id || profile.user_id);
+                  }
+                }
+
+                const shareUrl = url.toString();
+
+                navigator.clipboard.writeText(shareUrl).then(() => {
                   alert('Profile link copied to clipboard!');
                 }).catch(() => {
                   alert('Failed to copy link. Please try again.');

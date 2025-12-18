@@ -869,6 +869,20 @@ class CapTableService {
 
         if (insertError) {
           console.error('❌ Error creating fundraising details:', insertError);
+          console.error('❌ Insert error details:', {
+            message: insertError.message,
+            code: insertError.code,
+            details: insertError.details,
+            hint: insertError.hint,
+            startupId: startupId,
+            insertData: insertData
+          });
+          
+          // Provide more helpful error messages
+          if (insertError.code === '42501' || insertError.message?.includes('permission denied') || insertError.message?.includes('policy')) {
+            throw new Error(`Permission denied: Unable to create fundraising details. This may be due to RLS policy restrictions. Please check that your startup is properly linked to your account. Error: ${insertError.message}`);
+          }
+          
           throw new Error(`Create failed: ${insertError.message}`);
         }
 
@@ -889,7 +903,21 @@ class CapTableService {
 
         if (updateError) {
           console.error('❌ Error updating fundraising details:', updateError);
-          console.error('❌ Update error details:', JSON.stringify(updateError, null, 2));
+          console.error('❌ Update error details:', {
+            message: updateError.message,
+            code: updateError.code,
+            details: updateError.details,
+            hint: updateError.hint,
+            startupId: startupId,
+            targetId: target.id,
+            updateData: updateData
+          });
+          
+          // Provide more helpful error messages
+          if (updateError.code === '42501' || updateError.message?.includes('permission denied') || updateError.message?.includes('policy')) {
+            throw new Error(`Permission denied: Unable to update fundraising details. This may be due to RLS policy restrictions. Please check that your startup is properly linked to your account. Error: ${updateError.message}`);
+          }
+          
           throw new Error(`Update failed: ${updateError.message}`);
         }
 
@@ -1419,12 +1447,31 @@ class CapTableService {
 
   async uploadPitchDeck(file: File, startupId: number): Promise<string> {
     const fileName = `${startupId}/pitch-decks/${Date.now()}_${file.name}`;
+    console.log('📤 Uploading pitch deck:', { fileName, startupId, fileSize: file.size });
+    
     const { data, error } = await supabase.storage
       .from('pitch-decks')
       .upload(fileName, file);
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Error uploading pitch deck:', error);
+      console.error('❌ Upload error details:', {
+        message: error.message,
+        statusCode: error.statusCode,
+        error: error.error,
+        fileName,
+        startupId
+      });
+      
+      // Provide more helpful error messages
+      if (error.message?.includes('permission denied') || error.message?.includes('policy') || error.statusCode === 403) {
+        throw new Error(`Permission denied: Unable to upload pitch deck. This may be due to storage policy restrictions. Please check that your startup is properly linked to your account. Error: ${error.message}`);
+      }
+      
+      throw new Error(`Failed to upload pitch deck: ${error.message}`);
+    }
 
+    console.log('✅ Pitch deck uploaded successfully:', data.path);
     const { data: urlData } = supabase.storage
       .from('pitch-decks')
       .getPublicUrl(fileName);
@@ -1501,7 +1548,20 @@ class CapTableService {
       });
 
     if (error) {
-      console.error('Error uploading business plan:', error);
+      console.error('❌ Error uploading business plan:', error);
+      console.error('❌ Upload error details:', {
+        message: error.message,
+        statusCode: error.statusCode,
+        error: error.error,
+        fileName,
+        startupId
+      });
+      
+      // Provide more helpful error messages
+      if (error.message?.includes('permission denied') || error.message?.includes('policy') || error.statusCode === 403) {
+        throw new Error(`Permission denied: Unable to upload business plan. This may be due to storage policy restrictions. Please check that your startup is properly linked to your account. Error: ${error.message}`);
+      }
+      
       throw new Error(`Failed to upload business plan: ${error.message}`);
     }
 
@@ -1515,15 +1575,17 @@ class CapTableService {
   async uploadOnePagerPDF(file: File, startupId: number): Promise<string> {
     // Use consistent filename - always the same name to replace existing PDF
     const fileName = `${startupId}/one-pagers/one-pager.pdf`;
+    console.log('📤 Uploading one-pager PDF:', { fileName, startupId, fileSize: file.size });
     
     // First, try to delete the existing file if it exists (to ensure clean replacement)
     try {
       await supabase.storage
         .from('pitch-decks')
         .remove([fileName]);
+      console.log('✅ Existing one-pager deleted (if it existed)');
     } catch (deleteError) {
       // Ignore error if file doesn't exist - that's fine, we'll upload new one
-      console.log('No existing one-pager to delete (or already deleted)');
+      console.log('ℹ️ No existing one-pager to delete (or already deleted)');
     }
     
     // Upload new PDF with upsert to replace any existing file
@@ -1535,6 +1597,15 @@ class CapTableService {
       });
 
     if (error) {
+      console.error('❌ Error uploading one-pager PDF:', error);
+      console.error('❌ Upload error details:', {
+        message: error.message,
+        statusCode: error.statusCode,
+        error: error.error,
+        fileName,
+        startupId
+      });
+      
       // If upload fails, try without upsert as fallback
       const { data: retryData, error: retryError } = await supabase.storage
         .from('pitch-decks')
@@ -1542,7 +1613,20 @@ class CapTableService {
           cacheControl: '3600',
         });
       
-      if (retryError) throw retryError;
+      if (retryError) {
+        console.error('❌ Retry upload also failed:', retryError);
+        
+        // Provide more helpful error messages
+        if (retryError.message?.includes('permission denied') || retryError.message?.includes('policy') || retryError.statusCode === 403) {
+          throw new Error(`Permission denied: Unable to upload one-pager PDF. This may be due to storage policy restrictions. Please check that your startup is properly linked to your account. Error: ${retryError.message}`);
+        }
+        
+        throw new Error(`Failed to upload one-pager PDF: ${retryError.message}`);
+      }
+      
+      console.log('✅ One-pager PDF uploaded successfully on retry:', retryData?.path);
+    } else {
+      console.log('✅ One-pager PDF uploaded successfully:', data.path);
     }
 
     // Get the public URL (same URL every time since filename is consistent)

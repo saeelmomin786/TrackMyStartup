@@ -1550,13 +1550,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
     // Find startups whose users have entered the investment advisor code but haven't been accepted
     const pendingStartups = startups.filter(startup => {
-      // Find the user who owns this startup
+      // CRITICAL FIX: For new registrations, user.id is profile ID, but startup.user_id is auth_user_id
+      // Check both user.id (old registrations) and user.auth_user_id (new registrations)
       const startupUser = users.find(user => 
         user.role === 'Startup' && 
-        user.id === startup.user_id
+        (user.id === startup.user_id || (user as any).auth_user_id === startup.user_id)
       );
       
       if (!startupUser) {
+        console.log('🔍 Service Requests: No matching user found for startup:', {
+          startupId: startup.id,
+          startupName: startup.name,
+          startupUserId: startup.user_id,
+          totalUsers: users.length,
+          usersWithStartupRole: users.filter(u => u.role === 'Startup').length
+        });
         return false;
       }
 
@@ -1571,6 +1579,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       // Check if this user has entered the investment advisor code
       const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
       const isNotAccepted = !(startupUser as any).advisor_accepted;
+
+      console.log('🔍 Service Requests: Startup check:', {
+        startupId: startup.id,
+        startupName: startup.name,
+        userId: startupUser.id,
+        enteredCode,
+        advisorCode,
+        hasEnteredCode,
+        isNotAccepted,
+        shouldInclude: hasEnteredCode && isNotAccepted
+      });
 
       return hasEnteredCode && isNotAccepted;
     });
@@ -1603,6 +1622,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
       const isNotAccepted = !(user as any).advisor_accepted;
+
+      console.log('🔍 Service Requests: Investor check:', {
+        userId: user.id,
+        userName: user.name,
+        enteredCode,
+        advisorCode,
+        hasEnteredCode,
+        isNotAccepted,
+        shouldInclude: hasEnteredCode && isNotAccepted
+      });
 
       return hasEnteredCode && isNotAccepted;
     });

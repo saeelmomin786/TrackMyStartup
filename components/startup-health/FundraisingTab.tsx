@@ -744,8 +744,32 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       messageService.success('Fundraising updated', 'Your fundraising round has been saved.', 3000);
       }
     } catch (e: any) {
-      console.error('Error saving fundraising details:', e);
-      setError(e?.message || 'Failed to save fundraising details');
+      console.error('❌ Error saving fundraising details:', e);
+      console.error('❌ Error details:', {
+        message: e?.message,
+        code: e?.code,
+        details: e?.details,
+        hint: e?.hint,
+        startupId: startup.id,
+        error: e
+      });
+      
+      // Provide more helpful error messages
+      let errorMessage = 'Failed to save fundraising details';
+      if (e?.message) {
+        errorMessage = e.message;
+        // Check for RLS policy errors
+        if (e.message.includes('permission denied') || e.message.includes('policy') || e.code === '42501') {
+          errorMessage = 'Permission denied: Unable to save fundraising details. This may be due to authentication issues. Please try logging out and back in, or contact support if the problem persists.';
+        }
+      }
+      
+      setError(errorMessage);
+      messageService.error(
+        'Save Failed',
+        errorMessage,
+        5000
+      );
     } finally {
       setIsSaving(false);
     }

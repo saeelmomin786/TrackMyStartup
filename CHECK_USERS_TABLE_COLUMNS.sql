@@ -1,208 +1,86 @@
 -- =====================================================
--- CHECK USERS TABLE COLUMNS
+-- CHECK IF users TABLE HAS ADVISOR ACCEPTANCE COLUMNS
 -- =====================================================
--- Run this first to see what columns actually exist in your users table
--- Then we'll update the migration script based on the results
+-- This will show what columns exist in the users table
 -- =====================================================
 
--- Get all columns in users table
+-- Check if advisor acceptance columns exist in users table
 SELECT 
+    'users table columns' as table_name,
     column_name,
     data_type,
     is_nullable,
-    column_default,
-    ordinal_position
+    column_default
 FROM information_schema.columns 
-WHERE table_schema = 'public' 
-  AND table_name = 'users'
-ORDER BY ordinal_position;
+WHERE table_schema = 'public'
+  AND table_name = 'users' 
+  AND column_name IN (
+    'advisor_accepted', 
+    'advisor_accepted_date', 
+    'minimum_investment', 
+    'maximum_investment', 
+    'investment_stage', 
+    'success_fee', 
+    'success_fee_type', 
+    'scouting_fee'
+  )
+ORDER BY column_name;
 
--- Check for specific columns that we need for migration
+-- Check if advisor acceptance columns exist in user_profiles table
 SELECT 
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'startup_name'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as startup_name,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'center_name'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as center_name,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'firm_name'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as firm_name,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'investor_code'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as investor_code,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'investment_advisor_code'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as investment_advisor_code,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'investment_advisor_code_entered'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as investment_advisor_code_entered,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'ca_code'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as ca_code,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'cs_code'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as cs_code,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'phone'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as phone,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'address'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as address,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'city'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as city,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'state'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as state,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'country'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as country,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'company'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as company,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'company_type'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as company_type,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'currency'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as currency,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'government_id'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as government_id,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'ca_license'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as ca_license,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'cs_license'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as cs_license,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'verification_documents'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as verification_documents,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'profile_photo_url'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as profile_photo_url,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'logo_url'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as logo_url,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'proof_of_business_url'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as proof_of_business_url,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'financial_advisor_license_url'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as financial_advisor_license_url,
-    
-    CASE WHEN EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-          AND table_name = 'users' 
-          AND column_name = 'is_profile_complete'
-    ) THEN 'EXISTS' ELSE 'MISSING' END as is_profile_complete;
+    'user_profiles table columns' as table_name,
+    column_name,
+    data_type,
+    is_nullable,
+    column_default
+FROM information_schema.columns 
+WHERE table_schema = 'public'
+  AND table_name = 'user_profiles' 
+  AND column_name IN (
+    'advisor_accepted', 
+    'advisor_accepted_date', 
+    'minimum_investment', 
+    'maximum_investment', 
+    'investment_stage', 
+    'success_fee', 
+    'success_fee_type', 
+    'scouting_fee'
+  )
+ORDER BY column_name;
 
--- Show sample data structure (first row only, no sensitive data)
+-- Summary: Compare what exists in both tables
 SELECT 
-    id,
-    email,
-    name,
-    role,
-    registration_date,
-    created_at,
-    updated_at
-FROM public.users 
-LIMIT 1;
-
+    'Summary' as check_type,
+    'users table' as table_name,
+    COUNT(*) as columns_found
+FROM information_schema.columns 
+WHERE table_schema = 'public'
+  AND table_name = 'users' 
+  AND column_name IN (
+    'advisor_accepted', 
+    'advisor_accepted_date', 
+    'minimum_investment', 
+    'maximum_investment', 
+    'investment_stage', 
+    'success_fee', 
+    'success_fee_type', 
+    'scouting_fee'
+  )
+UNION ALL
+SELECT 
+    'Summary',
+    'user_profiles table',
+    COUNT(*)
+FROM information_schema.columns 
+WHERE table_schema = 'public'
+  AND table_name = 'user_profiles' 
+  AND column_name IN (
+    'advisor_accepted', 
+    'advisor_accepted_date', 
+    'minimum_investment', 
+    'maximum_investment', 
+    'investment_stage', 
+    'success_fee', 
+    'success_fee_type', 
+    'scouting_fee'
+  );

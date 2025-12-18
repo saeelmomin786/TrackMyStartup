@@ -32,6 +32,7 @@ import PublicProgramView from './components/PublicProgramView';
 import PublicAdminProgramView from './components/PublicAdminProgramView';
 import PublicStartupPage from './components/PublicStartupPage';
 import PublicInvestorPage from './components/PublicInvestorPage';
+import PublicMentorPage from './components/PublicMentorPage';
 import PublicAdvisorPage from './components/PublicAdvisorPage';
 import ExploreProfilesPage from './components/ExploreProfilesPage';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
@@ -62,6 +63,8 @@ const App: React.FC = () => {
   const isPublicInvestorPage = getQueryParam('view') === 'investor' && (getQueryParam('investorId') || getQueryParam('userId'));
   // Check if we're on a public investment advisor page
   const isPublicAdvisorPage = getQueryParam('view') === 'advisor' && (getQueryParam('advisorId') || getQueryParam('userId'));
+  // Check if we're on a public mentor page
+  const isPublicMentorPage = getQueryParam('view') === 'mentor' && (getQueryParam('mentorId') || getQueryParam('userId'));
   // Check if we're on explore profiles page
   const isExploreProfilesPage = getQueryParam('view') === 'explore' && getQueryParam('role');
   
@@ -277,6 +280,7 @@ const App: React.FC = () => {
   const [ignoreAuthEvents, setIgnoreAuthEvents] = useState(false);
   const ignoreAuthEventsRef = useRef(false);
   const [showAddProfileModal, setShowAddProfileModal] = useState(false);
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
   // Refresh user data when accessing payment page to ensure Form 2 completion is checked with latest data
   useEffect(() => {
@@ -3006,6 +3010,9 @@ const App: React.FC = () => {
   if (isPublicAdvisorPage) {
     return <PublicAdvisorPage />;
   }
+  if (isPublicMentorPage) {
+    return <PublicMentorPage />;
+  }
   if (isExploreProfilesPage) {
     return <ExploreProfilesPage />;
   }
@@ -3447,10 +3454,10 @@ const App: React.FC = () => {
     return (
       <>
         <MessageContainer />
-        <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
+        <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col overflow-x-hidden">
         <header className="bg-white shadow-sm sticky top-0 z-50">
-          <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-2 flex justify-between items-center">
-            <div className="flex items-center gap-2">
+          <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
               {/* Show investment advisor logo if user is an Investment Advisor OR has an assigned investment advisor */}
               {(() => {
                 const isInvestmentAdvisor = currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url;
@@ -3477,36 +3484,39 @@ const App: React.FC = () => {
                           ? (currentUser as any).logo_url 
                           : assignedInvestmentAdvisor?.logo_url} 
                         alt="Company Logo" 
-                        className="h-24 w-24 sm:h-28 sm:w-28 rounded object-contain bg-white border border-gray-200 p-1"
+                        className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded object-contain bg-white border border-gray-200 p-1"
                         onError={(e) => {
                           // Fallback to TrackMyStartup logo if image fails to load
                           e.currentTarget.style.display = 'none';
                           e.currentTarget.nextElementSibling?.classList.remove('hidden');
                         }}
                       />
-                      <img src={LogoTMS} alt="TrackMyStartup" className="h-24 w-24 sm:h-28 sm:w-28 object-contain hidden" />
+                      <img src={LogoTMS} alt="TrackMyStartup" className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 object-contain hidden" />
                     </>
                   ) : (
-                    <div className="h-24 w-24 sm:h-28 sm:w-28 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
-                      <span className="text-purple-600 font-semibold text-base sm:text-lg">IA</span>
+                    <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
+                      <span className="text-purple-600 font-semibold text-sm sm:text-base md:text-lg">IA</span>
                     </div>
                   )}
-                  <div>
-                    <h1 className="text-lg font-semibold text-gray-800">
+                  <div className="min-w-0">
+                    <h1 className="text-sm sm:text-lg font-semibold text-gray-800 truncate">
                       {currentUser?.role === 'Investment Advisor' 
                         ? (currentUser as any).firm_name || (currentUser as any).name || 'Investment Advisor'
                         : assignedInvestmentAdvisor?.firm_name || assignedInvestmentAdvisor?.name || 'Investment Advisor'}
                     </h1>
-                    <p className="text-xs text-blue-600">Supported by Track My Startup</p>
+                    <p className="text-[10px] sm:text-xs text-blue-600 truncate">
+                      Supported by Track My Startup
+                    </p>
                   </div>
                 </div>
               ) : (
-                <img src={LogoTMS} alt="TrackMyStartup" className="h-24 w-24 sm:h-28 sm:w-28 object-contain" />
+                <img src={LogoTMS} alt="TrackMyStartup" className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 object-contain" />
               )}
             </div>
-             <div className="flex items-center gap-3">
+             {/* Desktop header actions */}
+             <div className="hidden sm:flex flex-wrap items-center justify-end gap-2 sm:gap-3 w-full sm:w-auto">
               {currentUser?.role === 'Investor' && (
-                  <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
+                  <div className="text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
                       Investor Code: <span className="font-semibold text-brand-primary">
                           {currentUser.investor_code || currentUser.investorCode || 'Not Set'}
                       </span>
@@ -3524,7 +3534,7 @@ const App: React.FC = () => {
               )}
 
               {currentUser?.role === 'Investment Advisor' && (
-                  <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
+                  <div className="text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
                       Advisor Code: <span className="font-semibold text-brand-primary">
                           {(currentUser as any)?.investment_advisor_code || 'IA-XXXXXX'}
                       </span>
@@ -3532,7 +3542,7 @@ const App: React.FC = () => {
               )}
 
               {currentUser?.role === 'Mentor' && (
-                  <div className="hidden sm:block text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
+                  <div className="text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-mono">
                       Mentor Code: <span className="font-semibold text-brand-primary">
                           {(currentUser as any)?.mentor_code || 'MEN-XXXXXX'}
                       </span>
@@ -3540,7 +3550,7 @@ const App: React.FC = () => {
               )}
 
               {(currentUser?.role === 'Investor' || currentUser?.role === 'Startup') && currentUser?.investment_advisor_code_entered && (
-                  <div className="hidden sm:block text-sm text-slate-500 bg-purple-100 px-3 py-1.5 rounded-md font-mono">
+                  <div className="text-sm text-slate-500 bg-purple-100 px-3 py-1.5 rounded-md font-mono">
                       Advisor: <span className="font-semibold text-purple-800">
                           {currentUser.investment_advisor_code_entered}
                       </span>
@@ -3638,18 +3648,174 @@ const App: React.FC = () => {
                     title="Add New Profile"
                   >
                     <UserPlus className="h-4 w-4" />
-                    <span className="hidden sm:inline">Add Profile</span>
+                    <span>Add Profile</span>
                   </button>
                 </>
               )}
 
-              <button onClick={handleLogout} className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors">
-                  <LogOut className="h-4 w-4" />
-                  Logout
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
               </button>
+             </div>
+
+             {/* Mobile header actions */}
+             <div className="flex sm:hidden items-center justify-end gap-1 w-full">
+               {isAuthenticated && currentUser && (
+                 <button
+                   onClick={() => setIsHeaderMenuOpen(prev => !prev)}
+                   className="flex-1 max-w-[65%] flex items-center justify-center gap-1 text-xs font-medium text-slate-600 hover:text-brand-primary transition-colors px-2 py-1 rounded-md hover:bg-slate-50 border border-slate-200"
+                 >
+                   <BarChart3 className="h-3 w-3" />
+                   <span className="truncate">Profile & Codes</span>
+                 </button>
+               )}
+               <button
+                 onClick={handleLogout}
+                 className="flex items-center justify-center gap-1 text-xs font-medium text-slate-600 hover:text-brand-primary transition-colors px-2 py-1 rounded-md hover:bg-slate-50 border border-slate-200"
+               >
+                 <LogOut className="h-3 w-3" />
+                 <span>Logout</span>
+               </button>
              </div>
           </div>
         </header>
+        {/* Mobile header dropdown */}
+        {isHeaderMenuOpen && isAuthenticated && currentUser && (
+          <div className="sm:hidden border-b border-slate-200 bg-white">
+            <div className="container mx-auto px-3 py-3 space-y-3">
+              <div className="flex flex-col gap-2">
+                {currentUser?.role === 'Investor' && (
+                  <div className="text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-md font-mono flex justify-between">
+                    <span>Investor Code</span>
+                    <span className="font-semibold text-brand-primary">
+                      {currentUser.investor_code || currentUser.investorCode || 'Not Set'}
+                    </span>
+                  </div>
+                )}
+
+                {currentUser?.role === 'Startup Facilitation Center' && (
+                  <FacilitatorCodeDisplay 
+                    className="bg-blue-50 text-blue-800 px-3 py-1.5 rounded-md text-xs font-medium w-full flex justify-between"
+                    currentUser={currentUser}
+                  />
+                )}
+
+                {currentUser?.role === 'Investment Advisor' && (
+                  <div className="text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-md font-mono flex justify-between">
+                    <span>Advisor Code</span>
+                    <span className="font-semibold text-brand-primary">
+                      {(currentUser as any)?.investment_advisor_code || 'IA-XXXXXX'}
+                    </span>
+                  </div>
+                )}
+
+                {currentUser?.role === 'Mentor' && (
+                  <div className="text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-md font-mono flex justify-between">
+                    <span>Mentor Code</span>
+                    <span className="font-semibold text-brand-primary">
+                      {(currentUser as any)?.mentor_code || 'MEN-XXXXXX'}
+                    </span>
+                  </div>
+                )}
+
+                {(currentUser?.role === 'Investor' || currentUser?.role === 'Startup') &&
+                  currentUser?.investment_advisor_code_entered && (
+                  <div className="text-xs text-slate-500 bg-purple-50 px-3 py-1.5 rounded-md font-mono flex justify-between">
+                    <span>Advisor</span>
+                    <span className="font-semibold text-purple-800">
+                      {currentUser.investment_advisor_code_entered}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-200 pt-3 space-y-2">
+                {/* Profile switcher */}
+                <div className="w-full">
+                  <ProfileSwitcher
+                    currentProfileId={currentUser.id}
+                    onProfileSwitch={async (profile) => {
+                      console.log('🔄 Profile switched to (mobile menu):', profile.role, profile.id);
+                      
+                      try {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        
+                        let refreshedUser = null;
+                        for (let attempt = 1; attempt <= 3; attempt++) {
+                          refreshedUser = await authService.getCurrentUser();
+                          console.log(`🔄 Attempt ${attempt} (mobile):`, refreshedUser?.role, refreshedUser?.id, 'Expected:', profile.role, profile.id);
+                          
+                          if (refreshedUser && refreshedUser.id === profile.id) {
+                            console.log('✅ Got correct profile (mobile)!');
+                            break;
+                          }
+                          
+                          if (attempt < 3) {
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                          }
+                        }
+                        
+                        if (!refreshedUser) {
+                          console.error('❌ Could not get refreshed user after switch (mobile)');
+                          alert('Failed to load profile. Please refresh the page.');
+                          window.location.reload();
+                          return;
+                        }
+                        
+                        if (refreshedUser.id !== profile.id) {
+                          console.warn('⚠️ Profile ID mismatch (mobile)! Expected:', profile.id, 'Got:', refreshedUser.id);
+                        }
+                        
+                        setSelectedStartup(null);
+                        selectedStartupRef.current = null;
+                        
+                        setCurrentUser(refreshedUser);
+                        
+                        const isComplete = await authService.isProfileComplete(refreshedUser.id);
+                        console.log('🔄 Profile complete status (mobile):', isComplete, 'for role:', refreshedUser.role);
+                        
+                        if (!isComplete) {
+                          setCurrentPage('complete-registration');
+                          setHasInitialDataLoaded(false);
+                          setIsLoading(false);
+                          setViewKey(prev => prev + 1);
+                          setIsHeaderMenuOpen(false);
+                          return;
+                        }
+                        
+                        setHasInitialDataLoaded(false);
+                        setView('dashboard');
+                        setViewKey(prev => prev + 1);
+                        fetchData(true);
+                        setIsHeaderMenuOpen(false);
+                      } catch (error) {
+                        console.error('❌ Error switching profile (mobile):', error);
+                        alert('Failed to switch profile. Please refresh the page.');
+                        window.location.reload();
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* Add profile */}
+                <button
+                  onClick={() => {
+                    setShowAddProfileModal(true);
+                    setIsHeaderMenuOpen(false);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 text-sm font-medium text-slate-600 hover:text-brand-primary transition-colors px-3 py-2 rounded-md hover:bg-slate-50 border border-slate-200"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span>Add Profile</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* Error Display */}
         {error && (

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AuthUser, User, Startup, InvestmentType, ComplianceStatus } from '../types';
+import { User, Startup, InvestmentType, ComplianceStatus } from '../types';
 import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
+import { AuthUser } from '../lib/auth';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { mentorService, MentorMetrics, MentorRequest, MentorAssignment } from '../lib/mentorService';
 import { supabase } from '../lib/supabase';
@@ -241,6 +242,13 @@ const MentorView: React.FC<MentorViewProps> = ({
     }
   };
 
+  const openStartupPublicPage = (startupId: number) => {
+    const url = new URL(window.location.origin + window.location.pathname);
+    url.searchParams.set('view', 'startup');
+    url.searchParams.set('startupId', String(startupId));
+    window.open(url.toString(), '_blank');
+  };
+
   const handleBack = () => {
     setSelectedStartup(null);
   };
@@ -401,9 +409,9 @@ ${mentorName}`;
       {/* Header */}
       <div className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">Mentor Dashboard</h1>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Mentor Dashboard</h1>
               <p className="text-sm text-slate-600 mt-1">Welcome back, {currentUser?.name || 'Mentor'}</p>
               {currentUser?.mentor_code && (
                 <div className="mt-2 flex items-center gap-2">
@@ -433,6 +441,7 @@ ${mentorName}`;
             <Button
               variant="outline"
               onClick={() => setShowProfilePage(true)}
+              className="w-full sm:w-auto"
             >
               Profile
             </Button>
@@ -443,10 +452,10 @@ ${mentorName}`;
       {/* Tabs */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8">
+          <div className="flex overflow-x-auto space-x-4 sm:space-x-8 -mb-px">
             <button
               onClick={() => setActiveTab('dashboard')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
+              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center whitespace-nowrap ${
                 activeTab === 'dashboard'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -457,7 +466,7 @@ ${mentorName}`;
             </button>
             <button
               onClick={() => setActiveTab('discover')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
+              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center whitespace-nowrap ${
                 activeTab === 'discover'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -468,7 +477,7 @@ ${mentorName}`;
             </button>
             <button
               onClick={() => setActiveTab('portfolio')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
+              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center whitespace-nowrap ${
                 activeTab === 'portfolio'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -479,7 +488,7 @@ ${mentorName}`;
             </button>
             <button
               onClick={() => setActiveTab('collaboration')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center relative ${
+              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center relative whitespace-nowrap ${
                 activeTab === 'collaboration'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -692,17 +701,17 @@ ${mentorName}`;
                                         size="sm" 
                                         variant="outline"
                                         className="border-blue-300 text-blue-600 hover:bg-blue-50"
-                                        onClick={() => handleViewStartup(requestStartup)}
+                                        onClick={() => openStartupPublicPage(requestStartup.id)}
                                       >
                                         <Eye className="mr-1 h-3 w-3" /> View Startup
                                       </Button>
                                     )}
-                                    {request.startup_id && !requestStartup && onViewStartup && (
+                                    {request.startup_id && !requestStartup && (
                                       <Button 
                                         size="sm" 
                                         variant="outline"
                                         className="border-blue-300 text-blue-600 hover:bg-blue-50"
-                                        onClick={() => onViewStartup(request.startup_id!)}
+                                        onClick={() => openStartupPublicPage(request.startup_id!)}
                                       >
                                         <Eye className="mr-1 h-3 w-3" /> View Startup
                                       </Button>
@@ -1576,6 +1585,9 @@ ${mentorName}`;
                   <MentorCard
                     mentor={{
                       ...previewProfile,
+                      startupsMentoring: mentorMetrics?.startupsMentoring ?? 0,
+                      startupsMentoredPreviously: mentorMetrics?.startupsMentoredPreviously ?? 0,
+                      verifiedStartupsMentored: mentorMetrics?.verifiedStartupsMentored ?? 0,
                       user: {
                         name: currentUser.name || currentUser.email?.split('@')[0],
                         email: currentUser.email
@@ -1686,12 +1698,11 @@ ${mentorName}`;
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                // Navigate to explore users of this role type
+                                // Navigate to explore users of this role type in same tab
                                 const baseUrl = window.location.origin + window.location.pathname;
                                 const url = new URL(baseUrl);
-                                // Clear any existing query parameters
                                 url.search = '';
-                                
+
                                 if (profileType.role === 'Investor') {
                                   url.searchParams.set('view', 'explore');
                                   url.searchParams.set('role', 'Investor');
@@ -1705,13 +1716,8 @@ ${mentorName}`;
                                   url.searchParams.set('view', 'explore');
                                   url.searchParams.set('role', profileType.role);
                                 }
-                                
-                                // Open in new tab
-                                const newWindow = window.open(url.toString(), '_blank');
-                                if (!newWindow) {
-                                  // If popup blocked, fallback to same window
-                                  window.location.href = url.toString();
-                                }
+
+                                window.location.href = url.toString();
                               }}
                             >
                               <Eye className="h-3 w-3 mr-2" />

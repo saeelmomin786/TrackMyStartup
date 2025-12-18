@@ -3,7 +3,7 @@ import { Startup, FundraisingDetails, InvestmentRecord, UserRole, Founder, Compl
 import { AuthUser } from '../lib/auth';
 import Button from './ui/Button';
 import Card from './ui/Card';
-import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench } from 'lucide-react';
+import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench, DollarSign, Briefcase, FileText, Shield, Eye, Search } from 'lucide-react';
 import { investmentService } from '../lib/database';
 
 import StartupDashboardTab from './startup-health/StartupDashboardTab';
@@ -64,6 +64,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [showAccountPage, setShowAccountPage] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
+    const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>('explore');
     
     // Update currentStartup when startup prop changes (important for facilitator access)
     useEffect(() => {
@@ -294,20 +295,144 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                 );
             case 'services':
                 return (
-                  <Card className="p-4 sm:p-6">
-                    <h2 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">
-                      Services
-                    </h2>
-                    <p className="text-sm text-slate-600">
-                      English: This section will list additional services and tools available for your startup (CA/CS, advisory, compliance support, and more).
-                    </p>
-                    <p className="text-sm text-slate-600 mt-1">
-                      हिन्दी: यहाँ आपकी startup के लिए उपलब्ध extra services और tools (CA/CS, advisory, compliance support आदि) दिखाए जाएँगे।
-                    </p>
-                    <p className="text-sm text-slate-600 mt-1">
-                      मराठी: इथे तुमच्या startup साठी उपलब्ध अतिरिक्त services आणि tools (CA/CS, advisory, compliance support वगैरे) दाखवले जातील.
-                    </p>
-                  </Card>
+                  <div className="space-y-6 animate-fade-in">
+                    <Card className="p-4 sm:p-6">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                        <div>
+                          <h2 className="text-lg sm:text-xl font-semibold text-slate-900">
+                            Services
+                          </h2>
+                          <p className="text-sm text-slate-600 mt-1">
+                            Discover and manage services for your startup – mentors, advisors, CA/CS, and incubation support.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Services sub-tabs */}
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        <Button
+                          size="sm"
+                          variant={servicesSubTab === 'explore' ? 'primary' : 'outline'}
+                          onClick={() => setServicesSubTab('explore')}
+                        >
+                          <Search className="h-4 w-4 mr-2" />
+                          Explore
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={servicesSubTab === 'requested' ? 'primary' : 'outline'}
+                          onClick={() => setServicesSubTab('requested')}
+                        >
+                          <Bell className="h-4 w-4 mr-2" />
+                          Requested
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={servicesSubTab === 'my-services' ? 'primary' : 'outline'}
+                          onClick={() => setServicesSubTab('my-services')}
+                        >
+                          <Users className="h-4 w-4 mr-2" />
+                          My Services
+                        </Button>
+                      </div>
+
+                      {servicesSubTab === 'explore' && (
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-base sm:text-lg font-semibold text-slate-900 mb-2">
+                              Explore Service Providers
+                            </h3>
+                            <p className="text-sm text-slate-600">
+                              Browse different types of collaborators and open their profiles in a new tab to connect.
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                            {[
+                              { role: 'Investor', icon: DollarSign, color: 'bg-blue-100 text-blue-700 hover:bg-blue-200', description: 'Connect with investors' },
+                              { role: 'Investment Advisor', icon: Briefcase, color: 'bg-purple-100 text-purple-700 hover:bg-purple-200', description: 'Connect with investment advisors' },
+                              { role: 'Mentor', icon: Users, color: 'bg-green-100 text-green-700 hover:bg-green-200', description: 'Connect with mentors' },
+                              { role: 'CA', icon: FileText, color: 'bg-orange-100 text-orange-700 hover:bg-orange-200', description: 'Connect with Chartered Accountants' },
+                              { role: 'CS', icon: Shield, color: 'bg-pink-100 text-pink-700 hover:bg-pink-200', description: 'Connect with Company Secretaries' },
+                              { role: 'Incubation', icon: Building2, color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200', description: 'Connect with incubation centers' },
+                            ].map((profileType) => {
+                              const IconComponent = profileType.icon;
+                              return (
+                                <Card
+                                  key={profileType.role}
+                                  className="p-5 hover:shadow-lg transition-all duration-200 border border-slate-200 text-center"
+                                >
+                                  <div className="flex flex-col items-center">
+                                    <div className={`w-14 h-14 rounded-full ${profileType.color} flex items-center justify-center mb-3 transition-colors`}>
+                                      <IconComponent className="h-7 w-7" />
+                                    </div>
+                                    <h4 className="text-sm sm:text-base font-semibold text-slate-900 mb-1">
+                                      {profileType.role}
+                                    </h4>
+                                    <p className="text-xs sm:text-sm text-slate-600 mb-3">
+                                      {profileType.description}
+                                    </p>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="w-full"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        const baseUrl = window.location.origin + window.location.pathname;
+                                        const url = new URL(baseUrl);
+                                        url.search = '';
+
+                                        if (profileType.role === 'Investor') {
+                                          url.searchParams.set('view', 'explore');
+                                          url.searchParams.set('role', 'Investor');
+                                        } else if (profileType.role === 'Investment Advisor') {
+                                          url.searchParams.set('view', 'advisor');
+                                          url.searchParams.set('role', 'Investment Advisor');
+                                        } else if (profileType.role === 'Incubation') {
+                                          url.searchParams.set('view', 'explore');
+                                          url.searchParams.set('role', 'Startup Facilitation Center');
+                                        } else {
+                                          url.searchParams.set('view', 'explore');
+                                          url.searchParams.set('role', profileType.role);
+                                        }
+
+                                        window.location.href = url.toString();
+                                      }}
+                                    >
+                                      <Eye className="h-3 w-3 mr-2" />
+                                      Explore
+                                    </Button>
+                                  </div>
+                                </Card>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {servicesSubTab === 'requested' && (
+                        <div className="text-center py-8 text-slate-600">
+                          <p className="text-sm">
+                            Your pending service requests (to mentors, advisors, CA/CS, incubation, etc.) will appear here.
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            This will show all connections you have requested from the Explore pages.
+                          </p>
+                        </div>
+                      )}
+
+                      {servicesSubTab === 'my-services' && (
+                        <div className="text-center py-8 text-slate-600">
+                          <p className="text-sm">
+                            Accepted services and ongoing relationships will appear here.
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Use this section to track active advisors, mentors, and other service providers.
+                          </p>
+                        </div>
+                      )}
+                    </Card>
+                  </div>
                 );
             default:
                 return null;

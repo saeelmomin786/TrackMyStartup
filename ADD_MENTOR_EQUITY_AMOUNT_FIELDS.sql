@@ -21,3 +21,5 @@ COMMENT ON COLUMN public.mentor_profiles.equity_amount_max IS 'Maximum equity am
 
 
 
+
+

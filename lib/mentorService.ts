@@ -45,6 +45,7 @@ export interface MentorMetrics {
   requestsReceived: number;
   startupsMentoring: number;
   startupsMentoredPreviously: number;
+  verifiedStartupsMentored: number; // Only startups that are registered users on TMS
   startupsFounded: number;
   totalEarningsFees: number;
   totalEarningsESOP: number;
@@ -58,17 +59,28 @@ class MentorService {
   // Get all metrics for a mentor
   async getMentorMetrics(mentorId: string): Promise<MentorMetrics> {
     try {
+      // Get actual auth user ID (mentorId might be profile ID)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const actualMentorId = authUser?.id || mentorId;
+      
+      if (mentorId !== actualMentorId) {
+        console.warn('⚠️ getMentorMetrics: mentorId mismatch - using auth.uid() instead:', {
+          providedMentorId: mentorId,
+          authUserId: actualMentorId
+        });
+      }
+      
       // Get active assignments (gracefully handle if table doesn't exist)
       let activeAssignments: any[] = [];
       try {
-        console.log('🔍 Fetching active assignments for mentor_id:', mentorId);
+        console.log('🔍 Fetching active assignments for mentor_id:', actualMentorId);
         const { data, error } = await supabase
           .from('mentor_startup_assignments')
           .select(`
             *,
             startups (*)
           `)
-          .eq('mentor_id', mentorId)
+          .eq('mentor_id', actualMentorId)
           .eq('status', 'active')
           .order('assigned_at', { ascending: false });
 
@@ -89,7 +101,7 @@ class MentorService {
               const { data: acceptedRequests } = await supabase
                 .from('mentor_requests')
                 .select('startup_id')
-                .eq('mentor_id', mentorId)
+                .eq('mentor_id', actualMentorId)
                 .eq('status', 'accepted')
                 .in('startup_id', startupIds);
               
@@ -132,7 +144,7 @@ class MentorService {
             *,
             startups (*)
           `)
-          .eq('mentor_id', mentorId)
+          .eq('mentor_id', actualMentorId)
           .eq('status', 'completed')
           .order('completed_at', { ascending: false });
 
@@ -149,12 +161,12 @@ class MentorService {
       let requests: any[] = [];
       let allRequests: any[] = [];
       try {
-        console.log('🔍 Fetching mentor requests for mentor_id:', mentorId);
+        console.log('🔍 Fetching mentor requests for mentor_id:', actualMentorId);
         // First, get the basic request data
         const { data: requestsData, error: requestsError } = await supabase
           .from('mentor_requests')
           .select('*')
-          .eq('mentor_id', mentorId)
+          .eq('mentor_id', actualMentorId)
           .eq('status', 'pending')
           .order('requested_at', { ascending: false });
 
@@ -266,7 +278,7 @@ class MentorService {
         const { data: allRequestsData, error: allRequestsError } = await supabase
           .from('mentor_requests')
           .select('id, status')
-          .eq('mentor_id', mentorId);
+          .eq('mentor_id', actualMentorId);
 
         if (allRequestsError) {
           console.warn('Error fetching all requests:', allRequestsError);
@@ -293,7 +305,7 @@ class MentorService {
             *,
             startups (*)
           `)
-          .eq('mentor_id', mentorId)
+          .eq('mentor_id', actualMentorId)
           .order('founded_at', { ascending: false });
 
         if (error) {
@@ -339,10 +351,20 @@ class MentorService {
         } as MentorAssignment));
       };
 
+      // Calculate verified startups mentored (only those with user_id - registered users on TMS)
+      const verifiedActiveCount = activeAssignments.filter(a => 
+        a.startup_id && a.startups && a.startups.user_id
+      ).length;
+      const verifiedCompletedCount = completedAssignments.filter(a => 
+        a.startup_id && a.startups && a.startups.user_id
+      ).length;
+      const verifiedStartupsMentored = verifiedActiveCount + verifiedCompletedCount;
+
       return {
         requestsReceived: allRequests.filter(r => r.status === 'pending').length, // Only count pending requests
         startupsMentoring: activeAssignments.length,
         startupsMentoredPreviously: completedAssignments.length,
+        verifiedStartupsMentored: verifiedStartupsMentored,
         startupsFounded: foundedStartups.length,
         totalEarningsFees,
         totalEarningsESOP,
@@ -403,6 +425,7 @@ class MentorService {
         requestsReceived: 0,
         startupsMentoring: 0,
         startupsMentoredPreviously: 0,
+        verifiedStartupsMentored: 0,
         startupsFounded: 0,
         totalEarningsFees: 0,
         totalEarningsESOP: 0,
@@ -602,6 +625,178 @@ class MentorService {
       }).format(value);
     } catch (error) {
       return `${currency} ${value.toLocaleString()}`;
+    }
+  }
+
+  // =====================================================
+  // MENTOR PROFILE OPERATIONS
+  // =====================================================
+
+  /**
+   * Get mentor profile by user ID (uses auth.uid() for security)
+   */
+  async getMentorProfile(userId?: string): Promise<any | null> {
+    try {
+      // Get actual auth user ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        console.error('No authenticated user found');
+        return null;
+      }
+      
+      const actualUserId = userId || authUser.id;
+      
+      const { data, error } = await supabase
+        .from('mentor_profiles')
+        .select('*')
+        .eq('user_id', actualUserId)
+        .maybeSingle();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No profile found - this is okay
+          return null;
+        }
+        console.error('Error fetching mentor profile:', error);
+        throw error;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in getMentorProfile:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Save or update mentor profile
+   */
+  async saveMentorProfile(profileData: any): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      // Get actual auth user ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        return { success: false, error: 'Not authenticated' };
+      }
+
+      // Ensure user_id matches auth.uid() for security
+      const profileToSave = {
+        ...profileData,
+        user_id: authUser.id,
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('mentor_profiles')
+        .upsert(profileToSave, {
+          onConflict: 'user_id'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving mentor profile:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('Error in saveMentorProfile:', error);
+      return { success: false, error: error.message || 'Failed to save profile' };
+    }
+  }
+
+  /**
+   * Delete mentor profile
+   */
+  async deleteMentorProfile(): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Get actual auth user ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        return { success: false, error: 'Not authenticated' };
+      }
+
+      const { error } = await supabase
+        .from('mentor_profiles')
+        .delete()
+        .eq('user_id', authUser.id);
+
+      if (error) {
+        console.error('Error deleting mentor profile:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Error in deleteMentorProfile:', error);
+      return { success: false, error: error.message || 'Failed to delete profile' };
+    }
+  }
+
+  /**
+   * Get all public mentor profiles (for discovery)
+   */
+  async getAllMentorProfiles(filters?: {
+    mentor_type?: string;
+    sectors?: string[];
+    expertise_areas?: string[];
+    fee_type?: string;
+  }): Promise<any[]> {
+    try {
+      let query = supabase
+        .from('mentor_profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      // Apply filters
+      if (filters?.mentor_type) {
+        query = query.eq('mentor_type', filters.mentor_type);
+      }
+      if (filters?.fee_type) {
+        query = query.eq('fee_type', filters.fee_type);
+      }
+      if (filters?.sectors && filters.sectors.length > 0) {
+        query = query.contains('sectors', filters.sectors);
+      }
+      if (filters?.expertise_areas && filters.expertise_areas.length > 0) {
+        query = query.contains('expertise_areas', filters.expertise_areas);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error fetching mentor profiles:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getAllMentorProfiles:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Search mentor profiles
+   */
+  async searchMentorProfiles(searchTerm: string): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('mentor_profiles')
+        .select('*')
+        .or(`mentor_name.ilike.%${searchTerm}%,location.ilike.%${searchTerm}%,mentor_type.ilike.%${searchTerm}%`)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error searching mentor profiles:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in searchMentorProfiles:', error);
+      return [];
     }
   }
 }

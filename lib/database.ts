@@ -116,6 +116,7 @@ export const userService = {
         investment_advisor_code: profile.investment_advisor_code,
         investment_advisor_code_entered: profile.investment_advisor_code_entered,
         advisor_accepted: profile.advisor_accepted,
+        advisor_accepted_date: profile.advisor_accepted_date,
         logo_url: profile.logo_url,
         firm_name: profile.firm_name,
         startup_name: profile.startup_name,

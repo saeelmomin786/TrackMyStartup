@@ -129,6 +129,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [acceptedCollaborators, setAcceptedCollaborators] = useState<AdvisorConnectionRequest[]>([]);
   const [collaboratorProfiles, setCollaboratorProfiles] = useState<{[key: string]: any}>({});
 
+  // Track requests that have been locally rejected so they disappear immediately from the UI
+  // even before data is re-fetched from the backend
+  const [locallyRejectedRequestKeys, setLocallyRejectedRequestKeys] = useState<Set<string>>(new Set());
+
   // Mandate state
   const [mandates, setMandates] = useState<AdvisorMandate[]>([]);
   const [selectedMandateId, setSelectedMandateId] = useState<number | null>(null);
@@ -602,24 +606,82 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   };
 
   const handleRejectRequest = async (request: any) => {
-    if (request.type === 'startup') {
-      try {
-        await supabase
-          .from('users')
-          .update({ advisor_accepted: false })
-          .eq('id', request.user_id || request.id);
-      } catch (error) {
-        console.error('Error rejecting startup request', error);
+    try {
+      setIsLoading(true);
+
+      // For both startups and investors, use the underlying auth user id
+      const userId = request.user_id || request.id;
+      if (!userId) {
+        throw new Error('User ID not found for this request');
       }
-    } else if (request.type === 'investor') {
-      try {
-        await supabase
-          .from('users')
-          .update({ advisor_accepted: false })
-          .eq('id', request.id);
-      } catch (error) {
-        console.error('Error rejecting investor request', error);
+
+       // Optimistically remove from UI immediately
+       const localKey = `${request.type}:${request.id}`;
+       setLocallyRejectedRequestKeys(prev => {
+         const next = new Set(prev);
+         next.add(localKey);
+         return next;
+       });
+
+      const decisionTimestamp = new Date().toISOString();
+
+      // Update legacy `users` table (old registrations)
+      const { error: usersError } = await supabase
+        .from('users')
+        .update({
+          advisor_accepted: false,
+          advisor_accepted_date: decisionTimestamp
+        })
+        .eq('id', userId);
+
+      if (usersError) {
+        console.error('Error rejecting request in users table:', usersError);
       }
+
+      // Update `user_profiles` table (new registrations)
+      const { error: profilesError } = await supabase
+        .from('user_profiles')
+        .update({
+          advisor_accepted: false,
+          advisor_accepted_date: decisionTimestamp
+        })
+        .eq('auth_user_id', userId);
+
+      if (profilesError) {
+        console.error('Error rejecting request in user_profiles table:', profilesError);
+      }
+
+      // Add success notification
+      setNotifications(prev => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          message: `${request.type === 'investor' ? 'Investor' : 'Startup'} request rejected successfully!`,
+          type: 'success',
+          timestamp: new Date()
+        }
+      ]);
+
+    } catch (error) {
+      console.error('Error rejecting request:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+
+      setNotifications(prev => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          message: `Failed to reject request: ${errorMessage}`,
+          type: 'error',
+          timestamp: new Date()
+        }
+      ]);
+
+      // Auto-remove notification after 8 seconds for errors
+      setTimeout(() => {
+        setNotifications(prev => prev.slice(1));
+      }, 8000);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1578,7 +1640,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       // Check if this user has entered the investment advisor code
       const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
-      const isNotAccepted = !(startupUser as any).advisor_accepted;
+      const isAccepted = (startupUser as any).advisor_accepted === true;
+      const acceptedDate = (startupUser as any).advisor_accepted_date;
+      // Pending = has entered code, has NOT been accepted, and has no decision date yet
+      const isPending = !isAccepted && !acceptedDate;
 
       console.log('🔍 Service Requests: Startup check:', {
         startupId: startup.id,
@@ -1587,11 +1652,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         enteredCode,
         advisorCode,
         hasEnteredCode,
-        isNotAccepted,
-        shouldInclude: hasEnteredCode && isNotAccepted
+        isAccepted,
+        acceptedDate,
+        isPending,
+        shouldInclude: hasEnteredCode && isPending
       });
 
-      return hasEnteredCode && isNotAccepted;
+      return hasEnteredCode && isPending;
     });
 
     return pendingStartups;
@@ -1621,7 +1688,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
 
       const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
-      const isNotAccepted = !(user as any).advisor_accepted;
+      const isAccepted = (user as any).advisor_accepted === true;
+      const acceptedDate = (user as any).advisor_accepted_date;
+      // Pending = has entered code, has NOT been accepted, and has no decision date yet
+      const isPending = !isAccepted && !acceptedDate;
 
       console.log('🔍 Service Requests: Investor check:', {
         userId: user.id,
@@ -1629,11 +1699,13 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         enteredCode,
         advisorCode,
         hasEnteredCode,
-        isNotAccepted,
-        shouldInclude: hasEnteredCode && isNotAccepted
+        isAccepted,
+        acceptedDate,
+        isPending,
+        shouldInclude: hasEnteredCode && isPending
       });
 
-      return hasEnteredCode && isNotAccepted;
+      return hasEnteredCode && isPending;
     });
 
     return pendingInvestors;
@@ -4837,7 +4909,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      serviceRequests.map((request) => {
+                      serviceRequests
+                        .filter((request) => !locallyRejectedRequestKeys.has(`${request.type}:${request.id}`))
+                        .map((request) => {
                         const isStartup = request.type === 'startup';
                         const hasDueDiligence = isStartup && approvedDueDiligenceStartups.has(request.id);
                         const hasPendingDueDiligence = isStartup && dueDiligenceStartups.has(request.id) && !hasDueDiligence;

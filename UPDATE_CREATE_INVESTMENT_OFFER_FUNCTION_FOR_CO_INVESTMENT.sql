@@ -144,16 +144,37 @@ DECLARE
     initial_status TEXT := 'pending';
 BEGIN
     -- Get investor ID and check if investor has advisor
+    -- CRITICAL FIX: Support both old registrations (users table) and new registrations (user_profiles table)
+    -- Try user_profiles first (new multi-profile system)
     SELECT 
-        u.id,
-        COALESCE(u.investment_advisor_code, u.investment_advisor_code_entered) AS advisor_code,
+        up.auth_user_id,
+        COALESCE(up.investment_advisor_code, up.investment_advisor_code_entered) AS advisor_code,
         CASE 
-            WHEN u.investment_advisor_code IS NOT NULL OR u.investment_advisor_code_entered IS NOT NULL THEN TRUE
+            WHEN up.investment_advisor_code IS NOT NULL 
+                 OR up.investment_advisor_code_entered IS NOT NULL THEN TRUE
             ELSE FALSE
         END AS has_advisor
     INTO investor_id, investor_advisor_code, investor_has_advisor
-    FROM public.users u
-    WHERE u.email = p_investor_email;
+    FROM public.user_profiles up
+    WHERE up.email = p_investor_email
+      AND up.role = 'Investor'
+    LIMIT 1;
+    
+    -- Fallback: try users table for backward compatibility (old registrations)
+    IF investor_id IS NULL THEN
+        SELECT 
+            u.id,
+            COALESCE(u.investment_advisor_code, u.investment_advisor_code_entered) AS advisor_code,
+            CASE 
+                WHEN u.investment_advisor_code IS NOT NULL 
+                     OR u.investment_advisor_code_entered IS NOT NULL THEN TRUE
+                ELSE FALSE
+            END AS has_advisor
+        INTO investor_id, investor_advisor_code, investor_has_advisor
+        FROM public.users u
+        WHERE u.email = p_investor_email
+        LIMIT 1;
+    END IF;
     
     IF investor_id IS NULL THEN
         RAISE EXCEPTION 'Investor not found with email: %', p_investor_email;

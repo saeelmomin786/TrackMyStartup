@@ -2194,10 +2194,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   // Fetch offers made for this advisor
   const fetchOffersMade = async () => {
     if (!currentUser?.investment_advisor_code) {
+      console.log('⚠️ fetchOffersMade: No advisor code available');
       setOffersMade([]);
       return;
     }
     
+    console.log('🔄 fetchOffersMade: Starting fetch for advisor:', currentUser?.investment_advisor_code);
     setLoadingOffersMade(true);
     try {
       
@@ -2210,6 +2212,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       if (offersError) {
         console.error('Error fetching regular offers:', offersError);
+      } else {
+        console.log('✅ Fetched regular offers:', offersData?.length || 0, 'offers');
+        if (offersData && offersData.length > 0) {
+          console.log('📋 Offer stages:', offersData.map((o: any) => ({ id: o.id, stage: o.stage, startup_id: o.startup_id, startup_name: o.startup_name })));
+        }
       }
 
       // Also fetch co-investment offers that need investor advisor approval
@@ -2320,9 +2327,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
 
       // Fetch startup data with investment information and currency
-      const { data: startupsData, error: startupsError } = await supabase
-        .from('startups')
-        .select('id, name, investment_advisor_code, currency');
+      // Only fetch startups that are referenced in the offers
+      let startupsData: any[] = [];
+      let startupsError: any = null;
+      
+      if (startupIds.length > 0) {
+        const result = await supabase
+          .from('startups')
+          .select('id, name, investment_advisor_code, currency')
+          .in('id', startupIds); // Filter by startup IDs from offers
+        startupsData = result.data || [];
+        startupsError = result.error;
+      }
       
       // Fetch fundraising details for startups
       const { data: fundraisingData, error: fundraisingError } = await supabase
@@ -2332,6 +2348,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       if (startupsError) {
         console.error('Error fetching startups:', startupsError);
+      } else {
+        console.log('✅ Fetched startups:', startupsData.length, 'startups');
+        console.log('📋 Startup IDs:', startupIds);
+        console.log('📋 Fetched startup data:', startupsData.map((s: any) => ({ 
+          id: s.id, 
+          name: s.name, 
+          advisor_code: s.investment_advisor_code 
+        })));
       }
       
       if (fundraisingError) {
@@ -2441,7 +2465,23 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
 
         const investorHasThisAdvisor = investor.investment_advisor_code_entered === currentUser?.investment_advisor_code;
-        const startupHasThisAdvisor = startup.investment_advisor_code === currentUser?.investment_advisor_code;
+        // More robust comparison for startup advisor code (handle null/undefined/empty)
+        const startupHasThisAdvisor = startup.investment_advisor_code && 
+          currentUser?.investment_advisor_code &&
+          String(startup.investment_advisor_code).trim() === String(currentUser.investment_advisor_code).trim();
+        
+        // Debug logging for Stage 2 offers (startup advisor approval)
+        if (offer.stage === 2) {
+          console.log('🔍 Stage 2 offer check:', {
+            offer_id: offer.id,
+            startup_id: offer.startup_id,
+            startup_name: startup?.name,
+            startup_advisor_code: startup?.investment_advisor_code,
+            current_advisor_code: currentUser?.investment_advisor_code,
+            startupHasThisAdvisor,
+            startupFound: !!startup
+          });
+        }
         
         // Stage 1: Show if investor has this advisor (investor advisor approval needed)
         if (offer.stage === 1 && investorHasThisAdvisor) {
@@ -2450,6 +2490,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         
         // Stage 2: Show if startup has this advisor (startup advisor approval needed)
         if (offer.stage === 2 && startupHasThisAdvisor) {
+          console.log('✅ Stage 2 offer included:', offer.id);
           return true;
         }
         
@@ -2495,11 +2536,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       // Stage 1: Lead investor advisor approval needed
       const { data: coInvestmentStage1, error: coInvestmentStage1Error } = await supabase
         .from('co_investment_opportunities')
-        .select(`
-          *,
-          startup:startups!fk_startup_id(id, name, investment_advisor_code, currency),
-          listed_by_user:users!fk_listed_by_user_id(id, name, email, investment_advisor_code_entered)
-        `)
+        .select('*')
         .eq('status', 'active')
         .eq('stage', 1)
         .eq('lead_investor_advisor_approval_status', 'pending')
@@ -2512,11 +2549,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       // Stage 2: Startup advisor approval needed
       const { data: coInvestmentStage2, error: coInvestmentStage2Error } = await supabase
         .from('co_investment_opportunities')
-        .select(`
-          *,
-          startup:startups!fk_startup_id(id, name, investment_advisor_code, currency),
-          listed_by_user:users!fk_listed_by_user_id(id, name, email)
-        `)
+        .select('*')
         .eq('status', 'active')
         .eq('stage', 2)
         .eq('startup_advisor_approval_status', 'pending')
@@ -2524,6 +2557,69 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       if (coInvestmentStage2Error) {
         console.error('Error fetching Stage 2 co-investment opportunities:', coInvestmentStage2Error);
+      }
+
+      // Fetch startup data separately for both stages (manual join - no FK constraints after migration)
+      const allStageStartupIds = [
+        ...new Set([
+          ...(coInvestmentStage1 || []).map((opp: any) => opp.startup_id).filter(Boolean),
+          ...(coInvestmentStage2 || []).map((opp: any) => opp.startup_id).filter(Boolean)
+        ])
+      ];
+      
+      if (allStageStartupIds.length > 0) {
+        const { data: startupsData } = await supabase
+          .from('startups')
+          .select('id, name, investment_advisor_code, currency')
+          .in('id', allStageStartupIds);
+        
+        const startupsMap = new Map((startupsData || []).map((s: any) => [s.id, s]));
+        
+        // Attach startup data to Stage 1 opportunities
+        if (coInvestmentStage1) {
+          coInvestmentStage1.forEach((opp: any) => {
+            opp.startup = startupsMap.get(opp.startup_id);
+          });
+        }
+        
+        // Attach startup data to Stage 2 opportunities
+        if (coInvestmentStage2) {
+          coInvestmentStage2.forEach((opp: any) => {
+            opp.startup = startupsMap.get(opp.startup_id);
+          });
+        }
+      }
+
+      // Fetch user profile data for listed_by_user_id (manual join - no FK constraints after migration)
+      const allListedByUserIds = [
+        ...new Set([
+          ...(coInvestmentStage1 || []).map((opp: any) => opp.listed_by_user_id).filter(Boolean),
+          ...(coInvestmentStage2 || []).map((opp: any) => opp.listed_by_user_id).filter(Boolean)
+        ])
+      ];
+      
+      if (allListedByUserIds.length > 0) {
+        const { data: userProfilesData } = await supabase
+          .from('user_profiles')
+          .select('auth_user_id, name, email, investment_advisor_code_entered, role')
+          .in('auth_user_id', allListedByUserIds)
+          .eq('role', 'Investor');
+        
+        const userProfilesMap = new Map((userProfilesData || []).map((up: any) => [up.auth_user_id, up]));
+        
+        // Attach user profile data to Stage 1 opportunities
+        if (coInvestmentStage1) {
+          coInvestmentStage1.forEach((opp: any) => {
+            opp.listed_by_user = userProfilesMap.get(opp.listed_by_user_id);
+          });
+        }
+        
+        // Attach user profile data to Stage 2 opportunities
+        if (coInvestmentStage2) {
+          coInvestmentStage2.forEach((opp: any) => {
+            opp.listed_by_user = userProfilesMap.get(opp.listed_by_user_id);
+          });
+        }
       }
 
       // Filter and format co-investment opportunities
@@ -2728,12 +2824,38 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             id,
             investor_id,
             startup_id,
-            created_at,
-            investor:users(id, name, email),
-            startup:startups(id, name, sector)
+            created_at
           `)
           .in('investor_id', investorIds)
           .order('created_at', { ascending: false });
+
+        // Fetch startup and investor data separately (manual join - no FK constraints after migration)
+        if (favoritesData && favoritesData.length > 0) {
+          const startupIds = [...new Set(favoritesData.map((fav: any) => fav.startup_id).filter(Boolean))];
+          if (startupIds.length > 0) {
+            const { data: startupsData } = await supabase
+              .from('startups')
+              .select('id, name, sector')
+              .in('id', startupIds);
+            
+            const startupsMap = new Map((startupsData || []).map((s: any) => [s.id, s]));
+            favoritesData.forEach((fav: any) => {
+              fav.startup = startupsMap.get(fav.startup_id);
+            });
+          }
+
+          // Fetch investor data from user_profiles
+          const { data: investorProfilesData } = await supabase
+            .from('user_profiles')
+            .select('auth_user_id, name, email, role')
+            .in('auth_user_id', investorIds)
+            .eq('role', 'Investor');
+          
+          const investorProfilesMap = new Map((investorProfilesData || []).map((up: any) => [up.auth_user_id, up]));
+          favoritesData.forEach((fav: any) => {
+            fav.investor = investorProfilesMap.get(fav.investor_id);
+          });
+        }
         
         console.log('🔍 Query result:', { 
           dataCount: favoritesData?.length || 0, 
@@ -2990,9 +3112,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             lead_investor_advisor_approval_status,
             startup_advisor_approval_status,
             startup_approval_status,
-            created_at,
-            startup:startups(id, name, sector),
-            listed_by_user:users!fk_listed_by_user_id(id, name, email, investment_advisor_code_entered)
+            created_at
           `)
           .eq('status', 'active')
           .eq('stage', 1)
@@ -3001,6 +3121,37 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
         if (stage1Error) {
           console.error('Error fetching Stage 1 co-investment opportunities:', stage1Error);
+        }
+
+        // Fetch startup data separately (manual join - no FK constraints after migration)
+        if (stage1Opps && stage1Opps.length > 0) {
+          const startupIds = [...new Set(stage1Opps.map((opp: any) => opp.startup_id).filter(Boolean))];
+          if (startupIds.length > 0) {
+            const { data: startupsData } = await supabase
+              .from('startups')
+              .select('id, name, sector, investment_advisor_code, currency')
+              .in('id', startupIds);
+            
+            const startupsMap = new Map((startupsData || []).map((s: any) => [s.id, s]));
+            stage1Opps.forEach((opp: any) => {
+              opp.startup = startupsMap.get(opp.startup_id);
+            });
+          }
+
+          // Fetch user profile data for listed_by_user_id (manual join - no FK constraints after migration)
+          const listedByUserIds = [...new Set(stage1Opps.map((opp: any) => opp.listed_by_user_id).filter(Boolean))];
+          if (listedByUserIds.length > 0) {
+            const { data: userProfilesData } = await supabase
+              .from('user_profiles')
+              .select('auth_user_id, name, email, investment_advisor_code_entered, role')
+              .in('auth_user_id', listedByUserIds)
+              .eq('role', 'Investor');
+            
+            const userProfilesMap = new Map((userProfilesData || []).map((up: any) => [up.auth_user_id, up]));
+            stage1Opps.forEach((opp: any) => {
+              opp.listed_by_user = userProfilesMap.get(opp.listed_by_user_id);
+            });
+          }
         }
 
         // Filter to only show opportunities where lead investor has this advisor's code
@@ -3032,14 +3183,28 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             status,
             stage,
             startup_approval_status,
-            created_at,
-            startup:startups!fk_startup_id(id, name, sector, currency),
-            listed_by_user:users!fk_listed_by_user_id(id, name, email)
+            created_at
           `)
           .eq('status', 'active')
           .eq('stage', 4)
           .eq('startup_approval_status', 'approved')
           .order('created_at', { ascending: false });
+
+        // Fetch startup data separately for Stage 4 (manual join - no FK constraints after migration)
+        if (stage4Opps && stage4Opps.length > 0) {
+          const startupIds = [...new Set(stage4Opps.map((opp: any) => opp.startup_id).filter(Boolean))];
+          if (startupIds.length > 0) {
+            const { data: startupsData } = await supabase
+              .from('startups')
+              .select('id, name, sector, investment_advisor_code, currency')
+              .in('id', startupIds);
+            
+            const startupsMap = new Map((startupsData || []).map((s: any) => [s.id, s]));
+            stage4Opps.forEach((opp: any) => {
+              opp.startup = startupsMap.get(opp.startup_id);
+            });
+          }
+        }
         
         // Calculate lead investor invested and remaining amounts for Stage 4 opportunities
         if (stage4Opps) {

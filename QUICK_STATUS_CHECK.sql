@@ -1,50 +1,65 @@
--- QUICK_STATUS_CHECK.sql
--- Quick check to see current status
+-- QUICK CHECK: Are foreign keys already pointing to user_profiles?
+-- Run this first to see if you need to migrate
 
--- 1. Check if columns exist
-SELECT 'Columns exist?' as check_type,
-       CASE 
-           WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'investor_code') 
-           THEN 'YES - users.investor_code exists'
-           ELSE 'NO - users.investor_code missing'
-       END as users_column,
-       CASE 
-           WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'investment_records' AND column_name = 'investor_code') 
-           THEN 'YES - investment_records.investor_code exists'
-           ELSE 'NO - investment_records.investor_code missing'
-       END as investment_column;
+-- Check investment_offers (most important)
+SELECT 
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+            JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+            WHERE tc.table_schema = 'public'
+                AND tc.table_name = 'investment_offers'
+                AND tc.constraint_type = 'FOREIGN KEY'
+                AND (kcu.column_name = 'investor_id' OR kcu.column_name = 'investor_email')
+                AND ccu.table_name = 'user_profiles'
+        ) THEN '✅ ALREADY MIGRATED - investment_offers points to user_profiles'
+        ELSE '❌ NEED MIGRATION - investment_offers still points to users'
+    END as investment_offers_status;
 
--- 2. Count investors and their codes
-SELECT 'Investor count' as check_type,
-       COUNT(*) as total_investors,
-       COUNT(investor_code) as with_codes,
-       COUNT(*) - COUNT(investor_code) as without_codes
-FROM users WHERE role = 'Investor';
+-- Check startups
+SELECT 
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+            JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+            WHERE tc.table_schema = 'public'
+                AND tc.table_name = 'startups'
+                AND tc.constraint_type = 'FOREIGN KEY'
+                AND kcu.column_name = 'user_id'
+                AND ccu.table_name = 'user_profiles'
+        ) THEN '✅ ALREADY MIGRATED - startups points to user_profiles'
+        ELSE '❌ NEED MIGRATION - startups still points to users'
+    END as startups_status;
 
--- 3. Show all investors
-SELECT 'All investors' as check_type,
-       email,
-       investor_code,
-       created_at
-FROM users 
-WHERE role = 'Investor'
-ORDER BY created_at DESC;
+-- Check co_investment_offers
+SELECT 
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+            JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+            WHERE tc.table_schema = 'public'
+                AND tc.table_name = 'co_investment_offers'
+                AND tc.constraint_type = 'FOREIGN KEY'
+                AND kcu.column_name = 'investor_id'
+                AND ccu.table_name = 'user_profiles'
+        ) THEN '✅ ALREADY MIGRATED - co_investment_offers points to user_profiles'
+        ELSE '❌ NEED MIGRATION - co_investment_offers still points to users'
+    END as co_investment_offers_status;
 
--- 4. Count investment records
-SELECT 'Investment records' as check_type,
-       COUNT(*) as total_records,
-       COUNT(investor_code) as with_codes,
-       COUNT(*) - COUNT(investor_code) as without_codes
-FROM investment_records;
-
--- 5. Show recent investment records
-SELECT 'Recent investments' as check_type,
-       id,
-       startup_id,
-       investor_name,
-       investor_code,
-       amount,
-       created_at
-FROM investment_records 
-ORDER BY created_at DESC 
-LIMIT 5;
+-- FINAL DECISION
+SELECT 
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+            JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+            WHERE tc.table_schema = 'public'
+                AND tc.constraint_type = 'FOREIGN KEY'
+                AND ccu.table_name = 'user_profiles'
+                AND tc.table_name IN ('investment_offers', 'startups', 'co_investment_offers')
+        ) THEN '✅ MIGRATION ALREADY DONE - You can skip migration steps!'
+        ELSE '❌ MIGRATION NEEDED - Follow migration steps'
+    END as final_status;

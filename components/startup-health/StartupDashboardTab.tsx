@@ -910,7 +910,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           .from('co_investment_offers')
           .select(`
             *,
-            investor:users!co_investment_offers_investor_id_fkey(id, name, email),
+            investor_id,
             startup:startups(id, name, sector, currency),
             co_investment_opportunity:co_investment_opportunities(id, investment_amount, equity_percentage)
           `)

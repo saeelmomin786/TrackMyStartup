@@ -600,7 +600,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             stage,
                             created_at,
                             startup:startups!fk_startup_id(id, name, sector),
-                            listed_by_user:users!fk_listed_by_user_id(id, name, email)
+                            listed_by_user_id
                         `)
                         .eq('status', 'active')
                         .eq('stage', 4)  // Only show fully approved opportunities (after all approvals)
@@ -853,7 +853,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
           .select(`
             *,
             startup:startups(id, name, sector, currency),
-            investor:users!co_investment_offers_investor_id_fkey(id, name, email)
+            investor_id
           `)
           // Show offers where investor advisor has approved OR where investor has no advisor (not_required)
           .in('investor_advisor_approval_status', ['approved', 'not_required'])
@@ -1084,7 +1084,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
           .select(`
             *,
             startup:startups(id, name, sector, currency),
-            investor:users!co_investment_offers_investor_id_fkey(id, name, email)
+            investor_id
           `)
           // Show offers where investor advisor has approved OR where investor has no advisor (not_required)
           .in('investor_advisor_approval_status', ['approved', 'not_required'])
@@ -1183,7 +1183,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             startup_approval_status,
                             created_at,
                             startup:startups!fk_startup_id(id, name, sector, currency),
-                            listed_by_user:users!fk_listed_by_user_id(id, name, email)
+                            listed_by_user_id
                         `)
                         .eq('status', 'active')
                         .eq('stage', 4)

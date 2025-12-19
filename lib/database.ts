@@ -1383,9 +1383,26 @@ export const investmentService = {
 
       console.log('✅ Investor advisor approval result:', data);
       
-      // Trigger flow logic to ensure proper stage progression
+      // The SQL function already handles stage progression and returns new_stage
+      // If it returned success with new_stage > 1, the stage is already updated
+      // We should NOT call handleInvestmentFlow in this case to avoid race conditions
       if (action === 'approve') {
-        await this.handleInvestmentFlow(offerId);
+        // Check if SQL function already updated the stage
+        // Handle both number and string types for new_stage
+        const newStage = data?.new_stage;
+        const stageUpdated = newStage && (Number(newStage) > 1 || newStage > 1);
+        
+        if (stageUpdated) {
+          console.log(`✅ SQL function already updated stage to ${newStage}, skipping handleInvestmentFlow to avoid race condition`);
+          // Stage already updated by SQL function, no need to call handleInvestmentFlow
+          // The SQL function handles all the logic, including setting investor_advisor_approval_status = 'approved'
+        } else {
+          console.log(`⚠️ SQL function didn't return new_stage, calling handleInvestmentFlow as fallback`);
+          // SQL function didn't update stage, let handleInvestmentFlow handle it
+          // Add delay to ensure database transaction is committed
+          await new Promise(resolve => setTimeout(resolve, 500));
+          await this.handleInvestmentFlow(offerId);
+        }
       }
       
       return data;
@@ -1500,11 +1517,13 @@ export const investmentService = {
       console.log('🔍 New stage from SQL function:', data?.new_stage);
       console.log('🔍 New status from SQL function:', data?.new_status);
       
-      // Trigger flow logic to ensure proper stage progression
-      // SQL function should set stage to 3, but let's verify and ensure it's correct
-      if (action === 'approve') {
-        console.log('🔄 Triggering handleInvestmentFlow after startup advisor approval');
-        await this.handleInvestmentFlow(offerId);
+      // If SQL function already updated stage to 3, skip handleInvestmentFlow to avoid race condition
+      // The function should set stage to 3 when approving
+      if (action === 'approve' && data?.new_stage === 3) {
+        console.log('✅ SQL function already updated stage to 3, skipping handleInvestmentFlow to avoid race condition');
+        
+        // Small delay to ensure database consistency
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         // Verify the offer is now at stage 3
         const { data: verifyOffer } = await supabase
@@ -1522,7 +1541,14 @@ export const investmentService = {
         
         if (verifyOffer?.stage !== 3) {
           console.warn('⚠️ Offer stage is not 3 after startup advisor approval. Expected stage 3, got:', verifyOffer?.stage);
+          // Fallback: trigger handleInvestmentFlow if stage wasn't updated correctly
+          console.log('🔄 Stage mismatch detected, triggering handleInvestmentFlow as fallback');
+          await this.handleInvestmentFlow(offerId);
         }
+      } else if (action === 'approve') {
+        // Fallback: if SQL function didn't return new_stage 3, trigger flow logic
+        console.log('🔄 SQL function did not return stage 3, triggering handleInvestmentFlow');
+        await this.handleInvestmentFlow(offerId);
       }
       
       return data;
@@ -1535,17 +1561,53 @@ export const investmentService = {
   // Approve/reject offer by startup (final approval)
   async approveStartupOffer(offerId: number, action: 'approve' | 'reject') {
     try {
+      console.log('🔍 Calling approve_startup_offer with params:', {
+        p_offer_id: offerId,
+        p_approval_action: action
+      });
+      
       const { data, error } = await supabase.rpc('approve_startup_offer', {
         p_offer_id: offerId,
         p_approval_action: action
       });
 
       if (error) {
-        console.error('Error in approveStartupOffer:', error);
+        console.error('❌ Error in approveStartupOffer:', error);
+        console.error('❌ Error message:', error.message);
+        console.error('❌ Error code:', error.code);
+        console.error('❌ Error details:', error.details);
         throw error;
       }
 
       console.log('✅ Startup approval result:', data);
+      console.log('🔍 New stage from SQL function:', data?.new_stage);
+      console.log('🔍 New status from SQL function:', data?.new_status);
+      
+      // SQL function should set stage to 4 when approving, verify it
+      if (action === 'approve' && data?.new_stage === 4) {
+        console.log('✅ SQL function already updated stage to 4, offer approved successfully');
+        
+        // Small delay to ensure database consistency
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Verify the offer is now at stage 4
+        const { data: verifyOffer } = await supabase
+          .from('investment_offers')
+          .select('id, stage, status')
+          .eq('id', offerId)
+          .single();
+        
+        console.log('✅ Offer after startup approval:', {
+          id: verifyOffer?.id,
+          stage: verifyOffer?.stage,
+          status: verifyOffer?.status
+        });
+        
+        if (verifyOffer?.stage !== 4) {
+          console.warn('⚠️ Offer stage is not 4 after startup approval. Expected stage 4, got:', verifyOffer?.stage);
+        }
+      }
+      
       return data;
     } catch (error) {
       console.error('Error approving startup offer:', error);
@@ -1842,19 +1904,8 @@ export const investmentService = {
         .from('investment_offers')
         .select(`
           *,
-          investor:users!investment_offers_investor_email_fkey(
-            id,
-            email,
-            name,
-            investor_code,
-            investment_advisor_code,
-            investment_advisor_code_entered
-          ),
-          startup:startups!investment_offers_startup_id_fkey(
-            id,
-            name,
-            investment_advisor_code
-          )
+          investor_id,
+          startup_id
         `)
         .eq('id', offerId)
         .single();
@@ -1864,28 +1915,85 @@ export const investmentService = {
         return;
       }
 
+      // Fetch investor data separately (since we removed FK join)
+      let investorData: any = null;
+      if (offer.investor_id) {
+        const { data: investor } = await supabase
+          .from('user_profiles')
+          .select('auth_user_id, email, name, investment_advisor_code, investment_advisor_code_entered')
+          .eq('auth_user_id', offer.investor_id)
+          .eq('role', 'Investor')
+          .single();
+        investorData = investor;
+      }
+
+      // Fetch startup data separately (since we removed FK join)
+      let startupData: any = null;
+      if (offer.startup_id) {
+        const { data: startup } = await supabase
+          .from('startups')
+          .select('id, name, investment_advisor_code')
+          .eq('id', offer.startup_id)
+          .single();
+        startupData = startup;
+      }
+
       const currentStage = offer.stage || 1;
       console.log(`🔄 Processing investment flow for offer ${offerId}, current stage: ${currentStage}`);
 
       // Stage 1: Check if investor has investment advisor code
       // Check both investment_advisor_code and investment_advisor_code_entered (like the SQL function does)
       if (currentStage === 1) {
-        const investorAdvisorCode = offer.investor?.investment_advisor_code || offer.investor?.investment_advisor_code_entered;
+        const investorAdvisorCode = investorData?.investment_advisor_code || investorData?.investment_advisor_code_entered;
+        const approvalStatus = offer.investor_advisor_approval_status;
+        
         if (investorAdvisorCode) {
-          console.log(`✅ Investor has advisor code: ${investorAdvisorCode}, keeping at stage 1 for advisor approval`);
-          // Update advisor approval status to pending if not already set
-          if (!offer.investor_advisor_approval_status || offer.investor_advisor_approval_status === 'not_required') {
-            await supabase
-              .from('investment_offers')
-              .update({ investor_advisor_approval_status: 'pending' })
-              .eq('id', offerId);
+          // Check if advisor has already approved
+          if (approvalStatus === 'approved') {
+            console.log(`✅ Investor advisor has approved, moving to next stage`);
+            // Move to stage 2 (startup advisor) or stage 3 (direct to startup)
+            const startupAdvisorCode = startupData?.investment_advisor_code;
+            if (startupAdvisorCode) {
+              // Move to stage 2 (startup advisor approval)
+              await supabase
+                .from('investment_offers')
+                .update({ 
+                  stage: 2,
+                  startup_advisor_approval_status: 'pending',
+                  status: 'pending'
+                })
+                .eq('id', offerId);
+            } else {
+              // Move to stage 3 (startup review, no advisors)
+              await supabase
+                .from('investment_offers')
+                .update({ 
+                  stage: 3,
+                  startup_advisor_approval_status: 'not_required',
+                  status: 'pending'
+                })
+                .eq('id', offerId);
+            }
+            return;
+          } else if (approvalStatus === 'rejected') {
+            console.log(`❌ Investor advisor rejected, keeping at stage 1`);
+            return;
+          } else {
+            // Status is 'pending' or 'not_required' - keep at stage 1 for advisor approval
+            console.log(`⏳ Waiting for investor advisor approval (status: ${approvalStatus})`);
+            // Update advisor approval status to pending if not already set
+            if (!approvalStatus || approvalStatus === 'not_required') {
+              await supabase
+                .from('investment_offers')
+                .update({ investor_advisor_approval_status: 'pending' })
+                .eq('id', offerId);
+            }
+            return;
           }
-          // Keep at stage 1 - will be displayed in investor's advisor dashboard
-          return;
         } else {
           console.log(`❌ Investor has no advisor code, moving to stage 2`);
           // Check if startup has advisor to determine next stage
-          const startupAdvisorCode = offer.startup?.investment_advisor_code;
+          const startupAdvisorCode = startupData?.investment_advisor_code;
           if (startupAdvisorCode) {
             // Move to stage 2 (startup advisor approval)
             await supabase
@@ -1916,7 +2024,7 @@ export const investmentService = {
       // IMPORTANT: After startup advisor approval, this should move to Stage 3
       if (currentStage === 2) {
         console.log(`🔄 Processing Stage 2 - Offer at stage 2, checking startup advisor`);
-        const startupAdvisorCode = offer.startup?.investment_advisor_code;
+        const startupAdvisorCode = startupData?.investment_advisor_code;
         const startupAdvisorStatus = offer.startup_advisor_approval_status;
         console.log(`🔍 Startup advisor code found: ${startupAdvisorCode || 'NONE'}`);
         console.log(`🔍 Startup advisor status: ${startupAdvisorStatus || 'NONE'}`);
@@ -2872,8 +2980,8 @@ export const investmentService = {
             name,
             investment_advisor_code
           ),
-          lead_investor:users!fk_listed_by_user_id(
-            id,
+          lead_investor:user_profiles!fk_listed_by_user_id(
+            auth_user_id,
             email,
             name,
             investment_advisor_code_entered
@@ -3301,13 +3409,7 @@ export const investmentService = {
             name,
             investment_advisor_code
           ),
-          listed_by_user:users!fk_listed_by_user_id(
-            id,
-            email,
-            name,
-            investment_advisor_code,
-            investment_advisor_code_entered
-          )
+          listed_by_user_id
         `)
         .eq('startup_id', startupId)
         .eq('status', 'active')

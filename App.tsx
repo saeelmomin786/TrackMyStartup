@@ -2806,7 +2806,17 @@ const App: React.FC = () => {
 
 
 
-  if (isLoading && !selectedStartup && currentPage !== 'login' && currentPage !== 'register') {
+  // Show the global loading screen ONLY before we know the auth state.
+  // Once the user is authenticated, never block the UI here – even if data is still loading –
+  // otherwise newly registered/logged-in users can get stuck on this screen until a manual refresh.
+  if (
+    isLoading &&
+    !isAuthenticated &&
+    !currentUser &&
+    !selectedStartup &&
+    currentPage !== 'login' &&
+    currentPage !== 'register'
+  ) {
       console.log('Rendering loading screen...', { isAuthenticated, currentUser: !!currentUser });
       return (
           <div className="flex items-center justify-center min-h-screen bg-slate-50 text-brand-primary">

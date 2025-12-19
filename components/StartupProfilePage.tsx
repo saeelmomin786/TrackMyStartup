@@ -36,22 +36,41 @@ const StartupProfilePage: React.FC<StartupProfilePageProps> = ({
   const refreshProfileData = async () => {
     if (!currentUser?.id) return;
     
+    // Prevent multiple simultaneous refresh calls
+    if (isRefreshing) {
+      console.log('⏸️ Refresh already in progress, skipping...');
+      return;
+    }
+    
     try {
       setIsRefreshing(true);
       console.log('🔄 Refreshing startup profile data for user:', currentUser.id);
       
-      const freshProfile = await authService.getCurrentUser();
+      // Force refresh to bypass cache and get fresh data
+      const freshProfile = await authService.getCurrentUser(true);
       console.log('✅ Fresh startup profile data loaded:', freshProfile);
       
       // Update local state with fresh data
       setRefreshedProfile(freshProfile as AuthUser);
       
       // Only call onProfileUpdate if the data actually changed
-      if (onProfileUpdate && JSON.stringify(freshProfile) !== JSON.stringify(currentUser)) {
-        console.log('🔄 Startup profile data changed, updating parent component');
-        onProfileUpdate(freshProfile as AuthUser);
-      } else {
-        console.log('✅ Startup profile data unchanged, no parent update needed');
+      // OPTIMIZED: Compare only key fields instead of full JSON.stringify for better performance
+      if (onProfileUpdate && freshProfile) {
+        const hasChanged = 
+          freshProfile.id !== currentUser?.id ||
+          freshProfile.name !== currentUser?.name ||
+          freshProfile.email !== currentUser?.email ||
+          freshProfile.role !== currentUser?.role ||
+          freshProfile.profile_photo_url !== currentUser?.profile_photo_url ||
+          freshProfile.logo_url !== currentUser?.logo_url ||
+          freshProfile.is_profile_complete !== currentUser?.is_profile_complete;
+        
+        if (hasChanged) {
+          console.log('🔄 Startup profile data changed, updating parent component');
+          onProfileUpdate(freshProfile as AuthUser);
+        } else {
+          console.log('✅ Startup profile data unchanged, no parent update needed');
+        }
       }
       
     } catch (error) {

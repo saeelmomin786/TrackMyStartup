@@ -23,8 +23,11 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
 
     const resolveAndLogin = useCallback(async (fallbackUser: AuthUser) => {
         try {
-            const refreshedUser = await authService.getCurrentUser();
+            // Force refresh on login to ensure we get fresh data from database
+            // Cache is already cleared on logout, but forceRefresh ensures fresh data
+            const refreshedUser = await authService.getCurrentUser(true);
             if (refreshedUser) {
+                console.log('✅ Fresh user data loaded on login');
                 onLogin(refreshedUser);
                 return;
             }

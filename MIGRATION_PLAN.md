@@ -161,3 +161,4 @@ For each migration:
 - Some tables might need to store `profile_id` instead of `auth_user_id` if they need to track specific profiles
 - Most tables can continue using `auth_user_id` and join with `user_profiles` filtering by role
 
+

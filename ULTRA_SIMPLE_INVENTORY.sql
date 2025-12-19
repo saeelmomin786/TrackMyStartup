@@ -60,3 +60,4 @@ SELECT
        AND tc.table_schema = 'public'
        AND ccu.table_name = 'users') as fk_to_users_count;
 
+

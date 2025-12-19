@@ -1367,8 +1367,7 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
               <div className="p-4 bg-slate-50 rounded-lg">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="font-medium text-slate-900">Professional License</h4>
-                    <p className="text-sm text-slate-600">CA/CS license or role-specific document</p>
+                    <h4 className="font-medium text-slate-900">Proof of Company Registration</h4>
                   </div>
                   <Button
                     size="sm"

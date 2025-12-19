@@ -17,3 +17,4 @@ ORDER BY c.relname, pol.polname;
 -- the policy expression. Due to array_agg issues, we'll need to check
 -- each policy manually or use a different approach.
 
+

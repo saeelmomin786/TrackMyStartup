@@ -171,11 +171,11 @@ export class IPTrademarkService {
             // Generate a unique filename
             const fileExt = file.name.split('.').pop();
             const fileName = `${ipRecordId}_${Date.now()}.${fileExt}`;
-            const filePath = `ip-trademark-documents/${fileName}`;
+            const filePath = fileName; // Store directly in bucket root, no subfolder needed
 
             // Upload file to Supabase storage
             const { data: uploadData, error: uploadError } = await supabase.storage
-                .from('compliance-documents')
+                .from('ip-trademark-documents')
                 .upload(filePath, file);
 
             if (uploadError) {
@@ -185,7 +185,7 @@ export class IPTrademarkService {
 
             // Get the public URL
             const { data: urlData } = supabase.storage
-                .from('compliance-documents')
+                .from('ip-trademark-documents')
                 .getPublicUrl(filePath);
 
             // Save document record to database
@@ -232,11 +232,12 @@ export class IPTrademarkService {
 
             // Extract file path from URL
             const url = new URL(document.file_url);
-            const filePath = url.pathname.split('/').slice(-2).join('/');
+            // Get just the filename (last part of the path)
+            const filePath = url.pathname.split('/').pop();
 
             // Delete from storage
             const { error: storageError } = await supabase.storage
-                .from('compliance-documents')
+                .from('ip-trademark-documents')
                 .remove([filePath]);
 
             if (storageError) {

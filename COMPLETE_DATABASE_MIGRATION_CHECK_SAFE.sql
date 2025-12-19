@@ -139,3 +139,4 @@ WHERE n.nspname = 'public'
   AND pg_get_triggerdef(t.oid)::text ILIKE '%users%'
   AND pg_get_triggerdef(t.oid)::text NOT ILIKE '%user_profiles%';
 
+

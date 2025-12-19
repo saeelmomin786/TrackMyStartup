@@ -106,3 +106,4 @@ SELECT
          OR (view_definition ILIKE '%FROM users%' AND view_definition NOT ILIKE '%user_profiles%')
          OR (view_definition ILIKE '%JOIN users%' AND view_definition NOT ILIKE '%user_profiles%'))) as views_using_users;
 
+

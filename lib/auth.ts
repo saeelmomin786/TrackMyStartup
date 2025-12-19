@@ -62,8 +62,19 @@ export interface PasswordResetData {
 
 // Authentication service
 // Cache for getCurrentUser to prevent multiple simultaneous calls
-let _getCurrentUserCache: { promise: Promise<AuthUser | null> | null; timestamp: number } = { promise: null, timestamp: 0 };
-const GET_CURRENT_USER_CACHE_MS = 2000; // Cache for 2 seconds
+// SECURITY: Cache includes user ID to prevent cross-account data leakage
+let _getCurrentUserCache: { 
+  promise: Promise<AuthUser | null> | null; 
+  timestamp: number;
+  userId: string | null; // Track which user the cache belongs to
+} = { promise: null, timestamp: 0, userId: null };
+const GET_CURRENT_USER_CACHE_MS = 5000; // Cache for 5 seconds to reduce redundant calls
+
+// Function to clear the cache (for security on logout)
+function clearUserCache() {
+  _getCurrentUserCache = { promise: null, timestamp: 0, userId: null };
+  console.log('✅ User cache cleared');
+}
 
 export const authService = {
   // Export supabase client for direct access
@@ -291,140 +302,137 @@ export const authService = {
   },
 
   // Get current user profile (BACKWARD COMPATIBLE - checks user_profiles first, falls back to users)
-  async getCurrentUser(): Promise<AuthUser | null> {
-    // Prevent multiple simultaneous calls using cache
+  // forceRefresh: If true, bypasses cache and fetches fresh data
+  async getCurrentUser(forceRefresh: boolean = false): Promise<AuthUser | null> {
     const now = Date.now();
-    if (_getCurrentUserCache.promise && (now - _getCurrentUserCache.timestamp) < GET_CURRENT_USER_CACHE_MS) {
-      return _getCurrentUserCache.promise;
+    
+    // SECURITY: Get current authenticated user ID to verify cache belongs to same user
+    const { data: { user: currentAuthUser } } = await supabase.auth.getUser();
+    const currentUserId = currentAuthUser?.id || null;
+    
+    // If force refresh, clear cache and fetch fresh data
+    if (forceRefresh) {
+      _getCurrentUserCache = { promise: null, timestamp: 0, userId: null };
+    } else {
+      // SECURITY: Only use cache if:
+      // 1. Cache exists
+      // 2. Cache is still valid (within time window)
+      // 3. Cache belongs to the SAME user (prevents cross-account data leakage)
+      if (_getCurrentUserCache.promise && 
+          (now - _getCurrentUserCache.timestamp) < GET_CURRENT_USER_CACHE_MS &&
+          _getCurrentUserCache.userId === currentUserId) {
+        // Cache is valid and belongs to current user - safe to return
+        return _getCurrentUserCache.promise;
+      } else if (_getCurrentUserCache.userId !== currentUserId && _getCurrentUserCache.userId !== null) {
+        // SECURITY: Different user detected - clear old cache immediately
+        console.log('⚠️ Different user detected, clearing old cache for security');
+        _getCurrentUserCache = { promise: null, timestamp: 0, userId: null };
+      }
     }
 
+    // Create new promise
     const promise = this._getCurrentUserInternal();
-    _getCurrentUserCache = { promise, timestamp: now };
     
-    // Clear cache after promise resolves
-    promise.finally(() => {
-      if (_getCurrentUserCache.promise === promise) {
-        _getCurrentUserCache = { promise: null, timestamp: 0 };
-      }
-    });
+    // SECURITY: Store user ID with cache to prevent cross-account access
+    _getCurrentUserCache = { promise, timestamp: now, userId: currentUserId };
+    
+    // Don't clear cache in finally() - let it expire naturally based on timestamp
+    // This prevents race conditions where second call happens while first is resolving
     
     return promise;
   },
 
   async _getCurrentUserInternal(): Promise<AuthUser | null> {
     try {
-      // First, try to refresh the session if needed
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) {
-        console.error('Session error:', sessionError);
-        // Try to refresh the session
-        const { error: refreshError } = await supabase.auth.refreshSession();
-        if (refreshError) {
-          console.error('Failed to refresh session:', refreshError);
-          return null;
-        }
-      }
-      
+      // OPTIMIZED: Get user directly - getUser() already handles session validation
+      // No need for separate getSession() call which adds extra latency
       const { data: { user }, error } = await supabase.auth.getUser()
       
       if (error || !user) {
-        return null
-      }
-
-      // Try to get profile from user_profiles (new multi-profile system) first
-      let profile = null;
-      let profileError = null;
-      let usingNewSystem = false;
-      
-      // Retry logic for database queries
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          // First try: Get from user_profiles using the safe function
-          // Note: RPC functions that return TABLE return an array, not a single object
-          const profilePromise = supabase
-            .rpc('get_current_profile_safe', { auth_user_uuid: user.id });
-
-          const profileTimeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Profile check timeout after 5 seconds')), 5000);
-          });
-
-          const result = await Promise.race([profilePromise, profileTimeoutPromise]) as any;
-          
-          // RPC functions returning TABLE return { data: array, error }
-          if (result.data && Array.isArray(result.data) && result.data.length > 0) {
-            profile = result.data[0];
-            // Check if this profile is from user_profiles (new system)
-            // The function returns source_table, but we can also check if profile_id exists
-            usingNewSystem = !!(profile.profile_id && profile.profile_id !== profile.auth_user_id);
-            profileError = null;
-            break; // Success, exit retry loop
-          } else if (result.data && Array.isArray(result.data) && result.data.length === 0) {
-            // No profile found in new system, try old system
-            break;
-          } else {
-            profileError = result.error;
+        // Only try to refresh session if getUser() fails with a session error
+        if (error?.message?.includes('session') || error?.message?.includes('JWT')) {
+          console.log('Session expired, attempting refresh...');
+          const { error: refreshError } = await supabase.auth.refreshSession();
+          if (refreshError) {
+            console.error('Failed to refresh session:', refreshError);
+            return null;
           }
-          
-          if (attempt < 3) {
-            await new Promise(resolve => setTimeout(resolve, 500 * attempt)); // Faster retry
+          // Retry getUser after refresh
+          const { data: { user: retryUser }, error: retryError } = await supabase.auth.getUser();
+          if (retryError || !retryUser) {
+            return null;
           }
-        } catch (retryError) {
-          console.error(`Profile query attempt ${attempt} error:`, retryError);
-          if (attempt === 3) {
-            profileError = retryError;
-          }
+          // Use retried user and get profile
+          return this._fetchUserProfile(retryUser.id, retryUser.email);
         }
+        return null;
       }
 
-      // Only use user_profiles - no fallback to users table
-      if (profileError || !profile) {
-        console.log('No profile found in user_profiles for user:', user.email);
-        return null
-      }
-
-      // Profile ID is the actual profile UUID from user_profiles
-      const profileId = profile.profile_id || profile.id;
-      const isComplete = await this.isProfileComplete(profileId);
-
-      const userData = {
-        id: profile.profile_id || profile.id,
-        email: profile.email,
-        name: profile.name,
-        role: profile.role,
-        startup_name: profile.startup_name,
-        center_name: profile.center_name,
-        firm_name: profile.firm_name,
-        investor_code: profile.investor_code,
-        investment_advisor_code: profile.investment_advisor_code,
-        investment_advisor_code_entered: profile.investment_advisor_code_entered,
-        ca_code: profile.ca_code,
-        cs_code: profile.cs_code,
-        mentor_code: profile.mentor_code || null,
-        registration_date: profile.registration_date,
-        phone: profile.phone,
-        address: profile.address,
-        city: profile.city,
-        state: profile.state,
-        country: profile.country,
-        company: profile.company,
-        company_type: profile.company_type,
-        government_id: profile.government_id,
-        ca_license: profile.ca_license,
-        cs_license: profile.cs_license,
-        verification_documents: profile.verification_documents,
-        profile_photo_url: profile.profile_photo_url,
-        logo_url: profile.logo_url,
-        proof_of_business_url: profile.proof_of_business_url,
-        financial_advisor_license_url: profile.financial_advisor_license_url,
-        is_profile_complete: isComplete
-      };
-      
-      return userData;
+      // OPTIMIZED: Direct RPC call without timeout race condition
+      // The database query should be fast, timeout adds unnecessary overhead
+      return this._fetchUserProfile(user.id, user.email);
     } catch (error) {
       console.error('Error getting current user:', error)
       return null
     }
+  },
+
+  // Helper function to fetch user profile from database
+  async _fetchUserProfile(authUserId: string, userEmail: string): Promise<AuthUser | null> {
+    const { data: profileData, error: profileError } = await supabase
+      .rpc('get_current_profile_safe', { auth_user_uuid: authUserId });
+    
+    if (profileError || !profileData || !Array.isArray(profileData) || profileData.length === 0) {
+      console.log('No profile found in user_profiles for user:', userEmail);
+      return null;
+    }
+    
+    const profile = profileData[0];
+    const profileId = profile.profile_id || profile.id;
+    
+    // OPTIMIZED: Use is_profile_complete from profile if available, otherwise check
+    let isComplete = profile.is_profile_complete;
+    if (isComplete === undefined || isComplete === null) {
+      isComplete = await this.isProfileComplete(profileId);
+    }
+
+    return this._mapProfileToAuthUser(profile, isComplete);
+  },
+
+  // Helper function to map profile data to AuthUser interface
+  _mapProfileToAuthUser(profile: any, isComplete: boolean): AuthUser {
+    return {
+      id: profile.profile_id || profile.id,
+      email: profile.email,
+      name: profile.name,
+      role: profile.role,
+      startup_name: profile.startup_name,
+      center_name: profile.center_name,
+      firm_name: profile.firm_name,
+      investor_code: profile.investor_code,
+      investment_advisor_code: profile.investment_advisor_code,
+      investment_advisor_code_entered: profile.investment_advisor_code_entered,
+      ca_code: profile.ca_code,
+      cs_code: profile.cs_code,
+      mentor_code: profile.mentor_code || null,
+      registration_date: profile.registration_date,
+      phone: profile.phone,
+      address: profile.address,
+      city: profile.city,
+      state: profile.state,
+      country: profile.country,
+      company: profile.company,
+      company_type: profile.company_type,
+      government_id: profile.government_id,
+      ca_license: profile.ca_license,
+      cs_license: profile.cs_license,
+      verification_documents: profile.verification_documents,
+      profile_photo_url: profile.profile_photo_url,
+      logo_url: profile.logo_url,
+      proof_of_business_url: profile.proof_of_business_url,
+      financial_advisor_license_url: profile.financial_advisor_license_url,
+      is_profile_complete: isComplete
+    };
   },
 
   // Sign up new user
@@ -715,12 +723,30 @@ export const authService = {
   // Sign out user
   async signOut(): Promise<{ error: string | null }> {
     try {
-      const { error } = await supabase.auth.signOut()
-      return { error: error?.message || null }
+      // SECURITY: Clear cache before signing out to prevent data leakage
+      clearUserCache();
+      
+      // Sign out from Supabase (terminates session)
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) {
+        console.error('Error signing out:', error);
+        return { error: error.message || null };
+      }
+      
+      console.log('✅ User signed out successfully, cache cleared');
+      return { error: null };
     } catch (error) {
-      console.error('Error signing out:', error)
-      return { error: 'An unexpected error occurred' }
+      console.error('Error signing out:', error);
+      // Even if signOut fails, clear cache for security
+      clearUserCache();
+      return { error: 'An unexpected error occurred' };
     }
+  },
+
+  // Clear user cache (public method for manual cache clearing if needed)
+  clearCache() {
+    clearUserCache();
   },
 
   // Update user profile (comprehensive version)

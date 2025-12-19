@@ -1864,7 +1864,13 @@ const App: React.FC = () => {
 
   const handleLogout = useCallback(async () => {
     try {
+      console.log('🚪 Logging out user...');
+      
+      // Sign out and clear cache (signOut already clears cache, but doing it here too for safety)
       await authService.signOut();
+      authService.clearCache(); // Extra safety - ensure cache is cleared
+      
+      // Clear all application state
       setIsAuthenticated(false);
       setCurrentUser(null);
       setAssignedInvestmentAdvisor(null);
@@ -1878,8 +1884,31 @@ const App: React.FC = () => {
       deleteCookie('lastAuthUserId');
       deleteCookie('lastAuthTimestamp');
       deleteCookie('currentView');
+      
+      // Clear any localStorage/sessionStorage that might contain user data
+      // Note: Be careful not to clear everything as some data might be needed
+      // Only clear auth-related data
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.includes('auth') || key.includes('user') || key.includes('profile'))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+        console.log('✅ Cleared auth-related localStorage items');
+      } catch (storageError) {
+        console.warn('Could not clear localStorage:', storageError);
+      }
+      
+      console.log('✅ Logout complete - all data cleared');
     } catch (error) {
       console.error('Logout failed:', error);
+      // Even if logout fails, clear cache and state for security
+      authService.clearCache();
+      setIsAuthenticated(false);
+      setCurrentUser(null);
     }
   }, []);
 

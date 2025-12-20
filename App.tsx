@@ -47,6 +47,70 @@ import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { AddProfileModal } from './components/AddProfileModal';
 
 const App: React.FC = () => {
+  // Subdomain detection utility function
+  const getSubdomain = (): string | null => {
+    if (typeof window === 'undefined') return null;
+    const hostname = window.location.hostname;
+    
+    // Handle localhost for development
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
+      return null;
+    }
+    
+    // Split hostname by dots
+    const parts = hostname.split('.');
+    
+    // If we have at least 3 parts (e.g., subdomain.trackmystartup.com)
+    // or 2 parts with a subdomain (e.g., subdomain.trackmystartup)
+    if (parts.length >= 3) {
+      const subdomain = parts[0];
+      // Check if it's not 'www' and not empty
+      if (subdomain && subdomain !== 'www') {
+        return subdomain;
+      }
+    }
+    
+    return null;
+  };
+
+  // Check if we're on the main domain (trackmystartup.com or www.trackmystartup.com)
+  const isMainDomain = (): boolean => {
+    if (typeof window === 'undefined') return true;
+    const hostname = window.location.hostname;
+    
+    // Handle localhost for development
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
+      return true;
+    }
+    
+    const subdomain = getSubdomain();
+    return subdomain === null; // No subdomain means main domain
+  };
+
+  // Subdomain redirect logic - redirect subdomains to login page
+  // This must be called before any conditional returns to follow Rules of Hooks
+  useEffect(() => {
+    const subdomain = getSubdomain();
+    const currentPageParam = getQueryParam('page');
+    
+    // If we're on a subdomain and not already on login/reset-password/register/complete-registration
+    if (subdomain && !isMainDomain()) {
+      // Allow reset-password, register, and complete-registration pages on subdomains
+      // (needed for invite flows and registration)
+      const allowedPages = ['login', 'reset-password', 'register', 'complete-registration'];
+      
+      // If trying to access landing page or any other non-allowed page on subdomain, redirect to login
+      if (!currentPageParam || currentPageParam === 'landing' || !allowedPages.includes(currentPageParam)) {
+        console.log('🔀 Subdomain detected:', subdomain, '- Redirecting to login page');
+        // Redirect to login page on subdomain
+        const url = new URL(window.location.href);
+        url.searchParams.set('page', 'login');
+        // Preserve other query params (like advisorCode, email, etc.)
+        window.location.replace(url.toString());
+      }
+    }
+  }, []); // Run once on mount
+
   // Check if we're on a standalone page (footer links)
   const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products', '/diagnostic'];
   const currentPath = window.location.pathname;
@@ -190,7 +254,22 @@ const App: React.FC = () => {
       }
       const fromQuery = (getQueryParam('page') as any) || 'landing';
       const valid = ['landing','login','register','complete-registration','payment','reset-password'];
-      return valid.includes(fromQuery) ? fromQuery : 'landing';
+      const page = valid.includes(fromQuery) ? fromQuery : 'landing';
+      
+      // If on subdomain, don't allow landing page - redirect to login
+      const subdomain = getSubdomain();
+      if (subdomain && !isMainDomain() && page === 'landing') {
+        console.log('🔀 Subdomain detected - preventing landing page, defaulting to login');
+        return 'login';
+      }
+      
+      return page;
+    }
+    
+    // Default to login on subdomains, landing on main domain
+    const subdomain = getSubdomain();
+    if (subdomain && !isMainDomain()) {
+      return 'login';
     }
     return 'landing';
   });
@@ -3055,7 +3134,6 @@ const App: React.FC = () => {
   if (isExploreProfilesPage) {
     return <ExploreProfilesPage />;
   }
-  
   if (!isAuthenticated) {
     return (
         <div className="min-h-screen bg-slate-100 flex flex-col">

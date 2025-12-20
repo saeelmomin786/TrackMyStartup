@@ -7,7 +7,7 @@ export interface MentorRequest {
   requester_id: string;
   requester_type: 'Startup' | 'Investor';
   startup_id?: number;
-  status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
+  status: 'pending' | 'negotiating' | 'accepted' | 'rejected' | 'cancelled';
   requested_at: string;
   responded_at?: string;
   message?: string;
@@ -18,6 +18,13 @@ export interface MentorRequest {
   startup_sector?: string;
   fee_type?: string;
   fee_amount?: number;
+  // New fields for negotiation
+  proposed_fee_amount?: number;
+  proposed_equity_amount?: number;
+  proposed_esop_percentage?: number;
+  negotiated_fee_amount?: number;
+  negotiated_equity_amount?: number;
+  negotiated_esop_percentage?: number;
 }
 
 export interface MentorAssignment {
@@ -532,9 +539,9 @@ class MentorService {
         return false;
       }
 
-      // Check if request is pending
-      if (request.status !== 'pending') {
-        console.error('Request is not pending:', request.status);
+      // Check if request is pending or negotiating
+      if (request.status !== 'pending' && request.status !== 'negotiating') {
+        console.error('Request is not pending or negotiating:', request.status);
         return false;
       }
 
@@ -566,9 +573,10 @@ class MentorService {
           console.warn('⚠️ Error fetching equity record:', equityError);
         }
 
-        const feeAmount = equityRecord?.fee_amount || 0;
-        const esopPercentage = equityRecord?.equity_allocated || 0;
-        const esopValue = equityRecord?.investment_amount || 0;
+        // Use negotiated amounts if available, otherwise use proposed amounts, otherwise use equity record
+        const feeAmount = request.negotiated_fee_amount ?? request.proposed_fee_amount ?? equityRecord?.fee_amount ?? 0;
+        const esopPercentage = request.negotiated_esop_percentage ?? request.proposed_esop_percentage ?? equityRecord?.equity_allocated ?? 0;
+        const esopValue = request.negotiated_equity_amount ?? request.proposed_equity_amount ?? equityRecord?.investment_amount ?? 0;
 
         console.log('💰 Assignment details:', {
           mentor_id: request.mentor_id,
@@ -691,6 +699,76 @@ class MentorService {
     } catch (error) {
       console.error('Error rejecting mentor request:', error);
       return false;
+    }
+  }
+
+  // Send negotiation (mentor counter-proposal)
+  async sendNegotiation(
+    requestId: number,
+    negotiatedFeeAmount?: number,
+    negotiatedEquityAmount?: number,
+    negotiatedEsopPercentage?: number
+  ): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('mentor_requests')
+        .update({
+          status: 'negotiating',
+          negotiated_fee_amount: negotiatedFeeAmount || null,
+          negotiated_equity_amount: negotiatedEquityAmount || null,
+          negotiated_esop_percentage: negotiatedEsopPercentage || null,
+          responded_at: new Date().toISOString()
+        })
+        .eq('id', requestId);
+
+      if (error) {
+        console.error('Error sending negotiation:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error sending negotiation:', error);
+      return false;
+    }
+  }
+
+  // Send connect request from startup
+  async sendConnectRequest(
+    mentorId: string,
+    requesterId: string,
+    startupId: number | null,
+    message?: string,
+    proposedFeeAmount?: number,
+    proposedEquityAmount?: number,
+    proposedEsopPercentage?: number
+  ): Promise<{ success: boolean; requestId?: number; error?: string }> {
+    try {
+      const { data, error } = await supabase
+        .from('mentor_requests')
+        .insert({
+          mentor_id: mentorId,
+          requester_id: requesterId,
+          requester_type: 'Startup',
+          startup_id: startupId,
+          status: 'pending',
+          message: message || null,
+          proposed_fee_amount: proposedFeeAmount || null,
+          proposed_equity_amount: proposedEquityAmount || null,
+          proposed_esop_percentage: proposedEsopPercentage || null
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error sending connect request:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true, requestId: data.id };
+    } catch (error: any) {
+      console.error('Error sending connect request:', error);
+      return { success: false, error: error.message || 'Unknown error' };
     }
   }
 

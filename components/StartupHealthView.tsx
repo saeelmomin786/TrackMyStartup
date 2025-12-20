@@ -5,6 +5,7 @@ import Button from './ui/Button';
 import Card from './ui/Card';
 import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench, DollarSign, Briefcase, FileText, Shield, Eye, Search } from 'lucide-react';
 import { investmentService } from '../lib/database';
+import { supabase } from '../lib/supabase';
 
 import StartupDashboardTab from './startup-health/StartupDashboardTab';
 import NotificationBadge from './startup-health/NotificationBadge';
@@ -17,6 +18,9 @@ import CapTableTab from './startup-health/CapTableTab';
 import FundraisingTab from './startup-health/FundraisingTab';
 import StartupProfilePage from './StartupProfilePage';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
+import ConnectMentorRequestModal from './mentor/ConnectMentorRequestModal';
+import StartupRequestsSection from './mentor/StartupRequestsSection';
+import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
 
 
 interface StartupHealthViewProps {
@@ -65,6 +69,11 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [showNotifications, setShowNotifications] = useState(false);
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
     const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>('explore');
+    
+    // State for mentor connection
+    const [connectModalOpen, setConnectModalOpen] = useState(false);
+    const [selectedMentor, setSelectedMentor] = useState<any>(null);
+    const [startupRequests, setStartupRequests] = useState<any[]>([]);
     
     // Update currentStartup when startup prop changes (important for facilitator access)
     useEffect(() => {
@@ -159,6 +168,48 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             setLocalOffers(investmentOffers);
         }
     }, [investmentOffers]);
+
+    // Load startup requests for mentor connections
+    const loadStartupRequests = async () => {
+        if (!currentStartup?.id || !user?.id) return;
+        
+        try {
+            const { mentorService } = await import('../lib/mentorService');
+            // Get all requests where this startup is involved
+            const { data: requests, error } = await supabase
+                .from('mentor_requests')
+                .select('*')
+                .eq('startup_id', currentStartup.id)
+                .eq('requester_id', user.id)
+                .order('requested_at', { ascending: false });
+
+            if (error) {
+                console.error('Error loading startup requests:', error);
+                return;
+            }
+
+            // Map requests to include startup details
+            const mappedRequests = (requests || []).map((req: any) => {
+                const requestStartup = startups.find(s => s.id === req.startup_id);
+                return {
+                    ...req,
+                    startup_name: requestStartup?.name || 'Unknown Startup',
+                    startup_website: requestStartup?.domain || '',
+                    startup_sector: requestStartup?.sector || ''
+                };
+            });
+
+            setStartupRequests(mappedRequests);
+        } catch (error) {
+            console.error('Error loading startup requests:', error);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'services' && servicesSubTab === 'requested') {
+            loadStartupRequests();
+        }
+    }, [activeTab, servicesSubTab, currentStartup?.id, user?.id]);
 
     // Fallback fetch for startup users: if no offers came via props, fetch directly
     useEffect(() => {
@@ -411,24 +462,25 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                       )}
 
                       {servicesSubTab === 'requested' && (
-                        <div className="text-center py-8 text-slate-600">
-                          <p className="text-sm">
-                            Your pending service requests (to mentors, advisors, CA/CS, incubation, etc.) will appear here.
-                          </p>
-                          <p className="text-xs text-slate-500 mt-1">
-                            This will show all connections you have requested from the Explore pages.
-                          </p>
-                        </div>
+                        <StartupRequestsSection
+                          requests={startupRequests}
+                          onRequestAction={() => {
+                            loadStartupRequests();
+                          }}
+                        />
                       )}
 
                       {servicesSubTab === 'my-services' && (
-                        <div className="text-center py-8 text-slate-600">
-                          <p className="text-sm">
-                            Accepted services and ongoing relationships will appear here.
-                          </p>
-                          <p className="text-xs text-slate-500 mt-1">
-                            Use this section to track active advisors, mentors, and other service providers.
-                          </p>
+                        <div className="space-y-4">
+                          <ScheduledSessionsSection
+                            startupId={currentStartup.id}
+                            userType="Startup"
+                          />
+                          <div className="text-center py-4 text-slate-600">
+                            <p className="text-sm">
+                              Accepted services and ongoing relationships will appear here.
+                            </p>
+                          </div>
                         </div>
                       )}
                     </Card>
@@ -613,6 +665,29 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             {renderTabContent()}
         </div>
       </Card>
+
+      {/* Connect Mentor Request Modal */}
+      {connectModalOpen && selectedMentor && (
+        <ConnectMentorRequestModal
+          isOpen={connectModalOpen}
+          onClose={() => {
+            setConnectModalOpen(false);
+            setSelectedMentor(null);
+          }}
+          mentorId={selectedMentor.id}
+          mentorName={selectedMentor.name}
+          mentorFeeType={selectedMentor.fee_type}
+          mentorFeeAmount={selectedMentor.fee_amount}
+          mentorEquityPercentage={selectedMentor.equity_percentage}
+          startupId={currentStartup.id}
+          requesterId={user?.id!}
+          onRequestSent={() => {
+            loadStartupRequests();
+            setConnectModalOpen(false);
+            setSelectedMentor(null);
+          }}
+        />
+      )}
     </div>
   );
 };

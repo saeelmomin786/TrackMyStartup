@@ -18,6 +18,9 @@ import MentorDataForm from './MentorDataForm';
 import MentorProfileForm from './mentor/MentorProfileForm';
 import MentorCard from './mentor/MentorCard';
 import { AddProfileModal } from './AddProfileModal';
+import MentorPendingRequestsSection from './mentor/MentorPendingRequestsSection';
+import SchedulingModal from './mentor/SchedulingModal';
+import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
 
 interface MentorViewProps {
   currentUser: AuthUser | null;
@@ -76,6 +79,10 @@ const MentorView: React.FC<MentorViewProps> = ({
   
   // State for Add Profile Modal
   const [showAddProfileModal, setShowAddProfileModal] = useState(false);
+  
+  // State for Scheduling Modal
+  const [schedulingModalOpen, setSchedulingModalOpen] = useState(false);
+  const [selectedAssignmentForScheduling, setSelectedAssignmentForScheduling] = useState<any>(null);
   
   // Handle navigation from profile form to dashboard
   const handleNavigateToDashboard = (section?: 'active' | 'completed' | 'founded') => {
@@ -630,152 +637,16 @@ ${mentorName}`;
 
                 {/* Pending Requests */}
                 {mentorMetrics && (
-                  <Card>
-                    <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700 flex items-center gap-2">
-                      <Mail className="h-5 w-5 text-blue-600" />
-                      Pending Requests ({mentorMetrics.pendingRequests.length})
-                    </h3>
-                    {mentorMetrics.pendingRequests.length === 0 ? (
-                      <div className="text-center py-8 text-slate-500">
-                        <Mail className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                        <p className="text-sm">No pending requests at this time.</p>
-                        <p className="text-xs mt-1">Requests from startups will appear here when they add you as a mentor.</p>
-                      </div>
-                    ) : (
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-slate-200">
-                        <thead className="bg-slate-50">
-                          <tr>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Requested</th>
-                            <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-slate-200">
-                          {mentorMetrics.pendingRequests.map(request => {
-                            // Find startup from request
-                            const requestStartup = request.startup_id ? startups.find(s => s.id === request.startup_id) : null;
-                            
-                            return (
-                              <tr key={request.id}>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-900 font-medium">
-                                  {request.startup_name || requestStartup?.name || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {request.startup_website ? (
-                                    <a 
-                                      href={request.startup_website.startsWith('http') ? request.startup_website : `https://${request.startup_website}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-600 hover:text-blue-800 underline"
-                                    >
-                                      {request.startup_website}
-                                    </a>
-                                  ) : (
-                                    'N/A'
-                                  )}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {request.startup_sector || requestStartup?.sector || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {request.fee_type ? (
-                                    <div>
-                                      <div className="font-medium">{request.fee_type}</div>
-                                      {request.fee_amount !== null && request.fee_amount !== undefined && (
-                                        <div className="text-xs text-slate-400">
-                                          {formatCurrency(request.fee_amount, 'USD')}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    'N/A'
-                                  )}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {new Date(request.requested_at).toLocaleDateString()}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
-                                  <div className="flex items-center justify-end gap-2">
-                                    {requestStartup && (
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline"
-                                        className="border-blue-300 text-blue-600 hover:bg-blue-50"
-                                        onClick={() => openStartupPublicPage(requestStartup.id)}
-                                      >
-                                        <Eye className="mr-1 h-3 w-3" /> View Startup
-                                      </Button>
-                                    )}
-                                    {request.startup_id && !requestStartup && (
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline"
-                                        className="border-blue-300 text-blue-600 hover:bg-blue-50"
-                                        onClick={() => openStartupPublicPage(request.startup_id!)}
-                                      >
-                                        <Eye className="mr-1 h-3 w-3" /> View Startup
-                                      </Button>
-                                    )}
-                                    <Button 
-                                      size="sm" 
-                                      variant="primary" 
-                                      className="bg-green-600 hover:bg-green-700"
-                                      onClick={async () => {
-                                        if (confirm('Are you sure you want to accept this mentor request? This will add the startup to your Currently Mentoring section.')) {
-                                          const success = await mentorService.acceptMentorRequest(request.id);
-                                          if (success) {
+                  <MentorPendingRequestsSection
+                    requests={mentorMetrics.pendingRequests}
+                    onRequestAction={async () => {
                                             // Reload mentor metrics
                                             if (currentUser?.id) {
                                               const metrics = await mentorService.getMentorMetrics(currentUser.id);
                                               setMentorMetrics(metrics);
-                                              // Switch to Currently Mentoring tab to show the newly accepted startup
-                                              if (metrics.activeAssignments.length > 0) {
-                                                setMentorStartupsTab('active');
-                                              }
-                                            }
-                                          } else {
-                                            alert('Failed to accept mentor request. Please try again.');
-                                          }
-                                        }
-                                      }}
-                                    >
-                                      <CheckCircle className="mr-1 h-3 w-3" /> Accept
-                                    </Button>
-                                    <Button 
-                                      size="sm" 
-                                      variant="outline" 
-                                      className="border-red-300 text-red-600 hover:bg-red-50"
-                                      onClick={async () => {
-                                        if (confirm('Are you sure you want to reject this mentor request?')) {
-                                          const success = await mentorService.rejectMentorRequest(request.id);
-                                          if (success) {
-                                            // Reload mentor metrics
-                                            if (currentUser?.id) {
-                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
-                                              setMentorMetrics(metrics);
-                                            }
-                                          } else {
-                                            alert('Failed to reject mentor request. Please try again.');
-                                          }
-                                        }
-                                      }}
-                                    >
-                                      <X className="mr-1 h-3 w-3" /> Reject
-                                    </Button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                    )}
-                  </Card>
+                      }
+                    }}
+                  />
                 )}
 
                 {/* Combined Mentor Startups Section */}
@@ -912,6 +783,20 @@ ${mentorName}`;
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
                                   <div className="flex items-center justify-end gap-2">
+                                    {/* Schedule button - only for TMS startups */}
+                                    {assignment.startup && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-green-600 border-green-300 hover:bg-green-50"
+                                        onClick={() => {
+                                          setSelectedAssignmentForScheduling(assignment);
+                                          setSchedulingModalOpen(true);
+                                        }}
+                                      >
+                                        <Video className="mr-1 h-3 w-3" /> Schedule
+                                      </Button>
+                                    )}
                                     {/* Only show Invite to TMS if assignment didn't come from a request */}
                                     {!(assignment as any).fromRequest && (
                                       <Button
@@ -1178,9 +1063,9 @@ ${mentorName}`;
                                   <div className="flex items-center justify-end gap-2">
                                     {isOnTMS ? (
                                       // Startup is already on TMS - show View button
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
                                         onClick={() => handleViewStartup(startup as Startup)}
                                       >
                                         <Eye className="mr-2 h-4 w-4" /> View
@@ -1191,10 +1076,10 @@ ${mentorName}`;
                                         size="sm"
                                         variant="outline"
                                         onClick={() => setShowAddProfileModal(true)}
-                                        className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                                      >
+                                    className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                  >
                                         <UserPlus className="mr-1 h-3 w-3" /> Add to TMS
-                                      </Button>
+                                  </Button>
                                     )}
                                   </div>
                                 </td>
@@ -2009,6 +1894,37 @@ ${mentorName}`;
           }
         }}
       />
+
+      {/* Scheduling Modal */}
+      {schedulingModalOpen && selectedAssignmentForScheduling && (
+        <SchedulingModal
+          isOpen={schedulingModalOpen}
+          onClose={() => {
+            setSchedulingModalOpen(false);
+            setSelectedAssignmentForScheduling(null);
+          }}
+          mentorId={currentUser?.id!}
+          startupId={selectedAssignmentForScheduling.startup_id}
+          assignmentId={selectedAssignmentForScheduling.id}
+          onSessionBooked={async () => {
+            // Reload metrics
+            if (currentUser?.id) {
+              const metrics = await mentorService.getMentorMetrics(currentUser.id);
+              setMentorMetrics(metrics);
+            }
+          }}
+        />
+      )}
+
+      {/* Scheduled Sessions Section */}
+      {mentorStartupsTab === 'active' && currentUser?.id && (
+        <div className="mt-6">
+          <ScheduledSessionsSection
+            mentorId={currentUser.id}
+            userType="Mentor"
+          />
+        </div>
+      )}
     </div>
   );
 };

@@ -34,6 +34,12 @@ export interface ProfileTemplate {
   sector: string;
 }
 
+// Cache to track if profile_notifications table exists (to avoid repeated 404s)
+let _profileNotificationsTableExists: boolean | null = null;
+
+// Cache to track if international_ops table exists (to avoid repeated 404s)
+let _internationalOpsTableExists: boolean | null = null;
+
 export const profileService = {
   // Expose supabase client for direct subscriptions
   supabase,
@@ -80,23 +86,53 @@ export const profileService = {
 
       // Fetch international operations data (table may not exist)
       let internationalOpsData = null;
-      try {
-        const { data, error: internationalOpsError } = await supabase
-          .from('international_operations')
-          .select('*')
-          .eq('startup_id', startupId);
+      
+      // If we know the table doesn't exist, skip the query
+      if (_internationalOpsTableExists === false) {
+        console.log('🔍 international_ops table not found (cached), skipping fetch');
+        internationalOpsData = [];
+      } else {
+        try {
+          const { data, error: internationalOpsError } = await supabase
+            .from('international_ops')
+            .select('*')
+            .eq('startup_id', startupId);
 
-        if (internationalOpsError) {
-          // Only log if it's not a "table doesn't exist" error
-          if (internationalOpsError.code !== 'PGRST116' && internationalOpsError.message !== 'relation "public.international_operations" does not exist') {
-            console.log('🔍 International operations table error:', internationalOpsError);
+          if (internationalOpsError) {
+            const errorStatus = (internationalOpsError as any)?.status || (internationalOpsError as any)?.statusCode;
+            const errorMessage = internationalOpsError.message || '';
+            const errorCode = internationalOpsError.code || '';
+            
+            const isTableNotFound = 
+              errorCode === 'PGRST116' || 
+              errorCode === 'PGRST205' ||
+              errorCode === '42P01' ||
+              errorStatus === 404 ||
+              errorMessage.includes('does not exist') || 
+              errorMessage.includes('404') ||
+              (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+              errorMessage.includes('Could not find the table') ||
+              errorMessage.toLowerCase().includes('not found');
+
+            if (isTableNotFound) {
+              // Cache that table doesn't exist
+              _internationalOpsTableExists = false;
+              console.log('🔍 international_ops table not found, caching result');
+              internationalOpsData = [];
+            } else {
+              console.error('❌ Error fetching international operations:', internationalOpsError);
+              internationalOpsData = [];
+            }
+          } else {
+            // Table exists and query succeeded
+            _internationalOpsTableExists = true;
+            internationalOpsData = data;
           }
-        } else {
-          internationalOpsData = data;
+        } catch (error) {
+          // Silently handle table not existing
+          console.log('🔍 International operations table not available, skipping');
+          internationalOpsData = [];
         }
-      } catch (error) {
-        // Silently handle table not existing
-        console.log('🔍 International operations table not available, skipping');
       }
 
       // Normalize dates to YYYY-MM-DD
@@ -253,6 +289,12 @@ export const profileService = {
     try {
       console.log('🔍 addSubsidiary called with:', { startupId, subsidiary });
       
+      // Validate required fields
+      if (!subsidiary.country || !subsidiary.companyType || !subsidiary.registrationDate) {
+        console.error('❌ Missing required fields for subsidiary:', subsidiary);
+        return null;
+      }
+      
       // Use direct database insert instead of RPC to avoid function overloading conflicts
       const { data, error } = await supabase
         .from('subsidiaries')
@@ -269,10 +311,23 @@ export const profileService = {
 
       console.log('🔍 Direct add_subsidiary result:', { data, error });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Database error adding subsidiary:', error);
+        throw error;
+      }
       return data?.id || null;
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error adding subsidiary:', error);
+      // Log more details about the error
+      if (error?.code) {
+        console.error('Error code:', error.code);
+      }
+      if (error?.message) {
+        console.error('Error message:', error.message);
+      }
+      if (error?.details) {
+        console.error('Error details:', error.details);
+      }
       return null;
     }
   },
@@ -356,20 +411,104 @@ export const profileService = {
     startupId: number,
     operation: Omit<InternationalOp, 'id'>
   ): Promise<number | null> {
-    try {
-      // Use the full function with company_type
-      const { data, error } = await supabase
-        .rpc('add_international_op', {
-          startup_id_param: startupId,
-          country_param: operation.country,
-          company_type_param: operation.companyType || 'default',
-          start_date_param: operation.startDate
-        });
+    // If we know the table doesn't exist, return null immediately
+    if (_internationalOpsTableExists === false) {
+      console.log('⚠️ international_ops table not found, skipping add operation');
+      return null;
+    }
 
-      if (error) throw error;
-      return data;
-    } catch (error) {
+    try {
+      console.log('🔍 addInternationalOp called with:', { startupId, operation });
+      
+      // Validate required fields
+      if (!operation.country || !operation.startDate) {
+        console.error('❌ Missing required fields for international operation:', operation);
+        return null;
+      }
+      
+      // Use direct database insert instead of RPC to avoid function overloading conflicts
+      const { data, error } = await supabase
+        .from('international_ops')
+        .insert({
+          startup_id: startupId,
+          country: operation.country,
+          company_type: operation.companyType || 'C-Corporation',
+          start_date: operation.startDate,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select('id')
+        .single();
+
+      console.log('🔍 Direct add_international_op result:', { data, error });
+
+      // Handle 404 or table not found errors gracefully
+      if (error) {
+        const errorStatus = (error as any)?.status || (error as any)?.statusCode;
+        const errorMessage = error.message || '';
+        const errorCode = error.code || '';
+        
+        const isTableNotFound = 
+          errorCode === 'PGRST116' || 
+          errorCode === 'PGRST205' || // PostgREST: table not found in schema cache
+          errorCode === '42P01' ||
+          errorStatus === 404 ||
+          errorMessage.includes('does not exist') || 
+          errorMessage.includes('404') ||
+          (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+          errorMessage.includes('Could not find the table') ||
+          errorMessage.toLowerCase().includes('not found');
+
+        if (isTableNotFound) {
+          // Cache that table doesn't exist to prevent future calls
+          _internationalOpsTableExists = false;
+          console.log('⚠️ international_ops table not found, caching result');
+          // Silently return null - table doesn't exist, this is expected
+          return null;
+        }
+        
+        console.error('❌ Database error adding international operation:', error);
+        throw error;
+      }
+
+      // Table exists and query succeeded
+      _internationalOpsTableExists = true;
+      return data?.id || null;
+    } catch (error: any) {
+      // Check if it's a table not found error with improved detection
+      const errorStatus = error?.status || error?.statusCode;
+      const errorMessage = error?.message || '';
+      const errorCode = error?.code || '';
+      
+      const isTableNotFound = 
+        errorCode === 'PGRST116' || 
+        errorCode === 'PGRST205' || // PostgREST: table not found in schema cache
+        errorCode === '42P01' ||
+        errorStatus === 404 ||
+        errorMessage.includes('does not exist') || 
+        errorMessage.includes('404') ||
+        (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+        errorMessage.includes('Could not find the table') ||
+        errorMessage.toLowerCase().includes('not found');
+
+      if (isTableNotFound) {
+        // Cache that table doesn't exist
+        _internationalOpsTableExists = false;
+        // Silently return null - don't log errors for missing table
+        return null;
+      }
+
+      // Only log non-404 errors
       console.error('Error adding international operation:', error);
+      if (error?.code) {
+        console.error('Error code:', error.code);
+      }
+      if (error?.message) {
+        console.error('Error message:', error.message);
+      }
+      if (error?.details) {
+        console.error('Error details:', error.details);
+      }
       return null;
     }
   },
@@ -379,6 +518,12 @@ export const profileService = {
     opId: number,
     operation: Omit<InternationalOp, 'id'>
   ): Promise<boolean> {
+    // If we know the table doesn't exist, return false immediately
+    if (_internationalOpsTableExists === false) {
+      console.log('⚠️ international_ops table not found, skipping update operation');
+      return false;
+    }
+
     try {
       console.log('🔍 updateInternationalOp called with:', { opId, operation });
       
@@ -400,19 +545,70 @@ export const profileService = {
       
       console.log('🔍 Processed start date:', startDate);
       
-      const { data, error } = await supabase
-        .rpc('update_international_op', {
-          op_id_param: opId,
-          country_param: operation.country,
-          company_type_param: operation.companyType || 'default',
-          start_date_param: startDate
-        });
+      // Use direct database update instead of RPC to avoid function conflicts
+      const { error } = await supabase
+        .from('international_ops')
+        .update({
+          country: operation.country,
+          company_type: operation.companyType || 'C-Corporation',
+          start_date: startDate,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', opId);
 
-      console.log('🔍 update_international_op result:', { data, error });
+      console.log('🔍 Direct update_international_op result:', { error });
 
-      if (error) throw error;
-      return data;
-    } catch (error) {
+      if (error) {
+        // Check if it's a table not found error
+        const errorStatus = (error as any)?.status || (error as any)?.statusCode;
+        const errorMessage = error.message || '';
+        const errorCode = error.code || '';
+        
+        const isTableNotFound = 
+          errorCode === 'PGRST116' || 
+          errorCode === 'PGRST205' ||
+          errorCode === '42P01' ||
+          errorStatus === 404 ||
+          errorMessage.includes('does not exist') || 
+          errorMessage.includes('404') ||
+          (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+          errorMessage.includes('Could not find the table') ||
+          errorMessage.toLowerCase().includes('not found');
+
+        if (isTableNotFound) {
+          _internationalOpsTableExists = false;
+          // Silently return false - table doesn't exist
+          return false;
+        }
+        throw error;
+      }
+      
+      // Table exists and query succeeded
+      _internationalOpsTableExists = true;
+      return true;
+    } catch (error: any) {
+      // Check if it's a table not found error
+      const errorStatus = error?.status || error?.statusCode;
+      const errorMessage = error?.message || '';
+      const errorCode = error?.code || '';
+      
+      const isTableNotFound = 
+        errorCode === 'PGRST116' || 
+        errorCode === 'PGRST205' ||
+        errorCode === '42P01' ||
+        errorStatus === 404 ||
+        errorMessage.includes('does not exist') || 
+        errorMessage.includes('404') ||
+        (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+        errorMessage.includes('Could not find the table') ||
+        errorMessage.toLowerCase().includes('not found');
+
+      if (isTableNotFound) {
+        _internationalOpsTableExists = false;
+        // Silently return false - don't log errors for missing table
+        return false;
+      }
+
       console.error('❌ Error updating international operation:', error);
       return false;
     }
@@ -420,16 +616,75 @@ export const profileService = {
 
   // Delete international operation
   async deleteInternationalOp(opId: number): Promise<boolean> {
-    try {
-      const { data, error } = await supabase
-        .rpc('delete_international_op', {
-          op_id_param: opId
-        });
+    // If we know the table doesn't exist, return false immediately
+    if (_internationalOpsTableExists === false) {
+      console.log('⚠️ international_ops table not found, skipping delete operation');
+      return false;
+    }
 
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error deleting international operation:', error);
+    try {
+      console.log('🔍 deleteInternationalOp called with ID:', opId);
+      
+      // Use direct database delete instead of RPC to avoid function conflicts
+      const { error } = await supabase
+        .from('international_ops')
+        .delete()
+        .eq('id', opId);
+
+      console.log('🔍 Direct delete_international_op result:', { error });
+
+      if (error) {
+        // Check if it's a table not found error
+        const errorStatus = (error as any)?.status || (error as any)?.statusCode;
+        const errorMessage = error.message || '';
+        const errorCode = error.code || '';
+        
+        const isTableNotFound = 
+          errorCode === 'PGRST116' || 
+          errorCode === 'PGRST205' ||
+          errorCode === '42P01' ||
+          errorStatus === 404 ||
+          errorMessage.includes('does not exist') || 
+          errorMessage.includes('404') ||
+          (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+          errorMessage.includes('Could not find the table') ||
+          errorMessage.toLowerCase().includes('not found');
+
+        if (isTableNotFound) {
+          _internationalOpsTableExists = false;
+          // Silently return false - table doesn't exist
+          return false;
+        }
+        throw error;
+      }
+      
+      // Table exists and query succeeded
+      _internationalOpsTableExists = true;
+      return true;
+    } catch (error: any) {
+      // Check if it's a table not found error
+      const errorStatus = error?.status || error?.statusCode;
+      const errorMessage = error?.message || '';
+      const errorCode = error?.code || '';
+      
+      const isTableNotFound = 
+        errorCode === 'PGRST116' || 
+        errorCode === 'PGRST205' ||
+        errorCode === '42P01' ||
+        errorStatus === 404 ||
+        errorMessage.includes('does not exist') || 
+        errorMessage.includes('404') ||
+        (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+        errorMessage.includes('Could not find the table') ||
+        errorMessage.toLowerCase().includes('not found');
+
+      if (isTableNotFound) {
+        _internationalOpsTableExists = false;
+        // Silently return false - don't log errors for missing table
+        return false;
+      }
+
+      console.error('❌ Error deleting international operation:', error);
       return false;
     }
   },
@@ -440,6 +695,11 @@ export const profileService = {
 
   // Get profile notifications
   async getProfileNotifications(startupId: number): Promise<ProfileNotification[]> {
+    // If we know the table doesn't exist, return empty array immediately
+    if (_profileNotificationsTableExists === false) {
+      return [];
+    }
+
     try {
       const { data, error } = await supabase
         .from('profile_notifications')
@@ -447,9 +707,62 @@ export const profileService = {
         .eq('startup_id', startupId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      // Handle 404 or table not found errors gracefully
+      if (error) {
+        // Check for various 404/table not found error indicators
+        // Supabase returns 404 as status in error object
+        const errorStatus = (error as any)?.status || (error as any)?.statusCode;
+        const errorMessage = error.message || '';
+        const errorCode = error.code || '';
+        
+        const isTableNotFound = 
+          errorCode === 'PGRST116' || 
+          errorCode === 'PGRST205' || // PostgREST: table not found in schema cache
+          errorCode === '42P01' || // PostgreSQL: relation does not exist
+          errorStatus === 404 ||
+          errorMessage.includes('does not exist') || 
+          errorMessage.includes('404') ||
+          (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+          errorMessage.includes('Could not find the table') ||
+          errorMessage.toLowerCase().includes('not found');
+
+        if (isTableNotFound) {
+          // Cache that table doesn't exist to prevent future calls
+          _profileNotificationsTableExists = false;
+          // Silently return - table doesn't exist, this is expected
+          return [];
+        }
+        throw error;
+      }
+
+      // Table exists and query succeeded
+      _profileNotificationsTableExists = true;
       return data || [];
-    } catch (error) {
+    } catch (error: any) {
+      // Check if it's a table not found error with improved detection
+      const errorStatus = error?.status || error?.statusCode;
+      const errorMessage = error?.message || '';
+      const errorCode = error?.code || '';
+      
+      const isTableNotFound = 
+        errorCode === 'PGRST116' || 
+        errorCode === 'PGRST205' || // PostgREST: table not found in schema cache
+        errorCode === '42P01' ||
+        errorStatus === 404 ||
+        errorMessage.includes('does not exist') || 
+        errorMessage.includes('404') ||
+        (errorMessage.includes('relation') && errorMessage.includes('does not exist')) ||
+        errorMessage.includes('Could not find the table') ||
+        errorMessage.toLowerCase().includes('not found');
+
+      if (isTableNotFound) {
+        // Cache that table doesn't exist
+        _profileNotificationsTableExists = false;
+        // Silently return empty array - don't log errors for missing table
+        return [];
+      }
+
+      // Only log non-404 errors
       console.error('Error fetching profile notifications:', error);
       return [];
     }
@@ -540,6 +853,8 @@ export const profileService = {
         },
         callback
       )
+      // Subscribe to profile_notifications (if table exists)
+      // Note: This subscription will fail silently if table doesn't exist
       .on(
         'postgres_changes',
         {
@@ -548,7 +863,17 @@ export const profileService = {
           table: 'profile_notifications',
           filter: `startup_id=eq.${startupId}`
         },
-        callback
+        (payload) => {
+          // Only call callback if subscription succeeds
+          try {
+            callback(payload);
+          } catch (error) {
+            // Ignore errors from missing table
+            if (!error?.message?.includes('does not exist') && !error?.message?.includes('404')) {
+              console.error('Notification callback error:', error);
+            }
+          }
+        }
       )
       .on(
         'postgres_changes',
@@ -586,18 +911,31 @@ export const profileService = {
   // Subscribe to profile notifications
   subscribeToProfileNotifications(startupId: number, callback: (payload: any) => void) {
     return supabase
-      .channel(`profile_notifications_${startupId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'profile_notifications',
-          filter: `startup_id=eq.${startupId}`
-        },
-        callback
-      )
-      .subscribe();
+      // Only subscribe if table exists (handle gracefully if table doesn't exist)
+      const channel = supabase
+        .channel(`profile_notifications_${startupId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'profile_notifications',
+            filter: `startup_id=eq.${startupId}`
+          },
+          callback
+        )
+        .subscribe();
+      
+      // Handle subscription errors gracefully
+      channel.on('error', (error) => {
+        if (error?.message?.includes('does not exist') || error?.message?.includes('404')) {
+          console.log('⚠️ profile_notifications table not found, subscription skipped');
+        } else {
+          console.error('Subscription error:', error);
+        }
+      });
+      
+      return channel;
   },
 
   // =====================================================
@@ -899,5 +1237,12 @@ export const profileService = {
       console.error('Error updating compliance task status:', error);
       return false;
     }
+  },
+
+  // Clear cache for table existence checks (useful after table creation)
+  clearTableExistenceCache() {
+    _profileNotificationsTableExists = null;
+    _internationalOpsTableExists = null;
+    console.log('🔄 Cleared table existence cache');
   }
 };

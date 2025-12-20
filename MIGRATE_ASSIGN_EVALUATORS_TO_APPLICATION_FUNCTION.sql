@@ -50,3 +50,4 @@ $function$;
 SELECT '✅ Function assign_evaluators_to_application() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

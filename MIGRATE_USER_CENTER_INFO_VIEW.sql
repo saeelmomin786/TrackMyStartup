@@ -31,3 +31,4 @@ WHERE up.role = 'Startup Facilitation Center'::user_role
 SELECT '✅ View user_center_info migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

@@ -51,3 +51,4 @@ WHERE n.nspname = 'public'
 **Get the function definition for `assign_facilitator_code`** using the query above, then share the `function_definition` result with me, and I'll create the migration script!
 
 
+

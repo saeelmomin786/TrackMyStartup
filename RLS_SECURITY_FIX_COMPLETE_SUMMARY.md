@@ -130,3 +130,4 @@ All 8 tables now have RLS enabled and appropriate policies created!
 Your application is now much more secure while maintaining full functionality! 🎉
 
 
+

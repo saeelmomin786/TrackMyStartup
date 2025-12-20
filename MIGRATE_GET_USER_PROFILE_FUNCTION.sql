@@ -42,3 +42,4 @@ $function$;
 SELECT '✅ Function get_user_profile() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

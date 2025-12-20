@@ -76,3 +76,4 @@ GRANT EXECUTE ON FUNCTION get_advisor_clients(uuid) TO authenticated;
 SELECT '✅ Function get_advisor_clients() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

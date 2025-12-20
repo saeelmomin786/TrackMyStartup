@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Startup, InvestmentType, ComplianceStatus } from '../types';
-import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle } from 'lucide-react';
+import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2 } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { AuthUser } from '../lib/auth';
@@ -17,6 +17,7 @@ import StartupHealthView from './StartupHealthView';
 import MentorDataForm from './MentorDataForm';
 import MentorProfileForm from './mentor/MentorProfileForm';
 import MentorCard from './mentor/MentorCard';
+import { AddProfileModal } from './AddProfileModal';
 
 interface MentorViewProps {
   currentUser: AuthUser | null;
@@ -72,6 +73,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   
   // Tab state for mentor startups section
   const [mentorStartupsTab, setMentorStartupsTab] = useState<'active' | 'completed' | 'founded'>('active');
+  
+  // State for Add Profile Modal
+  const [showAddProfileModal, setShowAddProfileModal] = useState(false);
   
   // Handle navigation from profile form to dashboard
   const handleNavigateToDashboard = (section?: 'active' | 'completed' | 'founded') => {
@@ -837,6 +841,7 @@ ${mentorName}`;
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From Date</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ESOP</th>
                             <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
@@ -849,6 +854,7 @@ ${mentorName}`;
                             let emailId = '';
                             let website = '';
                             let sector = '';
+                            let fromDate = '';
                             
                             if (assignment.notes) {
                               try {
@@ -857,6 +863,7 @@ ${mentorName}`;
                                 emailId = notesData.email_id || '';
                                 website = notesData.website || '';
                                 sector = notesData.sector || '';
+                                fromDate = notesData.from_date || '';
                               } catch (e) {
                                 // Notes is not JSON, use startup data
                                 website = assignment.startup?.domain || '';
@@ -865,6 +872,11 @@ ${mentorName}`;
                             } else if (assignment.startup) {
                               website = assignment.startup.domain || '';
                               sector = assignment.startup.sector || '';
+                            }
+                            
+                            // If from_date not in notes, use assigned_at
+                            if (!fromDate && assignment.assigned_at) {
+                              fromDate = assignment.assigned_at.split('T')[0];
                             }
 
                             return (
@@ -888,6 +900,9 @@ ${mentorName}`;
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                   {sector || 'N/A'}
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                                  {fromDate || 'N/A'}
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                   {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
@@ -942,6 +957,27 @@ ${mentorName}`;
                                     >
                                       <CheckCircle2 className="mr-1 h-3 w-3" /> Update
                                     </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-red-600 border-red-300 hover:bg-red-50"
+                                      onClick={async () => {
+                                        if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
+                                          const success = await mentorService.deleteMentoringAssignment(assignment.id);
+                                          if (success) {
+                                            // Reload mentor metrics
+                                            if (currentUser?.id) {
+                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                              setMentorMetrics(metrics);
+                                            }
+                                          } else {
+                                            alert('Failed to delete mentoring assignment. Please try again.');
+                                          }
+                                        }
+                                      }}
+                                    >
+                                      <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                    </Button>
                                   </div>
                                 </td>
                               </tr>
@@ -961,6 +997,8 @@ ${mentorName}`;
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From Date</th>
+                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">To Date</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee Earned</th>
                             <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ESOP Value</th>
                             <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
@@ -973,6 +1011,8 @@ ${mentorName}`;
                             let emailId = '';
                             let website = '';
                             let sector = '';
+                            let fromDate = '';
+                            let toDate = '';
                             
                             if (assignment.notes) {
                               try {
@@ -981,6 +1021,8 @@ ${mentorName}`;
                                 emailId = notesData.email_id || '';
                                 website = notesData.website || '';
                                 sector = notesData.sector || '';
+                                fromDate = notesData.from_date || '';
+                                toDate = notesData.to_date || '';
                               } catch (e) {
                                 // Notes is not JSON, use startup data
                                 website = assignment.startup?.domain || '';
@@ -989,6 +1031,16 @@ ${mentorName}`;
                             } else if (assignment.startup) {
                               website = assignment.startup.domain || '';
                               sector = assignment.startup.sector || '';
+                            }
+                            
+                            // If from_date not in notes, use assigned_at
+                            if (!fromDate && assignment.assigned_at) {
+                              fromDate = assignment.assigned_at.split('T')[0];
+                            }
+                            
+                            // If to_date not in notes but completed_at exists, use completed_at
+                            if (!toDate && assignment.completed_at) {
+                              toDate = assignment.completed_at.split('T')[0];
                             }
 
                             return (
@@ -1012,6 +1064,12 @@ ${mentorName}`;
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                   {sector || 'N/A'}
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                                  {fromDate || 'N/A'}
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                                  {toDate || 'N/A'}
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                   {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
@@ -1038,6 +1096,27 @@ ${mentorName}`;
                                         <Eye className="mr-2 h-4 w-4" /> View
                                       </Button>
                                     )}
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-red-600 border-red-300 hover:bg-red-50"
+                                      onClick={async () => {
+                                        if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
+                                          const success = await mentorService.deleteMentoringAssignment(assignment.id);
+                                          if (success) {
+                                            // Reload mentor metrics
+                                            if (currentUser?.id) {
+                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                              setMentorMetrics(metrics);
+                                            }
+                                          } else {
+                                            alert('Failed to delete mentoring assignment. Please try again.');
+                                          }
+                                        }
+                                      }}
+                                    >
+                                      <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                    </Button>
                                   </div>
                                 </td>
                               </tr>
@@ -1067,9 +1146,13 @@ ${mentorName}`;
                             const emailId = (startup as any).email_id || '';
                             const website = (startup as any).website || startup.domain || '';
                             const sector = (startup as any).sector || startup.sector || '';
+                            
+                            // Check if startup is on TMS (has user_id or is a valid TMS startup)
+                            // If startup was created from notes (manually entered), it won't have user_id
+                            const isOnTMS = startup.user_id || (startup.id && typeof startup.id === 'number' && startup.id > 0 && !startup.notes);
 
                             return (
-                              <tr key={startup.id}>
+                              <tr key={startup.id || `manual-${startup.name}`}>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                                   <div className="text-xs sm:text-sm font-medium text-slate-900">{startup.name}</div>
                                 </td>
@@ -1092,14 +1175,28 @@ ${mentorName}`;
                                   {formatCurrency(startup.currentValuation || 0, startup.currency || 'USD')}
                                 </td>
                                 <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleInviteToTMS(startup.name, (startup as any).email_id)}
-                                    className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                                  >
-                                    <Send className="mr-1 h-3 w-3" /> Invite to TMS
-                                  </Button>
+                                  <div className="flex items-center justify-end gap-2">
+                                    {isOnTMS ? (
+                                      // Startup is already on TMS - show View button
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleViewStartup(startup as Startup)}
+                                      >
+                                        <Eye className="mr-2 h-4 w-4" /> View
+                                      </Button>
+                                    ) : (
+                                      // Startup not on TMS yet - show Add to TMS button
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setShowAddProfileModal(true)}
+                                        className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                      >
+                                        <UserPlus className="mr-1 h-3 w-3" /> Add to TMS
+                                      </Button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -1899,6 +1996,19 @@ ${mentorName}`;
           </div>
         )}
       </div>
+      
+      {/* Add Profile Modal */}
+      <AddProfileModal
+        isOpen={showAddProfileModal}
+        onClose={() => setShowAddProfileModal(false)}
+        onProfileCreated={() => {
+          setShowAddProfileModal(false);
+          // Optionally reload metrics or refresh data
+          if (currentUser?.id) {
+            mentorService.getMentorMetrics(currentUser.id).then(setMentorMetrics);
+          }
+        }}
+      />
     </div>
   );
 };

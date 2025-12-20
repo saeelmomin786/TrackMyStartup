@@ -117,6 +117,9 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   const [domainOptions, setDomainOptions] = useState<GeneralDataItem[]>([]);
   const [stageOptions, setStageOptions] = useState<GeneralDataItem[]>([]);
   const [roundTypeOptions, setRoundTypeOptions] = useState<GeneralDataItem[]>([]);
+  
+  // Validation status
+  const [validationStatus, setValidationStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
 
   useEffect(() => {
     const loadData = async () => {
@@ -135,8 +138,20 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         setStageOptions(stages);
         setRoundTypeOptions(roundTypes);
 
-        const rounds = await capTableService.getFundraisingDetails(startup.id);
+        const [rounds, validationRequest] = await Promise.all([
+          capTableService.getFundraisingDetails(startup.id),
+          validationService.getStartupValidationStatus(startup.id).catch(() => null)
+        ]);
+        
         setExistingRounds(rounds);
+        
+        // Set validation status
+        if (validationRequest) {
+          setValidationStatus(validationRequest.status as 'pending' | 'approved' | 'rejected');
+        } else {
+          setValidationStatus('none');
+        }
+        
         if (rounds.length > 0) {
           const latest = rounds[0];
           setFundraising(latest);
@@ -717,6 +732,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
           console.log('🔄 Creating/updating validation request for startup:', startup.name);
           const validationRequest = await validationService.createValidationRequest(startup.id, startup.name);
           console.log('✅ Validation request processed:', validationRequest);
+          setValidationStatus(validationRequest.status as 'pending' | 'approved' | 'rejected');
           
           // Show success message with validation info
           messageService.success(
@@ -776,24 +792,19 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   };
 
   const handleSaveAll = async () => {
-    // Require complete one‑pager before saving
+    // Save fundraising details first (always save, regardless of one-pager completion)
+    await handleSave();
+    
+    // Try to save one-pager PDF if one-pager is complete, but don't fail if it's not ready
     const isComplete = validateOnePagerComplete();
-    if (!isComplete) return;
-
-    // Save fundraising details first, then one‑pager PDF
-    await handleSave();
-    // Try to save one-pager PDF, but don't fail if it's not ready
-    try {
-      await handleSaveOnePagerToSupabase();
-    } catch (err) {
-      console.warn('One-pager PDF save failed (non-blocking):', err);
-      // Don't show error to user - fundraising details are already saved
+    if (isComplete) {
+      try {
+        await handleSaveOnePagerToSupabase();
+      } catch (err) {
+        console.warn('One-pager PDF save failed (non-blocking):', err);
+        // Don't show error to user - fundraising details are already saved
+      }
     }
-  };
-
-  // Separate function to save just fundraising details without one-pager validation
-  const handleSaveFundraisingOnly = async () => {
-    await handleSave();
   };
 
   if (isLoading) {
@@ -1057,41 +1068,54 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 />
               </div>
               <div className="pt-2 space-y-2">
-                <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="rounded border-slate-300"
-                    checked={!!fundraising.validationRequested}
-                    onChange={e => handleChange('validationRequested', e.target.checked)}
-                    disabled={!canEdit}
-                  />
-                  <span className="font-semibold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-md border border-blue-200">
-                    TMS validation
-                  </span>
-                </label>
-                <p className="text-xs text-slate-600 pl-7">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={validationStatus === 'approved' ? "primary" : validationStatus === 'pending' ? "primary" : "secondary"}
+                  onClick={async () => {
+                    if (validationStatus === 'none' || validationStatus === 'rejected') {
+                      // Create validation request
+                      try {
+                        await handleChange('validationRequested', true);
+                        const validationRequest = await validationService.createValidationRequest(startup.id, startup.name);
+                        setValidationStatus(validationRequest.status as 'pending' | 'approved' | 'rejected');
+                        messageService.success(
+                          'Validation Requested',
+                          'Your TMS validation request has been submitted and is pending admin approval.',
+                          5000
+                        );
+                      } catch (error) {
+                        console.error('Error creating validation request:', error);
+                        messageService.error(
+                          'Request Failed',
+                          'Failed to submit validation request. Please try again.',
+                          3000
+                        );
+                      }
+                    }
+                  }}
+                  disabled={!canEdit || validationStatus === 'approved'}
+                  className={`font-semibold ${
+                    validationStatus === 'approved' 
+                      ? 'bg-green-600 hover:bg-green-700 text-white cursor-not-allowed' 
+                      : validationStatus === 'pending'
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                      : 'bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200'
+                  }`}
+                >
+                  {validationStatus === 'approved' 
+                    ? 'TMS Validation Verified' 
+                    : validationStatus === 'pending'
+                    ? 'TMS Validation Requested'
+                    : 'TMS Validation'}
+                </Button>
+                <p className="text-xs text-slate-600">
                   We verify your profile and due diligence by TMS team. You will be shown to investors in the verified profile section.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Save button for basic fundraising fields */}
-          {canEdit && (
-            <div className="mt-6 pt-4 border-t border-slate-200">
-              <Button
-                variant="primary"
-                onClick={handleSaveFundraisingOnly}
-                disabled={isSaving}
-                className="w-full sm:w-auto"
-              >
-                {isSaving ? 'Saving...' : 'Save Fundraising Details'}
-              </Button>
-              <p className="text-xs text-slate-500 mt-2">
-                Save your fundraising round details. Use "Save Fundraising & One‑Pager" below to also save the one-pager PDF.
-              </p>
-            </div>
-          )}
         </Card>
 
         {/* Right: Fundraising Card Display - Same design as Discover page */}
@@ -1346,38 +1370,38 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Left: Questionnaire */}
           <div className="w-full lg:w-1/2 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+              <div className="flex-1">
                 <h3 className="text-lg font-semibold text-slate-900">Fundraising One‑Pager</h3>
-                <p className="text-xs sm:text-sm text-slate-500">
+                <p className="text-xs sm:text-sm text-slate-500 mt-1">
                   Answer these questions and we&apos;ll auto‑create a concise one‑pager for investors inside the Fundraising section.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={handleDownloadOnePager}
-                  disabled={isDownloading}
-                  className="whitespace-nowrap"
-                >
-                  {isDownloading ? 'Preparing PDF...' : 'Download PDF / Print'}
-                </Button>
+              <div className="flex flex-col gap-2 sm:items-end">
                 <Button
                   size="sm"
                   variant="primary"
                   onClick={handleSaveAll}
                   disabled={isSaving || isSavingToSupabase || isDownloading}
-                  className="whitespace-nowrap"
+                  className="whitespace-nowrap w-full sm:w-[200px]"
                 >
-                  {isSaving || isSavingToSupabase ? 'Saving...' : 'Save Fundraising & One‑Pager'}
+                  {isSaving || isSavingToSupabase ? 'Saving...' : 'Save Fundraising Details'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleDownloadOnePager}
+                  disabled={isDownloading}
+                  className="whitespace-nowrap w-full sm:w-[200px]"
+                >
+                  {isDownloading ? 'Preparing PDF...' : 'Download PDF / Print'}
                 </Button>
                 {fundraising.onePagerUrl && fundraising.onePagerUrl !== '#' && (
-                  <a href={fundraising.onePagerUrl} target="_blank" rel="noopener noreferrer">
+                  <a href={fundraising.onePagerUrl} target="_blank" rel="noopener noreferrer" className="w-full sm:w-[200px]">
                     <Button 
                       size="sm" 
                       variant="secondary" 
-                      className="whitespace-nowrap hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200"
+                      className="whitespace-nowrap w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200"
                     >
                       <FileText className="h-4 w-4 mr-2" /> View
                     </Button>

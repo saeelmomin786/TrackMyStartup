@@ -175,3 +175,4 @@ ORDER BY policyname;
 SELECT '✅ Fix script complete!' as status;
 SELECT '⚠️ For storage policies, use Supabase Dashboard (Storage > Policies)' as note;
 
+

@@ -51,3 +51,4 @@ SELECT '✅ Bucket creation attempted!' as status;
 SELECT '⚠️ If this fails, create bucket via Supabase Dashboard' as note;
 SELECT '⚠️ Remember to create storage policies via Dashboard' as reminder;
 
+

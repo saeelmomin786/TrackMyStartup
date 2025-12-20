@@ -640,6 +640,13 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
             // Add or update subsidiaries
             for (let i = 0; i < formData.subsidiaries.length; i++) {
                 const sub = formData.subsidiaries[i];
+                
+                // Skip if required fields are missing
+                if (!sub.country || !sub.companyType || !sub.registrationDate) {
+                    console.log(`⚠️ Skipping subsidiary ${i + 1} - missing required fields:`, sub);
+                    continue;
+                }
+                
                 if (sub.id && sub.id > 0) {
                     // Update existing subsidiary
                     await profileService.updateSubsidiary(sub.id, {
@@ -687,22 +694,37 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
             }
             
             // Add or update international operations
+            let hasInternationalOpsSaveErrors = false;
             for (let i = 0; i < formData.internationalOps.length; i++) {
                 const op = formData.internationalOps[i];
+                
+                // Skip if required fields are missing
+                if (!op.country || !op.startDate) {
+                    console.log(`⚠️ Skipping international operation ${i + 1} - missing required fields:`, op);
+                    continue;
+                }
+                
                 if (op.id && op.id > 0) {
                     // Update existing operation
-                    await profileService.updateInternationalOp(op.id, {
+                    const updateSuccess = await profileService.updateInternationalOp(op.id, {
                         country: op.country,
                         companyType: op.companyType,
                         startDate: op.startDate
                     });
+                    if (!updateSuccess) {
+                        hasInternationalOpsSaveErrors = true;
+                    }
                 } else {
                     // Add new operation
-                    await profileService.addInternationalOp(startup.id, {
+                    const newOpId = await profileService.addInternationalOp(startup.id, {
                         country: op.country,
                         companyType: op.companyType,
                         startDate: op.startDate
                     });
+                    if (!newOpId) {
+                        hasInternationalOpsSaveErrors = true;
+                        console.warn(`⚠️ Failed to save international operation ${i + 1} - table may not exist`);
+                    }
                 }
             }
             
@@ -716,7 +738,17 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
                 if (updatedProfile) {
                     const sanitizedData = sanitizeProfileData(updatedProfile);
                     console.log('🔍 Sanitized data for form:', sanitizedData);
+                    
+                    // If international operations failed to save, preserve them in form state
+                    if (hasInternationalOpsSaveErrors && formData.internationalOps.length > 0) {
+                        console.log('⚠️ Preserving international operations in form state due to save errors');
+                        sanitizedData.internationalOps = formData.internationalOps;
+                    }
+                    
                     setFormData(sanitizedData);
+                    
+                    // Clear validation errors after successful save
+                    setValidationErrors([]);
                     // Notify parent so other tabs receive updated profile
                     console.log('🔍 ProfileTab: Checking if onProfileUpdate callback exists...', { hasCallback: !!onProfileUpdate });
                     if (onProfileUpdate) {
@@ -1650,7 +1682,7 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
               </div>
             ) : (
               formData.subsidiaries.map((sub, index) => (
-                <div key={sub.id} className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border border-blue-200 rounded-xl space-y-6 shadow-md">
+                <div key={sub.id || `sub-${index}-${sub.country}-${sub.companyType}`} className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border border-blue-200 rounded-xl space-y-6 shadow-md">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <h4 className="md:col-span-3 text-lg font-bold text-blue-900 flex items-center gap-2">
                       <div className="w-6 h-6 bg-blue-200 rounded-full flex items-center justify-center text-sm font-bold text-blue-700">
@@ -1784,7 +1816,7 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
               </div>
             ) : (
               formData.internationalOps.map((op, index) => (
-                <div key={op.id} className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border border-blue-200 rounded-xl shadow-md">
+                <div key={op.id || `op-${index}-${op.country}-${op.startDate}`} className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border border-blue-200 rounded-xl shadow-md">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <h4 className="md:col-span-3 text-lg font-bold text-blue-900 flex items-center gap-2">
                       <div className="w-6 h-6 bg-blue-200 rounded-full flex items-center justify-center text-sm font-bold text-blue-700">

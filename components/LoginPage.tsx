@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Input from './ui/Input';
 import Button from './ui/Button';
 import ForgotPasswordModal from './ForgotPasswordModal';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 
 interface LoginPageProps {
     onLogin: (user: AuthUser) => void;
@@ -16,6 +16,7 @@ interface LoginPageProps {
 const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, onNavigateToCompleteRegistration, onNavigateToLanding }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isRedirecting, setIsRedirecting] = useState(false);
@@ -282,18 +283,21 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
     };
 
  return (
-        <div className="w-full flex flex-col items-center">
-            <Card className="w-full max-w-md">
-                <div className="text-center mb-8">
-                    <h2 className="text-3xl font-bold tracking-tight text-slate-900">Sign in to your account</h2>
-                    <p className="mt-2 text-sm text-slate-600">
-                        Or{' '}
-                        <button onClick={onNavigateToRegister} className="font-medium text-brand-primary hover:text-brand-secondary">
-                            create a new account
-                        </button>
-                    </p>
-                </div>
-                <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="w-full min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 py-8 px-4">
+            <div className="w-full max-w-md">
+                {/* Professional Card with Enhanced Design */}
+                <Card className="w-full shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+                    {/* Header Section Inside Card */}
+                    <div className="text-center mb-8 pb-6 border-b border-slate-100">
+                        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 mb-2">
+                            Sign in to your account
+                        </h2>
+                        <p className="text-sm text-slate-500 mt-1">
+                            Enter your credentials to access your account
+                        </p>
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="space-y-5">
                     <Input 
                         label="Email address"
                         id="email"
@@ -304,29 +308,48 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                         required
                     />
                     <div className="space-y-2">
-                        <Input 
-                            label="Password"
-                            id="password"
-                            type="password"
-                            autoComplete="current-password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                        />
-                        <div className="text-right">
+                        <div>
+                            <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1.5">
+                                Password
+                            </label>
+                            <div className="relative">
+                                <Input 
+                                    id="password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    autoComplete="current-password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    required
+                                    className="pr-10"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors focus:outline-none"
+                                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                >
+                                    {showPassword ? (
+                                        <EyeOff className="h-4 w-4" />
+                                    ) : (
+                                        <Eye className="h-4 w-4" />
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="text-right pt-1">
                             <button
                                 type="button"
                                 onClick={() => setIsForgotPasswordOpen(true)}
-                                className="text-sm text-brand-primary hover:text-brand-secondary font-medium"
+                                className="text-sm text-brand-primary hover:text-brand-secondary font-medium transition-colors focus:outline-none"
                             >
-                                Forgot your password?
+                                Forgot password?
                             </button>
                         </div>
                     </div>
 
                     {error && (
-                        <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                            <p className="text-red-800 text-sm">{error}</p>
+                        <div className="bg-red-50/80 border border-red-200 rounded-lg p-4 backdrop-blur-sm">
+                            <p className="text-red-800 text-sm font-medium">{error}</p>
                             {isRedirecting && (
                                 <div className="flex items-center gap-2 mt-2">
                                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
@@ -338,8 +361,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                         </div>
                     )}
 
-                    <div>
-                        <Button type="submit" className="w-full" disabled={isLoading || isRedirecting}>
+                    <div className="pt-1">
+                        <Button type="submit" className="w-full h-11 text-base font-semibold shadow-sm hover:shadow-md transition-shadow" disabled={isLoading || isRedirecting}>
                             {isLoading ? (
                                 <>
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -355,8 +378,22 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                             )}
                         </Button>
                     </div>
-                </form>
-            </Card>
+                    </form>
+
+                    {/* Register Link */}
+                    <div className="mt-6 pt-6 border-t border-slate-100">
+                        <p className="text-center text-sm text-slate-600">
+                            Don't have an account?{' '}
+                            <button 
+                                onClick={onNavigateToRegister} 
+                                className="font-semibold text-brand-primary hover:text-brand-secondary transition-colors focus:outline-none"
+                            >
+                                Create a new account
+                            </button>
+                        </p>
+                    </div>
+                </Card>
+            </div>
 
             {/* Forgot Password Modal */}
             <ForgotPasswordModal

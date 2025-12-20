@@ -210,3 +210,4 @@ SELECT
         ELSE 'Table DOES NOT EXIST - This is the problem!'
     END as diagnosis;
 
+

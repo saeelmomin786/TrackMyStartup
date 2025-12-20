@@ -71,3 +71,4 @@ We'll create migration scripts one by one. For each function:
 **Run the 7 ready scripts first**, then we'll continue creating scripts for the remaining 23 functions.
 
 
+

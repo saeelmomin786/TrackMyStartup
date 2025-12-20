@@ -17,3 +17,4 @@ WHERE n.nspname = 'public'
 -- Copy the function_definition and share it, or I'll create the script based on common patterns
 
 
+

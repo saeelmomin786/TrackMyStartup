@@ -34,3 +34,4 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
   AND ccu.table_name = 'users';
 
 
+

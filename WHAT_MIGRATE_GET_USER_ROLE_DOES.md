@@ -164,3 +164,4 @@ SELECT get_user_role();  -- Should return your role (e.g., "Investor")
 - RLS policies might fail for new users
 
 
+

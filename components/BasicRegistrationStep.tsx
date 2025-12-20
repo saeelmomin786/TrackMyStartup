@@ -3,7 +3,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
 import { UserRole } from '../types';
-import { Mail, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
+import { Mail, CheckCircle, AlertCircle, XCircle, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../lib/auth';
 
 interface BasicRegistrationStepProps {
@@ -40,6 +40,8 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
     firmName: '',
     investmentAdvisorCode: ''
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -491,25 +493,65 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
 
         {!isAddingProfile && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Input
-              label="Password"
-              id="password"
-              name="password"
-              type="password"
-              required
-              value={formData.password}
-              onChange={(e) => handleInputChange('password', e.target.value)}
-            />
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
+                Password
+              </label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={formData.password}
+                  onChange={(e) => handleInputChange('password', e.target.value)}
+                  className="pr-10"
+                  label=""
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
             
-            <Input
-              label="Confirm Password"
-              id="confirmPassword"
-              name="confirmPassword"
-              type="password"
-              required
-              value={formData.confirmPassword}
-              onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-            />
+            <div>
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 mb-1">
+                Confirm Password
+              </label>
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  required
+                  value={formData.confirmPassword}
+                  onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
+                  className="pr-10"
+                  label=""
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                  aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

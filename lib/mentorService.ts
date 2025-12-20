@@ -296,7 +296,7 @@ class MentorService {
         console.warn('Table mentor_requests may not exist yet:', err);
       }
 
-      // Get founded startups
+      // Get founded startups from mentor_founded_startups table
       let foundedStartups: any[] = [];
       try {
         const { data, error } = await supabase
@@ -315,6 +315,86 @@ class MentorService {
         }
       } catch (err) {
         console.warn('Table mentor_founded_startups may not exist yet:', err);
+      }
+
+      // Also get startups where founders have this mentor's mentor_code
+      // First, get the mentor's mentor_code
+      let mentorCode: string | null = null;
+      try {
+        const { data: mentorUser, error: mentorUserError } = await supabase
+          .from('users')
+          .select('mentor_code')
+          .eq('id', actualMentorId)
+          .single();
+
+        if (!mentorUserError && mentorUser?.mentor_code) {
+          mentorCode = mentorUser.mentor_code;
+        }
+      } catch (err) {
+        console.warn('Error fetching mentor code:', err);
+      }
+
+      // If mentor has a code, find startups where founders have this mentor_code
+      if (mentorCode) {
+        try {
+          const { data: foundersWithMentorCode, error: foundersError } = await supabase
+            .from('founders')
+            .select(`
+              startup_id,
+              startups (*)
+            `)
+            .eq('mentor_code', mentorCode)
+            .not('startup_id', 'is', null);
+
+          if (!foundersError && foundersWithMentorCode && foundersWithMentorCode.length > 0) {
+            // Get unique startup IDs
+            const startupIds = [...new Set(foundersWithMentorCode.map(f => f.startup_id).filter(Boolean))];
+            
+            // Check which startups are already in foundedStartups
+            const existingStartupIds = new Set(
+              foundedStartups
+                .map(f => f.startup_id)
+                .filter(Boolean)
+            );
+
+            // Add startups that aren't already in the list
+            for (const founder of foundersWithMentorCode) {
+              if (founder.startup_id && !existingStartupIds.has(founder.startup_id) && founder.startups) {
+                // Create a mentor_founded_startups entry for this startup
+                // First check if it already exists
+                const { data: existingEntry } = await supabase
+                  .from('mentor_founded_startups')
+                  .select('id')
+                  .eq('mentor_id', actualMentorId)
+                  .eq('startup_id', founder.startup_id)
+                  .maybeSingle();
+
+                if (!existingEntry) {
+                  // Create entry in mentor_founded_startups
+                  await supabase
+                    .from('mentor_founded_startups')
+                    .insert({
+                      mentor_id: actualMentorId,
+                      startup_id: founder.startup_id,
+                      founded_at: new Date().toISOString()
+                    });
+                }
+
+                // Add to foundedStartups list
+                foundedStartups.push({
+                  id: null, // Will be set when fetched again
+                  mentor_id: actualMentorId,
+                  startup_id: founder.startup_id,
+                  founded_at: new Date().toISOString(),
+                  notes: null,
+                  startups: founder.startups
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Error fetching startups by founder mentor_code:', err);
+        }
       }
 
       // Calculate totals
@@ -610,6 +690,27 @@ class MentorService {
       return true;
     } catch (error) {
       console.error('Error rejecting mentor request:', error);
+      return false;
+    }
+  }
+
+  // Delete a mentor assignment
+  async deleteMentoringAssignment(assignmentId: number): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('mentor_startup_assignments')
+        .delete()
+        .eq('id', assignmentId);
+
+      if (error) {
+        console.error('Error deleting mentor assignment:', error);
+        return false;
+      }
+
+      console.log('✅ Mentor assignment deleted:', assignmentId);
+      return true;
+    } catch (error) {
+      console.error('Error deleting mentor assignment:', error);
       return false;
     }
   }

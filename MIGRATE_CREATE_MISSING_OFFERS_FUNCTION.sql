@@ -69,3 +69,4 @@ $function$;
 SELECT '✅ Function create_missing_offers() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

@@ -7,7 +7,7 @@ import Input from './ui/Input';
 import Select from './ui/Select';
 import Button from './ui/Button';
 import CloudDriveInput from './ui/CloudDriveInput';
-import { Briefcase, UserPlus, Trash2, Loader2, CheckCircle, Upload } from 'lucide-react';
+import { Briefcase, UserPlus, Trash2, Loader2, CheckCircle, Upload, Eye, EyeOff } from 'lucide-react';
 
 interface RegistrationPageProps {
   onRegister: (user: AuthUser, founders: Founder[], startupName?: string, investmentAdvisorCode?: string) => void;
@@ -34,6 +34,8 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [country, setCountry] = useState(allCountries[0]);
     const [role, setRole] = useState<UserRole>('Startup');
     const [startupName, setStartupName] = useState('');
@@ -289,24 +291,64 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
                     />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <Input 
-                        label="Password"
-                        id="password"
-                        type="password"
-                        autoComplete="new-password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                    />
-                    <Input 
-                        label="Confirm Password"
-                        id="confirmPassword"
-                        type="password"
-                        autoComplete="new-password"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        required
-                    />
+                    <div>
+                        <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
+                            Password
+                        </label>
+                        <div className="relative">
+                            <Input 
+                                id="password"
+                                type={showPassword ? 'text' : 'password'}
+                                autoComplete="new-password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                required
+                                className="pr-10"
+                                label=""
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            >
+                                {showPassword ? (
+                                    <EyeOff className="h-4 w-4" />
+                                ) : (
+                                    <Eye className="h-4 w-4" />
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 mb-1">
+                            Confirm Password
+                        </label>
+                        <div className="relative">
+                            <Input 
+                                id="confirmPassword"
+                                type={showConfirmPassword ? 'text' : 'password'}
+                                autoComplete="new-password"
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                required
+                                className="pr-10"
+                                label=""
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                                aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                            >
+                                {showConfirmPassword ? (
+                                    <EyeOff className="h-4 w-4" />
+                                ) : (
+                                    <Eye className="h-4 w-4" />
+                                )}
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <Select

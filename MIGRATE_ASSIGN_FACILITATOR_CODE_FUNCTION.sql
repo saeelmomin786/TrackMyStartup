@@ -80,3 +80,4 @@ $function$;
 SELECT '✅ Function assign_facilitator_code() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

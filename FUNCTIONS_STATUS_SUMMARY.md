@@ -86,3 +86,4 @@ Run: `CHECK_INDIVIDUAL_FUNCTION_USAGE.sql`
 5. **Delete `users` table** when everything is migrated
 
 
+

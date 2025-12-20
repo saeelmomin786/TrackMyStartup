@@ -61,3 +61,4 @@ $function$;
 SELECT '✅ Function get_investor_recommendations() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

@@ -87,3 +87,4 @@ You've successfully cleaned up **303 unused indexes**! Your database is now:
 **The cleanup was a huge success!** 🚀
 
 
+

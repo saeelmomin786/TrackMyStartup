@@ -86,3 +86,4 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
 ORDER BY ccu.table_name, tc.table_name;
 
 
+

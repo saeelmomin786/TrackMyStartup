@@ -36,7 +36,7 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
     esop_percentage: '',
     from_date: '',
     to_date: '',
-    currently_mentoring: true,
+    currently_mentoring: false,
   });
 
   // Form states for founded startups
@@ -58,6 +58,19 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
     setIsSubmitting(true);
 
     try {
+      // Validate required date fields
+      if (!mentoringForm.from_date) {
+        alert('Please select a From Date');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      if (!mentoringForm.currently_mentoring && !mentoringForm.to_date) {
+        alert('Please select a To Date or check "Currently Mentoring"');
+        setIsSubmitting(false);
+        return;
+      }
+      
       // Verify authentication and get auth user ID
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) {
@@ -177,7 +190,7 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
         esop_percentage: '',
         from_date: '',
         to_date: '',
-        currently_mentoring: true,
+        currently_mentoring: false,
       });
       setEditingId(null);
       onUpdate();
@@ -197,6 +210,19 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
     setIsSubmitting(true);
 
     try {
+      // Validate required date fields
+      if (!foundedForm.from_date) {
+        alert('Please select a From Date');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      if (!foundedForm.currently_in_position && !foundedForm.to_date) {
+        alert('Please either check "Currently in Position" or select a To Date');
+        setIsSubmitting(false);
+        return;
+      }
+      
       // Verify authentication and get auth user ID
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) {
@@ -399,7 +425,7 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
               esop_percentage: '',
               from_date: '',
               to_date: '',
-              currently_mentoring: true,
+              currently_mentoring: false,
             });
           }}
           className={`py-2 px-4 border-b-2 font-medium text-sm ${
@@ -438,140 +464,6 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
       {/* Mentoring Form (Combined Active and Completed) */}
       {activeSection === 'active' && (
         <>
-          {/* Mentoring Data Table */}
-          {mentorMetrics && (mentorMetrics.activeAssignments.length > 0 || mentorMetrics.completedAssignments.length > 0) && (
-            <Card>
-              <h3 className="text-lg font-semibold mb-4">Mentoring Data</h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-slate-200">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ESOP %</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From Date</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">To Date</th>
-                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-slate-200">
-                    {[...mentorMetrics.activeAssignments, ...mentorMetrics.completedAssignments].map(assignment => {
-                      // Parse notes to get startup_name, email_id, website, and sector
-                      let startupName = assignment.startup?.name || `Startup #${assignment.startup_id || 'N/A'}`;
-                      let emailId = '';
-                      let website = '';
-                      let sector = '';
-                      let fromDate = '';
-                      let toDate = '';
-                      
-                      if (assignment.notes) {
-                        try {
-                          const notesData = JSON.parse(assignment.notes);
-                          startupName = notesData.startup_name || startupName;
-                          emailId = notesData.email_id || '';
-                          website = notesData.website || '';
-                          sector = notesData.sector || '';
-                          fromDate = notesData.from_date || '';
-                          toDate = notesData.to_date || '';
-                          } catch (e) {
-                            // Notes is not JSON, use startup data
-                            website = (assignment.startup as any)?.domain || '';
-                            sector = assignment.startup?.sector || '';
-                          }
-                        } else if (assignment.startup) {
-                          website = (assignment.startup as any).domain || '';
-                          sector = assignment.startup.sector || '';
-                        }
-                      
-                      // If from_date not in notes, use assigned_at
-                      if (!fromDate && assignment.assigned_at) {
-                        fromDate = assignment.assigned_at.split('T')[0];
-                      }
-                      
-                      // If to_date not in notes but completed_at exists, use completed_at
-                      if (!toDate && assignment.completed_at) {
-                        toDate = assignment.completed_at.split('T')[0];
-                      }
-
-                      return (
-                        <tr key={assignment.id}>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-slate-900">
-                            {startupName}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                            {emailId || 'N/A'}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                            {website ? (
-                              <a 
-                                href={website.startsWith('http') ? website : `https://${website}`} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                className="text-blue-600 hover:underline"
-                              >
-                                {website}
-                              </a>
-                            ) : 'N/A'}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                            {sector || 'N/A'}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
-                            <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                              assignment.status === 'active' 
-                                ? 'bg-green-100 text-green-800' 
-                                : assignment.status === 'completed'
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {assignment.status}
-                            </span>
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                            {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                            {assignment.esop_percentage > 0 ? `${assignment.esop_percentage}%` : 'N/A'}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                            {fromDate || 'N/A'}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                            {toDate || 'N/A'}
-                          </td>
-                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleEdit(assignment)}
-                                className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                              >
-                                <Edit className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleDelete(assignment.id, assignment.status === 'active' ? 'active' : 'completed')}
-                                className="text-red-600 border-red-300 hover:bg-red-50"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          )}
-
           <Card>
             <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit Mentoring' : 'Add Mentoring'}</h3>
           <form onSubmit={handleMentoringSubmit} className="space-y-4">
@@ -663,29 +555,30 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  From Date
+                  From Date <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="date"
+                  required
                   value={mentoringForm.from_date}
                   onChange={(e) => setMentoringForm({ ...mentoringForm, from_date: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
-              {!mentoringForm.currently_mentoring && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    To Date
-                  </label>
-                  <input
-                    type="date"
-                    value={mentoringForm.to_date}
-                    onChange={(e) => setMentoringForm({ ...mentoringForm, to_date: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  To Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required={!mentoringForm.currently_mentoring}
+                  value={mentoringForm.to_date}
+                  onChange={(e) => setMentoringForm({ ...mentoringForm, to_date: e.target.value })}
+                  disabled={mentoringForm.currently_mentoring}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
+                />
+              </div>
 
               <div className="flex items-center">
                 <input
@@ -723,7 +616,7 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
                       esop_percentage: '',
                       from_date: '',
                       to_date: '',
-                      currently_mentoring: true,
+                      currently_mentoring: false,
                     });
                   }}
                 >
@@ -737,6 +630,140 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
             </div>
           </form>
         </Card>
+
+          {/* Mentoring Data Table */}
+          {mentorMetrics && (mentorMetrics.activeAssignments.length > 0 || mentorMetrics.completedAssignments.length > 0) && (
+            <Card>
+              <h3 className="text-lg font-semibold mb-4">Mentoring Data</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ESOP %</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">To Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-200">
+                    {[...mentorMetrics.activeAssignments, ...mentorMetrics.completedAssignments].map(assignment => {
+                      // Parse notes to get startup_name, email_id, website, and sector
+                      let startupName = assignment.startup?.name || `Startup #${assignment.startup_id || 'N/A'}`;
+                      let emailId = '';
+                      let website = '';
+                      let sector = '';
+                      let fromDate = '';
+                      let toDate = '';
+                      
+                      if (assignment.notes) {
+                        try {
+                          const notesData = JSON.parse(assignment.notes);
+                          startupName = notesData.startup_name || startupName;
+                          emailId = notesData.email_id || '';
+                          website = notesData.website || '';
+                          sector = notesData.sector || '';
+                          fromDate = notesData.from_date || '';
+                          toDate = notesData.to_date || '';
+                        } catch (e) {
+                          // Notes is not JSON, use startup data
+                          website = (assignment.startup as any)?.domain || '';
+                          sector = assignment.startup?.sector || '';
+                        }
+                      } else if (assignment.startup) {
+                        website = (assignment.startup as any).domain || '';
+                        sector = assignment.startup.sector || '';
+                      }
+                      
+                      // If from_date not in notes, use assigned_at
+                      if (!fromDate && assignment.assigned_at) {
+                        fromDate = assignment.assigned_at.split('T')[0];
+                      }
+                      
+                      // If to_date not in notes but completed_at exists, use completed_at
+                      if (!toDate && assignment.completed_at) {
+                        toDate = assignment.completed_at.split('T')[0];
+                      }
+
+                      return (
+                        <tr key={assignment.id}>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-slate-900">
+                            {startupName}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {emailId || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {website ? (
+                              <a 
+                                href={website.startsWith('http') ? website : `https://${website}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-blue-600 hover:underline"
+                              >
+                                {website}
+                              </a>
+                            ) : 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {sector || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
+                            <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                              assignment.status === 'active' 
+                                ? 'bg-green-100 text-green-800' 
+                                : assignment.status === 'completed'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {assignment.status}
+                            </span>
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {assignment.esop_percentage > 0 ? `${assignment.esop_percentage}%` : 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {fromDate || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
+                            {toDate || 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleEdit(assignment)}
+                                className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                              >
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDelete(assignment.id, assignment.status === 'active' ? 'active' : 'completed')}
+                                className="text-red-600 border-red-300 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
         </>
       )}
 
@@ -744,6 +771,157 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
       {/* Startup Experience Form */}
       {activeSection === 'founded' && (
         <>
+          <Card>
+            <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit Startup Experience' : 'Add Startup Experience'}</h3>
+          <form onSubmit={handleFoundedSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Startup Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={foundedForm.startup_name}
+                  onChange={(e) => setFoundedForm({ ...foundedForm, startup_name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter startup name"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Founder Email ID <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={foundedForm.email_id}
+                  onChange={(e) => setFoundedForm({ ...foundedForm, email_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="founder@startup.com"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Website
+                </label>
+                <input
+                  type="url"
+                  value={foundedForm.website}
+                  onChange={(e) => setFoundedForm({ ...foundedForm, website: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="www.startup.com"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Sector
+                </label>
+                <select
+                  value={foundedForm.sector}
+                  onChange={(e) => setFoundedForm({ ...foundedForm, sector: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select Sector</option>
+                  {Object.values(StartupDomain).map(sector => (
+                    <option key={sector} value={sector}>{sector}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Position
+                </label>
+                <input
+                  type="text"
+                  value={foundedForm.position}
+                  onChange={(e) => setFoundedForm({ ...foundedForm, position: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., CEO, CTO, Co-founder"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  From Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={foundedForm.from_date}
+                  onChange={(e) => setFoundedForm({ ...foundedForm, from_date: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  To Date {!foundedForm.currently_in_position && <span className="text-red-500">*</span>}
+                </label>
+                <input
+                  type="date"
+                  required={!foundedForm.currently_in_position}
+                  value={foundedForm.to_date}
+                  onChange={(e) => setFoundedForm({ ...foundedForm, to_date: e.target.value })}
+                  disabled={foundedForm.currently_in_position}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
+                />
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="currently_in_position"
+                  checked={foundedForm.currently_in_position}
+                  onChange={(e) => {
+                    setFoundedForm({ 
+                      ...foundedForm, 
+                      currently_in_position: e.target.checked,
+                      to_date: e.target.checked ? '' : foundedForm.to_date
+                    });
+                  }}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded"
+                />
+                <label htmlFor="currently_in_position" className="ml-2 block text-sm font-medium text-slate-700">
+                  Currently in Position {!foundedForm.to_date && <span className="text-red-500">*</span>}
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              {editingId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingId(null);
+                    setFoundedForm({ 
+                      startup_name: '', 
+                      email_id: '', 
+                      website: '', 
+                      sector: '', 
+                      position: '',
+                      from_date: '',
+                      to_date: '',
+                      currently_in_position: false,
+                    });
+                  }}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button type="submit" disabled={isSubmitting}>
+                <Save className="h-4 w-4 mr-2" />
+                {editingId ? 'Update' : 'Add'} Startup Experience
+              </Button>
+            </div>
+          </form>
+        </Card>
+
           {/* Startup Experience Data Table */}
           {mentorMetrics && mentorMetrics.foundedStartups.length > 0 && (
             <Card>
@@ -880,155 +1058,6 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
               </div>
             </Card>
           )}
-
-          <Card>
-            <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit Startup Experience' : 'Add Startup Experience'}</h3>
-          <form onSubmit={handleFoundedSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Startup Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={foundedForm.startup_name}
-                  onChange={(e) => setFoundedForm({ ...foundedForm, startup_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter startup name"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Founder Email ID <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={foundedForm.email_id}
-                  onChange={(e) => setFoundedForm({ ...foundedForm, email_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="founder@startup.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Website
-                </label>
-                <input
-                  type="url"
-                  value={foundedForm.website}
-                  onChange={(e) => setFoundedForm({ ...foundedForm, website: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="www.startup.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Sector
-                </label>
-                <select
-                  value={foundedForm.sector}
-                  onChange={(e) => setFoundedForm({ ...foundedForm, sector: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select Sector</option>
-                  {Object.values(StartupDomain).map(sector => (
-                    <option key={sector} value={sector}>{sector}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Position
-                </label>
-                <input
-                  type="text"
-                  value={foundedForm.position}
-                  onChange={(e) => setFoundedForm({ ...foundedForm, position: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., CEO, CTO, Co-founder"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  From Date
-                </label>
-                <input
-                  type="date"
-                  value={foundedForm.from_date}
-                  onChange={(e) => setFoundedForm({ ...foundedForm, from_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  To Date
-                </label>
-                <input
-                  type="date"
-                  value={foundedForm.to_date}
-                  onChange={(e) => setFoundedForm({ ...foundedForm, to_date: e.target.value })}
-                  disabled={foundedForm.currently_in_position}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
-                />
-              </div>
-
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="currently_in_position"
-                  checked={foundedForm.currently_in_position}
-                  onChange={(e) => {
-                    setFoundedForm({ 
-                      ...foundedForm, 
-                      currently_in_position: e.target.checked,
-                      to_date: e.target.checked ? '' : foundedForm.to_date
-                    });
-                  }}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded"
-                />
-                <label htmlFor="currently_in_position" className="ml-2 block text-sm font-medium text-slate-700">
-                  Currently in Position
-                </label>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              {editingId && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setEditingId(null);
-                    setFoundedForm({ 
-                      startup_name: '', 
-                      email_id: '', 
-                      website: '', 
-                      sector: '', 
-                      position: '',
-                      from_date: '',
-                      to_date: '',
-                      currently_in_position: false,
-                    });
-                  }}
-                >
-                  Cancel
-                </Button>
-              )}
-              <Button type="submit" disabled={isSubmitting}>
-                <Save className="h-4 w-4 mr-2" />
-                {editingId ? 'Update' : 'Add'} Startup Experience
-              </Button>
-            </div>
-          </form>
-        </Card>
         </>
       )}
     </div>

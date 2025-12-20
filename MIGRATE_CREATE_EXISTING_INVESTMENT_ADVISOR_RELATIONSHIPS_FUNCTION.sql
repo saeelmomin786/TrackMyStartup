@@ -78,3 +78,4 @@ $function$;
 SELECT '✅ Function create_existing_investment_advisor_relationships() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

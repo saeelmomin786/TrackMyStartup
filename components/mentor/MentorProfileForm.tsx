@@ -898,21 +898,8 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                 Previously Mentored (on TMS)
                 <span className="ml-2 text-xs text-slate-500">(Completed - from dashboard)</span>
               </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                  {mentorMetrics?.startupsMentoredPreviously || 0}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleOpenAddForm('active')}
-                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add mentoring startup to increase count"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Add</span>
-                </Button>
+              <div className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                {mentorMetrics?.startupsMentoredPreviously || 0}
               </div>
               <input
                 type="hidden"
@@ -926,21 +913,8 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                 Verified Startups Mentored (Total)
                 <span className="ml-2 text-xs text-slate-500">(Only registered users on TMS - from dashboard)</span>
               </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-2 bg-blue-50 border border-blue-300 rounded-md text-slate-700 font-medium">
-                  {mentorMetrics?.verifiedStartupsMentored ?? 0}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleOpenAddForm('active')}
-                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add startup to increase count"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Add</span>
-                </Button>
+              <div className="px-3 py-2 bg-blue-50 border border-blue-300 rounded-md text-slate-700 font-medium">
+                {mentorMetrics?.verifiedStartupsMentored ?? 0}
               </div>
               <input
                 type="hidden"
@@ -954,25 +928,12 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                 Startups Mentored (Total)
                 <span className="ml-2 text-xs text-slate-500">(All mentoring - from dashboard)</span>
               </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                  {mentorMetrics ? (
-                    mentorMetrics.startupsMentoring + mentorMetrics.startupsMentoredPreviously
-                  ) : (
-                    profile.companies_mentored || 0
-                  )}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleOpenAddForm('active')}
-                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add startup to increase count"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Add</span>
-                </Button>
+              <div className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                {mentorMetrics ? (
+                  mentorMetrics.startupsMentoring + mentorMetrics.startupsMentoredPreviously
+                ) : (
+                  profile.companies_mentored || 0
+                )}
               </div>
               {professionalExperiences.length > 0 && (
                 <div className="mt-2 text-xs text-slate-600">
@@ -991,21 +952,8 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                 Startup Experience
                 <span className="ml-2 text-xs text-slate-500">(Verified from your dashboard)</span>
               </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                  {mentorMetrics?.startupsFounded || profile.companies_founded || 0}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleOpenAddForm('founded')}
-                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add startup experience to increase count"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Add</span>
-                </Button>
+              <div className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                {mentorMetrics?.startupsFounded || profile.companies_founded || 0}
               </div>
               <input
                 type="hidden"

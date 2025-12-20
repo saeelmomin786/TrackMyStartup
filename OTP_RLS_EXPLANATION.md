@@ -159,3 +159,4 @@ FOR UPDATE USING (auth.role() = 'authenticated');
 **You can safely run the RLS policies script!** 🎉
 
 
+

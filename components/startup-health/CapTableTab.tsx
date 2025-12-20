@@ -9,7 +9,7 @@ import Modal from '../ui/Modal';
 import DateInput from '../DateInput';
 import CloudDriveInput from '../ui/CloudDriveInput';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Plus, Trash2, Edit, Edit3, Save, X, TrendingUp, Users, DollarSign, PieChart as PieChartIcon, UserPlus, Download, Upload, Check, Eye, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Edit, Edit3, Save, X, TrendingUp, Users, DollarSign, PieChart as PieChartIcon, UserPlus, Download, Upload, Check, Eye, RefreshCw, CheckCircle } from 'lucide-react';
 import PricePerShareInput from './PricePerShareInput';
 import { capTableService } from '../../lib/capTableService';
 import { messageService } from '../../lib/messageService';
@@ -227,11 +227,17 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [editMentorAmountDraft, setEditMentorAmountDraft] = useState<string>('');
     const [editMentorEquityDraft, setEditMentorEquityDraft] = useState<string>('');
     const [editMentorPostMoneyDraft, setEditMentorPostMoneyDraft] = useState<string>('');
+    const [editMentorFeeType, setEditMentorFeeType] = useState<FeeType>(FeeType.Free);
 
     const [isEditMentorModalOpen, setIsEditMentorModalOpen] = useState(false);
     const [editingMentor, setEditingMentor] = useState<MentorRecord | null>(null);
     const [isDeleteMentorModalOpen, setIsDeleteMentorModalOpen] = useState(false);
     const [mentorToDelete, setMentorToDelete] = useState<MentorRecord | null>(null);
+
+    // File upload status tracking
+    const [invFileStatus, setInvFileStatus] = useState<{ name: string; size: number } | null>(null);
+    const [recFileStatus, setRecFileStatus] = useState<{ name: string; size: number } | null>(null);
+    const [mentorFileStatus, setMentorFileStatus] = useState<{ name: string; size: number } | null>(null);
 
     // Always keep local price per share synced with the most recent investment
     useEffect(() => {
@@ -698,7 +704,17 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setEditRecEquityDraft(editingRecognition.equityAllocated?.toString() || '');
             setEditRecPostMoneyDraft(editingRecognition.postMoneyValuation?.toString() || '');
         }
-    }, [isEditRecognitionModalOpen, editingRecognition]);
+        
+        // Initialize edit mentor form fields when modal opens
+        if (isEditMentorModalOpen && editingMentor) {
+            setEditMentorFeeType(editingMentor.feeType || FeeType.Free);
+            setEditMentorSharesDraft(editingMentor.shares?.toString() || '');
+            setEditMentorPricePerShareDraft(editingMentor.pricePerShare?.toString() || '');
+            setEditMentorAmountDraft(editingMentor.investmentAmount?.toString() || '');
+            setEditMentorEquityDraft(editingMentor.equityAllocated?.toString() || '');
+            setEditMentorPostMoneyDraft(editingMentor.postMoneyValuation?.toString() || '');
+        }
+    }, [isEditRecognitionModalOpen, editingRecognition, isEditMentorModalOpen, editingMentor]);
 
     // Recompute price per share whenever shares or valuation data changes
     useEffect(() => {
@@ -1598,6 +1614,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                  e.currentTarget.reset();
              }
              setError(null); // Clear any previous errors
+             setInvFileStatus(null); // Clear file status
              
              // Force reload ALL data including charts
              console.log('🔄 Reloading data after adding investment...');
@@ -1784,6 +1801,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             }
             setError(null);
             setFeeType(FeeType.Free);
+            setRecFileStatus(null); // Clear file status
             
             // Reset recognition form fields
             setRecSharesDraft('');
@@ -1907,6 +1925,15 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             } else if (entryType === 'mentor') {
                 console.log('👨‍🏫 Calling handleAddMentor...');
                 await handleAddMentor(e);
+                // Clear file status after successful submission
+                setMentorFileStatus(null);
+            }
+            
+            // Clear file statuses after successful submission
+            if (entryType === 'investment') {
+                setInvFileStatus(null);
+            } else if (entryType === 'recognition') {
+                setRecFileStatus(null);
             }
         } catch (error) {
             console.error('❌ Error in handleEntrySubmit:', error);
@@ -2005,6 +2032,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             }
             setError(null);
             setFeeType(FeeType.Free);
+            setMentorFileStatus(null); // Clear file status
             
             // Reset mentor form fields
             setMentorSharesDraft('');
@@ -2027,6 +2055,97 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         console.log('🔧 Editing mentor:', mentor);
         setEditingMentor(mentor);
         setIsEditMentorModalOpen(true);
+    };
+
+    const handleUpdateMentor = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        if (!startup?.id || !editingMentor) return;
+        
+        const formData = new FormData(e.currentTarget);
+        const mentorName = formData.get('mentor-name') as string;
+        const mentorCode = formData.get('mentor-code') as string;
+        const feeType = formData.get('mentor-fee-type') as FeeType;
+        const feeAmount = formData.get('mentor-fee-amount') ? parseFloat(formData.get('mentor-fee-amount') as string) : undefined;
+        const shares = formData.get('mentor-shares') ? parseInt(formData.get('mentor-shares') as string) : undefined;
+        const pricePerShare = formData.get('mentor-price-per-share') ? parseFloat(formData.get('mentor-price-per-share') as string) : undefined;
+        const investmentAmount = formData.get('mentor-amount') ? parseFloat(formData.get('mentor-amount') as string) : undefined;
+        const equityAllocated = formData.get('mentor-equity') ? parseFloat(formData.get('mentor-equity') as string) : undefined;
+        const postMoneyValuation = formData.get('mentor-postmoney') ? parseFloat(formData.get('mentor-postmoney') as string) : undefined;
+        const agreementFileEntry = formData.get('mentor-agreement');
+        const agreementFile = agreementFileEntry instanceof File && agreementFileEntry.size > 0 ? agreementFileEntry : null;
+        const agreementUrlEntry = formData.get('mentor-agreement-url');
+        const agreementUrl = typeof agreementUrlEntry === 'string' ? agreementUrlEntry.trim() : '';
+        
+        if (!mentorName || !mentorCode || !feeType) {
+            setError('Please fill in all required fields (Mentor Name, Mentor Code, and Fee Type).');
+            return;
+        }
+        
+        try {
+            setError(null);
+            setIsLoading(true);
+            
+            // Handle file upload for signed agreement if a new file is provided
+            let signedAgreementUrl = agreementUrl || editingMentor.signedAgreementUrl;
+            if (agreementFile) {
+                try {
+                    const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/mentor_agreement_' + Date.now() + '_' + agreementFile.name);
+                    if (uploadResult.success && uploadResult.url) {
+                        signedAgreementUrl = uploadResult.url;
+                    } else {
+                        throw new Error(uploadResult.error || 'Upload failed');
+                    }
+                } catch (uploadErr) {
+                    console.error('Failed to upload agreement file:', uploadErr);
+                    setError('Failed to upload agreement file');
+                    return;
+                }
+            }
+            
+            // Update mentor record using the service
+            const updatedMentorRecord = await mentorEquityService.updateMentorRecord(editingMentor.id, {
+                mentorName,
+                mentorCode,
+                feeType,
+                feeAmount,
+                shares,
+                pricePerShare,
+                investmentAmount,
+                equityAllocated,
+                postMoneyValuation,
+                signedAgreementUrl
+            });
+            
+            // Update local state
+            setMentorRecords(prev => prev.map(rec => 
+                rec.id === editingMentor.id ? updatedMentorRecord : rec
+            ));
+            
+            // Close modal and reset state
+            setIsEditMentorModalOpen(false);
+            setEditingMentor(null);
+            setError(null);
+            
+            // Reset edit mentor form fields
+            setEditMentorSharesDraft('');
+            setEditMentorPricePerShareDraft('');
+            setEditMentorAmountDraft('');
+            setEditMentorEquityDraft('');
+            setEditMentorPostMoneyDraft('');
+            
+            messageService.success('Mentor Record Updated', 'The mentor record has been successfully updated.', 3000);
+            console.log('✅ Mentor record updated successfully');
+            console.log('📋 Updated record:', updatedMentorRecord);
+        } catch (err) {
+            console.error('❌ Error updating mentor record:', err);
+            if (err instanceof Error) {
+                setError(err.message);
+            } else {
+                setError('Failed to update mentor record');
+            }
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleDeleteMentor = (mentor: MentorRecord) => {
@@ -3427,6 +3546,152 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     </Button>
                 </div>
             </Modal>
+
+            {/* Edit Mentor Modal */}
+            <Modal isOpen={isEditMentorModalOpen} onClose={() => setIsEditMentorModalOpen(false)} title="Edit Mentor Record" size="2xl">
+                <div className="max-h-[80vh] overflow-y-auto pr-2">
+                <form onSubmit={handleUpdateMentor} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <Input 
+                                label="Mentor Name" 
+                                name="mentor-name"
+                                id="mentor-name" 
+                                defaultValue={editingMentor?.mentorName || ''}
+                                required
+                                containerClassName="md:col-span-2"
+                            />
+                            <Input 
+                                label="Mentor Code" 
+                                name="mentor-code"
+                                id="mentor-code" 
+                                defaultValue={editingMentor?.mentorCode || ''}
+                                placeholder="e.g., MEN-D4E5F6" 
+                                required
+                            />
+                            <Select 
+                                label="Fee Type" 
+                                name="mentor-fee-type"
+                                id="mentor-fee-type" 
+                                value={editMentorFeeType}
+                                onChange={(e) => setEditMentorFeeType(e.target.value as FeeType)}
+                                required
+                            >
+                                {Object.values(FeeType).map(t => <option key={t} value={t}>{t}</option>)}
+                            </Select>
+                            {(editMentorFeeType === FeeType.Fees || editMentorFeeType === FeeType.Hybrid) && (
+                                <Input 
+                                    label="Fee Amount" 
+                                    name="mentor-fee-amount"
+                                    id="mentor-fee-amount" 
+                                    type="number" 
+                                    defaultValue={editingMentor?.feeAmount || ''}
+                                    step="0.01"
+                                />
+                            )}
+                            {(editMentorFeeType === FeeType.Equity || editMentorFeeType === FeeType.Hybrid) && (
+                                <>
+                                    <Input 
+                                        label="Number of Shares" 
+                                        name="mentor-shares"
+                                        id="mentor-shares" 
+                                        type="number"
+                                        value={editMentorSharesDraft || editingMentor?.shares || ''}
+                                        onChange={(e) => setEditMentorSharesDraft(e.target.value)}
+                                        placeholder="e.g., 10000"
+                                    />
+                                    <Input 
+                                        label={'Price per Share (' + startupCurrency + ')'} 
+                                        name="mentor-price-per-share" 
+                                        id="mentor-price-per-share" 
+                                        type="number"
+                                        step="0.01"
+                                        value={editMentorPricePerShareDraft || editingMentor?.pricePerShare || ''}
+                                        onChange={(e) => setEditMentorPricePerShareDraft(e.target.value)}
+                                        placeholder="e.g., 1.50"
+                                    />
+                                    <Input 
+                                        label="Investment Amount (auto)" 
+                                        name="mentor-amount" 
+                                        id="mentor-amount" 
+                                        type="number"
+                                        value={editMentorAmountDraft || editingMentor?.investmentAmount || ''}
+                                        readOnly 
+                                    />
+                                    <Input 
+                                        label="Equity Allocated (%) (auto)" 
+                                        name="mentor-equity" 
+                                        id="mentor-equity" 
+                                        type="number"
+                                        value={editMentorEquityDraft || editingMentor?.equityAllocated || ''}
+                                        readOnly 
+                                    />
+                                    <Input 
+                                        label="Post-Money Valuation (auto)" 
+                                        name="mentor-postmoney"
+                                        id="mentor-postmoney" 
+                                        type="number" 
+                                        value={editMentorPostMoneyDraft || editingMentor?.postMoneyValuation || ''}
+                                        readOnly 
+                                    />
+                                </>
+                            )}
+                                <CloudDriveInput
+                                value=""
+                                onChange={(url) => {
+                                    const hiddenInput = document.getElementById('mentor-agreement-url') as HTMLInputElement;
+                                    if (hiddenInput) hiddenInput.value = url;
+                                    const fileInput = document.getElementById('mentor-agreement') as HTMLInputElement;
+                                    if (fileInput) {
+                                        fileInput.value = '';
+                                        const emptyTransfer = new DataTransfer();
+                                        fileInput.files = emptyTransfer.files;
+                                    }
+                                }}
+                                onFileSelect={(file) => {
+                                    const fileInput = document.getElementById('mentor-agreement') as HTMLInputElement;
+                                    if (fileInput) {
+                                        const dataTransfer = new DataTransfer();
+                                        dataTransfer.items.add(file);
+                                        fileInput.files = dataTransfer.files;
+                                    }
+                                    const hiddenInput = document.getElementById('mentor-agreement-url') as HTMLInputElement;
+                                    if (hiddenInput) hiddenInput.value = '';
+                                }}
+                                placeholder="Paste your cloud drive link here..."
+                                label="Upload Signed Agreement"
+                                accept=".pdf,.doc,.docx"
+                                maxSize={10}
+                                documentType="signed agreement"
+                                showPrivacyMessage={false}
+                                className="md:col-span-2"
+                            />
+                            <input type="hidden" id="mentor-agreement-url" name="mentor-agreement-url" />
+                            <input
+                                type="file"
+                                id="mentor-agreement"
+                                name="mentor-agreement"
+                                className="hidden"
+                                accept=".pdf,.doc,.docx"
+                            />
+                        {editingMentor?.signedAgreementUrl && (
+                                <div className="md:col-span-2">
+                            <p className="text-sm text-slate-500 mt-1">
+                                Current file: <a href={editingMentor.signedAgreementUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View current agreement</a>
+                            </p>
+                                </div>
+                        )}
+                    </div>
+                    <div className="flex justify-end gap-3 pt-6 border-t mt-4">
+                        <Button type="button" variant="secondary" onClick={() => setIsEditMentorModalOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button type="submit" disabled={isLoading}>
+                            {isLoading ? 'Updating...' : 'Update Mentor Record'}
+                        </Button>
+                    </div>
+                </form>
+                </div>
+            </Modal>
  
             {/* Recognition and Incubation */}
             <Card>
@@ -3839,6 +4104,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     onChange={(url) => {
                                         const hiddenInput = document.getElementById('inv-proof-url') as HTMLInputElement;
                                         if (hiddenInput) hiddenInput.value = url;
+                                        if (url) setInvFileStatus(null); // Clear file status when URL is provided
                                     }}
                                     onFileSelect={(file) => {
                                         const fileInput = document.getElementById('inv-proof') as HTMLInputElement;
@@ -3847,6 +4113,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             dataTransfer.items.add(file);
                                             fileInput.files = dataTransfer.files;
                                         }
+                                        setInvFileStatus({ name: file.name, size: file.size });
                                     }}
                                     placeholder="Paste your cloud drive link here..."
                                     label="Proof of Investment"
@@ -3855,6 +4122,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     documentType="investment proof"
                                     showPrivacyMessage={false}
                                 />
+                                {invFileStatus && (
+                                    <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 p-2 rounded border border-green-200">
+                                        <CheckCircle className="h-4 w-4" />
+                                        <span>File selected: {invFileStatus.name} ({(invFileStatus.size / 1024 / 1024).toFixed(2)} MB)</span>
+                                    </div>
+                                )}
                                 <input type="hidden" id="inv-proof-url" name="inv-proof-url" />
                                 <input
                                     type="file"
@@ -3941,6 +4214,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             const emptyTransfer = new DataTransfer();
                                             fileInput.files = emptyTransfer.files;
                                         }
+                                        if (url) setRecFileStatus(null); // Clear file status when URL is provided
                                     }}
                                     onFileSelect={(file) => {
                                         const fileInput = document.getElementById('rec-agreement-new') as HTMLInputElement;
@@ -3951,22 +4225,29 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                         }
                                         const hiddenInput = document.getElementById('rec-agreement-url-new') as HTMLInputElement;
                                         if (hiddenInput) hiddenInput.value = '';
+                                        setRecFileStatus({ name: file.name, size: file.size });
                                     }}
                                     placeholder="Paste your cloud drive link here..."
                                     label="Upload Signed Agreement"
-                                    accept=".pdf,.doc,.docx"
+                                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                                     maxSize={10}
                                     documentType="signed agreement"
                                     showPrivacyMessage={false}
                                     className="md:col-span-2"
                                 />
+                                {recFileStatus && (
+                                    <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 p-2 rounded border border-green-200 md:col-span-2">
+                                        <CheckCircle className="h-4 w-4" />
+                                        <span>File selected: {recFileStatus.name} ({(recFileStatus.size / 1024 / 1024).toFixed(2)} MB)</span>
+                                    </div>
+                                )}
                                 <input type="hidden" id="rec-agreement-url-new" name="rec-agreement-url-new" />
                                 <input
                                     type="file"
                                     id="rec-agreement-new"
                                     name="rec-agreement"
                                     className="hidden"
-                                    accept=".pdf,.doc,.docx"
+                                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                                 />
                             </div>
                         )}
@@ -4041,6 +4322,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             const emptyTransfer = new DataTransfer();
                                             fileInput.files = emptyTransfer.files;
                                         }
+                                        if (url) setMentorFileStatus(null); // Clear file status when URL is provided
                                     }}
                                     onFileSelect={(file) => {
                                         const fileInput = document.getElementById('mentor-agreement-new') as HTMLInputElement;
@@ -4051,22 +4333,29 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                         }
                                         const hiddenInput = document.getElementById('mentor-agreement-url-new') as HTMLInputElement;
                                         if (hiddenInput) hiddenInput.value = '';
+                                        setMentorFileStatus({ name: file.name, size: file.size });
                                     }}
                                     placeholder="Paste your cloud drive link here (optional)..."
                                     label="Upload Signed Agreement (Optional)"
-                                    accept=".pdf,.doc,.docx"
+                                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                                     maxSize={10}
                                     documentType="signed agreement"
                                     showPrivacyMessage={false}
                                     className="md:col-span-2"
                                 />
+                                {mentorFileStatus && (
+                                    <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 p-2 rounded border border-green-200 md:col-span-2">
+                                        <CheckCircle className="h-4 w-4" />
+                                        <span>File selected: {mentorFileStatus.name} ({(mentorFileStatus.size / 1024 / 1024).toFixed(2)} MB)</span>
+                                    </div>
+                                )}
                                 <input type="hidden" id="mentor-agreement-url-new" name="mentor-agreement-url-new" />
                                 <input
                                     type="file"
                                     id="mentor-agreement-new"
                                     name="mentor-agreement"
                                     className="hidden"
-                                    accept=".pdf,.doc,.docx"
+                                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                                 />
                             </div>
                         )}

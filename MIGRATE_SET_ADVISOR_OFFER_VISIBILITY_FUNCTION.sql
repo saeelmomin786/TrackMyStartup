@@ -100,3 +100,4 @@ $function$;
 SELECT '✅ Function set_advisor_offer_visibility() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

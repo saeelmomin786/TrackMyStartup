@@ -216,3 +216,4 @@ Run these scripts one by one in Supabase SQL Editor. Test after each migration.
 **Ready to run!** 🚀
 
 
+

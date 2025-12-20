@@ -136,3 +136,4 @@ const { data } = await supabase.rpc('get_investment_advisor_investors', {
 **Go ahead and run all 6 scripts!** 🚀
 
 
+

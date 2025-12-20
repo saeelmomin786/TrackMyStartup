@@ -33,3 +33,4 @@ LEFT JOIN LATERAL (
 SELECT '✅ View v_incubation_opportunities migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

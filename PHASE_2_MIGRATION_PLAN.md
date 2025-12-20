@@ -53,3 +53,4 @@ For each function:
 Creating migration scripts one by one, starting with `set_advisor_offer_visibility`...
 
 
+

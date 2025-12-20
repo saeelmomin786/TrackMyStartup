@@ -42,3 +42,4 @@ SELECT '✅ Function get_user_role() migrated to use user_profiles (NO FALLBACK 
 -- 3. Better for large user bases - single index lookup
 
 
+

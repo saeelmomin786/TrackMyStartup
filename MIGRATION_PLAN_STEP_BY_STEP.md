@@ -49,3 +49,4 @@ Before migrating each function, we need to check:
 Let's start by checking `set_advisor_offer_visibility` function and its usage.
 
 
+

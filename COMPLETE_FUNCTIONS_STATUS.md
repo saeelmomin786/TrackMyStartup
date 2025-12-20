@@ -115,3 +115,4 @@ These functions don't use `users` or `user_profiles` tables, so no migration nee
 **Remaining:** 31 functions (1 with fallback + 30 not migrated)
 
 
+

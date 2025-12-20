@@ -44,3 +44,4 @@ $function$;
 SELECT '✅ Function generate_investment_advisor_code() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

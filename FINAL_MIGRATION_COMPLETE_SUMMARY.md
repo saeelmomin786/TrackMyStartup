@@ -206,3 +206,4 @@ This migration involved:
 **The database is now fully migrated and ready for production use with the new `user_profiles` architecture!** 🚀
 
 
+

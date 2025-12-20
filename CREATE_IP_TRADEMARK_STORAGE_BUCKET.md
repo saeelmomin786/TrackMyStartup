@@ -64,3 +64,4 @@ ip-trademark-documents/
 - **If you get permission errors**: Check that the storage policy was created correctly
 - **If files don't appear**: Refresh the page and check the bucket in Storage dashboard
 
+

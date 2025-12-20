@@ -68,3 +68,4 @@ WHERE proname = 'should_reveal_contact_details'
 AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
 
 
+

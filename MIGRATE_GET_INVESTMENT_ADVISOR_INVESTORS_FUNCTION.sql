@@ -62,3 +62,4 @@ $function$;
 SELECT '✅ Function get_investment_advisor_investors() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

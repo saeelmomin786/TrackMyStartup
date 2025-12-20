@@ -79,3 +79,4 @@ $function$;
 SELECT '✅ Function assign_mentor_code() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

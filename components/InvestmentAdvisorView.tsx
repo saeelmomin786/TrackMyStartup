@@ -2794,28 +2794,64 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       setLoadingInvestmentInterests(true);
       try {
         // CRITICAL: investor_favorites.investor_id stores auth.uid() (auth user ID)
-        // myInvestors contains users from users table where users.id should be auth.uid()
-        // But we need to verify this matches - use the investor.id directly as it should be auth.uid()
-        const investorIds = myInvestors.map(investor => investor.id).filter(Boolean);
+        // In the multi-profile system, we need to get auth_user_id from user_profiles
+        // First, get the auth_user_id for each investor
+        const investorProfileIds = myInvestors.map(investor => investor.id).filter(Boolean);
         
-        if (investorIds.length === 0) {
+        if (investorProfileIds.length === 0) {
           console.log('⚠️ No accepted investors found - investment interests will be empty');
           setInvestmentInterests([]);
           setLoadingInvestmentInterests(false);
           return;
         }
 
-        console.log('🔍 Loading investment interests for investors:', investorIds.length, investorIds);
+        console.log('🔍 Loading investment interests for investors:', investorProfileIds.length, investorProfileIds);
         console.log('🔍 Advisor code:', currentUser?.investment_advisor_code);
         console.log('🔍 myInvestors details:', myInvestors.map(inv => ({
           id: inv.id,
           name: inv.name,
           email: inv.email,
           code_entered: (inv as any).investment_advisor_code_entered,
-          advisor_accepted: (inv as any).advisor_accepted
+          advisor_accepted: (inv as any).advisor_accepted,
+          auth_user_id: (inv as any).auth_user_id
         })));
 
-        // Fetch favorites from assigned investors
+        // Get auth_user_id for each investor
+        // getAllUsers() already normalizes id = auth_user_id for user_profiles
+        const authUserIds: string[] = [];
+        const investorDataByAuthId = new Map<string, { name: string; email: string }>();
+        
+        // Process each investor - id is already auth_user_id from getAllUsers()
+        investorProfileIds.forEach(profileId => {
+          const investor = myInvestors.find(inv => inv.id === profileId);
+          if (investor) {
+            // getAllUsers() normalizes id to auth_user_id for both users and user_profiles
+            const authUserId = investor.id;
+            authUserIds.push(authUserId);
+            investorDataByAuthId.set(authUserId, {
+              name: investor.name || 'Unknown',
+              email: investor.email || ''
+            });
+          }
+        });
+        
+        console.log('🔍 Using auth_user_ids from myInvestors:', {
+          profileIds: investorProfileIds,
+          authUserIds: authUserIds,
+          count: authUserIds.length
+        });
+
+        if (authUserIds.length === 0) {
+          console.log('⚠️ No auth user IDs found - investment interests will be empty');
+          setInvestmentInterests([]);
+          setLoadingInvestmentInterests(false);
+          return;
+        }
+
+        console.log('🔍 Using auth_user_ids for query:', authUserIds.length, authUserIds);
+        console.log('🔍 Investor data map:', Array.from(investorDataByAuthId.entries()));
+
+        // Fetch favorites from assigned investors using auth_user_id
         // Note: The RLS policy "Investment Advisors can view assigned investor favorites" 
         // should automatically filter to only show favorites from accepted investors
         const { data: favoritesData, error: favoritesError } = await supabase
@@ -2826,8 +2862,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             startup_id,
             created_at
           `)
-          .in('investor_id', investorIds)
+          .in('investor_id', authUserIds)
           .order('created_at', { ascending: false });
+        
+        console.log('🔍 Favorites query result:', {
+          count: favoritesData?.length || 0,
+          error: favoritesError,
+          sampleInvestorIds: favoritesData?.slice(0, 3).map((f: any) => f.investor_id)
+        });
 
         // Fetch startup and investor data separately (manual join - no FK constraints after migration)
         if (favoritesData && favoritesData.length > 0) {
@@ -2844,16 +2886,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             });
           }
 
-          // Fetch investor data from user_profiles
-          const { data: investorProfilesData } = await supabase
-            .from('user_profiles')
-            .select('auth_user_id, name, email, role')
-            .in('auth_user_id', investorIds)
-            .eq('role', 'Investor');
-          
-          const investorProfilesMap = new Map((investorProfilesData || []).map((up: any) => [up.auth_user_id, up]));
+          // Use investor data we already fetched (or fetch if missing)
           favoritesData.forEach((fav: any) => {
-            fav.investor = investorProfilesMap.get(fav.investor_id);
+            const investorData = investorDataByAuthId.get(fav.investor_id);
+            if (investorData) {
+              fav.investor = investorData;
+            } else {
+              // Fallback: fetch if not already loaded
+              // getAllUsers() normalizes id to auth_user_id, so inv.id === fav.investor_id
+              const investor = myInvestors.find(inv => inv.id === fav.investor_id);
+              if (investor) {
+                fav.investor = { name: investor.name || 'Unknown', email: investor.email || '' };
+              }
+            }
           });
         }
         
@@ -2864,8 +2909,64 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           errorMessage: favoritesError?.message,
           errorDetails: favoritesError?.details,
           errorHint: favoritesError?.hint,
-          sampleData: favoritesData?.slice(0, 2) // Show first 2 items for debugging
+          sampleData: favoritesData?.slice(0, 2), // Show first 2 items for debugging
+          queryAuthUserIds: authUserIds,
+          queryInvestorIds: investorProfileIds
         });
+        
+        // Debug: Check if there are any favorites for this investor at all
+        if (favoritesData?.length === 0 && !favoritesError) {
+          console.log('🔍 No favorites found. Checking if investor has any favorites in database...');
+          console.log('🔍 Checking with auth_user_ids:', JSON.stringify(authUserIds));
+          
+          // First, check what investor_ids exist in the table (without RLS filter if possible)
+          const { data: allFavoritesCheck, error: checkError } = await supabase
+            .from('investor_favorites')
+            .select('investor_id, startup_id')
+            .in('investor_id', authUserIds)
+            .limit(5);
+          
+          console.log('🔍 Direct check for favorites:', {
+            found: allFavoritesCheck?.length || 0,
+            error: checkError,
+            errorCode: checkError?.code,
+            errorMessage: checkError?.message,
+            errorDetails: checkError?.details,
+            errorHint: checkError?.hint,
+            sampleInvestorIds: allFavoritesCheck?.map((f: any) => f.investor_id),
+            queriedAuthUserIds: authUserIds
+          });
+          
+          // Also check what investor_ids are actually in the table (without filter)
+          // This might be blocked by RLS, but let's try
+          const { data: sampleFavorites, error: sampleError } = await supabase
+            .from('investor_favorites')
+            .select('investor_id')
+            .limit(10);
+          
+          console.log('🔍 Sample investor_ids in investor_favorites table:', {
+            sampleInvestorIds: [...new Set(sampleFavorites?.map((f: any) => f.investor_id) || [])],
+            error: sampleError,
+            errorCode: sampleError?.code,
+            errorMessage: sampleError?.message,
+            errorDetails: sampleError?.details,
+            errorHint: sampleError?.hint,
+            count: sampleFavorites?.length || 0
+          });
+          
+          // Try to get the actual auth_user_id from the investor's user record
+          if (investorProfileIds.length > 0) {
+            const investor = myInvestors.find(inv => inv.id === investorProfileIds[0]);
+            console.log('🔍 Investor details for debugging:', {
+              profileId: investorProfileIds[0],
+              investorId: investor?.id,
+              investorEmail: investor?.email,
+              investorName: investor?.name,
+              authUserIdFromInvestor: (investor as any)?.auth_user_id,
+              source: (investor as any)?.source
+            });
+          }
+        }
 
         if (favoritesError) {
           // If table doesn't exist yet, silently fail
@@ -2881,7 +2982,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           const { data: fallbackData, error: fallbackError } = await supabase
             .from('investor_favorites')
             .select('*')
-            .in('investor_id', investorIds)
+            .in('investor_id', authUserIds)
             .order('created_at', { ascending: false });
           
           if (fallbackError) {
@@ -2891,22 +2992,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             return;
           }
           
-          // Fetch investor names separately
+          // Use investor data we already have from myInvestors
           const investorMap: Record<string, { name: string; email: string }> = {};
-          if (investorIds.length > 0) {
-            const { data: investorsData, error: investorsError } = await supabase
-              .from('users')
-              .select('id, name, email')
-              .in('id', investorIds);
-            
-            if (investorsError) {
-              console.error('Error fetching investor names:', investorsError);
-            } else if (investorsData) {
-              investorsData.forEach((investor: any) => {
-                investorMap[investor.id] = { name: investor.name || 'Unknown', email: investor.email || '' };
-              });
+          authUserIds.forEach(authId => {
+            const existingData = investorDataByAuthId.get(authId);
+            if (existingData) {
+              investorMap[authId] = existingData;
             }
-          }
+          });
           
           // Fetch startup names separately
           const startupIds = Array.from(new Set((fallbackData || []).map((row: any) => row.startup_id).filter(Boolean)));
@@ -2952,17 +3045,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           if (needsFallback) {
             console.log('⚠️ Joins failed, fetching data separately...');
             
-            // Fetch investor names separately
+            // Fetch investor names separately from user_profiles using auth_user_id
             const investorMap: Record<string, { name: string; email: string }> = {};
-            if (investorIds.length > 0) {
+            if (authUserIds.length > 0) {
               const { data: investorsData, error: investorsError } = await supabase
-                .from('users')
-                .select('id, name, email')
-                .in('id', investorIds);
+                .from('user_profiles')
+                .select('auth_user_id, name, email')
+                .in('auth_user_id', authUserIds)
+                .eq('role', 'Investor');
               
               if (!investorsError && investorsData) {
                 investorsData.forEach((investor: any) => {
-                  investorMap[investor.id] = { name: investor.name || 'Unknown', email: investor.email || '' };
+                  investorMap[investor.auth_user_id] = { name: investor.name || 'Unknown', email: investor.email || '' };
                 });
               }
             }
@@ -3017,27 +3111,36 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         } else {
           // Try direct query without joins if main query returned empty
           console.log('⚠️ Query with joins returned 0 results, trying direct query...');
+          console.log('🔍 Direct query will use auth_user_ids:', authUserIds);
+          
           const { data: directData, error: directError } = await supabase
             .from('investor_favorites')
             .select('id, investor_id, startup_id, created_at')
-            .in('investor_id', investorIds)
+            .in('investor_id', authUserIds)
             .order('created_at', { ascending: false });
+          
+          console.log('🔍 Direct query result:', {
+            count: directData?.length || 0,
+            error: directError,
+            errorCode: directError?.code,
+            errorMessage: directError?.message,
+            errorDetails: directError?.details,
+            sampleInvestorIds: directData?.slice(0, 5).map((f: any) => f.investor_id),
+            queriedAuthUserIds: JSON.stringify(authUserIds),
+            allInvestorIds: directData?.map((f: any) => f.investor_id)
+          });
           
           if (!directError && directData && directData.length > 0) {
             console.log('✅ Found favorites via direct query:', directData.length);
             
-            // Fetch investor and startup names separately
+            // Use investor data we already have from myInvestors
             const investorMap: Record<string, { name: string; email: string }> = {};
-            const { data: investorsData } = await supabase
-              .from('users')
-              .select('id, name, email')
-              .in('id', investorIds);
-            
-            if (investorsData) {
-              investorsData.forEach((investor: any) => {
-                investorMap[investor.id] = { name: investor.name || 'Unknown', email: investor.email || '' };
-              });
-            }
+            authUserIds.forEach(authId => {
+              const existingData = investorDataByAuthId.get(authId);
+              if (existingData) {
+                investorMap[authId] = existingData;
+              }
+            });
             
             const startupIds = Array.from(new Set(directData.map((row: any) => row.startup_id).filter(Boolean)));
             const startupMap: Record<number, { name: string; sector: string }> = {};
@@ -7869,7 +7972,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Name</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Liked Date</th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View in Discover</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View Profile</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -7911,28 +8014,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                           <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
                 <button
                               onClick={() => {
-                                // Switch to discovery tab and set the pitch ID
-                                setActiveTab('discovery');
-                                // Find the startup in activeFundraisingStartups
-                                const matchedPitch = activeFundraisingStartups.find(pitch => 
-                                  pitch.id === interest.startup_id || 
-                                  pitch.name === interest.startup_name
-                                );
-                                
-                                if (matchedPitch) {
-                                  setPlayingVideoId(matchedPitch.id);
-                                  // Scroll to top to ensure the pitch is visible
-                                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                                } else {
-                                  // If not found, just switch to discovery tab
-                                  setActiveTab('discovery');
-                                  alert(`Opening discover page. If ${interest.startup_name} is not visible, it may not be actively fundraising.`);
-                                }
+                                // Open public startup profile URL
+                                const startupUrl = new URL(window.location.origin + window.location.pathname);
+                                startupUrl.searchParams.set('view', 'startup');
+                                startupUrl.searchParams.set('startupId', String(interest.startup_id));
+                                window.open(startupUrl.toString(), '_blank');
                               }}
                               className="text-blue-600 hover:text-blue-800 hover:underline font-medium flex items-center gap-1"
                             >
                               <Eye className="h-4 w-4" />
-                              View in Discover
+                              View Profile
                 </button>
                           </td>
                         </tr>

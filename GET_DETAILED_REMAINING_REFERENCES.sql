@@ -104,3 +104,4 @@ GROUP BY tc.table_name
 ORDER BY COUNT(*) DESC;
 
 
+

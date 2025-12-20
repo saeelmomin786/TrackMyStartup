@@ -52,3 +52,4 @@ GRANT EXECUTE ON FUNCTION get_startup_by_user_email(TEXT) TO authenticated;
 SELECT '✅ Function get_startup_by_user_email() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

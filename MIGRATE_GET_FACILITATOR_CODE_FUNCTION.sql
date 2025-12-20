@@ -37,3 +37,4 @@ $function$;
 SELECT '✅ Function get_facilitator_code() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

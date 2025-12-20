@@ -79,3 +79,4 @@ $function$;
 SELECT '✅ Function create_investment_offers_automatically() migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

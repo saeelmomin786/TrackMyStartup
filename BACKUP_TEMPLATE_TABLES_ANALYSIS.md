@@ -77,3 +77,4 @@ Deletes backup tables and template tables (if no dependencies).
 **Backup tables are likely safe to delete - they're just old backups!** 🧹
 
 
+

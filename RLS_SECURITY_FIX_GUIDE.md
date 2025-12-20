@@ -143,3 +143,4 @@ FOR ALL USING (
 **Let's secure your database!** 🔒
 
 
+

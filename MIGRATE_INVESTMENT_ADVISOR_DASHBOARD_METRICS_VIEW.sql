@@ -36,3 +36,4 @@ GROUP BY up.auth_user_id, up.name, COALESCE(up.investment_advisor_code, up.inves
 SELECT '✅ View investment_advisor_dashboard_metrics migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

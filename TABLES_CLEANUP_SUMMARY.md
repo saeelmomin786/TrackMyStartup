@@ -135,3 +135,4 @@ This will safely delete all empty tables that have no foreign key dependencies (
 **Ready?** Let's clean up those 33 safe empty tables! 🧹
 
 
+

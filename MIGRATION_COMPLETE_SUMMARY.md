@@ -134,3 +134,4 @@ DROP TABLE IF EXISTS public.users CASCADE;
 Complete migration from `public.users` to `public.user_profiles` as the single source of truth, then delete the `users` table for a cleaner, optimized database schema.
 
 
+

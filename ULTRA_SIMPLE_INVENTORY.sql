@@ -61,3 +61,4 @@ SELECT
        AND ccu.table_name = 'users') as fk_to_users_count;
 
 
+

@@ -39,3 +39,4 @@ LEFT JOIN startups s ON up.startup_name = s.name;
 SELECT '✅ View user_startup_info migrated to use user_profiles (NO FALLBACK - OPTIMIZED)' as status;
 
 
+

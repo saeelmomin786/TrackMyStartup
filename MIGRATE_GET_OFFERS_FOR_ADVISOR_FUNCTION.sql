@@ -80,3 +80,4 @@ WHERE proname = 'get_offers_for_investment_advisor'
 AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
 
 
+

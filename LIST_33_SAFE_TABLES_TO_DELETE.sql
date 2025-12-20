@@ -65,3 +65,4 @@ LEFT JOIN referenced_tables rt ON rt.table_name = et.tablename
 WHERE rt.table_name IS NULL;  -- Not referenced
 
 
+

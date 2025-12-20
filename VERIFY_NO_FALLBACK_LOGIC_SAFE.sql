@@ -57,3 +57,4 @@ SELECT
     '✅ VERIFY_NO_FALLBACK_LOGIC_SAFE.sql completed' as status;
 
 
+

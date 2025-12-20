@@ -110,10 +110,7 @@ class GoogleCalendarService {
   // Generate Google Meet link (using our API credentials)
   async generateGoogleMeetLink(): Promise<string> {
     try {
-      // This will be implemented via backend API endpoint
-      // For now, return a placeholder
-      // In production, this should call your backend API which uses Google Calendar API
-      const response = await fetch('/api/generate-google-meet-link', {
+      const response = await fetch('/api/google-calendar?action=generate-meet-link', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -129,7 +126,6 @@ class GoogleCalendarService {
     } catch (error) {
       console.error('Error generating Google Meet link:', error);
       // Fallback: Generate a basic meet link format
-      // In production, this should be handled by backend
       const randomId = Math.random().toString(36).substring(2, 15);
       return `https://meet.google.com/${randomId}`;
     }
@@ -141,9 +137,7 @@ class GoogleCalendarService {
     event: GoogleCalendarEvent
   ): Promise<{ eventId: string; meetLink: string }> {
     try {
-      // This will be implemented via backend API endpoint
-      // The backend will use the access_token to create the event
-      const response = await fetch('/api/create-google-calendar-event', {
+      const response = await fetch('/api/google-calendar?action=create-event', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -185,8 +179,7 @@ class GoogleCalendarService {
     endDateTime: string
   ): Promise<boolean> {
     try {
-      // This will be implemented via backend API endpoint
-      const response = await fetch('/api/check-google-calendar-conflicts', {
+      const response = await fetch('/api/google-calendar?action=check-conflicts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -274,7 +267,7 @@ class GoogleCalendarService {
   // Refresh access token
   async refreshAccessToken(integration: GoogleCalendarIntegration): Promise<string | null> {
     try {
-      const response = await fetch('/api/refresh-google-token', {
+      const response = await fetch('/api/google-calendar?action=refresh-token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

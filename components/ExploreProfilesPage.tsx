@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { getQueryParam } from '../lib/urlState';
+import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
 import Card from './ui/Card';
 import Button from './ui/Button';
@@ -8,9 +8,11 @@ import { ArrowLeft, Search, DollarSign, Briefcase, Users, FileText, Shield, Buil
 import InvestorCard from './investor/InvestorCard';
 import InvestmentAdvisorCard from './investment-advisor/InvestmentAdvisorCard';
 import MentorCard from './mentor/MentorCard';
+import ConnectMentorRequestModal from './mentor/ConnectMentorRequestModal';
 import { investorConnectionRequestService } from '../lib/investorConnectionRequestService';
 import { advisorConnectionRequestService } from '../lib/advisorConnectionRequestService';
 import { authService } from '../lib/auth';
+import { mentorService } from '../lib/mentorService';
 
 interface ExploreProfilesPageProps {}
 
@@ -22,6 +24,10 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
   const [error, setError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [selectedMentor, setSelectedMentor] = useState<any>(null);
+  const [currentStartup, setCurrentStartup] = useState<any>(null);
+  const [existingRequests, setExistingRequests] = useState<Map<string, boolean>>(new Map());
 
   // Load current user for authentication
   useEffect(() => {
@@ -31,6 +37,19 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
         if (user) {
           setCurrentUser(user);
           setIsAuthenticated(true);
+          
+          // If user is a startup, load their startup
+          if (user.role === 'Startup' && user.startup_name) {
+            const { data: startups } = await supabase
+              .from('startups')
+              .select('id, name')
+              .eq('name', user.startup_name)
+              .limit(1);
+            
+            if (startups && startups.length > 0) {
+              setCurrentStartup(startups[0]);
+            }
+          }
         } else {
           setIsAuthenticated(false);
         }
@@ -41,6 +60,39 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
     };
     loadCurrentUser();
   }, []);
+
+  // Check for existing requests when user and startup are loaded
+  useEffect(() => {
+    const checkExistingRequests = async () => {
+      if (!currentUser || !currentStartup || role !== 'Mentor' || !isAuthenticated) {
+        return;
+      }
+
+      try {
+        const requestsMap = new Map<string, boolean>();
+        
+        // Check each mentor profile for existing requests
+        for (const profile of profiles) {
+          if (profile.user_id) {
+            const { exists } = await mentorService.checkExistingRequest(
+              profile.user_id,
+              currentUser.id,
+              currentStartup.id
+            );
+            requestsMap.set(profile.user_id, exists);
+          }
+        }
+        
+        setExistingRequests(requestsMap);
+      } catch (err) {
+        console.error('Error checking existing requests:', err);
+      }
+    };
+
+    if (profiles.length > 0 && currentUser && currentStartup) {
+      checkExistingRequests();
+    }
+  }, [profiles, currentUser, currentStartup, role, isAuthenticated]);
 
   useEffect(() => {
     const loadProfiles = async () => {
@@ -250,7 +302,12 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
   };
 
   const handleBack = () => {
-    window.history.back();
+    // Remove page=landing and view=explore to go back to dashboard
+    const url = new URL(window.location.href);
+    url.searchParams.delete('view');
+    url.searchParams.delete('role');
+    url.searchParams.delete('page');
+    window.location.href = url.toString();
   };
 
   const handleConnect = async (profile: any) => {
@@ -265,6 +322,13 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
       url.searchParams.delete('role');
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
+      return;
+    }
+
+    // For mentors, open the ConnectMentorRequestModal
+    if (role === 'Mentor') {
+      setSelectedMentor(profile);
+      setConnectModalOpen(true);
       return;
     }
 
@@ -312,7 +376,7 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
           collaborator_profile_url: profileUrl
         });
       } else {
-        // For Mentor, CA, CS, Incubation - use investor_connection_requests
+        // For CA, CS, Incubation - use investor_connection_requests
         const profileUrl = window.location.origin + window.location.pathname + `?view=user&userId=${requesterId}&role=${requesterRole}`;
         await investorConnectionRequestService.createRequest({
           investor_id: targetUserId,
@@ -405,7 +469,22 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
           </Card>
         ) : (
           <div className="space-y-6">
-            {filteredProfiles.map((profile) => {
+            {role === 'Mentor' ? (
+              // Use MentorCard component for mentors
+              filteredProfiles.map((profile) => {
+                const hasRequest = existingRequests.get(profile.user_id || '') || false;
+                return (
+                  <MentorCard
+                    key={profile.id || profile.user_id}
+                    mentor={profile}
+                    onConnect={() => handleConnect(profile)}
+                    connectLabel={hasRequest ? "Requested" : "Connect"}
+                    connectDisabled={!isAuthenticated || hasRequest}
+                  />
+                );
+              })
+            ) : (
+              filteredProfiles.map((profile) => {
               // Get video/logo info
               const videoEmbedInfo = profile.video_url ? getVideoEmbedUrl(profile.video_url, false) : null;
               const embedUrl = videoEmbedInfo?.embedUrl || null;
@@ -680,10 +759,41 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
                   </div>
                 </Card>
               );
-            })}
+              })
+            )}
           </div>
         )}
       </div>
+
+      {/* Connect Mentor Request Modal */}
+      {connectModalOpen && selectedMentor && currentUser && currentStartup && (
+        <ConnectMentorRequestModal
+          isOpen={connectModalOpen}
+          onClose={() => {
+            setConnectModalOpen(false);
+            setSelectedMentor(null);
+          }}
+          mentorId={selectedMentor.user_id}
+          mentorName={selectedMentor.mentor_name || selectedMentor.user?.name || 'Mentor'}
+          mentorFeeType={selectedMentor.fee_type}
+          mentorFeeAmount={selectedMentor.fee_amount_min || selectedMentor.fee_amount_max}
+          mentorFeeAmountMin={selectedMentor.fee_amount_min}
+          mentorFeeAmountMax={selectedMentor.fee_amount_max}
+          mentorEquityPercentage={selectedMentor.equity_amount_min || selectedMentor.equity_amount_max}
+          mentorCurrency={selectedMentor.fee_currency || 'USD'}
+          startupId={currentStartup.id}
+          requesterId={currentUser.id}
+          onRequestSent={() => {
+            // Update existing requests map
+            if (selectedMentor.user_id) {
+              setExistingRequests(prev => new Map(prev).set(selectedMentor.user_id, true));
+            }
+            setConnectModalOpen(false);
+            setSelectedMentor(null);
+            alert('Connection request sent successfully! Check the "Requested" tab in your Services dashboard to track your requests.');
+          }}
+        />
+      )}
     </div>
   );
 };

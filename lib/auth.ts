@@ -200,20 +200,83 @@ export const authService = {
       console.log('🔍 isProfileComplete: Checking profile for userId:', userId);
       
       // First try to get from user_profiles (new system)
-      const { data: profileFromProfiles, error: profilesError } = await supabase
-        .from('user_profiles')
-        .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete')
-        .eq('id', userId)
+      // userId might be profile_id (user_profiles.id) or auth_user_id (user_profiles.auth_user_id)
+      // So we need to check both, and also check the active profile via user_profile_sessions
+      let profileFromProfiles = null;
+      let profilesError = null;
+      
+      // Strategy 1: If userId is auth_user_id, get the active profile from user_profile_sessions
+      const { data: activeProfileSession, error: sessionError } = await supabase
+        .from('user_profile_sessions')
+        .select('current_profile_id')
+        .eq('auth_user_id', userId)
         .maybeSingle();
       
-      if (profilesError) {
-        console.error('❌ isProfileComplete: Error fetching profile:', profilesError);
-        return false;
+      if (activeProfileSession?.current_profile_id) {
+        // Get the active profile
+        const { data: activeProfile, error: activeProfileError } = await supabase
+          .from('user_profiles')
+          .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete')
+          .eq('id', activeProfileSession.current_profile_id)
+          .maybeSingle();
+        
+        if (activeProfile) {
+          profileFromProfiles = activeProfile;
+          console.log('✅ isProfileComplete: Found active profile via user_profile_sessions');
+        }
       }
       
+      // Strategy 2: If not found via session, try as profile_id directly
       if (!profileFromProfiles) {
-        console.log('❌ isProfileComplete: No profile found for userId:', userId);
-        return false;
+        const { data: profileById, error: errorById } = await supabase
+          .from('user_profiles')
+          .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete')
+          .eq('id', userId)
+          .maybeSingle();
+        
+        if (profileById) {
+          profileFromProfiles = profileById;
+          console.log('✅ isProfileComplete: Found profile by id');
+        }
+      }
+      
+      // Strategy 3: If still not found, try as auth_user_id (get first profile for this auth user)
+      if (!profileFromProfiles) {
+        const { data: profileByAuthId, error: errorByAuthId } = await supabase
+          .from('user_profiles')
+          .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete')
+          .eq('auth_user_id', userId)
+          .limit(1)
+          .maybeSingle();
+        
+        if (profileByAuthId) {
+          profileFromProfiles = profileByAuthId;
+          console.log('✅ isProfileComplete: Found profile by auth_user_id');
+        } else {
+          profilesError = errorByAuthId;
+        }
+      }
+      
+      if (profilesError && !profileFromProfiles) {
+        console.error('❌ isProfileComplete: Error fetching profile:', profilesError);
+      }
+      
+      // Strategy 4: Fallback to users table (old system)
+      if (!profileFromProfiles) {
+        console.log('❌ isProfileComplete: No profile found in user_profiles, checking users table');
+        const { data: userFromUsers, error: usersError } = await supabase
+          .from('users')
+          .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete')
+          .eq('id', userId)
+          .maybeSingle();
+        
+        if (userFromUsers) {
+          console.log('✅ isProfileComplete: Found profile in users table (old system)');
+          profileFromProfiles = userFromUsers;
+        } else {
+          console.log('❌ isProfileComplete: No profile found for userId:', userId);
+          return false;
+        }
       }
       
       console.log('🔍 isProfileComplete: Profile found:', {
@@ -402,7 +465,7 @@ export const authService = {
   // Helper function to map profile data to AuthUser interface
   _mapProfileToAuthUser(profile: any, isComplete: boolean): AuthUser {
     return {
-      id: profile.profile_id || profile.id,
+      id: profile.auth_user_id || profile.profile_id || profile.id, // Use auth_user_id for foreign keys
       email: profile.email,
       name: profile.name,
       role: profile.role,

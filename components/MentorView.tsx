@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Startup, InvestmentType, ComplianceStatus } from '../types';
-import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2 } from 'lucide-react';
+import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { AuthUser } from '../lib/auth';
@@ -21,6 +21,7 @@ import { AddProfileModal } from './AddProfileModal';
 import MentorPendingRequestsSection from './mentor/MentorPendingRequestsSection';
 import SchedulingModal from './mentor/SchedulingModal';
 import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
+import ManageAvailabilityModal from './mentor/ManageAvailabilityModal';
 
 interface MentorViewProps {
   currentUser: AuthUser | null;
@@ -83,6 +84,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   // State for Scheduling Modal
   const [schedulingModalOpen, setSchedulingModalOpen] = useState(false);
   const [selectedAssignmentForScheduling, setSelectedAssignmentForScheduling] = useState<any>(null);
+  
+  // State for Manage Availability Modal
+  const [manageAvailabilityModalOpen, setManageAvailabilityModalOpen] = useState(false);
   
   // Handle navigation from profile form to dashboard
   const handleNavigateToDashboard = (section?: 'active' | 'completed' | 'founded') => {
@@ -648,6 +652,23 @@ ${mentorName}`;
                     }}
                   />
                 )}
+
+                {/* Availability Management Section */}
+                <Card>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-base sm:text-lg font-semibold text-slate-700">Availability Management</h3>
+                      <p className="text-sm text-slate-500 mt-1">Set your available time slots for startups to book sessions</p>
+                    </div>
+                    <Button
+                      onClick={() => setManageAvailabilityModalOpen(true)}
+                      variant="outline"
+                    >
+                      <Calendar className="h-4 w-4 mr-2" />
+                      Manage Availability
+                    </Button>
+                  </div>
+                </Card>
 
                 {/* Combined Mentor Startups Section */}
                 {mentorMetrics && (
@@ -1924,6 +1945,15 @@ ${mentorName}`;
             userType="Mentor"
           />
         </div>
+      )}
+
+      {/* Manage Availability Modal */}
+      {currentUser?.id && (
+        <ManageAvailabilityModal
+          isOpen={manageAvailabilityModalOpen}
+          onClose={() => setManageAvailabilityModalOpen(false)}
+          mentorId={currentUser.id}
+        />
       )}
     </div>
   );

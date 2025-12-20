@@ -325,22 +325,34 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
 
         {/* Header Section */}
         <div className="mb-5 pr-10">
-          <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-1">
-            {mentor.mentor_name || mentor.user?.name || 'Mentor'}
-          </h3>
-          {mentor.mentor_type && (
-            <p className="text-slate-600 font-medium text-sm mb-3">{mentor.mentor_type}</p>
-          )}
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <h3 className="text-xl sm:text-2xl font-bold text-slate-800 flex-1">
+              {mentor.mentor_name || mentor.user?.name || 'Mentor'}
+            </h3>
+            <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full border border-blue-200 whitespace-nowrap">
+              Mentor
+            </span>
+          </div>
           
-          {/* Experience Info */}
+          {/* Location and Experience Info */}
           <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600 mb-3">
+            {mentor.location && (
+              <span className="flex items-center gap-1.5">
+                <MapPin className="h-4 w-4 text-slate-500" />
+                {mentor.location}
+              </span>
+            )}
             {mentor.years_of_experience && (
               <span className="flex items-center gap-1.5">
                 <Users className="h-4 w-4 text-slate-500" />
-                {mentor.years_of_experience} years
+                Experience: {mentor.years_of_experience} {mentor.years_of_experience === 1 ? 'year' : 'years'}
               </span>
             )}
           </div>
+          
+          {mentor.mentor_type && (
+            <p className="text-slate-600 font-medium text-sm mb-3">{mentor.mentor_type}</p>
+          )}
         </div>
 
         {/* Mentoring Stats */}
@@ -410,6 +422,19 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
               </div>
             )}
           </div>
+
+          {mentor.mentoring_stages && mentor.mentoring_stages.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-slate-500 mb-2">Mentoring Stages</div>
+              <div className="flex flex-wrap gap-1.5">
+                {mentor.mentoring_stages.map((stage, idx) => (
+                  <span key={idx} className="px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full border border-purple-200">
+                    {stage}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {mentor.mentoring_approach && (
             <div>
@@ -508,13 +533,15 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
             {onConnect && (
               <Button
                 size="sm"
-                variant="primary"
+                variant={connectLabel === 'Requested' ? 'outline' : 'primary'}
                 disabled={connectDisabled}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onConnect();
+                  if (!connectDisabled) {
+                    onConnect();
+                  }
                 }}
-                className="sm:flex-1"
+                className={`sm:flex-1 ${connectLabel === 'Requested' ? 'cursor-not-allowed opacity-60' : ''}`}
               >
                 {connectLabel || 'Connect'}
               </Button>

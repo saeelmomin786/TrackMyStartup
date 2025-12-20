@@ -6,6 +6,20 @@ import Input from '../ui/Input';
 import { MentorRequest } from '../../lib/mentorService';
 import { CheckCircle, XCircle, MessageSquare, DollarSign, TrendingUp } from 'lucide-react';
 
+// Helper function to format currency
+const formatCurrency = (value: number, currency: string = 'USD'): string => {
+  const currencySymbols: { [key: string]: string } = {
+    'USD': '$',
+    'INR': '₹',
+    'EUR': '€',
+    'GBP': '£',
+    'SGD': 'S$',
+    'AED': 'AED '
+  };
+  const symbol = currencySymbols[currency] || currency || '$';
+  return `${symbol}${value.toLocaleString()}`;
+};
+
 interface MentorPendingRequestsSectionProps {
   requests: MentorRequest[];
   onRequestAction: () => void;
@@ -162,13 +176,13 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
                       {request.proposed_fee_amount && (
                         <div className="flex items-center gap-2 text-sm text-slate-600">
                           <DollarSign className="h-4 w-4" />
-                          <span>Fee: ${request.proposed_fee_amount.toLocaleString()}</span>
+                          <span>Fee: {formatCurrency(request.proposed_fee_amount, request.fee_currency || 'USD')}</span>
                         </div>
                       )}
                       {request.proposed_equity_amount && (
                         <div className="flex items-center gap-2 text-sm text-slate-600">
                           <TrendingUp className="h-4 w-4" />
-                          <span>Equity: ${request.proposed_equity_amount.toLocaleString()}</span>
+                          <span>Equity: {formatCurrency(request.proposed_equity_amount, request.fee_currency || 'USD')}</span>
                         </div>
                       )}
                       {request.proposed_esop_percentage && (
@@ -233,13 +247,13 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
                       {request.negotiated_fee_amount && (
                         <div className="flex items-center gap-2 text-sm text-slate-600">
                           <DollarSign className="h-4 w-4" />
-                          <span>Fee: ${request.negotiated_fee_amount.toLocaleString()}</span>
+                          <span>Fee: {formatCurrency(request.negotiated_fee_amount, request.fee_currency || 'USD')}</span>
                         </div>
                       )}
                       {request.negotiated_equity_amount && (
                         <div className="flex items-center gap-2 text-sm text-slate-600">
                           <TrendingUp className="h-4 w-4" />
-                          <span>Equity: ${request.negotiated_equity_amount.toLocaleString()}</span>
+                          <span>Equity: {formatCurrency(request.negotiated_equity_amount, request.fee_currency || 'USD')}</span>
                         </div>
                       )}
                       {request.negotiated_esop_percentage && (
@@ -355,7 +369,7 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
-                Negotiated Fee Amount (USD)
+                Negotiated Fee Amount ({selectedRequest.fee_currency || 'USD'})
               </label>
               <Input
                 type="number"
@@ -369,7 +383,7 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
-                Negotiated Equity Amount (USD)
+                Negotiated Equity Amount ({selectedRequest.fee_currency || 'USD'})
               </label>
               <Input
                 type="number"

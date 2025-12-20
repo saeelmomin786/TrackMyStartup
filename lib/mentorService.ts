@@ -18,6 +18,7 @@ export interface MentorRequest {
   startup_sector?: string;
   fee_type?: string;
   fee_amount?: number;
+  fee_currency?: string;
   // New fields for negotiation
   proposed_fee_amount?: number;
   proposed_equity_amount?: number;
@@ -578,12 +579,31 @@ class MentorService {
         const esopPercentage = request.negotiated_esop_percentage ?? request.proposed_esop_percentage ?? equityRecord?.equity_allocated ?? 0;
         const esopValue = request.negotiated_equity_amount ?? request.proposed_equity_amount ?? equityRecord?.investment_amount ?? 0;
 
+        // Get currency from request or mentor profile
+        let assignmentCurrency = (request as any).fee_currency || 'USD';
+        if (!(request as any).fee_currency) {
+          try {
+            const { data: mentorProfile } = await supabase
+              .from('mentor_profiles')
+              .select('fee_currency')
+              .eq('user_id', request.mentor_id)
+              .single();
+            
+            if (mentorProfile?.fee_currency) {
+              assignmentCurrency = mentorProfile.fee_currency;
+            }
+          } catch (err) {
+            console.warn('Could not fetch mentor currency, using USD:', err);
+          }
+        }
+
         console.log('💰 Assignment details:', {
           mentor_id: request.mentor_id,
           startup_id: request.startup_id,
           feeAmount,
           esopPercentage,
-          esopValue
+          esopValue,
+          currency: assignmentCurrency
         });
 
         // Check if assignment already exists
@@ -609,7 +629,7 @@ class MentorService {
             .update({
               status: 'active',
               fee_amount: feeAmount,
-              fee_currency: 'USD',
+              fee_currency: assignmentCurrency,
               esop_percentage: esopPercentage,
               esop_value: esopValue,
               assigned_at: new Date().toISOString()
@@ -628,7 +648,7 @@ class MentorService {
               startup_id: request.startup_id,
               status: 'active',
               fee_amount: feeAmount,
-              fee_currency: 'USD',
+              fee_currency: assignmentCurrency,
               esop_percentage: esopPercentage,
               esop_value: esopValue,
               assigned_at: new Date().toISOString()
@@ -733,6 +753,36 @@ class MentorService {
     }
   }
 
+  // Check if a request already exists for a mentor-startup pair
+  async checkExistingRequest(
+    mentorId: string,
+    requesterId: string,
+    startupId: number | null
+  ): Promise<{ exists: boolean; request?: MentorRequest }> {
+    try {
+      const { data, error } = await supabase
+        .from('mentor_requests')
+        .select('*')
+        .eq('mentor_id', mentorId)
+        .eq('requester_id', requesterId)
+        .eq('startup_id', startupId)
+        .in('status', ['pending', 'negotiating', 'accepted'])
+        .order('requested_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error('Error checking existing request:', error);
+        return { exists: false };
+      }
+
+      return { exists: !!data, request: data || undefined };
+    } catch (error: any) {
+      console.error('Error checking existing request:', error);
+      return { exists: false };
+    }
+  }
+
   // Send connect request from startup
   async sendConnectRequest(
     mentorId: string,
@@ -741,28 +791,125 @@ class MentorService {
     message?: string,
     proposedFeeAmount?: number,
     proposedEquityAmount?: number,
-    proposedEsopPercentage?: number
+    proposedEsopPercentage?: number,
+    currency?: string
   ): Promise<{ success: boolean; requestId?: number; error?: string }> {
     try {
+      // Get the actual auth_user_id from the current session
+      // The requesterId might be a profile_id, so we need to get auth_user_id
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      if (authError || !authUser) {
+        console.error('❌ Not authenticated:', authError);
+        return { 
+          success: false, 
+          error: 'You must be logged in to send a connection request.' 
+        };
+      }
+      
+      // Use the auth user ID (this is what the foreign key needs)
+      const actualRequesterId = authUser.id;
+      
+      // Validate requesterId - check if it's a valid UUID format
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(actualRequesterId)) {
+        console.error('❌ Invalid requester ID format:', actualRequesterId);
+        return { 
+          success: false, 
+          error: 'Invalid user ID. Please ensure you are logged in correctly.' 
+        };
+      }
+
+      // Validate mentorId - check if it's a valid UUID format
+      if (!uuidRegex.test(mentorId)) {
+        console.error('❌ Invalid mentor ID format:', mentorId);
+        return { 
+          success: false, 
+          error: 'Invalid mentor ID. Please try again.' 
+        };
+      }
+
+      // Verify mentor_id exists in user_profiles (to ensure it's a valid user)
+      // The mentorId might be a profile_id, so check both
+      let actualMentorId = mentorId;
+      const { data: mentorProfileByAuthId } = await supabase
+        .from('user_profiles')
+        .select('auth_user_id')
+        .eq('auth_user_id', mentorId)
+        .limit(1);
+
+      if (!mentorProfileByAuthId || mentorProfileByAuthId.length === 0) {
+        // Might be a profile_id, try to get auth_user_id
+        const { data: mentorProfileById } = await supabase
+          .from('user_profiles')
+          .select('auth_user_id')
+          .eq('id', mentorId)
+          .single();
+        
+        if (mentorProfileById?.auth_user_id) {
+          actualMentorId = mentorProfileById.auth_user_id;
+          console.log('✅ Converted mentor profile_id to auth_user_id:', actualMentorId);
+        } else {
+          return { 
+            success: false, 
+            error: 'Invalid mentor. Please try selecting a different mentor.' 
+          };
+        }
+      }
+
+      // Get mentor's fee_currency if not provided
+      let mentorCurrency = currency || 'USD';
+      if (!currency) {
+        try {
+          const { data: mentorProfile } = await supabase
+            .from('mentor_profiles')
+            .select('fee_currency')
+            .eq('user_id', mentorId)
+            .single();
+          
+          if (mentorProfile?.fee_currency) {
+            mentorCurrency = mentorProfile.fee_currency;
+          }
+        } catch (err) {
+          console.warn('Could not fetch mentor currency, using USD:', err);
+        }
+      }
+
       const { data, error } = await supabase
         .from('mentor_requests')
         .insert({
-          mentor_id: mentorId,
-          requester_id: requesterId,
+          mentor_id: actualMentorId,
+          requester_id: actualRequesterId,
           requester_type: 'Startup',
           startup_id: startupId,
           status: 'pending',
           message: message || null,
           proposed_fee_amount: proposedFeeAmount || null,
           proposed_equity_amount: proposedEquityAmount || null,
-          proposed_esop_percentage: proposedEsopPercentage || null
+          proposed_esop_percentage: proposedEsopPercentage || null,
+          fee_currency: mentorCurrency
         })
         .select()
         .single();
 
       if (error) {
         console.error('Error sending connect request:', error);
-        return { success: false, error: error.message };
+        
+        // Provide more helpful error messages
+        if (error.code === '23503') { // Foreign key violation
+          if (error.message.includes('requester_id')) {
+            return { 
+              success: false, 
+              error: 'Your user account is not properly set up. Please contact support or try logging in again.' 
+            };
+          } else if (error.message.includes('mentor_id')) {
+            return { 
+              success: false, 
+              error: 'Invalid mentor. Please try selecting a different mentor.' 
+            };
+          }
+        }
+        
+        return { success: false, error: error.message || 'Failed to send request. Please try again.' };
       }
 
       return { success: true, requestId: data.id };

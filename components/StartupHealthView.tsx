@@ -3,7 +3,7 @@ import { Startup, FundraisingDetails, InvestmentRecord, UserRole, Founder, Compl
 import { AuthUser } from '../lib/auth';
 import Button from './ui/Button';
 import Card from './ui/Card';
-import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench, DollarSign, Briefcase, FileText, Shield, Eye, Search } from 'lucide-react';
+import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench, DollarSign, Briefcase, FileText, Shield, Eye, Search, CheckCircle } from 'lucide-react';
 import { investmentService } from '../lib/database';
 import { supabase } from '../lib/supabase';
 
@@ -74,6 +74,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [connectModalOpen, setConnectModalOpen] = useState(false);
     const [selectedMentor, setSelectedMentor] = useState<any>(null);
     const [startupRequests, setStartupRequests] = useState<any[]>([]);
+    const [acceptedMentorRequests, setAcceptedMentorRequests] = useState<any[]>([]);
     
     // Update currentStartup when startup prop changes (important for facilitator access)
     useEffect(() => {
@@ -189,15 +190,18 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             }
 
             // Map requests to include startup details
-            const mappedRequests = (requests || []).map((req: any) => {
-                const requestStartup = startups.find(s => s.id === req.startup_id);
-                return {
-                    ...req,
-                    startup_name: requestStartup?.name || 'Unknown Startup',
-                    startup_website: requestStartup?.domain || '',
-                    startup_sector: requestStartup?.sector || ''
-                };
-            });
+            // Filter out accepted requests (they should appear in "My Services" tab)
+            // Since we're filtering by currentStartup.id, all requests will be for this startup
+            const mappedRequests = (requests || [])
+                .filter((req: any) => req.status !== 'accepted') // Exclude accepted requests
+                .map((req: any) => {
+                    return {
+                        ...req,
+                        startup_name: currentStartup?.name || 'Unknown Startup',
+                        startup_website: currentStartup?.domain || '',
+                        startup_sector: currentStartup?.sector || ''
+                    };
+                });
 
             setStartupRequests(mappedRequests);
         } catch (error) {
@@ -205,11 +209,112 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         }
     };
 
+    // Load accepted mentor requests for "My Services" tab
+    const loadAcceptedMentorRequests = async () => {
+        if (!currentStartup?.id || !user?.id) return;
+        
+        try {
+            const { data: requests, error } = await supabase
+                .from('mentor_requests')
+                .select('*')
+                .eq('startup_id', currentStartup.id)
+                .eq('requester_id', user.id)
+                .eq('status', 'accepted')
+                .order('responded_at', { ascending: false });
+
+            if (error) {
+                console.error('Error loading accepted mentor requests:', error);
+                return;
+            }
+
+            // Enrich with mentor profile data
+            const mappedRequests = await Promise.all((requests || []).map(async (req: any) => {
+                let mentorName = 'Unknown Mentor';
+                try {
+                    const { data: mentorProfile } = await supabase
+                        .from('mentor_profiles')
+                        .select('mentor_name')
+                        .eq('user_id', req.mentor_id)
+                        .maybeSingle();
+                    
+                    if (mentorProfile?.mentor_name) {
+                        mentorName = mentorProfile.mentor_name;
+                    } else {
+                        // Try user_profiles
+                        const { data: userProfile } = await supabase
+                            .from('user_profiles')
+                            .select('name')
+                            .eq('auth_user_id', req.mentor_id)
+                            .maybeSingle();
+                        
+                        if (userProfile?.name) {
+                            mentorName = userProfile.name;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Error fetching mentor name:', err);
+                }
+
+                return {
+                    ...req,
+                    mentor_name: mentorName,
+                    startup_name: currentStartup?.name || 'Unknown Startup',
+                    startup_website: currentStartup?.domain || '',
+                    startup_sector: currentStartup?.sector || ''
+                };
+            }));
+
+            setAcceptedMentorRequests(mappedRequests);
+        } catch (error) {
+            console.error('Error loading accepted mentor requests:', error);
+        }
+    };
+
     useEffect(() => {
         if (activeTab === 'services' && servicesSubTab === 'requested') {
             loadStartupRequests();
+            // Also check if any requests were accepted (mentor accepted)
+            checkForAcceptedRequests();
+        } else if (activeTab === 'services' && servicesSubTab === 'my-services') {
+            loadAcceptedMentorRequests();
         }
     }, [activeTab, servicesSubTab, currentStartup?.id, user?.id]);
+
+    // Check if any requests were accepted by mentor and switch to My Services
+    const checkForAcceptedRequests = async () => {
+        if (!currentStartup?.id || !user?.id) return;
+        
+        try {
+            const { data: acceptedRequests, error } = await supabase
+                .from('mentor_requests')
+                .select('id, responded_at')
+                .eq('startup_id', currentStartup.id)
+                .eq('requester_id', user.id)
+                .eq('status', 'accepted')
+                .order('responded_at', { ascending: false })
+                .limit(1);
+
+            if (!error && acceptedRequests && acceptedRequests.length > 0) {
+                // Check if this is a newly accepted request (accepted in last 5 minutes)
+                const newestAccepted = acceptedRequests[0];
+                if (newestAccepted.responded_at) {
+                    const acceptedTime = new Date(newestAccepted.responded_at).getTime();
+                    const now = Date.now();
+                    const fiveMinutesAgo = now - (5 * 60 * 1000);
+                    
+                    // If accepted within last 5 minutes, auto-switch to My Services
+                    if (acceptedTime > fiveMinutesAgo) {
+                        setServicesSubTab('my-services');
+                        loadAcceptedMentorRequests();
+                        // Show notification
+                        alert('Great news! A mentor has accepted your connection request. Check "My Services" to see your active connections.');
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Error checking for accepted requests:', err);
+        }
+    };
 
     // Fallback fetch for startup users: if no offers came via props, fetch directly
     useEffect(() => {
@@ -399,13 +504,20 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                           </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                             {[
-                              { role: 'Investor', icon: DollarSign, color: 'bg-blue-100 text-blue-700 hover:bg-blue-200', description: 'Connect with investors' },
                               { role: 'Investment Advisor', icon: Briefcase, color: 'bg-purple-100 text-purple-700 hover:bg-purple-200', description: 'Connect with investment advisors' },
                               { role: 'Mentor', icon: Users, color: 'bg-green-100 text-green-700 hover:bg-green-200', description: 'Connect with mentors' },
                               { role: 'CA', icon: FileText, color: 'bg-orange-100 text-orange-700 hover:bg-orange-200', description: 'Connect with Chartered Accountants' },
                               { role: 'CS', icon: Shield, color: 'bg-pink-100 text-pink-700 hover:bg-pink-200', description: 'Connect with Company Secretaries' },
                               { role: 'Incubation', icon: Building2, color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200', description: 'Connect with incubation centers' },
-                            ].map((profileType) => {
+                            ]
+                            .filter((profileType) => {
+                              // Hide Investment Advisor if startup already has an investment advisor
+                              if (profileType.role === 'Investment Advisor' && currentStartup?.investment_advisor_code) {
+                                return false;
+                              }
+                              return true;
+                            })
+                            .map((profileType) => {
                               const IconComponent = profileType.icon;
                               return (
                                 <Card
@@ -466,21 +578,67 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                           requests={startupRequests}
                           onRequestAction={() => {
                             loadStartupRequests();
+                            // Check if any requests were accepted by mentor
+                            checkForAcceptedRequests();
+                          }}
+                          onRequestAccepted={() => {
+                            // Switch to My Services tab when startup accepts negotiation
+                            setServicesSubTab('my-services');
+                            loadAcceptedMentorRequests();
                           }}
                         />
                       )}
 
                       {servicesSubTab === 'my-services' && (
                         <div className="space-y-4">
+                          {/* Accepted Mentor Connections */}
+                          {acceptedMentorRequests.length > 0 && (
+                            <Card>
+                              <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                                <CheckCircle className="h-5 w-5 text-green-600" />
+                                Accepted Mentor Connections
+                              </h3>
+                              <div className="overflow-x-auto">
+                                <table className="w-full">
+                                  <thead>
+                                    <tr className="border-b border-slate-200">
+                                      <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Mentor</th>
+                                      <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Accepted Date</th>
+                                      <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Status</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {acceptedMentorRequests.map((request) => (
+                                      <tr key={request.id} className="border-b border-slate-100 hover:bg-slate-50">
+                                        <td className="py-3 px-4">
+                                          <div className="font-medium text-slate-900">{request.mentor_name || 'Unknown Mentor'}</div>
+                                        </td>
+                                        <td className="py-3 px-4 text-sm text-slate-600">
+                                          {request.responded_at ? new Date(request.responded_at).toLocaleDateString() : 'N/A'}
+                                        </td>
+                                        <td className="py-3 px-4">
+                                          <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">Accepted</span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </Card>
+                          )}
+                          
                           <ScheduledSessionsSection
                             startupId={currentStartup.id}
                             userType="Startup"
                           />
-                          <div className="text-center py-4 text-slate-600">
-                            <p className="text-sm">
-                              Accepted services and ongoing relationships will appear here.
-                            </p>
-                          </div>
+                          
+                          {acceptedMentorRequests.length === 0 && (
+                            <div className="text-center py-4 text-slate-600">
+                              <p className="text-sm">
+                                Accepted services and ongoing relationships will appear here.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </Card>
@@ -678,11 +836,15 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
           mentorName={selectedMentor.name}
           mentorFeeType={selectedMentor.fee_type}
           mentorFeeAmount={selectedMentor.fee_amount}
+          mentorFeeAmountMin={selectedMentor.fee_amount_min || selectedMentor.fee_amount}
+          mentorFeeAmountMax={selectedMentor.fee_amount_max || selectedMentor.fee_amount}
           mentorEquityPercentage={selectedMentor.equity_percentage}
+          mentorCurrency={selectedMentor.fee_currency || 'USD'}
           startupId={currentStartup.id}
           requesterId={user?.id!}
           onRequestSent={() => {
             loadStartupRequests();
+            setServicesSubTab('requested'); // Switch to "Requested" tab
             setConnectModalOpen(false);
             setSelectedMentor(null);
           }}

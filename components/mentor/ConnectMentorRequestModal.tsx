@@ -12,7 +12,10 @@ interface ConnectMentorRequestModalProps {
   mentorName: string;
   mentorFeeType?: string;
   mentorFeeAmount?: number;
+  mentorFeeAmountMin?: number;
+  mentorFeeAmountMax?: number;
   mentorEquityPercentage?: number;
+  mentorCurrency?: string;
   startupId: number | null;
   requesterId: string;
   onRequestSent: () => void;
@@ -25,7 +28,10 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
   mentorName,
   mentorFeeType,
   mentorFeeAmount,
+  mentorFeeAmountMin,
+  mentorFeeAmountMax,
   mentorEquityPercentage,
+  mentorCurrency = 'USD',
   startupId,
   requesterId,
   onRequestSent
@@ -36,6 +42,10 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
   const [proposedEsopPercentage, setProposedEsopPercentage] = useState<number | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  const MAX_MESSAGE_LENGTH = 500; // Character limit
+  const messageLength = message.length;
+  const remainingChars = MAX_MESSAGE_LENGTH - messageLength;
 
   useEffect(() => {
     if (isOpen) {
@@ -61,7 +71,8 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
         message || undefined,
         proposedFeeAmount,
         proposedEquityAmount,
-        proposedEsopPercentage
+        proposedEsopPercentage,
+        mentorCurrency
       );
 
       if (result.success) {
@@ -92,14 +103,37 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
             Message (Optional)
+            <span className="text-xs text-slate-500 ml-2">
+              {messageLength}/{MAX_MESSAGE_LENGTH} characters
+            </span>
           </label>
           <textarea
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => {
+              if (e.target.value.length <= MAX_MESSAGE_LENGTH) {
+                setMessage(e.target.value);
+              }
+            }}
             rows={4}
+            maxLength={MAX_MESSAGE_LENGTH}
             className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="Add a personal message to your request..."
           />
+          <div className="flex justify-between items-center mt-1">
+            <p className="text-xs text-slate-500">
+              {remainingChars > 0 ? `${remainingChars} characters remaining` : 'Character limit reached'}
+            </p>
+            {remainingChars < 50 && remainingChars > 0 && (
+              <p className="text-xs text-amber-600">
+                {remainingChars} characters left
+              </p>
+            )}
+            {remainingChars === 0 && (
+              <p className="text-xs text-red-600">
+                Maximum character limit reached
+              </p>
+            )}
+          </div>
         </div>
 
         {mentorFeeType && mentorFeeType !== 'Free' && (
@@ -107,16 +141,41 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
             <h3 className="text-sm font-semibold text-slate-700 mb-3">
               Proposed Terms
             </h3>
-            <p className="text-xs text-slate-500 mb-3">
-              Mentor's fee structure: {mentorFeeType}
-              {mentorFeeAmount && ` - ${mentorFeeAmount} USD`}
-              {mentorEquityPercentage && ` - ${mentorEquityPercentage}%`}
-            </p>
+            <div className="p-3 bg-blue-50 rounded-md mb-3">
+              <p className="text-xs font-medium text-slate-700 mb-2">Mentor's Fee Structure:</p>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-600">
+                  <span className="font-medium">Type:</span> {mentorFeeType}
+                </p>
+                {mentorFeeAmountMin && mentorFeeAmountMax && mentorFeeAmountMin !== mentorFeeAmountMax ? (
+                  <p className="text-xs text-slate-600">
+                    <span className="font-medium">Fee Range:</span> {mentorFeeAmountMin.toLocaleString()} - {mentorFeeAmountMax.toLocaleString()} {mentorCurrency}
+                  </p>
+                ) : mentorFeeAmountMin ? (
+                  <p className="text-xs text-slate-600">
+                    <span className="font-medium">Fee:</span> {mentorFeeAmountMin.toLocaleString()} {mentorCurrency}
+                  </p>
+                ) : mentorFeeAmountMax ? (
+                  <p className="text-xs text-slate-600">
+                    <span className="font-medium">Fee:</span> {mentorFeeAmountMax.toLocaleString()} {mentorCurrency}
+                  </p>
+                ) : mentorFeeAmount ? (
+                  <p className="text-xs text-slate-600">
+                    <span className="font-medium">Fee:</span> {mentorFeeAmount.toLocaleString()} {mentorCurrency}
+                  </p>
+                ) : null}
+                {mentorEquityPercentage && (
+                  <p className="text-xs text-slate-600">
+                    <span className="font-medium">Equity:</span> {mentorEquityPercentage}%
+                  </p>
+                )}
+              </div>
+            </div>
 
             {showFeeField && (
               <div className="mb-3">
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Proposed Fee Amount (USD)
+                  Proposed Fee Amount ({mentorCurrency})
                 </label>
                 <Input
                   type="number"
@@ -133,7 +192,7 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
               <>
                 <div className="mb-3">
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Proposed Equity Amount (USD)
+                    Proposed Equity Amount ({mentorCurrency})
                   </label>
                   <Input
                     type="number"

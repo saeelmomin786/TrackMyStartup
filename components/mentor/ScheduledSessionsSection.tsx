@@ -3,6 +3,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { mentorSchedulingService, ScheduledSession } from '../../lib/mentorSchedulingService';
 import { Calendar, Clock, Video, ExternalLink, Copy, CheckCircle } from 'lucide-react';
+import { formatDateTime, formatDateWithWeekday } from '../../lib/dateTimeUtils';
 
 interface ScheduledSessionsSectionProps {
   mentorId?: string;
@@ -62,21 +63,6 @@ const ScheduledSessionsSection: React.FC<ScheduledSessionsSectionProps> = ({
     setTimeout(() => setCopiedLink(null), 2000);
   };
 
-  const formatDateTime = (date: string, time: string) => {
-    const dateTime = new Date(`${date}T${time}`);
-    return {
-      date: dateTime.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      }),
-      time: dateTime.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    };
-  };
 
   if (isLoading) {
     return (
@@ -103,18 +89,22 @@ const ScheduledSessionsSection: React.FC<ScheduledSessionsSectionProps> = ({
       <h3 className="text-lg font-semibold text-slate-900 mb-4">Scheduled Sessions</h3>
       <div className="space-y-4">
         {sessions.map((session) => {
-          const { date, time } = formatDateTime(session.session_date, session.session_time);
+          const { date, time, dateTime } = formatDateTime(session.session_date, session.session_time);
+          const dateWithWeekday = formatDateWithWeekday(session.session_date);
           return (
             <div key={session.id} className="border border-slate-200 rounded-lg p-4">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 text-slate-700 mb-2">
                     <Calendar className="h-4 w-4" />
-                    <span className="font-medium">{date}</span>
+                    <span className="font-medium">{dateWithWeekday}</span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-600 mb-2">
                     <Clock className="h-4 w-4" />
                     <span>{time} ({session.duration_minutes} minutes)</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    {dateTime}
                   </div>
                   {session.agenda && (
                     <p className="text-sm text-slate-500 mt-2">{session.agenda}</p>

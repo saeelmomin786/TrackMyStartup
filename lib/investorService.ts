@@ -115,17 +115,18 @@ class InvestorService {
       
       if (startupIds.length > 0) {
         // 1. First, try to get domain data from opportunity_applications (most recent)
+        // Select sector (domain may not exist in all database versions)
         const { data: applicationData, error: applicationError } = await supabase
           .from('opportunity_applications')
-          .select('startup_id, domain')
+          .select('startup_id, sector')
           .in('startup_id', startupIds)
           .eq('status', 'accepted'); // Only get accepted applications
 
         if (!applicationError && applicationData) {
           applicationData.forEach(app => {
-            // Use domain field (sector column was renamed to domain)
-            if (app.domain && !domainMap[app.startup_id]) {
-              domainMap[app.startup_id] = app.domain;
+            // Use sector field as domain (sector is the reliable column)
+            if (app.sector && !domainMap[app.startup_id]) {
+              domainMap[app.startup_id] = app.sector;
             }
           });
         }
@@ -245,15 +246,16 @@ class InvestorService {
       let finalSector = data.startups.sector || 'Unknown';
       
       // Try to get domain from opportunity_applications first
+      // Select sector (domain may not exist in all database versions)
       const { data: applicationData, error: applicationError } = await supabase
         .from('opportunity_applications')
-        .select('domain, sector')
+        .select('sector')
         .eq('startup_id', startupId)
         .eq('status', 'accepted')
         .single();
 
-      if (!applicationError && applicationData?.domain) {
-        finalSector = applicationData.domain;
+      if (!applicationError && applicationData?.sector) {
+        finalSector = applicationData.sector;
       } else if (data.domain) {
         // Fallback to fundraising_details domain
         finalSector = data.domain;

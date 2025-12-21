@@ -5,6 +5,7 @@ import Modal from '../ui/Modal';
 import Input from '../ui/Input';
 import { MentorRequest } from '../../lib/mentorService';
 import { CheckCircle, XCircle, MessageSquare, DollarSign, TrendingUp } from 'lucide-react';
+import { formatDateDDMMYYYY } from '../../lib/dateTimeUtils';
 
 // Helper function to format currency
 const formatCurrency = (value: number, currency: string = 'USD'): string => {
@@ -159,7 +160,7 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
                     )}
                   </div>
                   <span className="text-xs text-slate-500">
-                    {new Date(request.requested_at).toLocaleDateString()}
+                    {formatDateDDMMYYYY(request.requested_at)}
                   </span>
                 </div>
 

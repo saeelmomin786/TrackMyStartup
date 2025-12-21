@@ -129,19 +129,37 @@ class MentorSchedulingService {
     endDate: string
   ): Promise<Array<{ date: string; time: string; slotId: number }>> {
     try {
+      // Cleanup old sessions before fetching slots
+      await this.cleanupPastScheduledSessions();
       // Get recurring slots
+      // For recurring slots, we need to check if they're valid for the date range
+      // A slot is valid if:
+      // 1. valid_from is null OR valid_from <= endDate
+      // 2. valid_until is null OR valid_until >= startDate
       const { data: recurringSlots, error: recurringError } = await supabase
         .from('mentor_availability_slots')
         .select('*')
         .eq('mentor_id', mentorId)
         .eq('is_active', true)
-        .eq('is_recurring', true)
-        .or(`valid_until.is.null,valid_until.gte.${startDate}`)
-        .or(`valid_from.is.null,valid_from.lte.${endDate}`);
+        .eq('is_recurring', true);
 
       if (recurringError) {
         console.error('Error fetching recurring slots:', recurringError);
       }
+
+      // Filter recurring slots by date validity
+      const validRecurringSlots = (recurringSlots || []).filter(slot => {
+        const validFrom = slot.valid_from ? new Date(slot.valid_from) : null;
+        const validUntil = slot.valid_until ? new Date(slot.valid_until) : null;
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        // Check if slot is valid for the date range
+        if (validFrom && validFrom > end) return false; // Slot starts after our range
+        if (validUntil && validUntil < start) return false; // Slot ends before our range
+        
+        return true;
+      });
 
       // Get one-time slots for date range
       const { data: oneTimeSlots, error: oneTimeError } = await supabase
@@ -177,15 +195,19 @@ class MentorSchedulingService {
       );
 
       // Process recurring slots
-      (recurringSlots || []).forEach(slot => {
+      console.log('📅 Processing recurring slots:', validRecurringSlots.length);
+      validRecurringSlots.forEach(slot => {
         const start = new Date(startDate);
         const end = new Date(endDate);
         
+        // Generate slots for each matching day of week
         for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          // Check if this day matches the slot's day of week
           if (slot.day_of_week === d.getDay()) {
             const dateStr = d.toISOString().split('T')[0];
             const timeKey = `${dateStr}T${slot.start_time}`;
             
+            // Only add if not already booked
             if (!bookedTimes.has(timeKey)) {
               availableSlots.push({
                 date: dateStr,
@@ -196,8 +218,11 @@ class MentorSchedulingService {
           }
         }
       });
+      
+      console.log('📅 Generated slots from recurring:', availableSlots.length);
 
       // Process one-time slots
+      console.log('📅 Processing one-time slots:', (oneTimeSlots || []).length);
       (oneTimeSlots || []).forEach(slot => {
         if (slot.specific_date) {
           const timeKey = `${slot.specific_date}T${slot.start_time}`;
@@ -210,6 +235,8 @@ class MentorSchedulingService {
           }
         }
       });
+      
+      console.log('📅 Total available slots after processing:', availableSlots.length);
 
       // Sort by date and time
       availableSlots.sort((a, b) => {
@@ -218,6 +245,9 @@ class MentorSchedulingService {
         }
         return a.time.localeCompare(b.time);
       });
+
+      console.log('✅ Final available slots count:', availableSlots.length);
+      console.log('📋 Slots:', availableSlots.slice(0, 5)); // Log first 5 for debugging
 
       return availableSlots;
     } catch (error) {
@@ -272,6 +302,10 @@ class MentorSchedulingService {
   // Get sessions for mentor
   async getMentorSessions(mentorId: string, status?: string): Promise<ScheduledSession[]> {
     try {
+      // Cleanup old sessions before fetching
+      await this.cleanupOldSessions();
+      await this.cleanupPastScheduledSessions();
+
       let query = supabase
         .from('mentor_startup_sessions')
         .select('*')
@@ -300,6 +334,10 @@ class MentorSchedulingService {
   // Get sessions for startup
   async getStartupSessions(startupId: number, status?: string): Promise<ScheduledSession[]> {
     try {
+      // Cleanup old sessions before fetching
+      await this.cleanupOldSessions();
+      await this.cleanupPastScheduledSessions();
+
       let query = supabase
         .from('mentor_startup_sessions')
         .select('*')
@@ -388,10 +426,61 @@ class MentorSchedulingService {
         return false;
       }
 
+      // Auto-delete completed sessions older than 30 days to keep database clean
+      await this.cleanupOldSessions();
+
       return true;
     } catch (error) {
       console.error('Error in completeSession:', error);
       return false;
+    }
+  }
+
+  // Cleanup old completed sessions (older than 30 days)
+  async cleanupOldSessions(): Promise<void> {
+    try {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const cutoffDate = thirtyDaysAgo.toISOString().split('T')[0];
+
+      // Delete completed sessions older than 30 days
+      const { error } = await supabase
+        .from('mentor_startup_sessions')
+        .delete()
+        .eq('status', 'completed')
+        .lt('session_date', cutoffDate);
+
+      if (error) {
+        console.error('Error cleaning up old sessions:', error);
+      } else {
+        console.log('Cleaned up old completed sessions');
+      }
+    } catch (error) {
+      console.error('Error in cleanupOldSessions:', error);
+    }
+  }
+
+  // Auto-cleanup past scheduled sessions that were never completed (older than 7 days)
+  async cleanupPastScheduledSessions(): Promise<void> {
+    try {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const cutoffDate = sevenDaysAgo.toISOString().split('T')[0];
+
+      // Delete past scheduled sessions that were never completed (older than 7 days)
+      const { error } = await supabase
+        .from('mentor_startup_sessions')
+        .delete()
+        .eq('status', 'scheduled')
+        .lt('session_date', cutoffDate);
+
+      if (error) {
+        console.error('Error cleaning up past scheduled sessions:', error);
+      } else {
+        console.log('Cleaned up past scheduled sessions');
+      }
+    } catch (error) {
+      console.error('Error in cleanupPastScheduledSessions:', error);
     }
   }
 }

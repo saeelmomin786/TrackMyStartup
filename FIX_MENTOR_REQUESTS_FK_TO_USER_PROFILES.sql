@@ -104,3 +104,4 @@ WHERE up.auth_user_id IS NULL;
 --    - That's the problem! You need to pass auth_user_id
 --    - Check your code where you get the user ID
 
+

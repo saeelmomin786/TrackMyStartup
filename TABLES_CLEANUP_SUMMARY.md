@@ -136,3 +136,5 @@ This will safely delete all empty tables that have no foreign key dependencies (
 
 
 
+
+

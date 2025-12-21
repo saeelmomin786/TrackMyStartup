@@ -1747,12 +1747,27 @@ export const investmentService = {
       console.log('🔍 Database: Fetching pending relationships for advisor:', advisorId);
       
       // Get the advisor's code first
+      // CRITICAL FIX: users table removed, use user_profiles instead
+      // advisorId is auth_user_id, so we need to find the active profile
+      const { data: sessionData } = await supabase
+        .from('user_profile_sessions')
+        .select('current_profile_id')
+        .eq('auth_user_id', advisorId)
+        .maybeSingle();
+      
+      const activeProfileId = sessionData?.current_profile_id;
+      
+      if (!activeProfileId) {
+        console.error('❌ Database: No active profile found for advisor:', advisorId);
+        return [];
+      }
+      
       const { data: advisorData, error: advisorError } = await supabase
-        .from('users')
+        .from('user_profiles')
         .select('investment_advisor_code')
-        .eq('id', advisorId)
+        .eq('id', activeProfileId)
         .eq('role', 'Investment Advisor')
-        .single();
+        .maybeSingle();
 
       if (advisorError || !advisorData) {
         console.error('❌ Database: Error fetching advisor code:', advisorError);

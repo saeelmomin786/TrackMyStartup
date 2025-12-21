@@ -122,10 +122,14 @@ export const advisorConnectionRequestService = {
 
   // Get all requests for an advisor
   async getRequestsForAdvisor(advisorId: string): Promise<AdvisorConnectionRequest[]> {
+    // CRITICAL FIX: advisor_connection_requests.advisor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || advisorId;
+    
     const { data, error } = await supabase
       .from('advisor_connection_requests')
       .select('*')
-      .eq('advisor_id', advisorId)
+      .eq('advisor_id', authUserId)  // Use auth_user_id, not profile_id
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -134,10 +138,14 @@ export const advisorConnectionRequestService = {
 
   // Get startup requests (for Service Requests tab)
   async getStartupRequests(advisorId: string): Promise<AdvisorConnectionRequest[]> {
+    // CRITICAL FIX: advisor_connection_requests.advisor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || advisorId;
+    
     const { data, error } = await supabase
       .from('advisor_connection_requests')
       .select('*')
-      .eq('advisor_id', advisorId)
+      .eq('advisor_id', authUserId)  // Use auth_user_id, not profile_id
       .eq('requester_type', 'Startup')
       .order('created_at', { ascending: false });
 
@@ -147,10 +155,14 @@ export const advisorConnectionRequestService = {
 
   // Get collaborator requests (for Collaboration tab)
   async getCollaboratorRequests(advisorId: string): Promise<AdvisorConnectionRequest[]> {
+    // CRITICAL FIX: advisor_connection_requests.advisor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || advisorId;
+    
     const { data, error } = await supabase
       .from('advisor_connection_requests')
       .select('*')
-      .eq('advisor_id', advisorId)
+      .eq('advisor_id', authUserId)  // Use auth_user_id, not profile_id
       .neq('requester_type', 'Startup')
       .order('created_at', { ascending: false });
 
@@ -160,10 +172,14 @@ export const advisorConnectionRequestService = {
 
   // Get requests by status
   async getRequestsByStatus(advisorId: string, status: string): Promise<AdvisorConnectionRequest[]> {
+    // CRITICAL FIX: advisor_connection_requests.advisor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || advisorId;
+    
     const { data, error } = await supabase
       .from('advisor_connection_requests')
       .select('*')
-      .eq('advisor_id', advisorId)
+      .eq('advisor_id', authUserId)  // Use auth_user_id, not profile_id
       .eq('status', status)
       .order('created_at', { ascending: false });
 
@@ -177,6 +193,10 @@ export const advisorConnectionRequestService = {
     status: 'pending' | 'accepted' | 'rejected' | 'viewed',
     advisorId: string
   ): Promise<void> {
+    // CRITICAL FIX: advisor_connection_requests.advisor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || advisorId;
+    
     const updateData: any = {
       status,
       updated_at: new Date().toISOString()
@@ -194,28 +214,36 @@ export const advisorConnectionRequestService = {
       .from('advisor_connection_requests')
       .update(updateData)
       .eq('id', requestId)
-      .eq('advisor_id', advisorId);
+      .eq('advisor_id', authUserId);  // Use auth_user_id, not profile_id
 
     if (error) throw error;
   },
 
   // Delete a request
   async deleteRequest(requestId: string, advisorId: string): Promise<void> {
+    // CRITICAL FIX: advisor_connection_requests.advisor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || advisorId;
+    
     const { error } = await supabase
       .from('advisor_connection_requests')
       .delete()
       .eq('id', requestId)
-      .eq('advisor_id', advisorId);
+      .eq('advisor_id', authUserId);  // Use auth_user_id, not profile_id
 
     if (error) throw error;
   },
 
   // Get count of pending requests
   async getPendingCount(advisorId: string): Promise<number> {
+    // CRITICAL FIX: advisor_connection_requests.advisor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || advisorId;
+    
     const { count, error } = await supabase
       .from('advisor_connection_requests')
       .select('*', { count: 'exact', head: true })
-      .eq('advisor_id', advisorId)
+      .eq('advisor_id', authUserId)  // Use auth_user_id, not profile_id
       .eq('status', 'pending');
 
     if (error) throw error;

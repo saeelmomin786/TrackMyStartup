@@ -6,6 +6,7 @@ import Select from '../ui/Select';
 import { mentorSchedulingService, AvailabilitySlot } from '../../lib/mentorSchedulingService';
 import { googleCalendarService } from '../../lib/googleCalendarService';
 import { Calendar, Clock, Video } from 'lucide-react';
+import { formatDateWithWeekday, formatTimeAMPM } from '../../lib/dateTimeUtils';
 
 interface SchedulingModalProps {
   isOpen: boolean;
@@ -52,13 +53,20 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
     setIsLoading(true);
     setError(null);
     try {
+      console.log('🔍 Loading available slots:', { mentorId, startDate, endDate });
       const slots = await mentorSchedulingService.getAvailableSlotsForDateRange(
         mentorId,
         startDate,
         endDate
       );
+      console.log('✅ Loaded slots:', slots.length, slots);
       setAvailableSlots(slots);
+      
+      if (slots.length === 0) {
+        console.warn('⚠️ No slots found. Check if mentor has created availability slots.');
+      }
     } catch (err: any) {
+      console.error('❌ Error loading slots:', err);
       setError(err.message || 'Failed to load available slots');
     } finally {
       setIsLoading(false);
@@ -140,19 +148,17 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
         )}
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Duration (minutes)
-          </label>
           <Select
+            label="Duration (minutes)"
+            id="duration"
             value={duration.toString()}
             onChange={(e) => setDuration(parseInt(e.target.value))}
-            options={[
-              { value: '30', label: '30 minutes' },
-              { value: '60', label: '1 hour' },
-              { value: '90', label: '1.5 hours' },
-              { value: '120', label: '2 hours' }
-            ]}
-          />
+          >
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="90">1.5 hours</option>
+            <option value="120">2 hours</option>
+          </Select>
         </div>
 
         <div>
@@ -195,7 +201,7 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
                   >
-                    {slot.time.substring(0, 5)}
+                    {formatTimeAMPM(slot.time)}
                   </button>
                 ))}
               </div>
@@ -207,18 +213,11 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
           <div className="p-3 bg-blue-50 rounded-md">
             <div className="flex items-center gap-2 text-sm text-slate-700">
               <Calendar className="h-4 w-4" />
-              <span>
-                {new Date(selectedDate).toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                })}
-              </span>
+              <span>{formatDateWithWeekday(selectedDate)}</span>
             </div>
             <div className="flex items-center gap-2 text-sm text-slate-700 mt-1">
               <Clock className="h-4 w-4" />
-              <span>{selectedTime.substring(0, 5)} ({duration} minutes)</span>
+              <span>{formatTimeAMPM(selectedTime)} ({duration} minutes)</span>
             </div>
             <div className="flex items-center gap-2 text-sm text-blue-600 mt-2">
               <Video className="h-4 w-4" />

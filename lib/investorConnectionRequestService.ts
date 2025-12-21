@@ -90,10 +90,15 @@ export const investorConnectionRequestService = {
 
   // Get all requests for an investor
   async getRequestsForInvestor(investorId: string): Promise<InvestorConnectionRequest[]> {
+    // CRITICAL FIX: investor_connection_requests.investor_id references auth.users(id), not profile_id
+    // Get auth_user_id if investorId is profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || investorId;
+    
     const { data, error } = await supabase
       .from('investor_connection_requests')
       .select('*')
-      .eq('investor_id', investorId)
+      .eq('investor_id', authUserId)  // Use auth_user_id, not profile_id
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -102,10 +107,14 @@ export const investorConnectionRequestService = {
 
   // Get requests by status
   async getRequestsByStatus(investorId: string, status: string): Promise<InvestorConnectionRequest[]> {
+    // CRITICAL FIX: investor_connection_requests.investor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || investorId;
+    
     const { data, error } = await supabase
       .from('investor_connection_requests')
       .select('*')
-      .eq('investor_id', investorId)
+      .eq('investor_id', authUserId)  // Use auth_user_id, not profile_id
       .eq('status', status)
       .order('created_at', { ascending: false });
 
@@ -119,6 +128,10 @@ export const investorConnectionRequestService = {
     status: 'pending' | 'accepted' | 'rejected' | 'viewed',
     investorId: string
   ): Promise<void> {
+    // CRITICAL FIX: investor_connection_requests.investor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || investorId;
+    
     const updateData: any = {
       status,
       updated_at: new Date().toISOString()
@@ -136,28 +149,36 @@ export const investorConnectionRequestService = {
       .from('investor_connection_requests')
       .update(updateData)
       .eq('id', requestId)
-      .eq('investor_id', investorId);
+      .eq('investor_id', authUserId);  // Use auth_user_id, not profile_id
 
     if (error) throw error;
   },
 
   // Delete a request
   async deleteRequest(requestId: string, investorId: string): Promise<void> {
+    // CRITICAL FIX: investor_connection_requests.investor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || investorId;
+    
     const { error } = await supabase
       .from('investor_connection_requests')
       .delete()
       .eq('id', requestId)
-      .eq('investor_id', investorId);
+      .eq('investor_id', authUserId);  // Use auth_user_id, not profile_id
 
     if (error) throw error;
   },
 
   // Get count of pending requests
   async getPendingCount(investorId: string): Promise<number> {
+    // CRITICAL FIX: investor_connection_requests.investor_id references auth.users(id), not profile_id
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authUserId = authUser?.id || investorId;
+    
     const { count, error } = await supabase
       .from('investor_connection_requests')
       .select('*', { count: 'exact', head: true })
-      .eq('investor_id', investorId)
+      .eq('investor_id', authUserId)  // Use auth_user_id, not profile_id
       .eq('status', 'pending');
 
     if (error) throw error;

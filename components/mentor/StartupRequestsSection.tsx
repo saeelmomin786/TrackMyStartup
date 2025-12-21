@@ -6,6 +6,7 @@ import { MentorRequest } from '../../lib/mentorService';
 import { CheckCircle, XCircle, Clock, MessageSquare, DollarSign, TrendingUp, Eye, FileText } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import MentorCard from './MentorCard';
+import { formatDateDDMMYYYY, formatTimeAMPM } from '../../lib/dateTimeUtils';
 
 interface StartupRequestsSectionProps {
   requests: MentorRequest[];
@@ -227,7 +228,7 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
               {requests.map((request) => {
                 const mentorProfile = mentorProfiles.get(request.mentor_id);
                 const mentorName = mentorProfile?.mentor_name || mentorProfile?.user?.name || 'Unknown Mentor';
-                const requestDate = new Date(request.requested_at).toLocaleDateString();
+                const requestDate = formatDateDDMMYYYY(request.requested_at);
                 // Show original offer, not negotiated offer in the table
                 const offerText = formatOffer(request);
 
@@ -435,9 +436,9 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
             )}
 
             <div className="text-xs text-slate-500">
-              Request sent on {new Date(selectedRequest.requested_at).toLocaleString()}
+              Request sent on {formatDateDDMMYYYY(selectedRequest.requested_at)}
               {selectedRequest.responded_at && (
-                <> • Responded on {new Date(selectedRequest.responded_at).toLocaleString()}</>
+                <> • Responded on {formatDateDDMMYYYY(selectedRequest.responded_at)}</>
               )}
             </div>
           </div>

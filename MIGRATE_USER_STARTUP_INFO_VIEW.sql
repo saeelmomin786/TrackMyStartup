@@ -40,3 +40,5 @@ SELECT '✅ View user_startup_info migrated to use user_profiles (NO FALLBACK - 
 
 
 
+
+

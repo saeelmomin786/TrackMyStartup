@@ -320,9 +320,11 @@ const PublicInvestorPage: React.FC = () => {
 
     // Create connection request in database
     try {
+      // CRITICAL FIX: requester_id in investor_connection_requests references auth.users(id), not profile_id
+      const requesterAuthUserId = authUserId;  // Already got from above
       await investorConnectionRequestService.createRequest({
         investor_id: investor.user_id,
-        requester_id: currentUser.id,
+        requester_id: requesterAuthUserId,  // Use auth_user_id, not profile_id
         requester_type: 'Startup',
         startup_id: startup.id,
         startup_profile_url: shareUrl

@@ -60,6 +60,7 @@ export const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({
       
       setProfiles(allProfiles);
       if (current) {
+        // Now current.id is profile_id, so it should match p.id from getUserProfiles()
         const matchingProfile = allProfiles.find(p => p.id === current.id) || allProfiles[0];
         setCurrentProfile(matchingProfile);
       }

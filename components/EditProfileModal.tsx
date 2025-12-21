@@ -283,10 +283,10 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         
         // Immediately save logo_url to database
         try {
-          // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
-          const { data: { user: authUser } } = await supabase.auth.getUser();
-          const authUserId = authUser?.id || currentUser.id; // Fallback for safety
-          const updateResult = await authService.updateProfile(authUserId, {
+          // CRITICAL FIX: Use currentUser.id (profile_id) to update the active profile
+          // In multi-profile system, we need to update the specific active profile
+          const profileId = currentUser.id; // This is now profile_id after our ID mapping fix
+          const updateResult = await authService.updateProfile(profileId, {
             logo_url: result.url
           });
           
@@ -371,10 +371,10 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
       }
 
       // Update profile in database using authService
-      // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id || currentUser.id; // Fallback for safety
-      const updateResult = await authService.updateProfile(authUserId, profileData);
+      // CRITICAL FIX: Use currentUser.id (profile_id) to update the active profile
+      // In multi-profile system, we need to update the specific active profile, not all profiles
+      const profileId = currentUser.id; // This is now profile_id after our ID mapping fix
+      const updateResult = await authService.updateProfile(profileId, profileData);
       if (updateResult.error) {
         throw new Error(updateResult.error);
       }

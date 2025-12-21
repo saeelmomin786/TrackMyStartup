@@ -21,6 +21,9 @@ import { getQueryParam, setQueryParam } from '../lib/urlState';
 import ConnectMentorRequestModal from './mentor/ConnectMentorRequestModal';
 import StartupRequestsSection from './mentor/StartupRequestsSection';
 import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
+import SchedulingModal from './mentor/SchedulingModal';
+import { formatDateDDMMYYYY } from '../lib/dateTimeUtils';
+import { Video } from 'lucide-react';
 
 
 interface StartupHealthViewProps {
@@ -75,6 +78,10 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [selectedMentor, setSelectedMentor] = useState<any>(null);
     const [startupRequests, setStartupRequests] = useState<any[]>([]);
     const [acceptedMentorRequests, setAcceptedMentorRequests] = useState<any[]>([]);
+    
+    // State for scheduling
+    const [schedulingModalOpen, setSchedulingModalOpen] = useState(false);
+    const [selectedMentorForScheduling, setSelectedMentorForScheduling] = useState<any>(null);
     
     // Update currentStartup when startup prop changes (important for facilitator access)
     useEffect(() => {
@@ -227,9 +234,11 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                 return;
             }
 
-            // Enrich with mentor profile data
+            // Enrich with mentor profile data and assignment ID
             const mappedRequests = await Promise.all((requests || []).map(async (req: any) => {
                 let mentorName = 'Unknown Mentor';
+                let assignmentId: number | null = null;
+                
                 try {
                     const { data: mentorProfile } = await supabase
                         .from('mentor_profiles')
@@ -255,12 +264,30 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                     console.warn('Error fetching mentor name:', err);
                 }
 
+                // Get the assignment ID for this mentor-startup pair
+                try {
+                    const { data: assignment } = await supabase
+                        .from('mentor_startup_assignments')
+                        .select('id')
+                        .eq('mentor_id', req.mentor_id)
+                        .eq('startup_id', currentStartup.id)
+                        .eq('status', 'active')
+                        .maybeSingle();
+                    
+                    if (assignment) {
+                        assignmentId = assignment.id;
+                    }
+                } catch (err) {
+                    console.warn('Error fetching assignment ID:', err);
+                }
+
                 return {
                     ...req,
                     mentor_name: mentorName,
                     startup_name: currentStartup?.name || 'Unknown Startup',
                     startup_website: currentStartup?.domain || '',
-                    startup_sector: currentStartup?.sector || ''
+                    startup_sector: currentStartup?.sector || '',
+                    assignment_id: assignmentId
                 };
             }));
 
@@ -605,6 +632,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Mentor</th>
                                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Accepted Date</th>
                                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Status</th>
+                                      <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Action</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -614,10 +642,23 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                           <div className="font-medium text-slate-900">{request.mentor_name || 'Unknown Mentor'}</div>
                                         </td>
                                         <td className="py-3 px-4 text-sm text-slate-600">
-                                          {request.responded_at ? new Date(request.responded_at).toLocaleDateString() : 'N/A'}
+                                          {request.responded_at ? formatDateDDMMYYYY(request.responded_at) : 'N/A'}
                                         </td>
                                         <td className="py-3 px-4">
                                           <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">Accepted</span>
+                                        </td>
+                                        <td className="py-3 px-4 text-right">
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="text-green-600 border-green-300 hover:bg-green-50"
+                                            onClick={() => {
+                                              setSelectedMentorForScheduling(request);
+                                              setSchedulingModalOpen(true);
+                                            }}
+                                          >
+                                            <Video className="mr-1 h-3 w-3" /> Schedule
+                                          </Button>
                                         </td>
                                       </tr>
                                     ))}
@@ -847,6 +888,24 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             setServicesSubTab('requested'); // Switch to "Requested" tab
             setConnectModalOpen(false);
             setSelectedMentor(null);
+          }}
+        />
+      )}
+
+      {/* Scheduling Modal */}
+      {schedulingModalOpen && selectedMentorForScheduling && currentStartup?.id && (
+        <SchedulingModal
+          isOpen={schedulingModalOpen}
+          onClose={() => {
+            setSchedulingModalOpen(false);
+            setSelectedMentorForScheduling(null);
+          }}
+          mentorId={selectedMentorForScheduling.mentor_id}
+          startupId={currentStartup.id}
+          assignmentId={selectedMentorForScheduling.assignment_id}
+          onSessionBooked={async () => {
+            // Reload accepted requests to refresh data
+            await loadAcceptedMentorRequests();
           }}
         />
       )}

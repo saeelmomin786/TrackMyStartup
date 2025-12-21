@@ -393,15 +393,20 @@ const App: React.FC = () => {
           } else {
             console.log('❌ Still no startup_name after refresh, checking startups table...');
             // Fallback: try to get startup name from startups table
-            const { data: startupData, error: startupError } = await authService.supabase
-              .from('startups')
-              .select('name')
-              .eq('user_id', currentUser.id)
-              .maybeSingle();
+            // IMPORTANT: startups table uses auth_user_id, not profile ID!
+            const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+            const authUserId = authUser?.id;
+            if (authUserId) {
+              const { data: startupData, error: startupError } = await authService.supabase
+                .from('startups')
+                .select('name')
+                .eq('user_id', authUserId)  // Use auth_user_id, not profile ID!
+                .maybeSingle();
             
-            if (startupData && !startupError) {
-              console.log('✅ Found startup name from startups table:', startupData.name);
-              setCurrentUser({ ...currentUser, startup_name: startupData.name });
+              if (startupData && !startupError) {
+                console.log('✅ Found startup name from startups table:', startupData.name);
+                setCurrentUser({ ...currentUser, startup_name: startupData.name });
+              }
             }
           }
         } catch (error) {
@@ -897,11 +902,17 @@ const App: React.FC = () => {
       
       // AGGRESSIVE FIX: If we already have data loaded and this is the same user, skip entirely
       // This prevents any reload or view reset on tab switch
+      // CRITICAL FIX: Compare auth_user_id, not profile_id
+      // currentUser.id is now profile_id, but session.user.id is auth_user_id
+      // Get auth_user_id from current session to compare properly
+      const { data: { user: currentAuthUser } } = await authService.supabase.auth.getUser();
+      const currentAuthUserId = currentAuthUser?.id;
+      
       if (hasInitialDataLoadedRef.current && 
           isAuthenticatedRef.current && 
           currentUserRef.current && 
           session?.user && 
-          currentUserRef.current.id === session.user.id &&
+          currentAuthUserId === session.user.id &&
           event !== 'SIGNED_OUT') {
         console.log('🚫 Data already loaded for this user, skipping auth event to prevent reload');
         return;
@@ -929,13 +940,15 @@ const App: React.FC = () => {
           }
           
           // Additional check: if we already have the same user authenticated, skip
-          if (isAuthenticatedRef.current && currentUserRef.current && session?.user && currentUserRef.current.id === session.user.id) {
+          // CRITICAL FIX: Compare auth_user_id, not profile_id
+          if (isAuthenticatedRef.current && currentUserRef.current && session?.user && currentAuthUserId === session.user.id) {
             console.log('🚫 User already authenticated with same ID, skipping duplicate auth event');
             return;
           }
         
         // IMPROVED FIX: Only block duplicate auth events, not all auth events
-        if (isAuthenticatedRef.current && currentUserRef.current && hasInitialDataLoadedRef.current && session?.user && currentUserRef.current.id === session.user.id) {
+        // CRITICAL FIX: Compare auth_user_id, not profile_id
+        if (isAuthenticatedRef.current && currentUserRef.current && hasInitialDataLoadedRef.current && session?.user && currentAuthUserId === session.user.id) {
           // Only block token refresh duplicates; never block INITIAL_SESSION across tabs
           if (event === 'TOKEN_REFRESHED') {
             console.log('🚫 IMPROVED FIX: Blocking duplicate auth event to prevent unnecessary refresh');
@@ -1030,10 +1043,20 @@ const App: React.FC = () => {
                         setIsLoading(false);
                         // Persist startup_name to user profile to make next refresh instant
                         try {
-                          await authService.supabase
-                            .from('users')
-                            .update({ startup_name: (startupsByUser[0] as any).name })
-                            .eq('id', session.user.id);
+                          // CRITICAL FIX: users table removed, use user_profiles instead
+                          // Get the active profile_id for this auth user
+                          const { data: sessionData } = await authService.supabase
+                            .from('user_profile_sessions')
+                            .select('current_profile_id')
+                            .eq('auth_user_id', session.user.id)
+                            .maybeSingle();
+                          
+                          if (sessionData?.current_profile_id) {
+                            await authService.supabase
+                              .from('user_profiles')
+                              .update({ startup_name: (startupsByUser[0] as any).name })
+                              .eq('id', sessionData.current_profile_id);
+                          }
                         } catch {}
                       }
                     }
@@ -1182,25 +1205,50 @@ const App: React.FC = () => {
                   console.log('❌ Could not load complete user data, creating basic profile...');
                   
                   // Create a basic profile for users who don't have one
+                  // CRITICAL FIX: users table removed, use user_profiles instead
                   try {
                     const { data: newProfile, error: createError } = await authService.supabase
-                      .from('users')
+                      .from('user_profiles')
                       .insert({
-                        id: session.user.id,
+                        auth_user_id: session.user.id,  // Use auth_user_id, not id
                         email: session.user.email,
                         name: session.user.user_metadata?.name || 'Unknown',
                         role: session.user.user_metadata?.role || 'Investor',
                         startup_name: session.user.user_metadata?.startupName || null,
-                        registration_date: new Date().toISOString().split('T')[0],
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
+                        registration_date: new Date().toISOString().split('T')[0]
                       })
                       .select()
                       .single();
                     
                     if (newProfile && !createError) {
                       console.log('✅ Created new user profile:', newProfile);
-                      setCurrentUser(newProfile);
+                      
+                      // CRITICAL FIX: Create session entry to set this as active profile
+                      try {
+                        await authService.supabase
+                          .from('user_profile_sessions')
+                          .upsert({
+                            auth_user_id: session.user.id,
+                            current_profile_id: newProfile.id
+                          }, {
+                            onConflict: 'auth_user_id'
+                          });
+                        console.log('✅ Created user_profile_sessions entry');
+                      } catch (sessionError) {
+                        console.error('❌ Error creating session entry:', sessionError);
+                      }
+                      
+                      // Map the profile to AuthUser format
+                      const mappedUser: AuthUser = {
+                        id: newProfile.id, // profile_id
+                        email: newProfile.email,
+                        name: newProfile.name,
+                        role: newProfile.role,
+                        startup_name: newProfile.startup_name,
+                        registration_date: newProfile.registration_date
+                      };
+                      
+                      setCurrentUser(mappedUser);
                       setIsAuthenticated(true);
                       setIsLoading(false);
                       
@@ -1677,8 +1725,15 @@ const App: React.FC = () => {
        // Fetch pending relationships for Investment Advisors
        if (currentUser?.role === 'Investment Advisor' && currentUser?.id) {
          try {
-           console.log('🔍 Fetching pending relationships for Investment Advisor:', currentUser.id);
-           const pendingRelationshipsData = await investmentService.getPendingInvestmentAdvisorRelationships(currentUser.id);
+           // CRITICAL FIX: getPendingInvestmentAdvisorRelationships expects auth_user_id, not profile_id
+           const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+           const authUserId = authUser?.id;
+           if (!authUserId) {
+             console.error('❌ No auth user found for pending relationships');
+             return;
+           }
+           console.log('🔍 Fetching pending relationships for Investment Advisor:', authUserId);
+           const pendingRelationshipsData = await investmentService.getPendingInvestmentAdvisorRelationships(authUserId);
            setPendingRelationships(pendingRelationshipsData);
            console.log('🔍 Pending relationships loaded:', pendingRelationshipsData.length);
          } catch (error) {
@@ -2656,9 +2711,17 @@ const App: React.FC = () => {
             
             console.log('✅ Found startup for co-investment:', startupData);
             
+            // CRITICAL FIX: listed_by_user_id expects auth_user_id, not profile_id
+            const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+            const authUserId = authUser?.id;
+            if (!authUserId) {
+              console.error('❌ No auth user found for co-investment opportunity');
+              return;
+            }
+            
             await investmentService.createCoInvestmentOpportunity({
               startup_id: startupData.id,
-              listed_by_user_id: currentUserRef.current.id,
+              listed_by_user_id: authUserId,  // Use auth_user_id, not profile ID!
               listed_by_type: 'Investor',
               investment_amount: opportunity.investmentValue,
               equity_percentage: opportunity.equityAllocation,
@@ -3506,10 +3569,17 @@ const App: React.FC = () => {
           (async () => {
             try {
               console.log(`🔍 Recovery attempt #${startupRecoveryAttemptsRef.current}: fetching startup by user_id...`);
+              // IMPORTANT: startups table uses auth_user_id, not profile ID!
+              const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+              const authUserId = authUser?.id;
+              if (!authUserId) {
+                console.error('❌ No auth user found for startup recovery');
+                return;
+              }
               const { data: startupsByUser, error: startupsByUserError } = await authService.supabase
                 .from('startups')
                 .select('*')
-                .eq('user_id', currentUser.id);
+                .eq('user_id', authUserId);  // Use auth_user_id, not profile ID!
               if (!startupsByUserError && startupsByUser && startupsByUser.length > 0) {
                 console.log('✅ Recovery success: found startups by user_id');
                 setStartups(startupsByUser as any);
@@ -3517,10 +3587,15 @@ const App: React.FC = () => {
                 setView('startupHealth');
                 // Persist startup_name for future refreshes
                 try {
-                  await authService.supabase
-                    .from('users')
-                    .update({ startup_name: (startupsByUser[0] as any).name })
-                    .eq('id', currentUser.id);
+                  // CRITICAL FIX: Update user_profiles table (users table removed)
+                  // Get the active profile_id from currentUser
+                  const profileId = currentUser.id; // This is profile_id
+                  if (profileId) {
+                    await authService.supabase
+                      .from('user_profiles')
+                      .update({ startup_name: (startupsByUser[0] as any).name })
+                      .eq('id', profileId);  // Use profile_id to update the active profile
+                  }
                 } catch {}
                 return;
               }
@@ -3689,10 +3764,11 @@ const App: React.FC = () => {
                         // Reload user data after profile switch - try multiple times if needed
                         let refreshedUser = null;
                         for (let attempt = 1; attempt <= 3; attempt++) {
-                          refreshedUser = await authService.getCurrentUser();
+                          // Force refresh to get latest profile data (not from cache)
+                          refreshedUser = await authService.getCurrentUser(attempt === 1); // Force refresh on first attempt
                           console.log(`🔄 Attempt ${attempt}: Refreshed user after switch:`, refreshedUser?.role, refreshedUser?.id, 'Expected:', profile.role, profile.id);
                           
-                          // Check if we got the correct profile
+                          // Check if we got the correct profile (now both use profile_id)
                           if (refreshedUser && refreshedUser.id === profile.id) {
                             console.log('✅ Got correct profile!');
                             break;

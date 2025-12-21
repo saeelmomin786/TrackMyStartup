@@ -295,11 +295,13 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
               const userIds = Array.from(new Set(rows.map(r => r.user_id)));
               let usersMap: Record<string, any> = {};
               if (userIds.length > 0) {
+                // CRITICAL FIX: users table removed, use user_profiles instead
+                // user_id is auth_user_id, so we need to query by auth_user_id
                 const { data: users } = await supabase
-                  .from('users')
-                  .select('id, name, email')
-                  .in('id', userIds);
-                (users || []).forEach(u => { usersMap[u.id] = u; });
+                  .from('user_profiles')
+                  .select('auth_user_id, name, email')
+                  .in('auth_user_id', userIds);
+                (users || []).forEach(u => { usersMap[u.auth_user_id] = u; });
               }
               setDiligenceRequests(
                 rows.map(r => ({
@@ -614,24 +616,27 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             console.log('🔍 Facilitator IDs to fetch:', facilitatorIds);
             
             if (facilitatorIds.length > 0) {
+              // CRITICAL FIX: users table removed, use user_profiles instead
+              // facilitatorIds are auth_user_id, so query by auth_user_id
               const { data: users, error: usersError } = await supabase
-                .from('users')
-                .select('id, name, facilitator_code')
-                .in('id', facilitatorIds);
+                .from('user_profiles')
+                .select('auth_user_id, name, facilitator_code')
+                .in('auth_user_id', facilitatorIds);
               
               console.log('🔍 Users query result:', users);
               console.log('🔍 Users query error:', usersError);
               
               if (!usersError && users) {
                 // Create a mapping of facilitator_id to user data
+                // CRITICAL FIX: user_profiles uses auth_user_id, not id
                 const userMap = {};
                 users.forEach(user => {
-                  userMap[user.id] = user;
+                  userMap[user.auth_user_id] = user;  // Use auth_user_id as key
                 });
                 
                 // Combine facilitator and user data
                 facilitators.forEach(facilitator => {
-                  const user = userMap[facilitator.facilitator_id];
+                  const user = userMap[facilitator.facilitator_id];  // facilitator_id is auth_user_id
                   facilitatorData[facilitator.id] = {
                     ...facilitator,
                     user: user

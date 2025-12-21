@@ -5,6 +5,7 @@ import Input from '../ui/Input';
 import Select from '../ui/Select';
 import { mentorSchedulingService, AvailabilitySlot } from '../../lib/mentorSchedulingService';
 import { Calendar, Clock, Plus, Trash2, Edit2, X, Check } from 'lucide-react';
+import { formatDateDDMMYYYY, formatTimeAMPM } from '../../lib/dateTimeUtils';
 
 interface ManageAvailabilityModalProps {
   isOpen: boolean;
@@ -188,10 +189,10 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
   const formatSlotDisplay = (slot: AvailabilitySlot): string => {
     if (slot.is_recurring) {
       const dayName = DAYS_OF_WEEK.find(d => d.value === slot.day_of_week)?.label || 'Unknown';
-      return `${dayName} ${slot.start_time.substring(0, 5)} - ${slot.end_time.substring(0, 5)}`;
+      return `${dayName} ${formatTimeAMPM(slot.start_time)} - ${formatTimeAMPM(slot.end_time)}`;
     } else {
-      const date = slot.specific_date ? new Date(slot.specific_date).toLocaleDateString() : 'Unknown';
-      return `${date} ${slot.start_time.substring(0, 5)} - ${slot.end_time.substring(0, 5)}`;
+      const date = slot.specific_date ? formatDateDDMMYYYY(slot.specific_date) : 'Unknown';
+      return `${date} ${formatTimeAMPM(slot.start_time)} - ${formatTimeAMPM(slot.end_time)}`;
     }
   };
 
@@ -227,37 +228,32 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Slot Type
-                </label>
-                <Select
-                  value={slotType}
-                  onChange={(e) => {
-                    setSlotType(e.target.value as 'recurring' | 'one-time');
-                    setError(null);
-                  }}
-                  options={[
-                    { value: 'recurring', label: 'Recurring (Weekly)' },
-                    { value: 'one-time', label: 'One-Time' }
-                  ]}
-                />
-              </div>
+              <Select
+                label="Slot Type"
+                id="slot-type"
+                value={slotType}
+                onChange={(e) => {
+                  setSlotType(e.target.value as 'recurring' | 'one-time');
+                  setError(null);
+                }}
+              >
+                <option value="recurring">Recurring (Weekly)</option>
+                <option value="one-time">One-Time</option>
+              </Select>
 
               {slotType === 'recurring' ? (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Day of Week
-                  </label>
-                  <Select
-                    value={dayOfWeek.toString()}
-                    onChange={(e) => setDayOfWeek(parseInt(e.target.value))}
-                    options={DAYS_OF_WEEK.map(day => ({
-                      value: day.value.toString(),
-                      label: day.label
-                    }))}
-                  />
-                </div>
+                <Select
+                  label="Day of Week"
+                  id="day-of-week"
+                  value={dayOfWeek.toString()}
+                  onChange={(e) => setDayOfWeek(parseInt(e.target.value))}
+                >
+                  {DAYS_OF_WEEK.map(day => (
+                    <option key={day.value} value={day.value.toString()}>
+                      {day.label}
+                    </option>
+                  ))}
+                </Select>
               ) : (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -321,27 +317,23 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Timezone
-                </label>
-                <Select
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  options={[
-                    { value: 'UTC', label: 'UTC' },
-                    { value: 'America/New_York', label: 'Eastern Time (ET)' },
-                    { value: 'America/Chicago', label: 'Central Time (CT)' },
-                    { value: 'America/Denver', label: 'Mountain Time (MT)' },
-                    { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
-                    { value: 'Asia/Kolkata', label: 'India Standard Time (IST)' },
-                    { value: 'Europe/London', label: 'London (GMT)' },
-                    { value: 'Europe/Paris', label: 'Paris (CET)' },
-                    { value: 'Asia/Singapore', label: 'Singapore (SGT)' },
-                    { value: 'Asia/Dubai', label: 'Dubai (GST)' }
-                  ]}
-                />
-              </div>
+              <Select
+                label="Timezone"
+                id="timezone"
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+              >
+                <option value="UTC">UTC</option>
+                <option value="America/New_York">Eastern Time (ET)</option>
+                <option value="America/Chicago">Central Time (CT)</option>
+                <option value="America/Denver">Mountain Time (MT)</option>
+                <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                <option value="Asia/Kolkata">India Standard Time (IST)</option>
+                <option value="Europe/London">London (GMT)</option>
+                <option value="Europe/Paris">Paris (CET)</option>
+                <option value="Asia/Singapore">Singapore (SGT)</option>
+                <option value="Asia/Dubai">Dubai (GST)</option>
+              </Select>
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" type="button" onClick={resetForm}>
@@ -416,13 +408,13 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
                         <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {slot.start_time.substring(0, 5)} - {slot.end_time.substring(0, 5)}
+                            {formatTimeAMPM(slot.start_time)} - {formatTimeAMPM(slot.end_time)}
                           </span>
                           {slot.valid_from && (
-                            <span>From: {new Date(slot.valid_from).toLocaleDateString()}</span>
+                            <span>From: {formatDateDDMMYYYY(slot.valid_from)}</span>
                           )}
                           {slot.valid_until && (
-                            <span>Until: {new Date(slot.valid_until).toLocaleDateString()}</span>
+                            <span>Until: {formatDateDDMMYYYY(slot.valid_until)}</span>
                           )}
                           <span>Timezone: {slot.timezone || 'UTC'}</span>
                         </div>
@@ -489,4 +481,5 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
 };
 
 export default ManageAvailabilityModal;
+
 

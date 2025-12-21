@@ -22,6 +22,7 @@ import MentorPendingRequestsSection from './mentor/MentorPendingRequestsSection'
 import SchedulingModal from './mentor/SchedulingModal';
 import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
 import ManageAvailabilityModal from './mentor/ManageAvailabilityModal';
+import PastSessionsSection from './mentor/PastSessionsSection';
 
 interface MentorViewProps {
   currentUser: AuthUser | null;
@@ -36,9 +37,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   startups,
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discover' | 'portfolio' | 'collaboration'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discover' | 'portfolio' | 'collaboration' | 'schedule'>(() => {
     const fromUrl = (getQueryParam('tab') as any) || 'dashboard';
-    const valid = ['dashboard', 'discover', 'portfolio', 'collaboration'];
+    const valid = ['dashboard', 'discover', 'portfolio', 'collaboration', 'schedule'];
     return valid.includes(fromUrl) ? fromUrl : 'dashboard';
   });
 
@@ -87,6 +88,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   
   // State for Manage Availability Modal
   const [manageAvailabilityModalOpen, setManageAvailabilityModalOpen] = useState(false);
+  
+  // State for Schedule Tab Sub-tabs
+  const [scheduleSubTab, setScheduleSubTab] = useState<'availability' | 'upcoming' | 'past'>('upcoming');
   
   // Handle navigation from profile form to dashboard
   const handleNavigateToDashboard = (section?: 'active' | 'completed' | 'founded') => {
@@ -329,10 +333,18 @@ const MentorView: React.FC<MentorViewProps> = ({
     }
 
     try {
+      // CRITICAL FIX: requester_id in investor_connection_requests references auth.users(id), not profile_id
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id;
+      if (!authUserId) {
+        alert('Unable to get user information. Please try again.');
+        return;
+      }
+      
       // Check if a request already exists (pending or accepted)
       const existingCheck = await investorConnectionRequestService.checkExistingRequest(
-        startup.user_id, // investor_id (the startup owner)
-        currentUser.id    // requester_id (the mentor)
+        startup.user_id, // investor_id (the startup owner) - this is auth_user_id
+        authUserId    // requester_id (the mentor) - must be auth_user_id
       );
 
       if (existingCheck.exists) {
@@ -348,8 +360,8 @@ const MentorView: React.FC<MentorViewProps> = ({
       // Create a connection request using investor_connection_requests table
       // This allows mentors to connect with startups and other users
       await investorConnectionRequestService.createRequest({
-        investor_id: startup.user_id,
-        requester_id: currentUser.id,
+        investor_id: startup.user_id,  // auth_user_id
+        requester_id: authUserId,  // Use auth_user_id, not profile_id
         requester_type: 'Mentor',
         startup_id: startup.id,
         startup_profile_url: window.location.origin + window.location.pathname + `?view=startup&startupId=${startup.id}`,
@@ -478,6 +490,17 @@ ${mentorName}`;
             >
               <LayoutGrid className="h-5 w-5 mr-2" />
               Dashboard
+            </button>
+            <button
+              onClick={() => setActiveTab('schedule')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center whitespace-nowrap ${
+                activeTab === 'schedule'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <Calendar className="h-5 w-5 mr-2" />
+              Schedule
             </button>
             <button
               onClick={() => setActiveTab('discover')}
@@ -652,23 +675,6 @@ ${mentorName}`;
                     }}
                   />
                 )}
-
-                {/* Availability Management Section */}
-                <Card>
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-base sm:text-lg font-semibold text-slate-700">Availability Management</h3>
-                      <p className="text-sm text-slate-500 mt-1">Set your available time slots for startups to book sessions</p>
-                    </div>
-                    <Button
-                      onClick={() => setManageAvailabilityModalOpen(true)}
-                      variant="outline"
-                    >
-                      <Calendar className="h-4 w-4 mr-2" />
-                      Manage Availability
-                    </Button>
-                  </div>
-                </Card>
 
                 {/* Combined Mentor Startups Section */}
                 {mentorMetrics && (
@@ -1616,6 +1622,106 @@ ${mentorName}`;
           </div>
         )}
 
+        {activeTab === 'schedule' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Schedule Tab Header */}
+            <Card>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">Schedule Management</h2>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Manage your availability slots and view all scheduled sessions
+                  </p>
+                </div>
+                <Button
+                  onClick={() => setManageAvailabilityModalOpen(true)}
+                  variant="outline"
+                >
+                  <Calendar className="h-4 w-4 mr-2" />
+                  Manage Availability
+                </Button>
+              </div>
+
+              {/* Sub-tabs for Schedule */}
+              <div className="border-b border-slate-200 mb-6">
+                <nav className="-mb-px flex space-x-4" aria-label="Schedule Tabs">
+                  <button
+                    onClick={() => setScheduleSubTab('availability')}
+                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                      scheduleSubTab === 'availability'
+                        ? 'border-blue-500 text-blue-600'
+                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <Clock className="h-4 w-4 inline mr-2" />
+                    Availability
+                  </button>
+                  <button
+                    onClick={() => setScheduleSubTab('upcoming')}
+                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                      scheduleSubTab === 'upcoming'
+                        ? 'border-green-500 text-green-600'
+                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <Calendar className="h-4 w-4 inline mr-2" />
+                    Upcoming Sessions
+                  </button>
+                  <button
+                    onClick={() => setScheduleSubTab('past')}
+                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                      scheduleSubTab === 'past'
+                        ? 'border-purple-500 text-purple-600'
+                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <CheckCircle className="h-4 w-4 inline mr-2" />
+                    Past Sessions
+                  </button>
+                </nav>
+              </div>
+
+              {/* Availability Sub-tab */}
+              {scheduleSubTab === 'availability' && (
+                <div className="space-y-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-blue-900 mb-2">How Availability Works:</h4>
+                    <ul className="text-xs text-blue-800 space-y-1">
+                      <li>• Create recurring slots (e.g., Every Monday 2-4 PM) or one-time slots</li>
+                      <li>• Startups can book sessions from your available slots</li>
+                      <li>• Booked slots are automatically removed from availability</li>
+                      <li>• You can activate/deactivate slots without deleting them</li>
+                    </ul>
+                  </div>
+                  <div className="text-center py-8 text-slate-500">
+                    <Calendar className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                    <p className="text-sm">Click "Manage Availability" above to create your availability slots.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Upcoming Sessions Sub-tab */}
+              {scheduleSubTab === 'upcoming' && currentUser?.id && (
+                <div>
+                  <ScheduledSessionsSection
+                    mentorId={currentUser.id}
+                    userType="Mentor"
+                  />
+                </div>
+              )}
+
+              {/* Past Sessions Sub-tab */}
+              {scheduleSubTab === 'past' && currentUser?.id && (
+                <div>
+                  <PastSessionsSection
+                    mentorId={currentUser.id}
+                  />
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
         {activeTab === 'collaboration' && (
           <div className="space-y-6 animate-fade-in">
             <Card>
@@ -1935,16 +2041,6 @@ ${mentorName}`;
             }
           }}
         />
-      )}
-
-      {/* Scheduled Sessions Section */}
-      {mentorStartupsTab === 'active' && currentUser?.id && (
-        <div className="mt-6">
-          <ScheduledSessionsSection
-            mentorId={currentUser.id}
-            userType="Mentor"
-          />
-        </div>
       )}
 
       {/* Manage Availability Modal */}

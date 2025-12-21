@@ -465,7 +465,7 @@ export const authService = {
   // Helper function to map profile data to AuthUser interface
   _mapProfileToAuthUser(profile: any, isComplete: boolean): AuthUser {
     return {
-      id: profile.auth_user_id || profile.profile_id || profile.id, // Use auth_user_id for foreign keys
+      id: profile.profile_id || profile.id, // Use profile_id to match getUserProfiles() structure
       email: profile.email,
       name: profile.name,
       role: profile.role,
@@ -749,10 +749,11 @@ export const authService = {
         return { user: null, error: 'User not authenticated' }
       }
 
+      // CRITICAL FIX: users table removed, use user_profiles instead
       const { data: profile, error: profileError } = await supabase
-        .from('users')
+        .from('user_profiles')
         .insert({
-          id: user.id,
+          auth_user_id: user.id,  // Use auth_user_id, not id
           email: user.email,
           name: name,
           role: role,
@@ -767,9 +768,25 @@ export const authService = {
         return { user: null, error: 'Failed to create profile' }
       }
 
+      // CRITICAL FIX: Create session entry to set this as active profile
+      try {
+        await supabase
+          .from('user_profile_sessions')
+          .upsert({
+            auth_user_id: user.id,
+            current_profile_id: profile.id
+          }, {
+            onConflict: 'auth_user_id'
+          });
+        console.log('✅ Created user_profile_sessions entry for new profile');
+      } catch (sessionError) {
+        console.error('❌ Error creating session entry:', sessionError);
+        // Continue anyway - profile was created successfully
+      }
+
       return {
         user: {
-          id: profile.id,
+          id: profile.id,  // This is now profile_id (correct)
           email: profile.email,
           name: profile.name,
           role: profile.role,
@@ -843,23 +860,38 @@ export const authService = {
         data = updatedProfile;
         error = null;
       } else {
-        // If that failed, try updating by auth_user_id (in case userId is auth_user_id)
-        // But only if we have multiple profiles, we need to find the active one
+        // If that failed, userId might be auth_user_id - get the active profile first
+        const { data: sessionData } = await supabase
+          .from('user_profile_sessions')
+          .select('current_profile_id')
+          .eq('auth_user_id', authUserId)
+          .maybeSingle();
+        
+        const activeProfileId = sessionData?.current_profile_id || userId;
+        
+        if (!activeProfileId) {
+          console.log('❌ No active profile found for auth_user_id');
+          return { user: null, error: 'Profile not found in user_profiles table' };
+        }
+        
+        // Try updating the active profile
         const { data: updatedProfileByAuth, error: profileUpdateErrorByAuth } = await supabase
           .from('user_profiles')
           .update(updates)
-          .eq('auth_user_id', authUserId)
+          .eq('id', activeProfileId)
+          .eq('auth_user_id', authUserId) // Security: ensure it belongs to this auth user
           .select()
           .maybeSingle(); // Use maybeSingle() to avoid 406 error
 
         if (!profileUpdateErrorByAuth && updatedProfileByAuth) {
-          // Successfully updated in user_profiles by auth_user_id
-          console.log('✅ Updating profile in user_profiles table (by auth_user_id)');
+          // Successfully updated in user_profiles by active profile_id
+          console.log('✅ Updating profile in user_profiles table (by active profile_id)');
           data = updatedProfileByAuth;
           error = null;
         } else {
           // Profile not found in user_profiles - cannot update
           console.log('❌ Profile not found in user_profiles table');
+          console.log('❌ Profile update error details:', profileUpdateErrorByAuth);
           return { user: null, error: 'Profile not found in user_profiles table' };
         }
       }
@@ -1092,11 +1124,14 @@ export const authService = {
 
       console.log('✅ Profile switch RPC successful, result:', data);
 
+      // Clear cache to force fresh fetch
+      _getCurrentUserCache = { promise: null, timestamp: 0, userId: null };
+      
       // Wait a moment to ensure database is updated
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // Verify the switch worked by getting current profile
-      const currentProfile = await this.getCurrentUser();
+      // Verify the switch worked by getting current profile (force refresh)
+      const currentProfile = await this.getCurrentUser(true);
       console.log('🔄 Verified current profile after switch:', currentProfile?.role, currentProfile?.id, 'Expected profile ID:', profileId);
 
       return { success: true };

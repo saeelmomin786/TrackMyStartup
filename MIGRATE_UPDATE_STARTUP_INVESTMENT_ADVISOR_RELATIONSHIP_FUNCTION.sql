@@ -70,3 +70,5 @@ SELECT '✅ Function update_startup_investment_advisor_relationship() migrated t
 
 
 
+
+

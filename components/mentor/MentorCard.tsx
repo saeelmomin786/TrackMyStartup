@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { mentorService } from '../../lib/mentorService';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { Briefcase, MapPin, Users, TrendingUp, Eye, Image as ImageIcon, Video, Globe, Linkedin, Mail, Award, DollarSign, ChevronDown, ChevronUp, Share2 } from 'lucide-react';
+import { Briefcase, MapPin, Users, TrendingUp, Eye, Image as ImageIcon, Video, Globe, Linkedin, Mail, Award, DollarSign, ChevronDown, ChevronUp, Share2, Building2 } from 'lucide-react';
 import { createSlug, createProfileUrl } from '../../lib/slugUtils';
 
 interface ProfessionalExperience {
@@ -64,10 +64,44 @@ interface MentorCardProps {
   connectDisabled?: boolean;
 }
 
+interface StartupAssignment {
+  id: number;
+  mentor_id: string;
+  startup_id?: number;
+  status: 'active' | 'completed' | 'cancelled';
+  assigned_at: string;
+  completed_at?: string;
+  notes?: string;
+  startup?: {
+    id: number;
+    name: string;
+    sector?: string;
+  };
+}
+
+interface FoundedStartup {
+  id: number;
+  mentor_id: string;
+  startup_id?: number;
+  founded_at: string;
+  notes?: string;
+  startup?: {
+    id: number;
+    name: string;
+    sector?: string;
+  };
+}
+
 const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, connectLabel, connectDisabled }) => {
   const [professionalExperiences, setProfessionalExperiences] = useState<ProfessionalExperience[]>([]);
   const [showProfessionalExp, setShowProfessionalExp] = useState(false);
   const [loadingExp, setLoadingExp] = useState(false);
+  const [startupAssignments, setStartupAssignments] = useState<StartupAssignment[]>([]);
+  const [showMentoringExp, setShowMentoringExp] = useState(false);
+  const [loadingMentoringExp, setLoadingMentoringExp] = useState(false);
+  const [foundedStartups, setFoundedStartups] = useState<FoundedStartup[]>([]);
+  const [showStartupExp, setShowStartupExp] = useState(false);
+  const [loadingStartupExp, setLoadingStartupExp] = useState(false);
   const [metrics, setMetrics] = useState({
     startupsMentoring: mentor.startupsMentoring ?? 0,
     startupsMentoredPreviously: mentor.startupsMentoredPreviously ?? 0,
@@ -159,20 +193,64 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
   };
 
   useEffect(() => {
-    if (showProfessionalExp && mentor.user_id) {
+    if (showProfessionalExp && (mentor.user_id || mentor.id)) {
       loadProfessionalExperiences();
     }
-  }, [showProfessionalExp, mentor.user_id]);
+  }, [showProfessionalExp, mentor.user_id, mentor.id]);
+
+  useEffect(() => {
+    if (showMentoringExp && (mentor.user_id || mentor.id)) {
+      loadStartupAssignments();
+    }
+  }, [showMentoringExp, mentor.user_id, mentor.id]);
+
+  useEffect(() => {
+    if (showStartupExp && (mentor.user_id || mentor.id)) {
+      loadFoundedStartups();
+    }
+  }, [showStartupExp, mentor.user_id, mentor.id]);
+
+  // Helper function to get user_id from mentor profile id
+  const getUserIdFromMentorId = async (mentorProfileId: string): Promise<string | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('mentor_profiles')
+        .select('user_id')
+        .eq('id', mentorProfileId)
+        .single();
+      
+      if (error) {
+        console.error('Error fetching user_id from mentor profile:', error);
+        return null;
+      }
+      
+      return data?.user_id || null;
+    } catch (error) {
+      console.error('Error in getUserIdFromMentorId:', error);
+      return null;
+    }
+  };
 
   const loadProfessionalExperiences = async () => {
     if (professionalExperiences.length > 0) return; // Already loaded
+    
+    let mentorUserId = mentor.user_id;
+    if (!mentorUserId && mentor.id) {
+      mentorUserId = await getUserIdFromMentorId(mentor.id);
+    }
+    
+    if (!mentorUserId) {
+      console.error('No mentor_id available for loading professional experiences');
+      setLoadingExp(false);
+      return;
+    }
     
     setLoadingExp(true);
     try {
       const { data, error } = await supabase
         .from('mentor_professional_experience')
         .select('*')
-        .eq('mentor_id', mentor.user_id)
+        .eq('mentor_id', mentorUserId)
         .order('from_date', { ascending: false });
 
       if (error) {
@@ -184,6 +262,89 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
       console.error('Error loading professional experiences:', error);
     } finally {
       setLoadingExp(false);
+    }
+  };
+
+  const loadStartupAssignments = async () => {
+    if (startupAssignments.length > 0) return; // Already loaded
+    
+    let mentorUserId = mentor.user_id;
+    if (!mentorUserId && mentor.id) {
+      mentorUserId = await getUserIdFromMentorId(mentor.id);
+    }
+    
+    if (!mentorUserId) {
+      console.error('No mentor_id available for loading startup assignments');
+      setLoadingMentoringExp(false);
+      return;
+    }
+    
+    setLoadingMentoringExp(true);
+    try {
+      const { data, error } = await supabase
+        .from('mentor_startup_assignments')
+        .select(`
+          *,
+          startups (
+            id,
+            name,
+            sector
+          )
+        `)
+        .eq('mentor_id', mentorUserId)
+        .in('status', ['active', 'completed'])
+        .order('assigned_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading startup assignments:', error);
+      } else if (data) {
+        setStartupAssignments(data as StartupAssignment[]);
+      }
+    } catch (error) {
+      console.error('Error loading startup assignments:', error);
+    } finally {
+      setLoadingMentoringExp(false);
+    }
+  };
+
+  const loadFoundedStartups = async () => {
+    if (foundedStartups.length > 0) return; // Already loaded
+    
+    let mentorUserId = mentor.user_id;
+    if (!mentorUserId && mentor.id) {
+      mentorUserId = await getUserIdFromMentorId(mentor.id);
+    }
+    
+    if (!mentorUserId) {
+      console.error('No mentor_id available for loading founded startups');
+      setLoadingStartupExp(false);
+      return;
+    }
+    
+    setLoadingStartupExp(true);
+    try {
+      const { data, error } = await supabase
+        .from('mentor_founded_startups')
+        .select(`
+          *,
+          startups (
+            id,
+            name,
+            sector
+          )
+        `)
+        .eq('mentor_id', mentorUserId)
+        .order('founded_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading founded startups:', error);
+      } else if (data) {
+        setFoundedStartups(data as FoundedStartup[]);
+      }
+    } catch (error) {
+      console.error('Error loading founded startups:', error);
+    } finally {
+      setLoadingStartupExp(false);
     }
   };
 
@@ -242,17 +403,30 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
     return `${symbol}${value.toLocaleString()}`;
   };
 
-  const formatFeeRange = () => {
+  const formatFeeRange = (type: 'fees' | 'stockOptions' = 'fees') => {
     if (!mentor.fee_type) return null;
     
     if (mentor.fee_type === 'Free') {
       return 'Free';
     }
     
-    if (mentor.fee_type === 'Equity-based') {
-      return 'Equity-based';
+    // For Stock Options type
+    if (type === 'stockOptions') {
+      if (mentor.equity_amount_min && mentor.equity_amount_max) {
+        if (mentor.equity_amount_min === mentor.equity_amount_max) {
+          return formatCurrencySimple(mentor.equity_amount_min, mentor.fee_currency);
+        }
+        const minStr = formatCurrencySimple(mentor.equity_amount_min, mentor.fee_currency);
+        const maxStr = formatCurrencySimple(mentor.equity_amount_max, mentor.fee_currency);
+        return `${minStr} - ${maxStr}`;
+      }
+      if (mentor.equity_amount_min) {
+        return formatCurrencySimple(mentor.equity_amount_min, mentor.fee_currency);
+      }
+      return 'Stock Options';
     }
     
+    // For Fees type
     if (mentor.fee_amount_min && mentor.fee_amount_max) {
       if (mentor.fee_amount_min === mentor.fee_amount_max) {
         return formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
@@ -267,7 +441,7 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
       return formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
     }
     
-    return mentor.fee_type;
+    return mentor.fee_type === 'Stock Options' ? 'Stock Options' : mentor.fee_type;
   };
 
   const videoEmbedUrl = mentor.media_type === 'video' && mentor.video_url 
@@ -459,17 +633,46 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
             {mentor.fee_type && (
               <div>
                 <div className="text-xs font-medium text-slate-500 mb-1.5">Fee Structure</div>
-                <div className="flex items-center gap-2 mb-1">
-                  <DollarSign className="h-4 w-4 text-green-600 flex-shrink-0" />
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-sm font-semibold text-slate-800">
-                      {formatFeeRange()}
-                    </span>
-                    {mentor.fee_type !== 'Free' && mentor.fee_type !== 'Equity-based' && (
-                      <span className="text-xs text-slate-500">({mentor.fee_type})</span>
+                {mentor.fee_type === 'Hybrid' ? (
+                  <div className="space-y-2">
+                    {/* Fees display */}
+                    {(mentor.fee_amount_min || mentor.fee_amount_max) && (
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-green-600 flex-shrink-0" />
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-semibold text-slate-800">
+                            {formatFeeRange('fees')}
+                          </span>
+                          <span className="text-xs text-slate-500">(Fees)</span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Stock Options display */}
+                    {(mentor.equity_amount_min || mentor.equity_amount_max) && (
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-semibold text-slate-800">
+                            {formatFeeRange('stockOptions')}
+                          </span>
+                          <span className="text-xs text-slate-500">(Stock Options)</span>
+                        </div>
+                      </div>
                     )}
                   </div>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-2 mb-1">
+                    <DollarSign className="h-4 w-4 text-green-600 flex-shrink-0" />
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-semibold text-slate-800">
+                        {formatFeeRange('fees')}
+                      </span>
+                      {mentor.fee_type !== 'Free' && mentor.fee_type !== 'Stock Options' && (
+                        <span className="text-xs text-slate-500">({mentor.fee_type})</span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {mentor.fee_description && (
                   <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">{mentor.fee_description}</p>
                 )}
@@ -531,6 +734,160 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
           )}
         </div>
 
+        {/* Mentoring Experience Section */}
+        <div className="mb-5">
+          <button
+            onClick={() => setShowMentoringExp(!showMentoringExp)}
+            className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-slate-600" />
+              <span className="text-sm font-medium text-slate-700">Mentoring Experience</span>
+              {startupAssignments.length > 0 && (
+                <span className="text-xs text-slate-500">({startupAssignments.length})</span>
+              )}
+            </div>
+            {showMentoringExp ? (
+              <ChevronUp className="h-4 w-4 text-slate-600" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-slate-600" />
+            )}
+          </button>
+
+          {showMentoringExp && (
+            <div className="mt-3 space-y-3">
+              {loadingMentoringExp ? (
+                <div className="text-center py-4 text-sm text-slate-500">Loading...</div>
+              ) : startupAssignments.length > 0 ? (
+                startupAssignments.map((assignment) => {
+                  // Get startup name from either startup object or notes
+                  let startupName = 'Unknown Startup';
+                  if (assignment.startup?.name) {
+                    startupName = assignment.startup.name;
+                  } else if (assignment.notes) {
+                    try {
+                      const notesData = JSON.parse(assignment.notes);
+                      startupName = notesData.startup_name || startupName;
+                    } catch {
+                      // If notes is not JSON, use it as-is
+                      startupName = assignment.notes;
+                    }
+                  }
+
+                  const startDate = formatDate(assignment.assigned_at);
+                  const endDate = assignment.completed_at 
+                    ? formatDate(assignment.completed_at)
+                    : assignment.status === 'active' 
+                      ? 'Present' 
+                      : 'N/A';
+
+                  return (
+                    <div
+                      key={assignment.id}
+                      className="p-3 bg-white border border-slate-200 rounded-lg"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="font-semibold text-slate-800 text-sm">{startupName}</h4>
+                            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                              assignment.status === 'active' 
+                                ? 'bg-green-100 text-green-800 border border-green-200'
+                                : 'bg-blue-100 text-blue-800 border border-blue-200'
+                            }`}>
+                              {assignment.status === 'active' ? 'Active' : 'Completed'}
+                            </span>
+                          </div>
+                          {assignment.startup?.sector && (
+                            <p className="text-xs text-slate-600 font-medium">{assignment.startup.sector}</p>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-500 text-right">
+                          {startDate} - {endDate}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-4 text-sm text-slate-500">
+                  No mentoring experience added yet
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Startup Experience Section */}
+        <div className="mb-5">
+          <button
+            onClick={() => setShowStartupExp(!showStartupExp)}
+            className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-slate-600" />
+              <span className="text-sm font-medium text-slate-700">Startup Experience</span>
+              {foundedStartups.length > 0 && (
+                <span className="text-xs text-slate-500">({foundedStartups.length})</span>
+              )}
+            </div>
+            {showStartupExp ? (
+              <ChevronUp className="h-4 w-4 text-slate-600" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-slate-600" />
+            )}
+          </button>
+
+          {showStartupExp && (
+            <div className="mt-3 space-y-3">
+              {loadingStartupExp ? (
+                <div className="text-center py-4 text-sm text-slate-500">Loading...</div>
+              ) : foundedStartups.length > 0 ? (
+                foundedStartups.map((startup) => {
+                  // Get startup name from either startup object or notes
+                  let startupName = 'Unknown Startup';
+                  if (startup.startup?.name) {
+                    startupName = startup.startup.name;
+                  } else if (startup.notes) {
+                    try {
+                      const notesData = JSON.parse(startup.notes);
+                      startupName = notesData.startup_name || startupName;
+                    } catch {
+                      // If notes is not JSON, use it as-is
+                      startupName = startup.notes;
+                    }
+                  }
+
+                  const foundedDate = formatDate(startup.founded_at);
+
+                  return (
+                    <div
+                      key={startup.id}
+                      className="p-3 bg-white border border-slate-200 rounded-lg"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-slate-800 text-sm">{startupName}</h4>
+                          {startup.startup?.sector && (
+                            <p className="text-xs text-slate-600 font-medium mt-1">{startup.startup.sector}</p>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-500 text-right">
+                          Founded: {foundedDate}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-4 text-sm text-slate-500">
+                  No startup experience added yet
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Action Buttons */}
         {(onConnect || onView) && (
           <div className="mt-4 flex flex-col sm:flex-row gap-2">
@@ -580,16 +937,21 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
                 </a>
               )}
               {mentor.linkedin_link && mentor.linkedin_link.trim() && (
-                <a
-                  href={mentor.linkedin_link.startsWith('http') ? mentor.linkedin_link : `https://${mentor.linkedin_link}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors cursor-pointer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Linkedin className="h-4 w-4 flex-shrink-0" />
-                  <span className="whitespace-nowrap">LinkedIn</span>
-                </a>
+                <>
+                  <a
+                    href={mentor.linkedin_link.startsWith('http') ? mentor.linkedin_link : `https://${mentor.linkedin_link}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors cursor-pointer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Linkedin className="h-4 w-4 flex-shrink-0" />
+                    <span className="whitespace-nowrap">LinkedIn</span>
+                  </a>
+                  <span className="text-xs text-orange-600 font-medium italic">
+                    {mentor.mentor_name || mentor.user?.name || 'Mentor'} (Mentor) Supported by Track My Startup.
+                  </span>
+                </>
               )}
             </div>
           </div>

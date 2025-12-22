@@ -67,15 +67,33 @@ class MentorService {
   // Get all metrics for a mentor
   async getMentorMetrics(mentorId: string): Promise<MentorMetrics> {
     try {
-      // Get actual auth user ID (mentorId might be profile ID)
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const actualMentorId = authUser?.id || mentorId;
+      // Get actual auth user ID (mentorId might be profile ID from user_profiles)
+      let actualMentorId = mentorId;
       
-      if (mentorId !== actualMentorId) {
-        console.warn('⚠️ getMentorMetrics: mentorId mismatch - using auth.uid() instead:', {
-          providedMentorId: mentorId,
-          authUserId: actualMentorId
-        });
+      // Get current auth user ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      
+      // If mentorId matches current auth user ID, use it directly
+      if (authUser && mentorId === authUser.id) {
+        actualMentorId = authUser.id;
+      } else {
+        // Check if mentorId is a profile ID (from user_profiles) and convert to auth_user_id
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('auth_user_id')
+          .eq('id', mentorId)
+          .maybeSingle();
+        
+        if (profile?.auth_user_id) {
+          // Found profile ID, convert to auth_user_id
+          actualMentorId = profile.auth_user_id;
+        } else if (authUser?.id && mentorId !== authUser.id) {
+          // If mentorId doesn't match auth.uid() and isn't a profile ID,
+          // and we're getting metrics for current user, use auth.uid()
+          // (This handles the case where currentUser.id is a profile ID)
+          actualMentorId = authUser.id;
+        }
+        // Otherwise, use mentorId as-is (might be auth_user_id for another user)
       }
       
       // Get active assignments (gracefully handle if table doesn't exist)
@@ -863,7 +881,7 @@ class MentorService {
           const { data: mentorProfile } = await supabase
             .from('mentor_profiles')
             .select('fee_currency')
-            .eq('user_id', mentorId)
+            .eq('user_id', actualMentorId)
             .single();
           
           if (mentorProfile?.fee_currency) {

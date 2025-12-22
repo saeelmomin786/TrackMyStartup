@@ -3,7 +3,7 @@ import { Startup, FundraisingDetails, InvestmentRecord, UserRole, Founder, Compl
 import { AuthUser } from '../lib/auth';
 import Button from './ui/Button';
 import Card from './ui/Card';
-import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench, DollarSign, Briefcase, FileText, Shield, Eye, Search, CheckCircle, Video, X, MapPin, Globe, Linkedin, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench, DollarSign, Briefcase, FileText, Shield, Eye, Search, CheckCircle, Video, X, MapPin, Globe, Linkedin, ChevronDown, ChevronUp, Share2 } from 'lucide-react';
 import { investmentService } from '../lib/database';
 import { supabase } from '../lib/supabase';
 
@@ -44,6 +44,13 @@ const MentorCardWithDetails: React.FC<{
   const [showMetricsModal, setShowMetricsModal] = useState(false);
   const [showProfessionalExpModal, setShowProfessionalExpModal] = useState(false);
   const [loadingExp, setLoadingExp] = useState(false);
+  const [showProfessionalExp, setShowProfessionalExp] = useState(false);
+  const [startupAssignments, setStartupAssignments] = useState<any[]>([]);
+  const [showMentoringExp, setShowMentoringExp] = useState(false);
+  const [loadingMentoringExp, setLoadingMentoringExp] = useState(false);
+  const [foundedStartups, setFoundedStartups] = useState<any[]>([]);
+  const [showStartupExp, setShowStartupExp] = useState(false);
+  const [loadingStartupExp, setLoadingStartupExp] = useState(false);
 
   // Load metrics
   useEffect(() => {
@@ -52,12 +59,26 @@ const MentorCardWithDetails: React.FC<{
     }
   }, [mentor.user_id]);
 
-  // Load professional experiences when modal opens
+  // Load professional experiences when modal opens or dropdown opens
   useEffect(() => {
-    if (showProfessionalExpModal && mentor.user_id && professionalExperiences.length === 0) {
+    if ((showProfessionalExpModal || showProfessionalExp) && mentor.user_id && professionalExperiences.length === 0) {
       loadProfessionalExperiences();
     }
-  }, [showProfessionalExpModal, mentor.user_id]);
+  }, [showProfessionalExpModal, showProfessionalExp, mentor.user_id]);
+
+  // Load startup assignments when mentoring experience dropdown opens
+  useEffect(() => {
+    if (showMentoringExp && mentor.user_id) {
+      loadStartupAssignments();
+    }
+  }, [showMentoringExp, mentor.user_id]);
+
+  // Load founded startups when startup experience dropdown opens
+  useEffect(() => {
+    if (showStartupExp && mentor.user_id) {
+      loadFoundedStartups();
+    }
+  }, [showStartupExp, mentor.user_id]);
 
   const loadMetrics = async () => {
     if (!mentor.user_id || loadingMetrics) return;
@@ -77,7 +98,7 @@ const MentorCardWithDetails: React.FC<{
   };
 
   const loadProfessionalExperiences = async () => {
-    if (loadingExp) return;
+    if (loadingExp || professionalExperiences.length > 0) return;
     setLoadingExp(true);
     try {
       const { data, error } = await supabase
@@ -98,6 +119,105 @@ const MentorCardWithDetails: React.FC<{
     }
   };
 
+  const loadStartupAssignments = async () => {
+    if (startupAssignments.length > 0) return;
+    
+    let mentorUserId = mentor.user_id;
+    if (!mentorUserId && mentor.id) {
+      // Try to get user_id from profile id
+      const { data: profile } = await supabase
+        .from('mentor_profiles')
+        .select('user_id')
+        .eq('id', mentor.id)
+        .maybeSingle();
+      if (profile?.user_id) {
+        mentorUserId = profile.user_id;
+      }
+    }
+    
+    if (!mentorUserId) {
+      console.error('No mentor_id available for loading startup assignments');
+      setLoadingMentoringExp(false);
+      return;
+    }
+    
+    setLoadingMentoringExp(true);
+    try {
+      const { data, error } = await supabase
+        .from('mentor_startup_assignments')
+        .select(`
+          *,
+          startups (
+            id,
+            name,
+            sector
+          )
+        `)
+        .eq('mentor_id', mentorUserId)
+        .in('status', ['active', 'completed'])
+        .order('assigned_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading startup assignments:', error);
+      } else if (data) {
+        setStartupAssignments(data);
+      }
+    } catch (error) {
+      console.error('Error loading startup assignments:', error);
+    } finally {
+      setLoadingMentoringExp(false);
+    }
+  };
+
+  const loadFoundedStartups = async () => {
+    if (foundedStartups.length > 0) return;
+    
+    let mentorUserId = mentor.user_id;
+    if (!mentorUserId && mentor.id) {
+      // Try to get user_id from profile id
+      const { data: profile } = await supabase
+        .from('mentor_profiles')
+        .select('user_id')
+        .eq('id', mentor.id)
+        .maybeSingle();
+      if (profile?.user_id) {
+        mentorUserId = profile.user_id;
+      }
+    }
+    
+    if (!mentorUserId) {
+      console.error('No mentor_id available for loading founded startups');
+      setLoadingStartupExp(false);
+      return;
+    }
+    
+    setLoadingStartupExp(true);
+    try {
+      const { data, error } = await supabase
+        .from('mentor_founded_startups')
+        .select(`
+          *,
+          startups (
+            id,
+            name,
+            sector
+          )
+        `)
+        .eq('mentor_id', mentorUserId)
+        .order('founded_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading founded startups:', error);
+      } else if (data) {
+        setFoundedStartups(data);
+      }
+    } catch (error) {
+      console.error('Error loading founded startups:', error);
+    } finally {
+      setLoadingStartupExp(false);
+    }
+  };
+
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Present';
     try {
@@ -107,17 +227,6 @@ const MentorCardWithDetails: React.FC<{
       return dateString;
     }
   };
-
-  const formatFeeRange = () => {
-    if (!mentor.fee_type) return null;
-    
-    if (mentor.fee_type === 'Free') {
-      return 'Free';
-    }
-    
-    if (mentor.fee_type === 'Equity-based') {
-      return 'Equity-based';
-    }
     
     const formatCurrencySimple = (value?: number, currency?: string) => {
       if (!value) return '';
@@ -133,6 +242,30 @@ const MentorCardWithDetails: React.FC<{
       return `${symbol}${value.toLocaleString()}`;
     };
     
+  const formatFeeRange = (type: 'fees' | 'stockOptions' = 'fees') => {
+    if (!mentor.fee_type) return null;
+    
+    if (mentor.fee_type === 'Free') {
+      return 'Free';
+    }
+    
+    // For Stock Options type
+    if (type === 'stockOptions') {
+      if (mentor.equity_amount_min && mentor.equity_amount_max) {
+        if (mentor.equity_amount_min === mentor.equity_amount_max) {
+          return formatCurrencySimple(mentor.equity_amount_min, mentor.fee_currency);
+        }
+        const minStr = formatCurrencySimple(mentor.equity_amount_min, mentor.fee_currency);
+        const maxStr = formatCurrencySimple(mentor.equity_amount_max, mentor.fee_currency);
+        return `${minStr} - ${maxStr}`;
+      }
+      if (mentor.equity_amount_min) {
+        return formatCurrencySimple(mentor.equity_amount_min, mentor.fee_currency);
+      }
+      return 'Stock Options';
+    }
+    
+    // For Fees type
     if (mentor.fee_amount_min && mentor.fee_amount_max) {
       if (mentor.fee_amount_min === mentor.fee_amount_max) {
         return formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
@@ -146,7 +279,7 @@ const MentorCardWithDetails: React.FC<{
       return formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
     }
     
-    return mentor.fee_type;
+    return mentor.fee_type === 'Stock Options' ? 'Stock Options' : mentor.fee_type;
   };
 
   return (
@@ -220,91 +353,283 @@ const MentorCardWithDetails: React.FC<{
             )}
           </div>
 
-          {/* Experience and Professional Experience Buttons */}
-          <div className="mb-4 flex flex-col sm:flex-row gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowMetricsModal(true)}
-              className="flex-1"
-            >
-              <Users className="h-4 w-4 mr-2" />
-              View Experience
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowProfessionalExpModal(true)}
-              className="flex-1"
-            >
-              <Briefcase className="h-4 w-4 mr-2" />
-              Professional Experience
-              {professionalExperiences.length > 0 && (
-                <span className="ml-2 text-xs">({professionalExperiences.length})</span>
-              )}
-            </Button>
-          </div>
 
-          {/* Expertise and Sectors */}
-          <div className="mb-4 space-y-3">
+          {/* Mentoring Details */}
+          <div className="space-y-4 mb-4">
+            {/* Expertise Areas & Sectors in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {mentor.expertise_areas && mentor.expertise_areas.length > 0 && (
               <div>
-                <div className="text-xs font-medium text-slate-500 mb-1.5">Expertise Areas</div>
+                  <div className="text-xs font-medium text-slate-500 mb-2">Expertise Areas</div>
                 <div className="flex flex-wrap gap-1.5">
-                  {mentor.expertise_areas.slice(0, 5).map((area: string, idx: number) => (
+                    {mentor.expertise_areas.map((area: string, idx: number) => (
                     <span key={idx} className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full border border-blue-200">
                       {area}
                     </span>
                   ))}
-                  {mentor.expertise_areas.length > 5 && (
-                    <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-full">
-                      +{mentor.expertise_areas.length - 5} more
-                    </span>
-                  )}
                 </div>
               </div>
             )}
 
             {mentor.sectors && mentor.sectors.length > 0 && (
               <div>
-                <div className="text-xs font-medium text-slate-500 mb-1.5">Sectors</div>
+                  <div className="text-xs font-medium text-slate-500 mb-2">Sectors</div>
                 <div className="flex flex-wrap gap-1.5">
-                  {mentor.sectors.slice(0, 5).map((sector: string, idx: number) => (
+                    {mentor.sectors.map((sector: string, idx: number) => (
                     <span key={idx} className="px-2.5 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full border border-green-200">
                       {sector}
                     </span>
                   ))}
-                  {mentor.sectors.length > 5 && (
-                    <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-full">
-                      +{mentor.sectors.length - 5} more
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {mentor.mentoring_stages && mentor.mentoring_stages.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-slate-500 mb-2">Mentoring Stages</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {mentor.mentoring_stages.map((stage: string, idx: number) => (
+                    <span key={idx} className="px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full border border-purple-200">
+                      {stage}
                     </span>
-                  )}
+                  ))}
                 </div>
               </div>
             )}
-          </div>
 
-          {/* Fee Structure */}
+            {mentor.mentoring_approach && (
+              <div>
+                <div className="text-xs font-medium text-slate-500 mb-1.5">Mentoring Approach</div>
+                <p className="text-sm text-slate-700 leading-relaxed">{mentor.mentoring_approach}</p>
+          </div>
+            )}
+
+            {/* Availability & Fee Structure in one line */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {mentor.availability && (
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="font-medium">Availability:</span>
+                  <span>{mentor.availability}</span>
+                </div>
+              )}
+
           {mentor.fee_type && (
-            <div className="mb-4">
+                <div>
               <div className="text-xs font-medium text-slate-500 mb-1.5">Fee Structure</div>
+                  {mentor.fee_type === 'Hybrid' ? (
+                    <div className="space-y-2">
+                      {/* Fees display */}
+                      {(mentor.fee_amount_min || mentor.fee_amount_max) && (
               <div className="flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-green-600 flex-shrink-0" />
+                          <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-sm font-semibold text-slate-800">
-                  {formatFeeRange()}
+                              {formatFeeRange('fees')}
                 </span>
-                {mentor.fee_type !== 'Free' && mentor.fee_type !== 'Equity-based' && (
+                            <span className="text-xs text-slate-500">(Fees)</span>
+                          </div>
+                        </div>
+                      )}
+                      {/* Stock Options display */}
+                      {(mentor.equity_amount_min || mentor.equity_amount_max) && (
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-sm font-semibold text-slate-800">
+                              {formatFeeRange('stockOptions')}
+                            </span>
+                            <span className="text-xs text-slate-500">(Stock Options)</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 mb-1">
+                      <DollarSign className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-sm font-semibold text-slate-800">
+                          {formatFeeRange('fees')}
+                        </span>
+                        {mentor.fee_type !== 'Free' && mentor.fee_type !== 'Stock Options' && (
                   <span className="text-xs text-slate-500">({mentor.fee_type})</span>
                 )}
               </div>
             </div>
           )}
+                  {mentor.fee_description && (
+                    <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">{mentor.fee_description}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
 
-          {/* Mentoring Approach */}
-          {mentor.mentoring_approach && (
-            <div className="mb-4">
-              <div className="text-xs font-medium text-slate-500 mb-1.5">Mentoring Approach</div>
-              <p className="text-sm text-slate-700 line-clamp-2">{mentor.mentoring_approach}</p>
+          {/* Experience Buttons - 4 buttons in 2 rows */}
+          <div className="mb-4 space-y-2">
+            {/* Row 1: Professional Experience and Startup Experience */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowProfessionalExpModal(true)}
+                className="flex items-center justify-center gap-2"
+              >
+                <Briefcase className="h-4 w-4" />
+                <span className="text-xs sm:text-sm">Professional Experience</span>
+                {professionalExperiences.length > 0 && (
+                  <span className="text-xs">({professionalExperiences.length})</span>
+                )}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowStartupExp(!showStartupExp)}
+                className="flex items-center justify-center gap-2"
+              >
+                <Building2 className="h-4 w-4" />
+                <span className="text-xs sm:text-sm">Startup Experience</span>
+                {foundedStartups.length > 0 && (
+                  <span className="text-xs">({foundedStartups.length})</span>
+                )}
+              </Button>
+            </div>
+            {/* Row 2: Mentoring Experience and View Experience (Metrics) */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowMentoringExp(!showMentoringExp)}
+                className="flex items-center justify-center gap-2"
+              >
+                <Users className="h-4 w-4" />
+                <span className="text-xs sm:text-sm">Mentoring Experience</span>
+                {startupAssignments.length > 0 && (
+                  <span className="text-xs">({startupAssignments.length})</span>
+                )}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowMetricsModal(true)}
+                className="flex items-center justify-center gap-2"
+              >
+                <Users className="h-4 w-4" />
+                <span className="text-xs sm:text-sm">View Experience</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Dropdown sections for Mentoring and Startup Experience (shown when buttons clicked) */}
+          {showMentoringExp && (
+            <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+              {loadingMentoringExp ? (
+                <div className="text-center py-4 text-sm text-slate-500">Loading...</div>
+              ) : startupAssignments.length > 0 ? (
+                <div className="space-y-3">
+                  {startupAssignments.map((assignment) => {
+                    let startupName = 'Unknown Startup';
+                    if (assignment.startup?.name) {
+                      startupName = assignment.startup.name;
+                    } else if (assignment.notes) {
+                      try {
+                        const notesData = JSON.parse(assignment.notes);
+                        startupName = notesData.startup_name || startupName;
+                      } catch {
+                        startupName = assignment.notes;
+                      }
+                    }
+
+                    const startDate = formatDate(assignment.assigned_at);
+                    const endDate = assignment.completed_at 
+                      ? formatDate(assignment.completed_at)
+                      : assignment.status === 'active' 
+                        ? 'Present' 
+                        : 'N/A';
+
+                    return (
+                      <div
+                        key={assignment.id}
+                        className="p-3 bg-white border border-slate-200 rounded-lg"
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h4 className="font-semibold text-slate-800 text-sm">{startupName}</h4>
+                              <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                                assignment.status === 'active' 
+                                  ? 'bg-green-100 text-green-800 border border-green-200'
+                                  : 'bg-blue-100 text-blue-800 border border-blue-200'
+                              }`}>
+                                {assignment.status === 'active' ? 'Active' : 'Completed'}
+                              </span>
+                            </div>
+                            {assignment.startup?.sector && (
+                              <p className="text-xs text-slate-600 font-medium">{assignment.startup.sector}</p>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 text-right">
+                            {startDate} - {endDate}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-4 text-sm text-slate-500">
+                  No mentoring experience added yet
+                </div>
+              )}
+            </div>
+          )}
+
+          {showStartupExp && (
+            <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+              {loadingStartupExp ? (
+                <div className="text-center py-4 text-sm text-slate-500">Loading...</div>
+              ) : foundedStartups.length > 0 ? (
+                <div className="space-y-3">
+                  {foundedStartups.map((startup) => {
+                    let startupName = 'Unknown Startup';
+                    if (startup.startup?.name) {
+                      startupName = startup.startup.name;
+                    } else if (startup.notes) {
+                      try {
+                        const notesData = JSON.parse(startup.notes);
+                        startupName = notesData.startup_name || startupName;
+                      } catch {
+                        startupName = startup.notes;
+                      }
+                    }
+
+                    const foundedDate = formatDate(startup.founded_at);
+
+                    return (
+                      <div
+                        key={startup.id}
+                        className="p-3 bg-white border border-slate-200 rounded-lg"
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-slate-800 text-sm">{startupName}</h4>
+                            {startup.startup?.sector && (
+                              <p className="text-xs text-slate-600 font-medium mt-1">{startup.startup.sector}</p>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 text-right">
+                            Founded: {foundedDate}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-4 text-sm text-slate-500">
+                  No startup experience added yet
+                </div>
+              )}
             </div>
           )}
 
@@ -325,6 +650,7 @@ const MentorCardWithDetails: React.FC<{
                   </a>
                 )}
                 {mentor.linkedin_link && mentor.linkedin_link.trim() && (
+                  <>
                   <a
                     href={mentor.linkedin_link.startsWith('http') ? mentor.linkedin_link : `https://${mentor.linkedin_link}`}
                     target="_blank"
@@ -335,6 +661,10 @@ const MentorCardWithDetails: React.FC<{
                     <Linkedin className="h-4 w-4 flex-shrink-0" />
                     <span className="whitespace-nowrap">LinkedIn</span>
                   </a>
+                    <span className="text-xs text-orange-600 font-medium italic">
+                      {mentor.mentor_name || 'Mentor'} (Mentor) Supported by Track My Startup.
+                    </span>
+                  </>
                 )}
               </div>
               <Button
@@ -1543,7 +1873,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             setConnectModalOpen(false);
             setSelectedMentor(null);
           }}
-          mentorId={selectedMentor.id}
+          mentorId={selectedMentor.user_id || selectedMentor.id}
           mentorName={selectedMentor.name}
           mentorFeeType={selectedMentor.fee_type}
           mentorFeeAmount={selectedMentor.fee_amount}

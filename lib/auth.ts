@@ -209,7 +209,7 @@ export const authService = {
       // If it's a profile_id, query directly. If it's auth_user_id, use session lookup.
       const { data: profileById, error: profileByIdError } = await supabase
         .from('user_profiles')
-        .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete, auth_user_id')
+        .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete')
         .eq('id', userId)
         .maybeSingle();
       

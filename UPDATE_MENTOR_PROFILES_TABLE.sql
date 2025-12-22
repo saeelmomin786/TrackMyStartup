@@ -45,8 +45,8 @@ CREATE TABLE IF NOT EXISTS public.mentor_profiles (
     fee_amount_min DECIMAL(15, 2),
     fee_amount_max DECIMAL(15, 2),
     fee_currency TEXT DEFAULT 'USD',
-    equity_amount_min DECIMAL(5, 2), -- Percentage
-    equity_amount_max DECIMAL(5, 2), -- Percentage
+    equity_amount_min DECIMAL(15, 2), -- Stock Options amount in currency (same as fees)
+    equity_amount_max DECIMAL(15, 2), -- Stock Options amount in currency (same as fees)
     fee_description TEXT, -- Additional description of fee structure
     
     -- Media
@@ -144,7 +144,7 @@ BEGIN
         AND column_name = 'equity_amount_min'
     ) THEN
         ALTER TABLE public.mentor_profiles 
-        ADD COLUMN equity_amount_min DECIMAL(5, 2);
+        ADD COLUMN equity_amount_min DECIMAL(15, 2);
     END IF;
 END $$;
 
@@ -158,7 +158,7 @@ BEGIN
         AND column_name = 'equity_amount_max'
     ) THEN
         ALTER TABLE public.mentor_profiles 
-        ADD COLUMN equity_amount_max DECIMAL(5, 2);
+        ADD COLUMN equity_amount_max DECIMAL(15, 2);
     END IF;
 END $$;
 

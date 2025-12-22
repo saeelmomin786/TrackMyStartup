@@ -32,8 +32,6 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
     email_id: '',
     website: '',
     sector: '',
-    fee_amount: '',
-    esop_percentage: '',
     from_date: '',
     to_date: '',
     currently_mentoring: false,
@@ -103,12 +101,10 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
 
       if (editingId) {
         // Update existing assignment
+        // Note: fee_amount and esop_percentage are automatically calculated for TMS startups
         const updateData: any = {
           startup_id: null,
           status: status,
-          fee_amount: parseFloat(mentoringForm.fee_amount) || 0,
-          fee_currency: 'USD',
-          esop_percentage: parseFloat(mentoringForm.esop_percentage) || 0,
           notes: notesData,
         };
         
@@ -140,13 +136,11 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
         }
       } else {
         // Create new assignment - use auth user ID (already fetched above)
+        // Note: fee_amount and esop_percentage are automatically calculated for TMS startups
         const insertData: any = {
           mentor_id: actualMentorId,
           startup_id: null,
           status: status,
-          fee_amount: parseFloat(mentoringForm.fee_amount) || 0,
-          fee_currency: 'USD',
-          esop_percentage: parseFloat(mentoringForm.esop_percentage) || 0,
           notes: notesData,
         };
         
@@ -186,8 +180,6 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
         email_id: '',
         website: '',
         sector: '',
-        fee_amount: '',
-        esop_percentage: '',
         from_date: '',
         to_date: '',
         currently_mentoring: false,
@@ -369,8 +361,6 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
       email_id: emailId,
       website: website,
       sector: sector,
-      fee_amount: assignment.fee_amount.toString(),
-      esop_percentage: assignment.esop_percentage.toString(),
       from_date: fromDate,
       to_date: toDate,
       currently_mentoring: currentlyMentoring,
@@ -421,8 +411,6 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
               email_id: '',
               website: '',
               sector: '',
-              fee_amount: '',
-              esop_percentage: '',
               from_date: '',
               to_date: '',
               currently_mentoring: false,
@@ -525,33 +513,6 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Fee Amount
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={mentoringForm.fee_amount}
-                  onChange={(e) => setMentoringForm({ ...mentoringForm, fee_amount: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="0.00"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  ESOP Percentage
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={mentoringForm.esop_percentage}
-                  onChange={(e) => setMentoringForm({ ...mentoringForm, esop_percentage: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="0.00"
-                />
-              </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">

@@ -131,11 +131,7 @@ class FacilitatorStartupService {
       // Fetch domain information from opportunity applications for these startups
       const { data: applicationData, error: applicationError } = await supabase
         .from('opportunity_applications')
-        .select(`
-          startup_id,
-          domain,
-          sector
-        `)
+        .select('startup_id, domain')
         .in('startup_id', startupIds)
         .eq('status', 'accepted'); // Only get accepted applications
 
@@ -151,10 +147,9 @@ class FacilitatorStartupService {
       if (applicationData) {
         console.log('🔍 Portfolio Debug - Application data fetched:', applicationData);
         applicationData.forEach(app => {
-          // Try domain field first, then fallback to sector field
-          const domainValue = app.domain || app.sector;
-          if (domainValue && !domainMap[app.startup_id]) {
-            domainMap[app.startup_id] = domainValue;
+          // Use domain field (sector column was renamed to domain)
+          if (app.domain && !domainMap[app.startup_id]) {
+            domainMap[app.startup_id] = app.domain;
           }
         });
         console.log('🔍 Portfolio Debug - Domain map from applications:', domainMap);

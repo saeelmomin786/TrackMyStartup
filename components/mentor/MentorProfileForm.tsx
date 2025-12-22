@@ -52,6 +52,10 @@ interface MentorProfileFormProps {
   onNavigateToDashboard?: (section?: 'active' | 'founded') => void;
   startups?: Startup[];
   onMetricsUpdate?: () => void;
+  excludeSections?: ('feeStructure' | 'media')[];
+  externalProfile?: MentorProfile | null;
+  onSaveRef?: (saveFn: () => Promise<void>) => void;
+  onEditingStateRef?: (state: { isEditing: boolean; setIsEditing: (val: boolean) => void }) => void;
 }
 
 const MentorProfileForm: React.FC<MentorProfileFormProps> = ({ 
@@ -62,7 +66,11 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   isViewOnly = false,
   onNavigateToDashboard,
   startups = [],
-  onMetricsUpdate
+  onMetricsUpdate,
+  excludeSections = [],
+  externalProfile,
+  onSaveRef,
+  onEditingStateRef
 }) => {
   const [isEditing, setIsEditing] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -82,7 +90,6 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   const [isStagesOpen, setIsStagesOpen] = useState(false);
   const [showAddFormModal, setShowAddFormModal] = useState(false);
   const [formSection, setFormSection] = useState<'active' | 'founded'>('active');
-  const [showProfessionalExpModal, setShowProfessionalExpModal] = useState(false);
   const expertiseRef = useRef<HTMLDivElement>(null);
   const sectorsRef = useRef<HTMLDivElement>(null);
   const stagesRef = useRef<HTMLDivElement>(null);
@@ -111,19 +118,42 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     }
   };
 
-  const mentorTypes = ['Industry Expert', 'Serial Entrepreneur', 'Corporate Executive', 'Academic', 'Investor', 'Other'];
+  const mentorTypes = ['Industry Expert', 'Entrepreneur', 'Corporate Executive', 'Academic', 'Investor', 'Other'];
   const expertiseAreas = ['Product Development', 'Marketing', 'Sales', 'Finance', 'Operations', 'HR', 'Technology', 'Strategy', 'Fundraising', 'Legal', 'Compliance', 'International Expansion'];
   const sectors = ['SaaS', 'E-commerce', 'FinTech', 'HealthTech', 'EdTech', 'AgriTech', 'AI/ML', 'Blockchain', 'Gaming', 'Media', 'Real Estate', 'Manufacturing', 'Other'];
   const mentoringStages = ['Ideation', 'Proof of Concept (PoC)', 'Prototype / MVP', 'Pilot Testing', 'Product–Market Fit (PMF)', 'Early Traction', 'Growth Stage', 'Scaling & Expansion', 'Maturity', 'Exit (IPO / Acquisition)'];
   const availabilityOptions = ['Once per week', 'Once per month', 'Once per quarterly', 'Yearly', 'As per requirement'];
   const engagementOptions = ['1-on-1', 'Group Sessions', 'Workshops', 'Advisory Board', 'All of the above'];
-  const feeTypes = ['Free', 'Fees', 'Equity', 'Hybrid'];
+  const feeTypes = ['Free', 'Fees', 'Stock Options', 'Hybrid'];
   const currencies = ['USD', 'INR', 'EUR', 'GBP', 'SGD', 'AED'];
 
   useEffect(() => {
     loadProfile();
     loadProfessionalExperiences();
   }, [currentUser.id]);
+
+  // Sync with external profile changes (from right side sections)
+  useEffect(() => {
+    if (externalProfile) {
+      setProfile(externalProfile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalProfile]);
+
+  // Expose save function and editing state to parent
+  useEffect(() => {
+    if (onSaveRef) {
+      onSaveRef(handleSave);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSaveRef]);
+
+  useEffect(() => {
+    if (onEditingStateRef) {
+      onEditingStateRef({ isEditing, setIsEditing });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onEditingStateRef, isEditing]);
   
   const loadProfessionalExperiences = async () => {
     try {
@@ -165,21 +195,98 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     }
   };
   
-  const calculateTotalExperience = () => {
+  // Merge overlapping date intervals
+  const mergeIntervals = (intervals: Array<{ start: Date; end: Date }>): Array<{ start: Date; end: Date }> => {
+    if (intervals.length === 0) return [];
+    
+    // Sort intervals by start date
+    const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime());
+    
+    const merged: Array<{ start: Date; end: Date }> = [sorted[0]];
+    
+    for (let i = 1; i < sorted.length; i++) {
+      const current = sorted[i];
+      const lastMerged = merged[merged.length - 1];
+      
+      // If current interval overlaps or is adjacent to the last merged interval
+      if (current.start <= lastMerged.end) {
+        // Merge: extend the end date if current ends later
+        if (current.end > lastMerged.end) {
+          lastMerged.end = current.end;
+        }
+      } else {
+        // No overlap, add as new interval
+        merged.push(current);
+      }
+    }
+    
+    return merged;
+  };
+  
+  // Calculate total months from merged intervals
+  const calculateMonthsFromIntervals = (intervals: Array<{ start: Date; end: Date }>): number => {
     let totalMonths = 0;
     
-    professionalExperiences.forEach(exp => {
-      const fromDate = new Date(exp.from_date);
-      const toDate = exp.currently_working || !exp.to_date 
-        ? new Date() 
-        : new Date(exp.to_date);
-      
-      const months = (toDate.getFullYear() - fromDate.getFullYear()) * 12 
-        + (toDate.getMonth() - fromDate.getMonth());
-      
+    intervals.forEach(interval => {
+      const months = (interval.end.getFullYear() - interval.start.getFullYear()) * 12 
+        + (interval.end.getMonth() - interval.start.getMonth());
       totalMonths += months;
     });
     
+    return totalMonths;
+  };
+  
+  const calculateTotalExperience = () => {
+    const intervals: Array<{ start: Date; end: Date }> = [];
+    const now = new Date();
+    
+    // Collect intervals from startup mentoring assignments
+    if (mentorMetrics) {
+      // Active assignments: from assigned_at to current date
+      (mentorMetrics.activeAssignments || []).forEach(assignment => {
+        if (assignment.assigned_at) {
+          intervals.push({
+            start: new Date(assignment.assigned_at),
+            end: now
+          });
+        }
+      });
+      
+      // Completed assignments: from assigned_at to completed_at
+      (mentorMetrics.completedAssignments || []).forEach(assignment => {
+        if (assignment.assigned_at) {
+          const endDate = assignment.completed_at 
+            ? new Date(assignment.completed_at)
+            : now;
+          intervals.push({
+            start: new Date(assignment.assigned_at),
+            end: endDate
+          });
+        }
+      });
+    }
+    
+    // Collect intervals from professional experience
+    professionalExperiences.forEach(exp => {
+      if (exp.from_date) {
+        const startDate = new Date(exp.from_date);
+        const endDate = exp.currently_working || !exp.to_date 
+          ? now 
+        : new Date(exp.to_date);
+        intervals.push({
+          start: startDate,
+          end: endDate
+        });
+      }
+    });
+    
+    // Merge overlapping intervals
+    const mergedIntervals = mergeIntervals(intervals);
+    
+    // Calculate total months from merged intervals
+    const totalMonths = calculateMonthsFromIntervals(mergedIntervals);
+    
+    // Format the result
     const years = Math.floor(totalMonths / 12);
     const months = totalMonths % 12;
     
@@ -487,7 +594,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
       const fileName = `${authUser.id}-${Date.now()}.${fileExt}`;
       const filePath = `mentor-logos/${fileName}`;
 
-      console.log('Uploading logo:', { filePath, fileSize: file.size, fileType: file.type });
+      console.log('Uploading profile photo:', { filePath, fileSize: file.size, fileType: file.type });
 
       const { error: uploadError } = await supabase.storage
         .from('mentor-assets')
@@ -498,7 +605,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
       if (uploadError) {
         console.error('Upload error:', uploadError);
-        let errorMessage = 'Failed to upload logo';
+        let errorMessage = 'Failed to upload profile photo';
         
         if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('does not exist')) {
           errorMessage = 'Storage bucket not found. Please contact administrator to set up mentor-assets bucket.';
@@ -516,13 +623,13 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         .from('mentor-assets')
         .getPublicUrl(filePath);
 
-      console.log('Logo uploaded successfully:', publicUrl);
+      console.log('Profile photo uploaded successfully:', publicUrl);
       handleChange('logo_url', publicUrl);
       handleChange('media_type', 'logo');
-      alert('Logo uploaded successfully!');
+      alert('Profile photo uploaded successfully!');
     } catch (error: any) {
-      console.error('Error uploading logo:', error);
-      alert(`Failed to upload logo: ${error.message || 'Unknown error'}`);
+      console.error('Error uploading profile photo:', error);
+      alert(`Failed to upload profile photo: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -601,20 +708,6 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
   return (
     <div>
-      {/* Header with Edit/Save Button in Top Right */}
-      {!isViewOnly && (
-        <div className="flex justify-end mb-4">
-          <Button
-            size="md"
-            variant={isEditing ? "primary" : "secondary"}
-            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-            disabled={isSaving}
-          >
-            {isSaving ? 'Saving...' : isEditing ? <><Save className="h-4 w-4 mr-2" /> Save</> : <><Edit className="h-4 w-4 mr-2" /> Edit Profile</>}
-          </Button>
-        </div>
-      )}
-      
       <div className="space-y-6">
         {/* Basic Information */}
         <div className="space-y-4">
@@ -851,62 +944,34 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
         </div>
 
-        {/* Experience */}
+        {/* Startup Experience */}
         <div className="space-y-4">
-          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Experience</h4>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              label="Years of Experience"
-              type="number"
-              value={profile.years_of_experience?.toString() || ''}
-              onChange={(e) => handleChange('years_of_experience', e.target.value ? parseInt(e.target.value) : null)}
-              disabled={!isEditing || isViewOnly}
-              placeholder="e.g., 10"
-            />
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Startup Mentoring
-                <span className="ml-2 text-xs text-slate-500">(Active - from dashboard)</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                  {mentorMetrics?.startupsMentoring || 0}
+          <div className="flex items-center justify-between border-b pb-2">
+            <h4 className="text-base font-medium text-slate-700">Startup Experience</h4>
+            <div className="flex items-center gap-3">
+              {(professionalExperiences.length > 0 || (mentorMetrics && (mentorMetrics.activeAssignments?.length > 0 || mentorMetrics.completedAssignments?.length > 0))) && (
+                <div className="text-sm text-slate-600">
+                  <span className="font-semibold text-slate-800">Total Experience: </span>
+                  <span className="text-blue-600 font-medium">{calculateTotalExperience()}</span>
                 </div>
+              )}
+              {!isViewOnly && (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => handleOpenAddForm('active')}
+                  onClick={() => handleOpenAddForm('founded')}
                   className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add startup to increase count"
+                  title="Add startup experience"
                 >
                   <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Add</span>
+                  <span>Add Startup</span>
                 </Button>
+              )}
               </div>
-              <input
-                type="hidden"
-                value={mentorMetrics?.startupsMentoring || 0}
-                onChange={() => {}}
-              />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Previously Mentored (on TMS)
-                <span className="ml-2 text-xs text-slate-500">(Completed - from dashboard)</span>
-              </label>
-              <div className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                {mentorMetrics?.startupsMentoredPreviously || 0}
-              </div>
-              <input
-                type="hidden"
-                value={mentorMetrics?.startupsMentoredPreviously || 0}
-                onChange={() => {}}
-              />
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -935,9 +1000,9 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                   profile.companies_mentored || 0
                 )}
               </div>
-              {professionalExperiences.length > 0 && (
+              {(professionalExperiences.length > 0 || (mentorMetrics && (mentorMetrics.activeAssignments?.length > 0 || mentorMetrics.completedAssignments?.length > 0))) && (
                 <div className="mt-2 text-xs text-slate-600">
-                  <span className="font-medium">Total Professional Experience:</span> {calculateTotalExperience()}
+                  <span className="font-medium">Total Experience:</span> {calculateTotalExperience()}
                 </div>
               )}
               <input
@@ -962,27 +1027,6 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               />
             </div>
 
-            <Input
-              label="Current Role"
-              value={profile.current_role || ''}
-              onChange={(e) => handleChange('current_role', e.target.value)}
-              disabled={!isEditing || isViewOnly}
-              placeholder="e.g., CEO, CTO, Advisor"
-            />
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Professional Experience</label>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowProfessionalExpModal(true)}
-                disabled={!isEditing || isViewOnly}
-                className="w-full flex items-center justify-center gap-2"
-              >
-                <Briefcase className="h-4 w-4" />
-                {professionalExperiences.length > 0 ? `Manage Experience (${professionalExperiences.length})` : 'Add Professional Experience'}
-              </Button>
-            </div>
           </div>
 
           <div>
@@ -1024,222 +1068,10 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
           </div>
         </div>
 
-        {/* Fee Structure */}
+        {/* Relevant Professional Experience */}
         <div className="space-y-4">
-          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Fee Structure</h4>
+          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Relevant Professional Experience</h4>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
-              label="Fee Type"
-              value={profile.fee_type || ''}
-              onChange={(e) => handleChange('fee_type', e.target.value)}
-              disabled={!isEditing || isViewOnly}
-            >
-              <option value="">Select Fee Type</option>
-              {feeTypes.map(type => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </Select>
-
-            {/* Currency - Show for Fees and Hybrid */}
-            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
-              <Select
-                label="Currency"
-                value={profile.fee_currency || 'USD'}
-                onChange={(e) => handleChange('fee_currency', e.target.value)}
-                disabled={!isEditing || isViewOnly}
-              >
-                {currencies.map(currency => (
-                  <option key={currency} value={currency}>{currency}</option>
-                ))}
-              </Select>
-            )}
-
-            {/* Minimum Fee Amount - Show for Fees and Hybrid */}
-            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
-              <Input
-                label="Minimum Fee Amount"
-                type="number"
-                value={profile.fee_amount_min?.toString() || ''}
-                onChange={(e) => handleChange('fee_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
-                disabled={!isEditing || isViewOnly}
-                placeholder="e.g., 1000"
-              />
-            )}
-
-            {/* Maximum Fee Amount - Show for Fees and Hybrid */}
-            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
-              <Input
-                label="Maximum Fee Amount"
-                type="number"
-                value={profile.fee_amount_max?.toString() || ''}
-                onChange={(e) => handleChange('fee_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
-                disabled={!isEditing || isViewOnly}
-                placeholder="e.g., 5000"
-              />
-            )}
-
-            {/* Minimum Equity Amount (ESOP) - Show for Equity and Hybrid */}
-            {(profile.fee_type === 'Equity' || profile.fee_type === 'Hybrid') && (
-              <Input
-                label="Minimum Equity Amount (ESOP)"
-                type="number"
-                step="0.01"
-                value={profile.equity_amount_min?.toString() || ''}
-                onChange={(e) => handleChange('equity_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
-                disabled={!isEditing || isViewOnly}
-                placeholder="e.g., 1000"
-              />
-            )}
-
-            {/* Maximum Equity Amount (ESOP) - Show for Equity and Hybrid */}
-            {(profile.fee_type === 'Equity' || profile.fee_type === 'Hybrid') && (
-              <Input
-                label="Maximum Equity Amount (ESOP)"
-                type="number"
-                step="0.01"
-                value={profile.equity_amount_max?.toString() || ''}
-                onChange={(e) => handleChange('equity_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
-                disabled={!isEditing || isViewOnly}
-                placeholder="e.g., 5000"
-              />
-            )}
-          </div>
-
-        </div>
-
-        {/* Media Section */}
-        <div className="space-y-4">
-          <h4 className="text-base font-medium text-slate-700 border-b pb-2">Logo / Video</h4>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Media Type</label>
-            <div className="flex gap-4">
-              <label className="flex items-center">
-                <input
-                  type="radio"
-                  name="media_type"
-                  value="logo"
-                  checked={profile.media_type === 'logo'}
-                  onChange={() => handleChange('media_type', 'logo')}
-                  disabled={!isEditing || isViewOnly}
-                  className="mr-2"
-                />
-                <ImageIcon className="h-4 w-4 mr-1" />
-                <span className="text-sm text-slate-600">Logo</span>
-              </label>
-              <label className="flex items-center">
-                <input
-                  type="radio"
-                  name="media_type"
-                  value="video"
-                  checked={profile.media_type === 'video'}
-                  onChange={() => handleChange('media_type', 'video')}
-                  disabled={!isEditing || isViewOnly}
-                  className="mr-2"
-                />
-                <Video className="h-4 w-4 mr-1" />
-                <span className="text-sm text-slate-600">YouTube Video</span>
-              </label>
-            </div>
-          </div>
-
-          {profile.media_type === 'logo' ? (
-            <div className="space-y-4">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Logo</label>
-              {profile.logo_url ? (
-                <div className="mb-4">
-                  <img src={profile.logo_url} alt="Logo" className="h-24 w-24 object-contain border border-slate-200 rounded" />
-                </div>
-              ) : null}
-              {isEditing && !isViewOnly && (
-                <div className="flex items-end gap-3">
-                  <div className="mb-1">
-                    <label className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md cursor-pointer hover:bg-blue-700">
-                      <Upload className="h-4 w-4 mr-2" />
-                      Upload Logo
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleLogoUpload}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
-                    <span>OR</span>
-                  </div>
-                  <div className="flex-1">
-                    <Input
-                      label="Logo URL"
-                      type="url"
-                      value={profile.logo_url || ''}
-                      onChange={(e) => handleChange('logo_url', e.target.value)}
-                      disabled={!isEditing || isViewOnly}
-                      placeholder="https://example.com/logo.png"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <Input
-              label="YouTube Video URL"
-              value={profile.video_url || ''}
-              onChange={(e) => handleChange('video_url', e.target.value)}
-              disabled={!isEditing || isViewOnly}
-              placeholder="https://www.youtube.com/watch?v=..."
-            />
-          )}
-        </div>
-      </div>
-
-      {/* Add Startup Form Modal */}
-      <Modal
-        isOpen={showAddFormModal}
-        onClose={handleCloseAddForm}
-        title={
-          formSection === 'active' 
-            ? 'Add Mentoring' 
-            : 'Add Startup Experience'
-        }
-        size="large"
-      >
-        {currentUser?.id && (
-          <MentorDataForm
-            mentorId={currentUser.id}
-            startups={startups}
-            onUpdate={() => {
-              handleCloseAddForm();
-              if (onMetricsUpdate) {
-                onMetricsUpdate();
-              }
-            }}
-            mentorMetrics={mentorMetrics}
-            initialSection={formSection}
-          />
-        )}
-      </Modal>
-
-      {/* Professional Experience Modal */}
-      <Modal
-        isOpen={showProfessionalExpModal}
-        onClose={() => {
-          setShowProfessionalExpModal(false);
-          setEditingExpId(null);
-          setExpForm({
-            company: '',
-            position: '',
-            description: '',
-            from_date: '',
-            to_date: '',
-            currently_working: false,
-          });
-        }}
-        title="Professional Experience"
-        size="large"
-      >
-        <div className="space-y-6">
           {/* List of Professional Experiences */}
           {professionalExperiences.length > 0 && (
             <div className="space-y-3">
@@ -1410,7 +1242,216 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             </div>
           )}
         </div>
+
+        {!excludeSections.includes('feeStructure') && (
+          <div className="space-y-4">
+            {/* Fee Structure */}
+            <div className="border-b pb-2">
+              <h4 className="text-base font-medium text-slate-700 mb-1">Fee Structure</h4>
+              <p className="text-sm font-medium text-amber-600">
+                Note: Track My Startup will charge 20% of mentoring fees to cover operations.
+              </p>
+            </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Select
+              label="Fee Type"
+              value={profile.fee_type || ''}
+              onChange={(e) => handleChange('fee_type', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+            >
+              <option value="">Select Fee Type</option>
+              {feeTypes.map(type => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </Select>
+
+            {/* Currency - Show for Fees and Hybrid */}
+            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
+              <Select
+                label="Currency"
+                value={profile.fee_currency || 'USD'}
+                onChange={(e) => handleChange('fee_currency', e.target.value)}
+                disabled={!isEditing || isViewOnly}
+              >
+                {currencies.map(currency => (
+                  <option key={currency} value={currency}>{currency}</option>
+                ))}
+              </Select>
+            )}
+
+            {/* Minimum Fee Amount - Show for Fees and Hybrid */}
+            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
+              <Input
+                label="Minimum Fee Amount"
+                type="number"
+                value={profile.fee_amount_min?.toString() || ''}
+                onChange={(e) => handleChange('fee_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g., 1000"
+              />
+            )}
+
+            {/* Maximum Fee Amount - Show for Fees and Hybrid */}
+            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
+              <Input
+                label="Maximum Fee Amount"
+                type="number"
+                value={profile.fee_amount_max?.toString() || ''}
+                onChange={(e) => handleChange('fee_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g., 5000"
+              />
+            )}
+
+              {/* Minimum Stock Options Amount (ESOP) - Show for Stock Options and Hybrid */}
+              {(profile.fee_type === 'Stock Options' || profile.fee_type === 'Hybrid') && (
+              <Input
+                  label="Minimum Stock Options Amount (ESOP)"
+                type="number"
+                step="0.01"
+                  min="0"
+                value={profile.equity_amount_min?.toString() || ''}
+                onChange={(e) => handleChange('equity_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g., 1000"
+              />
+            )}
+
+              {/* Maximum Stock Options Amount (ESOP) - Show for Stock Options and Hybrid */}
+              {(profile.fee_type === 'Stock Options' || profile.fee_type === 'Hybrid') && (
+              <Input
+                  label="Maximum Stock Options Amount (ESOP)"
+                type="number"
+                step="0.01"
+                  min="0"
+                value={profile.equity_amount_max?.toString() || ''}
+                onChange={(e) => handleChange('equity_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g., 5000"
+              />
+            )}
+          </div>
+
+        </div>
+        )}
+
+        {!excludeSections.includes('media') && (
+        <div className="space-y-4">
+            {/* Media Section */}
+            <h4 className="text-base font-medium text-slate-700 border-b pb-2">Profile Photo / Video</h4>
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Media Type</label>
+            <div className="flex gap-4">
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="media_type"
+                  value="logo"
+                  checked={profile.media_type === 'logo'}
+                  onChange={() => handleChange('media_type', 'logo')}
+                  disabled={!isEditing || isViewOnly}
+                  className="mr-2"
+                />
+                <ImageIcon className="h-4 w-4 mr-1" />
+                  <span className="text-sm text-slate-600">Profile Photo</span>
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="media_type"
+                  value="video"
+                  checked={profile.media_type === 'video'}
+                  onChange={() => handleChange('media_type', 'video')}
+                  disabled={!isEditing || isViewOnly}
+                  className="mr-2"
+                />
+                <Video className="h-4 w-4 mr-1" />
+                  <span className="text-sm text-slate-600">Profile Video</span>
+              </label>
+            </div>
+          </div>
+
+          {profile.media_type === 'logo' ? (
+            <div className="space-y-4">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Profile Photo</label>
+              {profile.logo_url ? (
+                <div className="mb-4">
+                    <img src={profile.logo_url} alt="Profile Photo" className="h-24 w-24 object-contain border border-slate-200 rounded" />
+                </div>
+              ) : null}
+              {isEditing && !isViewOnly && (
+                <div className="flex items-end gap-3">
+                  <div className="mb-1">
+                    <label className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md cursor-pointer hover:bg-blue-700">
+                      <Upload className="h-4 w-4 mr-2" />
+                        Upload Profile Photo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
+                    <span>OR</span>
+                  </div>
+                  <div className="flex-1">
+                    <Input
+                        label="Profile Photo URL"
+                      type="url"
+                      value={profile.logo_url || ''}
+                      onChange={(e) => handleChange('logo_url', e.target.value)}
+                      disabled={!isEditing || isViewOnly}
+                        placeholder="https://example.com/profile-photo.png"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Input
+                label="Profile Video URL"
+              value={profile.video_url || ''}
+              onChange={(e) => handleChange('video_url', e.target.value)}
+              disabled={!isEditing || isViewOnly}
+              placeholder="https://www.youtube.com/watch?v=..."
+            />
+          )}
+        </div>
+        )}
+
+      </div>
+
+      {/* Add Startup Form Modal */}
+      <Modal
+        isOpen={showAddFormModal}
+        onClose={handleCloseAddForm}
+        title={
+          formSection === 'active' 
+            ? 'Add Mentoring' 
+            : 'Add Startup Experience'
+        }
+        size="large"
+      >
+        {currentUser?.id && (
+          <MentorDataForm
+            mentorId={currentUser.id}
+            startups={startups}
+            onUpdate={() => {
+              handleCloseAddForm();
+              if (onMetricsUpdate) {
+                onMetricsUpdate();
+              }
+            }}
+            mentorMetrics={mentorMetrics}
+            initialSection={formSection}
+          />
+        )}
       </Modal>
+
     </div>
   );
 };

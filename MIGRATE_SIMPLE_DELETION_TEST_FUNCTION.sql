@@ -65,3 +65,5 @@ SELECT '✅ Function simple_deletion_test() migrated to use user_profiles (NO FA
 
 
 
+
+

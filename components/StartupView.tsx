@@ -77,10 +77,11 @@ const StartupView: React.FC<StartupViewProps> = ({
 
   const handleShare = async (startup: Startup) => {
     // Create clean public shareable link
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.set('view', 'startup');
-    url.searchParams.set('startupId', String(startup.id));
-    const shareUrl = url.toString();
+    const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+    const startupName = startup.name || 'Startup';
+    const slug = createSlug(startupName);
+    const baseUrl = window.location.origin + window.location.pathname;
+    const shareUrl = createProfileUrl(baseUrl, 'startup', 'startupId', String(startup.id), slug);
     const details = `Startup: ${startup.name}\nSector: ${startup.sector}\nValuation: ₹${startup.current_valuation}L\nFunding: ₹${startup.total_funding}L\nRevenue: ₹${startup.total_revenue}L\n\nView startup: ${shareUrl}`;
     try {
       if (navigator.share) {

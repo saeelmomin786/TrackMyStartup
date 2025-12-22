@@ -2,6 +2,7 @@ import React from 'react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Briefcase, MapPin, DollarSign, TrendingUp, Eye, Image as ImageIcon, Video, Globe, Linkedin, Mail, Building2, Share2, Send, UserPlus } from 'lucide-react';
+import { createSlug, createProfileUrl } from '../../lib/slugUtils';
 
 interface InvestorProfile {
   id?: string;
@@ -63,11 +64,11 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
     return null;
   };
 
-  const formatCurrency = (value?: number) => {
+  const formatCurrency = (value?: number, currency: string = 'USD') => {
     if (!value) return 'N/A';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD',
+      currency: currency,
       notation: 'compact',
       maximumFractionDigits: 0
     }).format(value);
@@ -79,16 +80,21 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
 
   const handleShare = async () => {
     // Create clean public shareable link similar to startup sharing
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.set('view', 'investor');
-    if (investor.id) {
-      url.searchParams.set('investorId', investor.id);
-    } else if (investor.user_id) {
-      url.searchParams.set('userId', investor.user_id);
-    }
-    const shareUrl = url.toString();
+    const investorName = investor.investor_name || investor.user?.name || 'Investor';
+    const slug = createSlug(investorName);
+    const baseUrl = window.location.origin + window.location.pathname;
     
-    const shareText = `Investor: ${investor.investor_name || 'Investor'}\nFirm Type: ${investor.firm_type || 'N/A'}\nLocation: ${investor.global_hq || 'N/A'}\nInvestment Range: ${investor.ticket_size_min && investor.ticket_size_max ? `${formatCurrency(investor.ticket_size_min)} - ${formatCurrency(investor.ticket_size_max)}` : 'N/A'}\n\nView investor profile: ${shareUrl}`;
+    let shareUrl: string;
+    if (investor.id) {
+      shareUrl = createProfileUrl(baseUrl, 'investor', 'investorId', investor.id, slug);
+    } else if (investor.user_id) {
+      shareUrl = createProfileUrl(baseUrl, 'investor', 'userId', investor.user_id, slug);
+    } else {
+      return;
+    }
+    
+    const investorCurrency = (investor as any).currency || 'USD';
+    const shareText = `Investor: ${investor.investor_name || 'Investor'}\nFirm Type: ${investor.firm_type || 'N/A'}\nLocation: ${investor.global_hq || 'N/A'}\nInvestment Range: ${investor.ticket_size_min && investor.ticket_size_max ? `${formatCurrency(investor.ticket_size_min, investorCurrency)} - ${formatCurrency(investor.ticket_size_max, investorCurrency)}` : 'N/A'}\n\nView investor profile: ${shareUrl}`;
 
     try {
       if (navigator.share) {
@@ -128,14 +134,19 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
       onView(investor);
     } else {
       // Navigate to public investor profile page via URL (similar to startup sharing)
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.set('view', 'investor');
+      const investorName = investor.investor_name || investor.user?.name || 'Investor';
+      const slug = createSlug(investorName);
+      const baseUrl = window.location.origin + window.location.pathname;
+      
+      let url: string;
       if (investor.id) {
-        url.searchParams.set('investorId', investor.id);
+        url = createProfileUrl(baseUrl, 'investor', 'investorId', investor.id, slug);
       } else if (investor.user_id) {
-        url.searchParams.set('userId', investor.user_id);
+        url = createProfileUrl(baseUrl, 'investor', 'userId', investor.user_id, slug);
+      } else {
+        return;
       }
-      window.location.href = url.toString();
+      window.location.href = url;
     }
   };
 
@@ -224,7 +235,7 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
               {(investor.firm_type || investor.global_hq) && <span className="text-slate-300">•</span>}
               <span className="text-slate-600 flex items-center gap-1.5">
                 <DollarSign className="h-4 w-4 text-slate-500" />
-                <span>{formatCurrency(investor.ticket_size_min)} - {formatCurrency(investor.ticket_size_max)}</span>
+                <span>{formatCurrency(investor.ticket_size_min, (investor as any).currency || 'USD')} - {formatCurrency(investor.ticket_size_max, (investor as any).currency || 'USD')}</span>
               </span>
             </>
           )}

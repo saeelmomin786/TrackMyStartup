@@ -4,6 +4,7 @@ import { mentorService } from '../../lib/mentorService';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Briefcase, MapPin, Users, TrendingUp, Eye, Image as ImageIcon, Video, Globe, Linkedin, Mail, Award, DollarSign, ChevronDown, ChevronUp, Share2 } from 'lucide-react';
+import { createSlug, createProfileUrl } from '../../lib/slugUtils';
 
 interface ProfessionalExperience {
   id: number;
@@ -77,16 +78,19 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
   const handleShare = async () => {
     if (!mentor.user_id && !mentor.id) return;
 
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.set('view', 'mentor');
-    if (mentor.id) {
-      url.searchParams.set('mentorId', mentor.id);
-    } else if (mentor.user_id) {
-      url.searchParams.set('userId', mentor.user_id);
-    }
-    const shareUrl = url.toString();
-
     const mentorName = mentor.mentor_name || mentor.user?.name || 'Mentor';
+    const slug = createSlug(mentorName);
+    const baseUrl = window.location.origin + window.location.pathname;
+    
+    let shareUrl: string;
+    if (mentor.id) {
+      shareUrl = createProfileUrl(baseUrl, 'mentor', 'mentorId', mentor.id, slug);
+    } else if (mentor.user_id) {
+      shareUrl = createProfileUrl(baseUrl, 'mentor', 'userId', mentor.user_id, slug);
+    } else {
+      return;
+    }
+
     const location = mentor.location || '';
     const expertise = (mentor.expertise_areas || []).join(', ');
     const sectors = (mentor.sectors || []).join(', ');

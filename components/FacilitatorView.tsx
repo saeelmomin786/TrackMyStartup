@@ -484,10 +484,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     console.log('Share button clicked for startup:', startup.name);
     console.log('Startup object:', startup);
     // Build a deep link to this pitch in Facilitator Discover tab
-    const url = new URL(window.location.href);
-    url.searchParams.set('tab', 'discover');
-    url.searchParams.set('pitchId', String(startup.id));
-    const shareUrl = url.toString();
+    // For facilitator view, we still link to the public startup page with slug
+    const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+    const startupName = startup.name || 'Startup';
+    const slug = createSlug(startupName);
+    const baseUrl = window.location.origin + window.location.pathname;
+    const shareUrl = createProfileUrl(baseUrl, 'startup', 'startupId', String(startup.id), slug);
     // Calculate valuation from investment value and equity allocation
     const valuation = startup.equityAllocation > 0 ? (startup.investmentValue / (startup.equityAllocation / 100)) : 0;
     const inferredCurrency =

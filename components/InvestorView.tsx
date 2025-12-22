@@ -83,10 +83,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         console.log('Share button clicked for startup:', startup.name);
         console.log('Startup object:', startup);
         // Build a public shareable link to the startup page
-        const url = new URL(window.location.origin + window.location.pathname);
-        url.searchParams.set('view', 'startup');
-        url.searchParams.set('startupId', String(startup.id));
-        const shareUrl = url.toString();
+        const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+        const startupName = startup.name || 'Startup';
+        const slug = createSlug(startupName);
+        const baseUrl = window.location.origin + window.location.pathname;
+        const shareUrl = createProfileUrl(baseUrl, 'startup', 'startupId', String(startup.id), slug);
         const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\n\nView startup: ${shareUrl}`;
         console.log('Share details:', details);
         try {
@@ -2695,8 +2696,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         <div className="space-y-8 animate-fade-in">
             {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <SummaryCard title="Total Funding" value={formatCurrency(totalFunding)} icon={<DollarSign className="h-6 w-6 text-brand-primary" />} />
-            <SummaryCard title="Total Revenue" value={formatCurrency(totalRevenue)} icon={<TrendingUp className="h-6 w-6 text-brand-primary" />} />
+            <SummaryCard title="Total Funding" value={formatCurrency(totalFunding, 'USD')} icon={<DollarSign className="h-6 w-6 text-brand-primary" />} />
+            <SummaryCard title="Total Revenue" value={formatCurrency(totalRevenue, 'USD')} icon={<TrendingUp className="h-6 w-6 text-brand-primary" />} />
             <SummaryCard title="Compliance Rate" value={`${complianceRate.toFixed(1)}%`} icon={<CheckSquare className="h-6 w-6 text-brand-primary" />} />
             <SummaryCard title="My Startups" value={`${startups.length}`} icon={<Users className="h-6 w-6 text-brand-primary" />} />
           </div>
@@ -2728,7 +2729,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                     .map(req => (
                                     <tr key={req.id}>
                                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-slate-900">{req.name}</td>
-                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">{formatCurrency(req.investmentValue)}</td>
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">{formatCurrency(req.investmentValue, (req as any).currency || 'USD')}</td>
                                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">{req.equityAllocation}%</td>
                                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
                                             {!isViewOnly && (
@@ -2796,9 +2797,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                             <div className="text-xs sm:text-sm font-medium text-slate-900">{startup.name}</div>
                                             <div className="text-xs text-slate-500">{startup.sector}</div>
                                         </td>
-                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">{formatCurrency(startup.currentValuation)}</td>
+                                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">{formatCurrency(startup.currentValuation, startup.currency || 'USD')}</td>
                                             <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                                {investmentAmount ? formatCurrency(investmentAmount) : 'N/A'}
+                                                {investmentAmount ? formatCurrency(investmentAmount, startup.currency || 'USD') : 'N/A'}
                                             </td>
                                             <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                                 {equityPercentage !== null && equityPercentage !== undefined ? `${equityPercentage}%` : 'N/A'}
@@ -2838,10 +2839,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                                                 <div className="text-xs text-slate-500">{addedStartup.sector || 'N/A'}</div>
                                             </td>
                                             <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                                {addedStartup.current_valuation ? formatCurrency(addedStartup.current_valuation) : 'N/A'}
+                                                {addedStartup.current_valuation ? formatCurrency(addedStartup.current_valuation, addedStartup.currency || 'USD') : 'N/A'}
                                             </td>
                                             <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                                {addedStartup.investment_amount ? formatCurrency(addedStartup.investment_amount) : 'N/A'}
+                                                {addedStartup.investment_amount ? formatCurrency(addedStartup.investment_amount, addedStartup.currency || 'USD') : 'N/A'}
                                             </td>
                                             <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
                                                 {addedStartup.equity_percentage !== null && addedStartup.equity_percentage !== undefined ? `${addedStartup.equity_percentage}%` : 'N/A'}
@@ -5151,13 +5152,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                               const proportionalLeadEquity = totalAsk > 0 && equityPct > 0 ? (equityPct * (leadCommitted / totalAsk)) : 0;
                               const leadEquityPct = leadEquityFromOffer > 0 ? leadEquityFromOffer : proportionalLeadEquity;
                               const fmtPct = (v: number) => `${Number.isFinite(v) ? v.toFixed(2) : '0.00'}%`;
+                              const startupCurrency = opp.startup?.currency || (opp as any).currency || 'USD';
                               return (
                                 <div className="text-xs text-slate-600 mt-0.5">
-                                  Total ask <span className="font-medium text-slate-800">{formatCurrency(totalAsk)}</span>
+                                  Total ask <span className="font-medium text-slate-800">{formatCurrency(totalAsk, startupCurrency)}</span>
                                   {equityPct > 0 && <> for <span className="font-medium text-slate-800">{fmtPct(equityPct)}</span> equity</>}
-                                  {' '}• You committed <span className="font-medium text-slate-800">{formatCurrency(leadCommitted)}</span>
+                                  {' '}• You committed <span className="font-medium text-slate-800">{formatCurrency(leadCommitted, startupCurrency)}</span>
                                   {leadEquityPct > 0 && <> for <span className="font-medium text-slate-800">{fmtPct(leadEquityPct)}</span> equity</>}
-                                  {' '}• Remaining <span className="font-medium text-slate-800">{formatCurrency(remaining)}</span>
+                                  {' '}• Remaining <span className="font-medium text-slate-800">{formatCurrency(remaining, startupCurrency)}</span>
                                 </div>
                               );
                             })()}
@@ -6097,7 +6099,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             <form onSubmit={handleOfferSubmit} className="space-y-4">
                 <p className="text-sm text-slate-600">
                     You are making an offer for <span className="font-semibold">{selectedOpportunity?.name}</span>. 
-                    The current ask is <span className="font-semibold">{investorService.formatCurrency(selectedOpportunity?.investmentValue || 0)}</span> for <span className="font-semibold">{selectedOpportunity?.equityAllocation}%</span> equity.
+                    The current ask is <span className="font-semibold">{investorService.formatCurrency(selectedOpportunity?.investmentValue || 0, (selectedOpportunity as any)?.currency || 'USD')}</span> for <span className="font-semibold">{selectedOpportunity?.equityAllocation}%</span> equity.
                 </p>
                 
                 <div>

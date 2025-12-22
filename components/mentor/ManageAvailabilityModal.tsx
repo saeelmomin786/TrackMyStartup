@@ -11,6 +11,7 @@ interface ManageAvailabilityModalProps {
   isOpen: boolean;
   onClose: () => void;
   mentorId: string;
+  initialSlot?: AvailabilitySlot;
 }
 
 const DAYS_OF_WEEK = [
@@ -26,12 +27,13 @@ const DAYS_OF_WEEK = [
 const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
   isOpen,
   onClose,
-  mentorId
+  mentorId,
+  initialSlot
 }) => {
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingSlot, setEditingSlot] = useState<AvailabilitySlot | null>(null);
+  const [editingSlot, setEditingSlot] = useState<AvailabilitySlot | null>(initialSlot || null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -39,17 +41,64 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
   const [slotType, setSlotType] = useState<'recurring' | 'one-time'>('recurring');
   const [dayOfWeek, setDayOfWeek] = useState<number>(1);
   const [specificDate, setSpecificDate] = useState('');
-  const [startTime, setStartTime] = useState('09:00');
-  const [endTime, setEndTime] = useState('10:00');
-  const [validFrom, setValidFrom] = useState('');
+  const [startTime, setStartTime] = useState(() => {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  });
+  const [endTime, setEndTime] = useState(() => {
+    const now = new Date();
+    now.setHours(now.getHours() + 1);
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  });
+  const [validFrom, setValidFrom] = useState(() => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  });
   const [validUntil, setValidUntil] = useState('');
   const [timezone, setTimezone] = useState('UTC');
 
   useEffect(() => {
     if (isOpen && mentorId) {
       loadSlots();
+      if (initialSlot) {
+        setEditingSlot(initialSlot);
+        setShowAddForm(true);
+        // Populate form with initial slot data
+        setSlotType(initialSlot.is_recurring ? 'recurring' : 'one-time');
+        setDayOfWeek(initialSlot.day_of_week ?? 1);
+        setSpecificDate(initialSlot.specific_date || '');
+        setStartTime(initialSlot.start_time || '09:00');
+        setEndTime(initialSlot.end_time || '10:00');
+        setValidFrom(initialSlot.valid_from || '');
+        setValidUntil(initialSlot.valid_until || '');
+        setTimezone(initialSlot.timezone || 'UTC');
+      } else {
+        // Reset form when no initial slot
+        setEditingSlot(null);
+        setShowAddForm(false);
+      }
     }
   }, [isOpen, mentorId]);
+  
+  // Separate effect for initialSlot to avoid dependency array issues
+  useEffect(() => {
+    if (isOpen && initialSlot) {
+      setEditingSlot(initialSlot);
+      setShowAddForm(true);
+      setSlotType(initialSlot.is_recurring ? 'recurring' : 'one-time');
+      setDayOfWeek(initialSlot.day_of_week ?? 1);
+      setSpecificDate(initialSlot.specific_date || '');
+      setStartTime(initialSlot.start_time || '09:00');
+      setEndTime(initialSlot.end_time || '10:00');
+      setValidFrom(initialSlot.valid_from || '');
+      setValidUntil(initialSlot.valid_until || '');
+      setTimezone(initialSlot.timezone || 'UTC');
+    }
+  }, [initialSlot, isOpen]);
 
   const loadSlots = async () => {
     setIsLoading(true);
@@ -68,9 +117,17 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
     setSlotType('recurring');
     setDayOfWeek(1);
     setSpecificDate('');
-    setStartTime('09:00');
-    setEndTime('10:00');
-    setValidFrom('');
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    setStartTime(`${hours}:${minutes}`);
+    const endTimeDate = new Date(now);
+    endTimeDate.setHours(now.getHours() + 1);
+    const endHours = String(endTimeDate.getHours()).padStart(2, '0');
+    const endMinutes = String(endTimeDate.getMinutes()).padStart(2, '0');
+    setEndTime(`${endHours}:${endMinutes}`);
+    const today = new Date();
+    setValidFrom(today.toISOString().split('T')[0]);
     setValidUntil('');
     setTimezone('UTC');
     setEditingSlot(null);
@@ -93,6 +150,27 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
     if (slotType === 'one-time' && !specificDate) {
       setError('Please select a specific date for one-time slot');
       return;
+    }
+
+    // Prevent creating slots in the past
+    if (slotType === 'one-time' && specificDate) {
+      const slotDateTime = new Date(`${specificDate}T${startTime}`);
+      const now = new Date();
+      if (slotDateTime < now) {
+        setError('Cannot create slots in the past. Please select a future date and time.');
+        return;
+      }
+    }
+
+    // For recurring slots, check valid_from is not in the past
+    if (slotType === 'recurring' && validFrom) {
+      const validFromDate = new Date(validFrom);
+      const now = new Date();
+      now.setHours(0, 0, 0, 0); // Compare dates only
+      if (validFromDate < now) {
+        setError('Valid from date cannot be in the past. Please select today or a future date.');
+        return;
+      }
     }
 
     if (validFrom && validUntil && validFrom > validUntil) {

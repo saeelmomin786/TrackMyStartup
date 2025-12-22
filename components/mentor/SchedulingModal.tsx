@@ -5,6 +5,7 @@ import Input from '../ui/Input';
 import Select from '../ui/Select';
 import { mentorSchedulingService, AvailabilitySlot } from '../../lib/mentorSchedulingService';
 import { googleCalendarService } from '../../lib/googleCalendarService';
+import { supabase } from '../../lib/supabase';
 import { Calendar, Clock, Video } from 'lucide-react';
 import { formatDateWithWeekday, formatTimeAMPM } from '../../lib/dateTimeUtils';
 
@@ -26,8 +27,7 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
   onSessionBooked
 }) => {
   const [availableSlots, setAvailableSlots] = useState<Array<{ date: string; time: string; slotId: number }>>([]);
-  const [selectedDate, setSelectedDate] = useState('');
-  const [selectedTime, setSelectedTime] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null);
   const [duration, setDuration] = useState(60);
   const [isLoading, setIsLoading] = useState(false);
   const [isBooking, setIsBooking] = useState(false);
@@ -74,8 +74,8 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
   };
 
   const handleBookSession = async () => {
-    if (!selectedDate || !selectedTime) {
-      setError('Please select a date and time');
+    if (!selectedSlot) {
+      setError('Please select a time slot');
       return;
     }
 
@@ -96,50 +96,106 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
         mentorId,
         startupId,
         assignmentId,
-        selectedDate,
-        selectedTime,
+        selectedSlot.date,
+        selectedSlot.time,
         duration,
         'UTC',
         meetLink
       );
 
-      // If mentor has Google Calendar, create event
+      // Create calendar event in our centralized calendar with both mentor and startup as attendees
       try {
-        const integration = await googleCalendarService.getIntegration(mentorId, 'Mentor');
-        if (integration && integration.calendar_sync_enabled) {
-          const startDateTime = new Date(`${selectedDate}T${selectedTime}`);
+        // Get mentor and startup emails
+        const { data: mentorUser } = await supabase
+          .from('users')
+          .select('email')
+          .eq('id', mentorId)
+          .single();
+
+        const { data: startupData } = await supabase
+          .from('startups')
+          .select('user_id')
+          .eq('id', startupId)
+          .single();
+
+        let startupEmail: string | null = null;
+        if (startupData?.user_id) {
+          const { data: startupUser } = await supabase
+            .from('users')
+            .select('email')
+            .eq('id', startupData.user_id)
+            .single();
+          startupEmail = startupUser?.email || null;
+        }
+
+        // Build attendees list
+        const attendees: Array<{ email: string }> = [];
+        if (mentorUser?.email) {
+          attendees.push({ email: mentorUser.email });
+        }
+        if (startupEmail) {
+          attendees.push({ email: startupEmail });
+        }
+
+        // Create event in centralized calendar using service account
+        if (attendees.length > 0 && meetLink) {
+          const startDateTime = new Date(`${selectedSlot.date}T${selectedSlot.time}`);
           const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
 
-          await googleCalendarService.createCalendarEventWithMeet(integration, {
-            summary: 'Mentoring Session',
-            description: 'Mentoring session with startup',
-            start: {
-              dateTime: startDateTime.toISOString(),
-              timeZone: 'UTC'
+          await googleCalendarService.createCalendarEventWithServiceAccount(
+            {
+              summary: 'Mentoring Session',
+              description: `Mentoring session scheduled through Track My Startup\n\nGoogle Meet Link: ${meetLink}`,
+              start: {
+                dateTime: startDateTime.toISOString(),
+                timeZone: 'UTC'
+              },
+              end: {
+                dateTime: endDateTime.toISOString(),
+                timeZone: 'UTC'
+              }
             },
-            end: {
-              dateTime: endDateTime.toISOString(),
-              timeZone: 'UTC'
-            }
-          });
+            attendees,
+            meetLink // Use the same Meet link from dashboard
+          );
+
+          console.log('✅ Calendar event created in centralized calendar with attendees:', attendees);
         }
       } catch (err) {
         console.warn('Failed to create Google Calendar event, continuing:', err);
+        // Don't block booking if calendar creation fails
       }
 
       onSessionBooked();
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Failed to book session. Please try again.');
+      // Check if it's a double-booking error
+      if (err.message?.includes('already been booked') || 
+          err.message?.includes('already booked')) {
+        setError('This time slot is no longer available. Please select another time.');
+        // Reload available slots to refresh the list
+        loadAvailableSlots();
+      } else {
+        setError(err.message || 'Failed to book session. Please try again.');
+      }
     } finally {
       setIsBooking(false);
     }
   };
 
-  const slotsForSelectedDate = availableSlots.filter(slot => slot.date === selectedDate);
+  // Group slots by date
+  const slotsByDate = availableSlots.reduce((acc, slot) => {
+    if (!acc[slot.date]) {
+      acc[slot.date] = [];
+    }
+    acc[slot.date].push(slot);
+    return acc;
+  }, {} as Record<string, Array<{ date: string; time: string; slotId: number }>>);
+
+  const sortedDates = Object.keys(slotsByDate).sort();
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Schedule Session">
+    <Modal isOpen={isOpen} onClose={onClose} title="Schedule Session" size="lg">
       <div className="space-y-4">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
@@ -147,83 +203,66 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
           </div>
         )}
 
-        <div>
-          <Select
-            label="Duration (minutes)"
-            id="duration"
-            value={duration.toString()}
-            onChange={(e) => setDuration(parseInt(e.target.value))}
-          >
-            <option value="30">30 minutes</option>
-            <option value="60">1 hour</option>
-            <option value="90">1.5 hours</option>
-            <option value="120">2 hours</option>
-          </Select>
-        </div>
+        {isLoading ? (
+          <div className="text-center py-8">
+            <div className="text-slate-500">Loading available slots...</div>
+          </div>
+        ) : availableSlots.length === 0 ? (
+          <div className="text-center py-8">
+            <Calendar className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+            <p className="text-slate-600 mb-2">No available slots at this time.</p>
+          </div>
+        ) : (
+          <>
+            <div className="max-h-96 overflow-y-auto space-y-4">
+              {sortedDates.map((date) => (
+                <div key={date} className="bg-white rounded-md p-4 border border-slate-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Calendar className="h-4 w-4 text-slate-500" />
+                    <span className="font-semibold text-slate-900">
+                      {formatDateWithWeekday(date)}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      ({slotsByDate[date].length} slots)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                    {slotsByDate[date].map((slot, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => setSelectedSlot({ date: slot.date, time: slot.time })}
+                        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                          selectedSlot?.date === slot.date && selectedSlot?.time === slot.time
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {formatTimeAMPM(slot.time)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Select Date
-          </label>
-          <Input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => {
-              setSelectedDate(e.target.value);
-              setSelectedTime(''); // Reset time when date changes
-            }}
-            min={startDate}
-            max={endDate}
-          />
-        </div>
-
-        {selectedDate && (
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Available Times
-            </label>
-            {isLoading ? (
-              <div className="text-sm text-slate-500 py-4">Loading available times...</div>
-            ) : slotsForSelectedDate.length === 0 ? (
-              <div className="text-sm text-slate-500 py-4">
-                No available slots for this date. Please select another date.
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-                {slotsForSelectedDate.map((slot, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => setSelectedTime(slot.time)}
-                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      selectedTime === slot.time
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    {formatTimeAMPM(slot.time)}
-                  </button>
-                ))}
+            {selectedSlot && (
+              <div className="p-3 bg-blue-50 rounded-md border border-blue-200">
+                <div className="flex items-center gap-2 text-sm text-slate-700">
+                  <Calendar className="h-4 w-4" />
+                  <span className="font-medium">{formatDateWithWeekday(selectedSlot.date)}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-slate-700 mt-1">
+                  <Clock className="h-4 w-4" />
+                  <span>{formatTimeAMPM(selectedSlot.time)} ({duration} minutes)</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-blue-600 mt-2">
+                  <Video className="h-4 w-4" />
+                  <span>Google Meet link will be generated after booking</span>
+                </div>
               </div>
             )}
-          </div>
-        )}
-
-        {selectedDate && selectedTime && (
-          <div className="p-3 bg-blue-50 rounded-md">
-            <div className="flex items-center gap-2 text-sm text-slate-700">
-              <Calendar className="h-4 w-4" />
-              <span>{formatDateWithWeekday(selectedDate)}</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-slate-700 mt-1">
-              <Clock className="h-4 w-4" />
-              <span>{formatTimeAMPM(selectedTime)} ({duration} minutes)</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-blue-600 mt-2">
-              <Video className="h-4 w-4" />
-              <span>Google Meet link will be generated after booking</span>
-            </div>
-          </div>
+          </>
         )}
 
         <div className="flex justify-end gap-2 pt-4 border-t">
@@ -232,7 +271,7 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
           </Button>
           <Button
             onClick={handleBookSession}
-            disabled={!selectedDate || !selectedTime || isBooking}
+            disabled={!selectedSlot || isBooking}
           >
             {isBooking ? 'Booking...' : 'Book Session'}
           </Button>

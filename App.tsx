@@ -3759,51 +3759,25 @@ const App: React.FC = () => {
                       
                       try {
                         // Wait a moment for the database to update (switchProfile already waits 300ms)
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                        await new Promise(resolve => setTimeout(resolve, 300));
                         
-                        // Reload user data after profile switch - try multiple times if needed
-                        let refreshedUser = null;
-                        for (let attempt = 1; attempt <= 3; attempt++) {
-                          // Force refresh to get latest profile data (not from cache)
-                          refreshedUser = await authService.getCurrentUser(attempt === 1); // Force refresh on first attempt
-                          console.log(`🔄 Attempt ${attempt}: Refreshed user after switch:`, refreshedUser?.role, refreshedUser?.id, 'Expected:', profile.role, profile.id);
-                          
-                          // Check if we got the correct profile (now both use profile_id)
-                          if (refreshedUser && refreshedUser.id === profile.id) {
-                            console.log('✅ Got correct profile!');
-                            break;
-                          }
-                          
-                          if (attempt < 3) {
-                            console.log(`⏳ Waiting for profile to update (attempt ${attempt}/3)...`);
-                            await new Promise(resolve => setTimeout(resolve, 500));
-                          }
-                        }
-                        
-                        if (!refreshedUser) {
-                          console.error('❌ Could not get refreshed user after switch');
-                          alert('Failed to load profile. Please refresh the page.');
-                          window.location.reload();
-                          return;
-                        }
+                        // Verify the switch worked by checking current user
+                        const refreshedUser = await authService.getCurrentUser(true); // Force refresh
+                        console.log('🔄 Verified profile after switch:', refreshedUser?.role, refreshedUser?.id, 'Expected:', profile.role, profile.id);
                         
                         // Verify we got the right profile
-                        if (refreshedUser.id !== profile.id) {
-                          console.warn('⚠️ Profile ID mismatch! Expected:', profile.id, 'Got:', refreshedUser.id);
-                          console.warn('⚠️ Expected role:', profile.role, 'Got role:', refreshedUser.role);
-                          // Still proceed, but log the issue
+                        if (refreshedUser && refreshedUser.id === profile.id) {
+                          console.log('✅ Profile switch verified successfully!');
+                        } else {
+                          console.warn('⚠️ Profile ID mismatch! Expected:', profile.id, 'Got:', refreshedUser?.id);
                         }
                         
-                        console.log('✅ Updating currentUser state with:', refreshedUser.role);
+                        // AUTOMATIC REFRESH: Reload page to ensure all data loads correctly with new profile
+                        console.log('🔄 Refreshing page to load all data for new profile...');
+                        window.location.reload();
                         
-                        // CRITICAL FIX: Clear selectedStartup when switching profiles
-                        // This ensures we don't show old startup data when switching between profiles
-                        console.log('🔄 Clearing selectedStartup to prevent showing old data');
-                        setSelectedStartup(null);
-                        selectedStartupRef.current = null;
-                        
-                        // Update current user state
-                        setCurrentUser(refreshedUser);
+                        // Note: Code below won't execute due to page reload, but kept for reference
+                        return;
                         
                         // Check if profile is complete
                         const isComplete = await authService.isProfileComplete(refreshedUser.id);
@@ -3935,56 +3909,35 @@ const App: React.FC = () => {
                       console.log('🔄 Profile switched to (mobile menu):', profile.role, profile.id);
                       
                       try {
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                        // Wait longer for the database to fully update
+                        await new Promise(resolve => setTimeout(resolve, 500));
                         
+                        // Verify the switch worked by checking current user (with retry)
                         let refreshedUser = null;
                         for (let attempt = 1; attempt <= 3; attempt++) {
-                          refreshedUser = await authService.getCurrentUser();
-                          console.log(`🔄 Attempt ${attempt} (mobile):`, refreshedUser?.role, refreshedUser?.id, 'Expected:', profile.role, profile.id);
+                          refreshedUser = await authService.getCurrentUser(true); // Force refresh
+                          console.log(`🔄 Attempt ${attempt} (mobile): Verified profile after switch:`, refreshedUser?.role, refreshedUser?.id, 'Expected:', profile.role, profile.id);
                           
                           if (refreshedUser && refreshedUser.id === profile.id) {
-                            console.log('✅ Got correct profile (mobile)!');
+                            console.log('✅ Profile switch verified successfully (mobile)!');
                             break;
                           }
                           
                           if (attempt < 3) {
-                            await new Promise(resolve => setTimeout(resolve, 500));
+                            console.log(`⏳ Waiting for profile to update (attempt ${attempt}/3)...`);
+                            await new Promise(resolve => setTimeout(resolve, 300));
                           }
                         }
                         
-                        if (!refreshedUser) {
-                          console.error('❌ Could not get refreshed user after switch (mobile)');
-                          alert('Failed to load profile. Please refresh the page.');
-                          window.location.reload();
-                          return;
+                        // Verify we got the right profile
+                        if (!refreshedUser || refreshedUser.id !== profile.id) {
+                          console.warn('⚠️ Profile ID mismatch (mobile)! Expected:', profile.id, 'Got:', refreshedUser?.id);
+                          // Still proceed with refresh - the database should be correct
                         }
                         
-                        if (refreshedUser.id !== profile.id) {
-                          console.warn('⚠️ Profile ID mismatch (mobile)! Expected:', profile.id, 'Got:', refreshedUser.id);
-                        }
-                        
-                        setSelectedStartup(null);
-                        selectedStartupRef.current = null;
-                        
-                        setCurrentUser(refreshedUser);
-                        
-                        const isComplete = await authService.isProfileComplete(refreshedUser.id);
-                        console.log('🔄 Profile complete status (mobile):', isComplete, 'for role:', refreshedUser.role);
-                        
-                        if (!isComplete) {
-                          setCurrentPage('complete-registration');
-                          setHasInitialDataLoaded(false);
-                          setIsLoading(false);
-                          setViewKey(prev => prev + 1);
-                          setIsHeaderMenuOpen(false);
-                          return;
-                        }
-                        
-                        setHasInitialDataLoaded(false);
-                        setView('dashboard');
-                        setViewKey(prev => prev + 1);
-                        fetchData(true);
-                        setIsHeaderMenuOpen(false);
+                        // AUTOMATIC REFRESH: Reload page to ensure all data loads correctly with new profile
+                        console.log('🔄 Refreshing page to load all data for new profile (mobile)...');
+                        window.location.reload();
                       } catch (error) {
                         console.error('❌ Error switching profile (mobile):', error);
                         alert('Failed to switch profile. Please refresh the page.');

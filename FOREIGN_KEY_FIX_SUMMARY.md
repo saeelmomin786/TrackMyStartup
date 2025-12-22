@@ -78,3 +78,5 @@ But the code was potentially passing:
 **Status: ✅ Fixed - Now uses auth_user_id (auth.users.id) instead of profile_id**
 
 
+
+

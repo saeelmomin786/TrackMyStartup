@@ -4740,10 +4740,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const handleShare = async (startup: ActiveFundraisingStartup) => {
     try {
       // Create clean public shareable link
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.set('view', 'startup');
-      url.searchParams.set('startupId', String(startup.id));
-      const shareUrl = url.toString();
+      const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+      const startupName = startup.name || 'Startup';
+      const slug = createSlug(startupName);
+      const baseUrl = window.location.origin + window.location.pathname;
+      const shareUrl = createProfileUrl(baseUrl, 'startup', 'startupId', String(startup.id), slug);
       const shareData = {
         title: `${startup.name} - Investment Opportunity`,
         text: `Check out this startup: ${startup.name} in ${startup.sector}\n\nView startup: ${shareUrl}`,

@@ -807,6 +807,75 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     }
   };
 
+  const handleSaveOnePager = async () => {
+    if (!startup?.id) return;
+
+    // Validate one-pager fields first
+    if (!validateOnePagerComplete()) {
+      return; // Validation failed, error already shown
+    }
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      // First, save the one-pager data fields to the database
+      const toSave: FundraisingDetails = {
+        ...fundraising,
+        // Map one-pager answers into fundraising details so they are stored in Supabase
+        onePagerDate: onePager.date,
+        onePagerOneLiner: onePager.oneLiner,
+        problemStatement: onePager.problemStatement,
+        solutionText: onePager.solution,
+        growthChallenge: onePager.growthChallenge,
+        uspText: onePager.usp,
+        competitionText: onePager.competition,
+        teamText: onePager.team,
+        tamText: onePager.tam,
+        samText: onePager.sam,
+        somText: onePager.som,
+        tractionText: onePager.traction,
+        askUtilizationText: onePager.askUtilization,
+        revenueThisYear: onePager.revenueThisYear,
+        revenueLastYear: onePager.revenueLastYear,
+        revenueNextMonth: onePager.revenueNextMonth,
+        grossProfitMargin: onePager.grossProfitMargin,
+        netProfitMargin: onePager.netProfitMargin,
+        fixedCostLast3Months: onePager.fixedCostLast3Months,
+      };
+
+      const saved = await capTableService.updateFundraisingDetails(startup.id, toSave);
+      
+      // Reload fundraising details to get the latest data
+      const refreshedRounds = await capTableService.getFundraisingDetails(startup.id);
+      setExistingRounds(refreshedRounds);
+      
+      const updatedRecord = saved.id 
+        ? refreshedRounds.find(r => r.id === saved.id) || saved
+        : refreshedRounds.find(r => r.active) || refreshedRounds[0] || saved;
+      
+      setFundraising(updatedRecord);
+
+      setIsSaving(false);
+
+      // Then, generate and save the PDF (this handles its own loading state)
+      await handleSaveOnePagerToSupabase();
+      
+      // Reload fundraising details to ensure we have the latest state including onePagerUrl
+      const finalRefreshedRounds = await capTableService.getFundraisingDetails(startup.id);
+      setExistingRounds(finalRefreshedRounds);
+      const finalUpdatedRecord = finalRefreshedRounds.find(r => r.active) || finalRefreshedRounds[0];
+      if (finalUpdatedRecord) {
+        setFundraising(finalUpdatedRecord);
+      }
+    } catch (e: any) {
+      console.error('Error saving one-pager:', e);
+      setError(e?.message || 'Failed to save one-pager');
+      messageService.error('Save Failed', 'Could not save one-pager. Please try again.', 3000);
+      setIsSaving(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-10">
@@ -1116,6 +1185,22 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             </div>
           </div>
 
+          {/* Save button for funding details */}
+          {canEdit && (
+            <div className="mt-6 pt-4 border-t border-slate-200">
+              <Button
+                type="button"
+                size="md"
+                variant="primary"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="w-full"
+              >
+                {isSaving ? 'Saving...' : 'Save Funding Details'}
+              </Button>
+            </div>
+          )}
+
         </Card>
 
         {/* Right: Fundraising Card Display - Same design as Discover page */}
@@ -1378,20 +1463,22 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:items-end">
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={handleSaveAll}
-                  disabled={isSaving || isSavingToSupabase || isDownloading}
-                  className="whitespace-nowrap w-full sm:w-[200px]"
-                >
-                  {isSaving || isSavingToSupabase ? 'Saving...' : 'Save Fundraising Details'}
-                </Button>
+                {canEdit && (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={handleSaveOnePager}
+                    disabled={isSaving || isSavingToSupabase || isDownloading}
+                    className="whitespace-nowrap w-full sm:w-[200px]"
+                  >
+                    {isSaving || isSavingToSupabase ? 'Saving...' : 'Save One-Pager'}
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={handleDownloadOnePager}
-                  disabled={isDownloading}
+                  disabled={isDownloading || isSaving || isSavingToSupabase}
                   className="whitespace-nowrap w-full sm:w-[200px]"
                 >
                   {isDownloading ? 'Preparing PDF...' : 'Download PDF / Print'}
@@ -1403,7 +1490,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                       variant="secondary" 
                       className="whitespace-nowrap w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200"
                     >
-                      <FileText className="h-4 w-4 mr-2" /> View
+                      <FileText className="h-4 w-4 mr-2" /> View Saved One-Pager
                     </Button>
                   </a>
                 )}
@@ -2212,30 +2299,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
           </div>
         </div>
       </Card>
-
-      {existingRounds.length > 0 && (
-        <Card className="p-4 sm:p-6">
-          <h3 className="text-sm font-semibold text-slate-900 mb-3">Previous Rounds</h3>
-          <div className="space-y-2 text-xs sm:text-sm text-slate-600">
-            {existingRounds.map((round, idx) => (
-              <div
-                key={idx}
-                className="flex flex-wrap items-center justify-between border border-slate-200 rounded-md px-3 py-2"
-              >
-                <div className="space-x-2">
-                  <span className="font-medium">{round.type}</span>
-                  <span>• {formatCurrency(round.value, startup.currency || 'INR')}</span>
-                  <span>• {round.equity}% equity</span>
-                  {round.stage && <span>• {round.stage}</span>}
-                </div>
-                {round.active && (
-                  <span className="text-emerald-700 text-xs font-semibold">Active</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
       </>
       )}
 

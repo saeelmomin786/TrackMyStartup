@@ -23,6 +23,9 @@ import SchedulingModal from './mentor/SchedulingModal';
 import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
 import ManageAvailabilityModal from './mentor/ManageAvailabilityModal';
 import PastSessionsSection from './mentor/PastSessionsSection';
+import ShareSlotsModal from './mentor/ShareSlotsModal';
+import AvailabilitySlotsDisplay from './mentor/AvailabilitySlotsDisplay';
+import MentorStartupScheduleSection from './mentor/MentorStartupScheduleSection';
 
 interface MentorViewProps {
   currentUser: AuthUser | null;
@@ -85,6 +88,10 @@ const MentorView: React.FC<MentorViewProps> = ({
   // State for Scheduling Modal
   const [schedulingModalOpen, setSchedulingModalOpen] = useState(false);
   const [selectedAssignmentForScheduling, setSelectedAssignmentForScheduling] = useState<any>(null);
+  const [shareSlotsModalOpen, setShareSlotsModalOpen] = useState(false);
+  const [selectedAssignmentForSharing, setSelectedAssignmentForSharing] = useState<any>(null);
+  const [scheduleSectionOpen, setScheduleSectionOpen] = useState(false);
+  const [selectedAssignmentForSchedule, setSelectedAssignmentForSchedule] = useState<any>(null);
   
   // State for Manage Availability Modal
   const [manageAvailabilityModalOpen, setManageAvailabilityModalOpen] = useState(false);
@@ -333,18 +340,10 @@ const MentorView: React.FC<MentorViewProps> = ({
     }
 
     try {
-      // CRITICAL FIX: requester_id in investor_connection_requests references auth.users(id), not profile_id
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const authUserId = authUser?.id;
-      if (!authUserId) {
-        alert('Unable to get user information. Please try again.');
-        return;
-      }
-      
       // Check if a request already exists (pending or accepted)
       const existingCheck = await investorConnectionRequestService.checkExistingRequest(
-        startup.user_id, // investor_id (the startup owner) - this is auth_user_id
-        authUserId    // requester_id (the mentor) - must be auth_user_id
+        startup.user_id, // investor_id (the startup owner)
+        currentUser.id    // requester_id (the mentor)
       );
 
       if (existingCheck.exists) {
@@ -360,8 +359,8 @@ const MentorView: React.FC<MentorViewProps> = ({
       // Create a connection request using investor_connection_requests table
       // This allows mentors to connect with startups and other users
       await investorConnectionRequestService.createRequest({
-        investor_id: startup.user_id,  // auth_user_id
-        requester_id: authUserId,  // Use auth_user_id, not profile_id
+        investor_id: startup.user_id,
+        requester_id: currentUser.id,
         requester_type: 'Mentor',
         startup_id: startup.id,
         startup_profile_url: window.location.origin + window.location.pathname + `?view=startup&startupId=${startup.id}`,
@@ -817,11 +816,11 @@ ${mentorName}`;
                                         variant="outline"
                                         className="text-green-600 border-green-300 hover:bg-green-50"
                                         onClick={() => {
-                                          setSelectedAssignmentForScheduling(assignment);
-                                          setSchedulingModalOpen(true);
+                                          setSelectedAssignmentForSchedule(assignment);
+                                          setScheduleSectionOpen(true);
                                         }}
                                       >
-                                        <Video className="mr-1 h-3 w-3" /> Schedule
+                                        <Calendar className="mr-1 h-3 w-3" /> Schedule
                                       </Button>
                                     )}
                                     {/* Only show Invite to TMS if assignment didn't come from a request */}
@@ -869,27 +868,30 @@ ${mentorName}`;
                                     >
                                       <CheckCircle2 className="mr-1 h-3 w-3" /> Update
                                     </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="text-red-600 border-red-300 hover:bg-red-50"
-                                      onClick={async () => {
-                                        if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
-                                          const success = await mentorService.deleteMentoringAssignment(assignment.id);
-                                          if (success) {
-                                            // Reload mentor metrics
-                                            if (currentUser?.id) {
-                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
-                                              setMentorMetrics(metrics);
+                                    {/* Only show Delete button for manually entered startups (not TMS startups) */}
+                                    {!assignment.startup && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-red-600 border-red-300 hover:bg-red-50"
+                                        onClick={async () => {
+                                          if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
+                                            const success = await mentorService.deleteMentoringAssignment(assignment.id);
+                                            if (success) {
+                                              // Reload mentor metrics
+                                              if (currentUser?.id) {
+                                                const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                                setMentorMetrics(metrics);
+                                              }
+                                            } else {
+                                              alert('Failed to delete mentoring assignment. Please try again.');
                                             }
-                                          } else {
-                                            alert('Failed to delete mentoring assignment. Please try again.');
                                           }
-                                        }
-                                      }}
-                                    >
-                                      <Trash2 className="mr-1 h-3 w-3" /> Delete
-                                    </Button>
+                                        }}
+                                      >
+                                        <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                      </Button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -1008,27 +1010,30 @@ ${mentorName}`;
                                         <Eye className="mr-2 h-4 w-4" /> View
                                       </Button>
                                     )}
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="text-red-600 border-red-300 hover:bg-red-50"
-                                      onClick={async () => {
-                                        if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
-                                          const success = await mentorService.deleteMentoringAssignment(assignment.id);
-                                          if (success) {
-                                            // Reload mentor metrics
-                                            if (currentUser?.id) {
-                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
-                                              setMentorMetrics(metrics);
+                                    {/* Only show Delete button for manually entered startups (not TMS startups) */}
+                                    {!assignment.startup && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-red-600 border-red-300 hover:bg-red-50"
+                                        onClick={async () => {
+                                          if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
+                                            const success = await mentorService.deleteMentoringAssignment(assignment.id);
+                                            if (success) {
+                                              // Reload mentor metrics
+                                              if (currentUser?.id) {
+                                                const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                                setMentorMetrics(metrics);
+                                              }
+                                            } else {
+                                              alert('Failed to delete mentoring assignment. Please try again.');
                                             }
-                                          } else {
-                                            alert('Failed to delete mentoring assignment. Please try again.');
                                           }
-                                        }
-                                      }}
-                                    >
-                                      <Trash2 className="mr-1 h-3 w-3" /> Delete
-                                    </Button>
+                                        }}
+                                      >
+                                        <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                      </Button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -1682,21 +1687,9 @@ ${mentorName}`;
               </div>
 
               {/* Availability Sub-tab */}
-              {scheduleSubTab === 'availability' && (
-                <div className="space-y-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-blue-900 mb-2">How Availability Works:</h4>
-                    <ul className="text-xs text-blue-800 space-y-1">
-                      <li>• Create recurring slots (e.g., Every Monday 2-4 PM) or one-time slots</li>
-                      <li>• Startups can book sessions from your available slots</li>
-                      <li>• Booked slots are automatically removed from availability</li>
-                      <li>• You can activate/deactivate slots without deleting them</li>
-                    </ul>
-                  </div>
-                  <div className="text-center py-8 text-slate-500">
-                    <Calendar className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                    <p className="text-sm">Click "Manage Availability" above to create your availability slots.</p>
-                  </div>
+              {scheduleSubTab === 'availability' && currentUser?.id && (
+                <div>
+                  <AvailabilitySlotsDisplay mentorId={currentUser.id} />
                 </div>
               )}
 
@@ -2022,7 +2015,58 @@ ${mentorName}`;
         }}
       />
 
-      {/* Scheduling Modal */}
+      {/* Schedule Section Modal */}
+      {scheduleSectionOpen && selectedAssignmentForSchedule && selectedAssignmentForSchedule.startup && currentUser?.id && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
+              <h3 className="text-lg font-semibold text-slate-900">
+                Schedule Management - {selectedAssignmentForSchedule.startup?.name || 'Startup'}
+              </h3>
+              <button
+                onClick={() => {
+                  setScheduleSectionOpen(false);
+                  setSelectedAssignmentForSchedule(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <MentorStartupScheduleSection
+                mentorId={currentUser.id}
+                startupId={selectedAssignmentForSchedule.startup?.id || selectedAssignmentForSchedule.startup_id}
+                assignmentId={selectedAssignmentForSchedule.id}
+                startupName={selectedAssignmentForSchedule.startup?.name || 'Startup'}
+                onUpdate={async () => {
+                  if (currentUser?.id) {
+                    const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                    setMentorMetrics(metrics);
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Slots Modal */}
+      {shareSlotsModalOpen && selectedAssignmentForSharing && selectedAssignmentForSharing.startup && (
+        <ShareSlotsModal
+          isOpen={shareSlotsModalOpen}
+          onClose={() => {
+            setShareSlotsModalOpen(false);
+            setSelectedAssignmentForSharing(null);
+          }}
+          mentorId={currentUser?.id!}
+          startupId={selectedAssignmentForSharing.startup_id}
+          startupName={selectedAssignmentForSharing.startup.name || 'Startup'}
+          assignmentId={selectedAssignmentForSharing.id}
+        />
+      )}
+
+      {/* Scheduling Modal (for direct booking if needed) */}
       {schedulingModalOpen && selectedAssignmentForScheduling && (
         <SchedulingModal
           isOpen={schedulingModalOpen}

@@ -205,24 +205,37 @@ export const authService = {
       let profileFromProfiles = null;
       let profilesError = null;
       
-      // Strategy 1: If userId is auth_user_id, get the active profile from user_profile_sessions
-      const { data: activeProfileSession, error: sessionError } = await supabase
-        .from('user_profile_sessions')
-        .select('current_profile_id')
-        .eq('auth_user_id', userId)
+      // Strategy 1: Check if userId is profile_id (UUID format) - try direct lookup first
+      // If it's a profile_id, query directly. If it's auth_user_id, use session lookup.
+      const { data: profileById, error: profileByIdError } = await supabase
+        .from('user_profiles')
+        .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete, auth_user_id')
+        .eq('id', userId)
         .maybeSingle();
       
-      if (activeProfileSession?.current_profile_id) {
-        // Get the active profile
-        const { data: activeProfile, error: activeProfileError } = await supabase
-          .from('user_profiles')
-          .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete')
-          .eq('id', activeProfileSession.current_profile_id)
+      if (profileById) {
+        profileFromProfiles = profileById;
+        console.log('✅ isProfileComplete: Found profile by id');
+      } else {
+        // Strategy 2: If userId is auth_user_id, get the active profile from user_profile_sessions
+        const { data: activeProfileSession, error: sessionError } = await supabase
+          .from('user_profile_sessions')
+          .select('current_profile_id')
+          .eq('auth_user_id', userId)
           .maybeSingle();
         
-        if (activeProfile) {
-          profileFromProfiles = activeProfile;
-          console.log('✅ isProfileComplete: Found active profile via user_profile_sessions');
+        if (activeProfileSession?.current_profile_id) {
+          // Get the active profile
+          const { data: activeProfile, error: activeProfileError } = await supabase
+            .from('user_profiles')
+            .select('government_id, ca_license, cs_license, verification_documents, role, center_name, logo_url, financial_advisor_license_url, is_profile_complete')
+            .eq('id', activeProfileSession.current_profile_id)
+            .maybeSingle();
+          
+          if (activeProfile) {
+            profileFromProfiles = activeProfile;
+            console.log('✅ isProfileComplete: Found active profile via user_profile_sessions');
+          }
         }
       }
       
@@ -465,7 +478,7 @@ export const authService = {
   // Helper function to map profile data to AuthUser interface
   _mapProfileToAuthUser(profile: any, isComplete: boolean): AuthUser {
     return {
-      id: profile.profile_id || profile.id, // Use profile_id to match getUserProfiles() structure
+      id: profile.profile_id || profile.id, // CRITICAL FIX: Use profile_id (not auth_user_id) so currentUser.id matches getUserProfiles()
       email: profile.email,
       name: profile.name,
       role: profile.role,
@@ -749,11 +762,10 @@ export const authService = {
         return { user: null, error: 'User not authenticated' }
       }
 
-      // CRITICAL FIX: users table removed, use user_profiles instead
       const { data: profile, error: profileError } = await supabase
-        .from('user_profiles')
+        .from('users')
         .insert({
-          auth_user_id: user.id,  // Use auth_user_id, not id
+          id: user.id,
           email: user.email,
           name: name,
           role: role,
@@ -768,25 +780,9 @@ export const authService = {
         return { user: null, error: 'Failed to create profile' }
       }
 
-      // CRITICAL FIX: Create session entry to set this as active profile
-      try {
-        await supabase
-          .from('user_profile_sessions')
-          .upsert({
-            auth_user_id: user.id,
-            current_profile_id: profile.id
-          }, {
-            onConflict: 'auth_user_id'
-          });
-        console.log('✅ Created user_profile_sessions entry for new profile');
-      } catch (sessionError) {
-        console.error('❌ Error creating session entry:', sessionError);
-        // Continue anyway - profile was created successfully
-      }
-
       return {
         user: {
-          id: profile.id,  // This is now profile_id (correct)
+          id: profile.id,
           email: profile.email,
           name: profile.name,
           role: profile.role,
@@ -860,38 +856,23 @@ export const authService = {
         data = updatedProfile;
         error = null;
       } else {
-        // If that failed, userId might be auth_user_id - get the active profile first
-        const { data: sessionData } = await supabase
-          .from('user_profile_sessions')
-          .select('current_profile_id')
-          .eq('auth_user_id', authUserId)
-          .maybeSingle();
-        
-        const activeProfileId = sessionData?.current_profile_id || userId;
-        
-        if (!activeProfileId) {
-          console.log('❌ No active profile found for auth_user_id');
-          return { user: null, error: 'Profile not found in user_profiles table' };
-        }
-        
-        // Try updating the active profile
+        // If that failed, try updating by auth_user_id (in case userId is auth_user_id)
+        // But only if we have multiple profiles, we need to find the active one
         const { data: updatedProfileByAuth, error: profileUpdateErrorByAuth } = await supabase
           .from('user_profiles')
           .update(updates)
-          .eq('id', activeProfileId)
-          .eq('auth_user_id', authUserId) // Security: ensure it belongs to this auth user
+          .eq('auth_user_id', authUserId)
           .select()
           .maybeSingle(); // Use maybeSingle() to avoid 406 error
 
         if (!profileUpdateErrorByAuth && updatedProfileByAuth) {
-          // Successfully updated in user_profiles by active profile_id
-          console.log('✅ Updating profile in user_profiles table (by active profile_id)');
+          // Successfully updated in user_profiles by auth_user_id
+          console.log('✅ Updating profile in user_profiles table (by auth_user_id)');
           data = updatedProfileByAuth;
           error = null;
         } else {
           // Profile not found in user_profiles - cannot update
           console.log('❌ Profile not found in user_profiles table');
-          console.log('❌ Profile update error details:', profileUpdateErrorByAuth);
           return { user: null, error: 'Profile not found in user_profiles table' };
         }
       }
@@ -1124,14 +1105,14 @@ export const authService = {
 
       console.log('✅ Profile switch RPC successful, result:', data);
 
-      // Clear cache to force fresh fetch
+      // CRITICAL FIX: Clear cache before getting updated profile
       _getCurrentUserCache = { promise: null, timestamp: 0, userId: null };
-      
+
       // Wait a moment to ensure database is updated
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // Verify the switch worked by getting current profile (force refresh)
-      const currentProfile = await this.getCurrentUser(true);
+      // Verify the switch worked by getting current profile (force refresh to bypass cache)
+      const currentProfile = await this.getCurrentUser(true); // Force refresh
       console.log('🔄 Verified current profile after switch:', currentProfile?.role, currentProfile?.id, 'Expected profile ID:', profileId);
 
       return { success: true };

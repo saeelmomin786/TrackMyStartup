@@ -577,7 +577,7 @@ const DashboardTab: React.FC<{
                             <tr key={s.id}>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{s.name}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{s.sector}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatCurrency(s.currentValuation)}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatCurrency(s.currentValuation, s.currency || 'USD')}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500"><Badge status={s.complianceStatus} /></td>
                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <Button size="sm" variant="outline" onClick={() => onViewStartup(s.id)}><Eye className="mr-2 h-4 w-4" /> View Details</Button>
@@ -769,7 +769,7 @@ const OffersTab: React.FC<{ offers: InvestmentOffer[], onProcessOffer: AdminView
                         <tr key={o.id}>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{o.investorEmail}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{o.startupName}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatCurrency(o.offerAmount)} for {o.equityPercentage}%</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatCurrency(o.offerAmount, o.currency || 'USD')} for {o.equityPercentage}%</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                                 <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                                     o.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
@@ -1090,15 +1090,15 @@ const InvestmentFlowTab: React.FC<{
                                                 {offer.investorEmail}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                                                {formatCurrency(offer.offerAmount)}
+                                                {formatCurrency(offer.offerAmount, offer.currency || 'USD')}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                                                 {offer.equityPercentage}%
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                                                 <div className="text-xs">
-                                                    <div>Startup: {formatCurrency((offer as any).startup_scouting_fee_paid || 0)}</div>
-                                                    <div>Investor: {formatCurrency((offer as any).investor_scouting_fee_paid || 0)}</div>
+                                                    <div>Startup: {formatCurrency((offer as any).startup_scouting_fee_paid || 0, offer.currency || 'USD')}</div>
+                                                    <div>Investor: {formatCurrency((offer as any).investor_scouting_fee_paid || 0, offer.currency || 'USD')}</div>
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
@@ -1160,7 +1160,7 @@ const InvestmentFlowTab: React.FC<{
                                                     {offer.investorEmail}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                                                    {formatCurrency(offer.offerAmount)}
+                                                    {formatCurrency(offer.offerAmount, offer.currency || 'USD')}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                                                     Investment offer for {offer.equityPercentage}% equity
@@ -1183,7 +1183,7 @@ const InvestmentFlowTab: React.FC<{
                                                         {offer.investorEmail}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                                                        {formatCurrency((offer as any).startup_scouting_fee_paid)}
+                                                        {formatCurrency((offer as any).startup_scouting_fee_paid, offer.currency || 'USD')}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                                                         Paid by investor when making offer
@@ -1231,7 +1231,7 @@ const InvestmentFlowTab: React.FC<{
                                                         {offer.investorEmail}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                                                        {formatCurrency((offer as any).investor_scouting_fee_paid)}
+                                                        {formatCurrency((offer as any).investor_scouting_fee_paid, offer.currency || 'USD')}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                                                         Paid by startup when accepting offer

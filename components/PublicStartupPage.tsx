@@ -14,6 +14,7 @@ import { paymentService } from '../lib/paymentService';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { getVideoEmbedUrl, VideoSource } from '../lib/videoUtils';
 import LogoTMS from './public/logoTMS.svg';
+import { createSlug, createProfileUrl } from '../lib/slugUtils';
 
 const PublicStartupPage: React.FC = () => {
   const [startup, setStartup] = useState<Startup | null>(null);
@@ -202,10 +203,10 @@ const PublicStartupPage: React.FC = () => {
     if (!startup) return;
 
     // Create clean public shareable link (ensure it's the public format)
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.set('view', 'startup');
-    url.searchParams.set('startupId', String(startup.id));
-    const shareUrl = url.toString();
+    const startupName = startup.name || 'Startup';
+    const slug = createSlug(startupName);
+    const baseUrl = window.location.origin + window.location.pathname;
+    const shareUrl = createProfileUrl(baseUrl, 'startup', 'startupId', String(startup.id), slug);
     const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nValuation: ${formatCurrency(startup.current_valuation || 0, startup.currency || 'INR')}\n\nView startup: ${shareUrl}`;
 
     try {

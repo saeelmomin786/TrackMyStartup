@@ -172,6 +172,44 @@ class GoogleCalendarService {
     }
   }
 
+  // Create calendar event using service account (centralized calendar)
+  async createCalendarEventWithServiceAccount(
+    event: GoogleCalendarEvent,
+    attendees: Array<{ email: string }>,
+    meetLink?: string
+  ): Promise<{ eventId: string; meetLink: string; calendarId: string }> {
+    try {
+      const response = await fetch('/api/google-calendar?action=create-event-service-account', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          event: {
+            ...event,
+            attendees: attendees
+          },
+          meetLink: meetLink // Pass existing Meet link if available
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to create calendar event');
+      }
+
+      const data = await response.json();
+      return {
+        eventId: data.eventId,
+        meetLink: data.meetLink || data.hangoutLink || meetLink || '',
+        calendarId: data.calendarId || 'primary'
+      };
+    } catch (error) {
+      console.error('Error creating calendar event with service account:', error);
+      throw error;
+    }
+  }
+
   // Check for conflicts in Google Calendar
   async checkConflicts(
     integration: GoogleCalendarIntegration,

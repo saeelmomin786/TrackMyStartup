@@ -184,26 +184,32 @@ const PublicInvestorPage: React.FC = () => {
   const handleShare = async () => {
     if (!investor) return;
 
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.set('view', 'investor');
-    if (investor.id) {
-      url.searchParams.set('investorId', investor.id);
-    } else if (investor.user_id) {
-      url.searchParams.set('userId', investor.user_id);
-    }
-    const shareUrl = url.toString();
+    const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+    const investorName = investor.investor_name || investor.user?.name || 'Investor';
+    const slug = createSlug(investorName);
+    const baseUrl = window.location.origin + window.location.pathname;
     
-    const formatCurrency = (value?: number) => {
+    let shareUrl: string;
+    if (investor.id) {
+      shareUrl = createProfileUrl(baseUrl, 'investor', 'investorId', investor.id, slug);
+    } else if (investor.user_id) {
+      shareUrl = createProfileUrl(baseUrl, 'investor', 'userId', investor.user_id, slug);
+    } else {
+      return;
+    }
+    
+    const formatCurrency = (value?: number, currency: string = 'USD') => {
       if (!value) return 'N/A';
       return new Intl.NumberFormat('en-US', {
         style: 'currency',
-        currency: 'USD',
+        currency: currency,
         notation: 'compact',
         maximumFractionDigits: 0
       }).format(value);
     };
 
-    const shareText = `Investor: ${investor.investor_name || 'Investor'}\nFirm Type: ${investor.firm_type || 'N/A'}\nLocation: ${investor.global_hq || 'N/A'}\nInvestment Range: ${investor.ticket_size_min && investor.ticket_size_max ? `${formatCurrency(investor.ticket_size_min)} - ${formatCurrency(investor.ticket_size_max)}` : 'N/A'}\n\nView investor profile: ${shareUrl}`;
+    const investorCurrency = (investor as any).currency || 'USD';
+    const shareText = `Investor: ${investor.investor_name || 'Investor'}\nFirm Type: ${investor.firm_type || 'N/A'}\nLocation: ${investor.global_hq || 'N/A'}\nInvestment Range: ${investor.ticket_size_min && investor.ticket_size_max ? `${formatCurrency(investor.ticket_size_min, investorCurrency)} - ${formatCurrency(investor.ticket_size_max, investorCurrency)}` : 'N/A'}\n\nView investor profile: ${shareUrl}`;
 
     try {
       if (navigator.share) {

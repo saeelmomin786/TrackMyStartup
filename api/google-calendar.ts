@@ -14,8 +14,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleCheckConflicts(req, res);
       case 'refresh-token':
         return await handleRefreshToken(req, res);
+      case 'create-event-service-account':
+        return await handleCreateEventServiceAccount(req, res);
       default:
-        return res.status(400).json({ error: 'Invalid action. Use: generate-meet-link, create-event, check-conflicts, or refresh-token' });
+        return res.status(400).json({ error: 'Invalid action. Use: generate-meet-link, create-event, create-event-service-account, check-conflicts, or refresh-token' });
     }
   } catch (error: any) {
     console.error('Error in google-calendar API:', error);
@@ -278,5 +280,109 @@ async function handleRefreshToken(req: VercelRequest, res: VercelResponse) {
       : 3600,
     tokenType: credentials.token_type || 'Bearer'
   });
+}
+
+// Create Google Calendar Event using Service Account (Centralized Calendar)
+async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { event, meetLink } = req.body as {
+    event: {
+      summary: string;
+      description?: string;
+      start: { dateTime: string; timeZone: string };
+      end: { dateTime: string; timeZone: string };
+      attendees?: Array<{ email: string }>;
+    };
+    meetLink?: string; // Use existing Meet link if provided
+  };
+
+  if (!event) {
+    return res.status(400).json({ error: 'Missing required field: event' });
+  }
+
+  const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  
+  if (!serviceAccountKey) {
+    return res.status(500).json({ 
+      error: 'Google service account not configured. Please set GOOGLE_SERVICE_ACCOUNT_KEY environment variable.' 
+    });
+  }
+
+  let credentials;
+  try {
+    credentials = typeof serviceAccountKey === 'string' && serviceAccountKey.startsWith('{')
+      ? JSON.parse(serviceAccountKey)
+      : require(serviceAccountKey);
+  } catch (parseError) {
+    return res.status(500).json({ 
+      error: 'Invalid service account key format. Must be JSON string or path to key file.' 
+    });
+  }
+
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/calendar']
+  });
+
+  const calendar = google.calendar({ version: 'v3', auth });
+
+  // Use the calendar ID from service account or 'primary'
+  // You can set a specific calendar ID in env: GOOGLE_CALENDAR_ID
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
+
+  // Build event with attendees and Meet link
+  // Note: Google Calendar API will generate a new Meet link when conferenceData is included
+  // We'll include the existing Meet link in description and use the calendar-generated one
+  const eventData: any = {
+    summary: event.summary,
+    description: meetLink 
+      ? `${event.description || 'Mentoring session scheduled through Track My Startup'}\n\nGoogle Meet Link: ${meetLink}`
+      : (event.description || 'Mentoring session scheduled through Track My Startup'),
+    start: event.start,
+    end: event.end,
+    attendees: event.attendees || [],
+    // Always create Meet link in calendar event (for proper invites)
+    // The Meet link from calendar will be used, but we also include the original in description
+    conferenceData: {
+      createRequest: {
+        requestId: `meet-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+        conferenceSolutionKey: { type: 'hangoutsMeet' }
+      }
+    }
+  };
+
+  try {
+    const response = await calendar.events.insert({
+      calendarId: calendarId,
+      conferenceDataVersion: 1,
+      sendUpdates: 'all', // Send invites to all attendees
+      requestBody: eventData
+    });
+
+    // Get the Meet link from calendar event response
+    // This is the link that will be used in the calendar event
+    const hangoutLink = response.data.hangoutLink || 
+                       response.data.conferenceData?.entryPoints?.[0]?.uri;
+    
+    // If we have an existing Meet link and calendar generated a different one,
+    // we'll use the calendar-generated one for consistency (it's already in the event)
+    // The original link is preserved in the description
+
+    return res.status(200).json({
+      eventId: response.data.id,
+      hangoutLink: hangoutLink || null,
+      meetLink: hangoutLink || meetLink || null,
+      calendarId: calendarId
+    });
+  } catch (error: any) {
+    console.error('Error creating calendar event with service account:', error);
+    return res.status(500).json({ 
+      error: 'Failed to create calendar event',
+      details: error.message 
+    });
+  }
 }
 

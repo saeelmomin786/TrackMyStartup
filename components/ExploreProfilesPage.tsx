@@ -334,15 +334,8 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
 
     try {
       const targetUserId = profile.user_id;
-      // CRITICAL FIX: requester_id in connection_requests tables references auth.users(id), not profile_id
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const requesterId = authUser?.id;  // Use auth_user_id, not profile_id
+      const requesterId = currentUser.id;
       const requesterRole = currentUser.role || '';
-      
-      if (!requesterId) {
-        alert('Unable to get user information. Please try again.');
-        return;
-      }
 
       // Check if request already exists
       let existingCheck;

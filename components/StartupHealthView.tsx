@@ -3,7 +3,7 @@ import { Startup, FundraisingDetails, InvestmentRecord, UserRole, Founder, Compl
 import { AuthUser } from '../lib/auth';
 import Button from './ui/Button';
 import Card from './ui/Card';
-import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench, DollarSign, Briefcase, FileText, Shield, Eye, Search, CheckCircle } from 'lucide-react';
+import { ArrowLeft, LayoutDashboard, User, ShieldCheck, Banknote, Users, TableProperties, Building2, Menu, Bell, Wrench, DollarSign, Briefcase, FileText, Shield, Eye, Search, CheckCircle, Video, X, MapPin, Globe, Linkedin, ChevronDown, ChevronUp } from 'lucide-react';
 import { investmentService } from '../lib/database';
 import { supabase } from '../lib/supabase';
 
@@ -22,8 +22,449 @@ import ConnectMentorRequestModal from './mentor/ConnectMentorRequestModal';
 import StartupRequestsSection from './mentor/StartupRequestsSection';
 import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
 import SchedulingModal from './mentor/SchedulingModal';
+import StartupMentorScheduleSection from './startup/StartupMentorScheduleSection';
 import { formatDateDDMMYYYY } from '../lib/dateTimeUtils';
-import { Video } from 'lucide-react';
+import { mentorService } from '../lib/mentorService';
+
+const ArrowLeftIcon = ArrowLeft;
+
+// Component for mentor card with metrics and professional experience
+const MentorCardWithDetails: React.FC<{
+  mentor: any;
+  videoEmbedUrl: string | null;
+  onConnect: () => void;
+}> = ({ mentor, videoEmbedUrl, onConnect }) => {
+  const [metrics, setMetrics] = useState({
+    startupsMentoring: 0,
+    startupsMentoredPreviously: 0,
+    verifiedStartupsMentored: 0,
+  });
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
+  const [professionalExperiences, setProfessionalExperiences] = useState<any[]>([]);
+  const [showMetricsModal, setShowMetricsModal] = useState(false);
+  const [showProfessionalExpModal, setShowProfessionalExpModal] = useState(false);
+  const [loadingExp, setLoadingExp] = useState(false);
+
+  // Load metrics
+  useEffect(() => {
+    if (mentor.user_id) {
+      loadMetrics();
+    }
+  }, [mentor.user_id]);
+
+  // Load professional experiences when modal opens
+  useEffect(() => {
+    if (showProfessionalExpModal && mentor.user_id && professionalExperiences.length === 0) {
+      loadProfessionalExperiences();
+    }
+  }, [showProfessionalExpModal, mentor.user_id]);
+
+  const loadMetrics = async () => {
+    if (!mentor.user_id || loadingMetrics) return;
+    setLoadingMetrics(true);
+    try {
+      const mentorMetrics = await mentorService.getMentorMetrics(mentor.user_id);
+      setMetrics({
+        startupsMentoring: mentorMetrics.startupsMentoring,
+        startupsMentoredPreviously: mentorMetrics.startupsMentoredPreviously,
+        verifiedStartupsMentored: mentorMetrics.verifiedStartupsMentored,
+      });
+    } catch (error) {
+      console.error('Error loading mentor metrics:', error);
+    } finally {
+      setLoadingMetrics(false);
+    }
+  };
+
+  const loadProfessionalExperiences = async () => {
+    if (loadingExp) return;
+    setLoadingExp(true);
+    try {
+      const { data, error } = await supabase
+        .from('mentor_professional_experience')
+        .select('*')
+        .eq('mentor_id', mentor.user_id)
+        .order('from_date', { ascending: false });
+
+      if (error) {
+        console.error('Error loading professional experiences:', error);
+      } else if (data) {
+        setProfessionalExperiences(data);
+      }
+    } catch (error) {
+      console.error('Error loading professional experiences:', error);
+    } finally {
+      setLoadingExp(false);
+    }
+  };
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return 'Present';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+    } catch {
+      return dateString;
+    }
+  };
+
+  const formatFeeRange = () => {
+    if (!mentor.fee_type) return null;
+    
+    if (mentor.fee_type === 'Free') {
+      return 'Free';
+    }
+    
+    if (mentor.fee_type === 'Equity-based') {
+      return 'Equity-based';
+    }
+    
+    const formatCurrencySimple = (value?: number, currency?: string) => {
+      if (!value) return '';
+      const currencySymbols: { [key: string]: string } = {
+        'USD': '$',
+        'INR': '₹',
+        'EUR': '€',
+        'GBP': '£',
+        'SGD': 'S$',
+        'AED': 'AED '
+      };
+      const symbol = currencySymbols[currency || 'USD'] || currency || '$';
+      return `${symbol}${value.toLocaleString()}`;
+    };
+    
+    if (mentor.fee_amount_min && mentor.fee_amount_max) {
+      if (mentor.fee_amount_min === mentor.fee_amount_max) {
+        return formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
+      }
+      const minStr = formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
+      const maxStr = formatCurrencySimple(mentor.fee_amount_max, mentor.fee_currency);
+      return `${minStr} - ${maxStr}`;
+    }
+    
+    if (mentor.fee_amount_min) {
+      return formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
+    }
+    
+    return mentor.fee_type;
+  };
+
+  return (
+    <Card className="p-6">
+      <div className="flex flex-col md:flex-row gap-6">
+        {/* Media Section - Right Side */}
+        <div className="md:w-1/3">
+          {mentor.media_type === 'logo' && mentor.logo_url ? (
+            <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white flex items-center justify-center border border-slate-200">
+              <img
+                src={mentor.logo_url}
+                alt={`${mentor.mentor_name || 'Mentor'} logo`}
+                className="w-full h-full object-contain p-4"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            </div>
+          ) : videoEmbedUrl ? (
+            <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black">
+              <iframe
+                src={videoEmbedUrl}
+                title={`Video for ${mentor.mentor_name}`}
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="absolute top-0 left-0 w-full h-full"
+              />
+            </div>
+          ) : (
+            <div className="w-full aspect-video bg-gradient-to-br from-slate-100 to-slate-200 rounded-lg flex items-center justify-center">
+              <div className="text-center">
+                <Users className="h-12 w-12 text-slate-400 mx-auto mb-2" />
+                <p className="text-sm text-slate-500">No media available</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Content Section - Left Side */}
+        <div className="md:w-2/3 flex flex-col relative">
+          {/* Header */}
+          <div className="mb-3">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <h3 className="text-xl font-bold text-slate-800 flex-1">
+                {mentor.mentor_name || 'Mentor'}
+              </h3>
+              <span className="px-2.5 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full border border-green-200 whitespace-nowrap">
+                Mentor
+              </span>
+            </div>
+            
+            {/* Location and Experience */}
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600 mb-2">
+              {mentor.location && (
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4 text-slate-500" />
+                  {mentor.location}
+                </span>
+              )}
+              {mentor.years_of_experience && (
+                <span className="flex items-center gap-1.5">
+                  <Users className="h-4 w-4 text-slate-500" />
+                  {mentor.years_of_experience} {mentor.years_of_experience === 1 ? 'year' : 'years'} experience
+                </span>
+              )}
+            </div>
+
+            {mentor.mentor_type && (
+              <p className="text-slate-600 font-medium text-sm mb-2">{mentor.mentor_type}</p>
+            )}
+          </div>
+
+          {/* Experience and Professional Experience Buttons */}
+          <div className="mb-4 flex flex-col sm:flex-row gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowMetricsModal(true)}
+              className="flex-1"
+            >
+              <Users className="h-4 w-4 mr-2" />
+              View Experience
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowProfessionalExpModal(true)}
+              className="flex-1"
+            >
+              <Briefcase className="h-4 w-4 mr-2" />
+              Professional Experience
+              {professionalExperiences.length > 0 && (
+                <span className="ml-2 text-xs">({professionalExperiences.length})</span>
+              )}
+            </Button>
+          </div>
+
+          {/* Expertise and Sectors */}
+          <div className="mb-4 space-y-3">
+            {mentor.expertise_areas && mentor.expertise_areas.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-slate-500 mb-1.5">Expertise Areas</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {mentor.expertise_areas.slice(0, 5).map((area: string, idx: number) => (
+                    <span key={idx} className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full border border-blue-200">
+                      {area}
+                    </span>
+                  ))}
+                  {mentor.expertise_areas.length > 5 && (
+                    <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-full">
+                      +{mentor.expertise_areas.length - 5} more
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {mentor.sectors && mentor.sectors.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-slate-500 mb-1.5">Sectors</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {mentor.sectors.slice(0, 5).map((sector: string, idx: number) => (
+                    <span key={idx} className="px-2.5 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full border border-green-200">
+                      {sector}
+                    </span>
+                  ))}
+                  {mentor.sectors.length > 5 && (
+                    <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-full">
+                      +{mentor.sectors.length - 5} more
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Fee Structure */}
+          {mentor.fee_type && (
+            <div className="mb-4">
+              <div className="text-xs font-medium text-slate-500 mb-1.5">Fee Structure</div>
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-green-600 flex-shrink-0" />
+                <span className="text-sm font-semibold text-slate-800">
+                  {formatFeeRange()}
+                </span>
+                {mentor.fee_type !== 'Free' && mentor.fee_type !== 'Equity-based' && (
+                  <span className="text-xs text-slate-500">({mentor.fee_type})</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Mentoring Approach */}
+          {mentor.mentoring_approach && (
+            <div className="mb-4">
+              <div className="text-xs font-medium text-slate-500 mb-1.5">Mentoring Approach</div>
+              <p className="text-sm text-slate-700 line-clamp-2">{mentor.mentoring_approach}</p>
+            </div>
+          )}
+
+          {/* Action Buttons and Links */}
+          <div className="mt-auto pt-4 border-t border-slate-200">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-4">
+                {mentor.website && mentor.website.trim() && (
+                  <a
+                    href={mentor.website.startsWith('http') ? mentor.website : `https://${mentor.website}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Globe className="h-4 w-4 flex-shrink-0" />
+                    <span className="whitespace-nowrap">Website</span>
+                  </a>
+                )}
+                {mentor.linkedin_link && mentor.linkedin_link.trim() && (
+                  <a
+                    href={mentor.linkedin_link.startsWith('http') ? mentor.linkedin_link : `https://${mentor.linkedin_link}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Linkedin className="h-4 w-4 flex-shrink-0" />
+                    <span className="whitespace-nowrap">LinkedIn</span>
+                  </a>
+                )}
+              </div>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={onConnect}
+              >
+                Connect
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Experience Metrics Modal */}
+      {showMetricsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
+              <h3 className="text-lg font-semibold text-slate-900">
+                Mentoring Experience - {mentor.mentor_name || 'Mentor'}
+              </h3>
+              <button
+                onClick={() => setShowMetricsModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              {loadingMetrics ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-slate-600">Loading metrics...</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="text-3xl font-bold text-slate-800 mb-2">
+                      {metrics.startupsMentoring}
+                    </div>
+                    <div className="text-sm text-slate-600 font-medium">Startup Mentoring</div>
+                    <div className="text-xs text-slate-500 mt-1">(Active)</div>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="text-3xl font-bold text-slate-800 mb-2">
+                      {metrics.startupsMentoredPreviously}
+                    </div>
+                    <div className="text-sm text-slate-600 font-medium">Previously Mentored</div>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="text-3xl font-bold text-slate-800 mb-2">
+                      {metrics.startupsMentoring + metrics.startupsMentoredPreviously}
+                    </div>
+                    <div className="text-sm text-slate-600 font-medium">Startups Mentored</div>
+                    <div className="text-xs text-slate-500 mt-1">(Total)</div>
+                  </div>
+                  <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="text-3xl font-bold text-blue-600 mb-2">
+                      {metrics.verifiedStartupsMentored}
+                    </div>
+                    <div className="text-sm text-slate-600 font-medium">Verified Mentored</div>
+                    <div className="text-xs text-blue-600 mt-1">(TMS Users)</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Professional Experience Modal */}
+      {showProfessionalExpModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
+              <h3 className="text-lg font-semibold text-slate-900">
+                Professional Experience - {mentor.mentor_name || 'Mentor'}
+              </h3>
+              <button
+                onClick={() => setShowProfessionalExpModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              {loadingExp ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-slate-600">Loading professional experience...</p>
+                </div>
+              ) : professionalExperiences.length > 0 ? (
+                <div className="space-y-4">
+                  {professionalExperiences.map((exp) => (
+                    <div
+                      key={exp.id}
+                      className="p-4 bg-white border border-slate-200 rounded-lg hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-slate-800 text-base mb-1">{exp.position}</h4>
+                          <p className="text-sm text-slate-600 font-medium">{exp.company}</p>
+                        </div>
+                        <div className="text-sm text-slate-500 text-right ml-4">
+                          {formatDate(exp.from_date)} - {exp.currently_working ? 'Present' : formatDate(exp.to_date)}
+                        </div>
+                      </div>
+                      {exp.description && (
+                        <p className="text-sm text-slate-700 mt-3 leading-relaxed">{exp.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <Briefcase className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-slate-800 mb-2">No Professional Experience</h3>
+                  <p className="text-slate-600">
+                    No professional experience has been added yet.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+};
 
 
 interface StartupHealthViewProps {
@@ -73,6 +514,12 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
     const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>('explore');
     
+    // State for service exploration
+    const [selectedServiceType, setSelectedServiceType] = useState<string | null>(null);
+    const [mentors, setMentors] = useState<any[]>([]);
+    const [loadingMentors, setLoadingMentors] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    
     // State for mentor connection
     const [connectModalOpen, setConnectModalOpen] = useState(false);
     const [selectedMentor, setSelectedMentor] = useState<any>(null);
@@ -82,6 +529,8 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     // State for scheduling
     const [schedulingModalOpen, setSchedulingModalOpen] = useState(false);
     const [selectedMentorForScheduling, setSelectedMentorForScheduling] = useState<any>(null);
+    const [viewScheduleSectionOpen, setViewScheduleSectionOpen] = useState(false);
+    const [selectedMentorForView, setSelectedMentorForView] = useState<any>(null);
     
     // Update currentStartup when startup prop changes (important for facilitator access)
     useEffect(() => {
@@ -182,13 +631,23 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         if (!currentStartup?.id || !user?.id) return;
         
         try {
+            // CRITICAL FIX: mentor_requests.requester_id references auth.users(id), not profile_id
+            // Get auth_user_id to ensure RLS policy allows the query
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            const authUserId = authUser?.id;
+            
+            if (!authUserId) {
+                console.error('Error: Not authenticated');
+                return;
+            }
+            
             const { mentorService } = await import('../lib/mentorService');
             // Get all requests where this startup is involved
             const { data: requests, error } = await supabase
                 .from('mentor_requests')
                 .select('*')
                 .eq('startup_id', currentStartup.id)
-                .eq('requester_id', user.id)
+                .eq('requester_id', authUserId)  // Use auth_user_id for RLS policy
                 .order('requested_at', { ascending: false });
 
             if (error) {
@@ -221,11 +680,21 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         if (!currentStartup?.id || !user?.id) return;
         
         try {
+            // CRITICAL FIX: mentor_requests.requester_id references auth.users(id), not profile_id
+            // Get auth_user_id to ensure RLS policy allows the query
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            const authUserId = authUser?.id;
+            
+            if (!authUserId) {
+                console.error('Error: Not authenticated');
+                return;
+            }
+            
             const { data: requests, error } = await supabase
                 .from('mentor_requests')
                 .select('*')
                 .eq('startup_id', currentStartup.id)
-                .eq('requester_id', user.id)
+                .eq('requester_id', authUserId)  // Use auth_user_id for RLS policy
                 .eq('status', 'accepted')
                 .order('responded_at', { ascending: false });
 
@@ -307,16 +776,104 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         }
     }, [activeTab, servicesSubTab, currentStartup?.id, user?.id]);
 
+    // Load mentors when Mentor service type is selected
+    useEffect(() => {
+        if (selectedServiceType === 'Mentor' && activeTab === 'services' && servicesSubTab === 'explore') {
+            loadMentors();
+        }
+    }, [selectedServiceType, activeTab, servicesSubTab]);
+
+    const loadMentors = async () => {
+        setLoadingMentors(true);
+        try {
+            const mentorProfiles = await mentorService.getAllMentorProfiles();
+            setMentors(mentorProfiles);
+        } catch (error) {
+            console.error('Error loading mentors:', error);
+            setMentors([]);
+        } finally {
+            setLoadingMentors(false);
+        }
+    };
+
+    const getYoutubeEmbedUrl = (url?: string): string | null => {
+        if (!url) return null;
+        try {
+            const urlObj = new URL(url);
+            if (urlObj.hostname.includes('youtube.com')) {
+                const videoId = urlObj.searchParams.get('v');
+                return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+            } else if (urlObj.hostname.includes('youtu.be')) {
+                const videoId = urlObj.pathname.slice(1);
+                return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+            }
+        } catch {
+            return null;
+        }
+        return null;
+    };
+
+    const formatCurrencySimple = (value?: number, currency?: string) => {
+        if (!value) return '';
+        const currencySymbols: { [key: string]: string } = {
+            'USD': '$',
+            'INR': '₹',
+            'EUR': '€',
+            'GBP': '£',
+            'SGD': 'S$',
+            'AED': 'AED '
+        };
+        const symbol = currencySymbols[currency || 'USD'] || currency || '$';
+        return `${symbol}${value.toLocaleString()}`;
+    };
+
+    const formatFeeRange = (mentor: any) => {
+        if (!mentor.fee_type) return null;
+        
+        if (mentor.fee_type === 'Free') {
+            return 'Free';
+        }
+        
+        if (mentor.fee_type === 'Equity-based') {
+            return 'Equity-based';
+        }
+        
+        if (mentor.fee_amount_min && mentor.fee_amount_max) {
+            if (mentor.fee_amount_min === mentor.fee_amount_max) {
+                return formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
+            }
+            const minStr = formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
+            const maxStr = formatCurrencySimple(mentor.fee_amount_max, mentor.fee_currency);
+            return `${minStr} - ${maxStr}`;
+        }
+        
+        if (mentor.fee_amount_min) {
+            return formatCurrencySimple(mentor.fee_amount_min, mentor.fee_currency);
+        }
+        
+        return mentor.fee_type;
+    };
+
     // Check if any requests were accepted by mentor and switch to My Services
     const checkForAcceptedRequests = async () => {
         if (!currentStartup?.id || !user?.id) return;
         
         try {
+            // CRITICAL FIX: mentor_requests.requester_id references auth.users(id), not profile_id
+            // Get auth_user_id to ensure RLS policy allows the query
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            const authUserId = authUser?.id;
+            
+            if (!authUserId) {
+                console.error('Error: Not authenticated');
+                return;
+            }
+            
             const { data: acceptedRequests, error } = await supabase
                 .from('mentor_requests')
                 .select('id, responded_at')
                 .eq('startup_id', currentStartup.id)
-                .eq('requester_id', user.id)
+                .eq('requester_id', authUserId)  // Use auth_user_id for RLS policy
                 .eq('status', 'accepted')
                 .order('responded_at', { ascending: false })
                 .limit(1);
@@ -521,82 +1078,195 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
 
                       {servicesSubTab === 'explore' && (
                         <div className="space-y-6">
-                          <div>
-                            <h3 className="text-base sm:text-lg font-semibold text-slate-900 mb-2">
-                              Explore Service Providers
-                            </h3>
-                            <p className="text-sm text-slate-600">
-                              Browse different types of collaborators and open their profiles in a new tab to connect.
-                            </p>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {[
-                              { role: 'Investment Advisor', icon: Briefcase, color: 'bg-purple-100 text-purple-700 hover:bg-purple-200', description: 'Connect with investment advisors' },
-                              { role: 'Mentor', icon: Users, color: 'bg-green-100 text-green-700 hover:bg-green-200', description: 'Connect with mentors' },
-                              { role: 'CA', icon: FileText, color: 'bg-orange-100 text-orange-700 hover:bg-orange-200', description: 'Connect with Chartered Accountants' },
-                              { role: 'CS', icon: Shield, color: 'bg-pink-100 text-pink-700 hover:bg-pink-200', description: 'Connect with Company Secretaries' },
-                              { role: 'Incubation', icon: Building2, color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200', description: 'Connect with incubation centers' },
-                            ]
-                            .filter((profileType) => {
-                              // Hide Investment Advisor if startup already has an investment advisor
-                              if (profileType.role === 'Investment Advisor' && currentStartup?.investment_advisor_code) {
-                                return false;
-                              }
-                              return true;
-                            })
-                            .map((profileType) => {
-                              const IconComponent = profileType.icon;
-                              return (
-                                <Card
-                                  key={profileType.role}
-                                  className="p-5 hover:shadow-lg transition-all duration-200 border border-slate-200 text-center"
-                                >
-                                  <div className="flex flex-col items-center">
-                                    <div className={`w-14 h-14 rounded-full ${profileType.color} flex items-center justify-center mb-3 transition-colors`}>
-                                      <IconComponent className="h-7 w-7" />
-                                    </div>
-                                    <h4 className="text-sm sm:text-base font-semibold text-slate-900 mb-1">
-                                      {profileType.role}
-                                    </h4>
-                                    <p className="text-xs sm:text-sm text-slate-600 mb-3">
-                                      {profileType.description}
-                                    </p>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="w-full"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        const baseUrl = window.location.origin + window.location.pathname;
-                                        const url = new URL(baseUrl);
-                                        url.search = '';
-
-                                        if (profileType.role === 'Investor') {
-                                          url.searchParams.set('view', 'explore');
-                                          url.searchParams.set('role', 'Investor');
-                                        } else if (profileType.role === 'Investment Advisor') {
-                                          url.searchParams.set('view', 'advisor');
-                                          url.searchParams.set('role', 'Investment Advisor');
-                                        } else if (profileType.role === 'Incubation') {
-                                          url.searchParams.set('view', 'explore');
-                                          url.searchParams.set('role', 'Startup Facilitation Center');
-                                        } else {
-                                          url.searchParams.set('view', 'explore');
-                                          url.searchParams.set('role', profileType.role);
-                                        }
-
-                                        window.location.href = url.toString();
-                                      }}
+                          {selectedServiceType === null ? (
+                            <>
+                              <div>
+                                <h3 className="text-base sm:text-lg font-semibold text-slate-900 mb-2">
+                                  Explore Service Providers
+                                </h3>
+                                <p className="text-sm text-slate-600">
+                                  Browse different types of collaborators and connect with them.
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                {[
+                                  { role: 'Investment Advisor', icon: Briefcase, color: 'bg-purple-100 text-purple-700 hover:bg-purple-200', description: 'Connect with investment advisors' },
+                                  { role: 'Mentor', icon: Users, color: 'bg-green-100 text-green-700 hover:bg-green-200', description: 'Connect with mentors' },
+                                  { role: 'CA', icon: FileText, color: 'bg-orange-100 text-orange-700 hover:bg-orange-200', description: 'Connect with Chartered Accountants' },
+                                  { role: 'CS', icon: Shield, color: 'bg-pink-100 text-pink-700 hover:bg-pink-200', description: 'Connect with Company Secretaries' },
+                                  { role: 'Incubation', icon: Building2, color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200', description: 'Connect with incubation centers' },
+                                ]
+                                .filter((profileType) => {
+                                  // Hide Investment Advisor if startup already has an investment advisor
+                                  if (profileType.role === 'Investment Advisor' && currentStartup?.investment_advisor_code) {
+                                    return false;
+                                  }
+                                  return true;
+                                })
+                                .map((profileType) => {
+                                  const IconComponent = profileType.icon;
+                                  return (
+                                    <Card
+                                      key={profileType.role}
+                                      className="p-5 hover:shadow-lg transition-all duration-200 border border-slate-200 text-center"
                                     >
-                                      <Eye className="h-3 w-3 mr-2" />
-                                      Explore
-                                    </Button>
-                                  </div>
+                                      <div className="flex flex-col items-center">
+                                        <div className={`w-14 h-14 rounded-full ${profileType.color} flex items-center justify-center mb-3 transition-colors`}>
+                                          <IconComponent className="h-7 w-7" />
+                                        </div>
+                                        <h4 className="text-sm sm:text-base font-semibold text-slate-900 mb-1">
+                                          {profileType.role}
+                                        </h4>
+                                        <p className="text-xs sm:text-sm text-slate-600 mb-3">
+                                          {profileType.description}
+                                        </p>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="w-full"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            
+                                            // For Mentor, show inline. For others, redirect
+                                            if (profileType.role === 'Mentor') {
+                                              setSelectedServiceType('Mentor');
+                                            } else {
+                                              const baseUrl = window.location.origin + window.location.pathname;
+                                              const url = new URL(baseUrl);
+                                              url.search = '';
+
+                                              if (profileType.role === 'Investor') {
+                                                url.searchParams.set('view', 'explore');
+                                                url.searchParams.set('role', 'Investor');
+                                              } else if (profileType.role === 'Investment Advisor') {
+                                                url.searchParams.set('view', 'advisor');
+                                                url.searchParams.set('role', 'Investment Advisor');
+                                              } else if (profileType.role === 'Incubation') {
+                                                url.searchParams.set('view', 'explore');
+                                                url.searchParams.set('role', 'Startup Facilitation Center');
+                                              } else {
+                                                url.searchParams.set('view', 'explore');
+                                                url.searchParams.set('role', profileType.role);
+                                              }
+
+                                              window.location.href = url.toString();
+                                            }
+                                          }}
+                                        >
+                                          <Eye className="h-3 w-3 mr-2" />
+                                          Explore
+                                        </Button>
+                                      </div>
+                                    </Card>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          ) : selectedServiceType === 'Mentor' ? (
+                            <div className="space-y-4">
+                              {/* Back button and header */}
+                              <div className="flex items-center gap-4 mb-4">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedServiceType(null);
+                                    setSearchTerm('');
+                                  }}
+                                >
+                                  <ArrowLeftIcon className="h-4 w-4 mr-2" />
+                                  Back
+                                </Button>
+                                <div>
+                                  <h3 className="text-lg font-semibold text-slate-900">
+                                    Explore Mentors
+                                  </h3>
+                                  <p className="text-sm text-slate-600">
+                                    Browse available mentors and connect with them.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Search bar */}
+                              <div className="relative">
+                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Search mentors by name, location, or expertise..."
+                                  value={searchTerm}
+                                  onChange={(e) => setSearchTerm(e.target.value)}
+                                  className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                              </div>
+
+                              {/* Loading state */}
+                              {loadingMentors && (
+                                <Card className="text-center py-12">
+                                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                                  <p className="text-slate-600">Loading mentors...</p>
                                 </Card>
-                              );
-                            })}
-                          </div>
+                              )}
+
+                              {/* Mentors list */}
+                              {!loadingMentors && (
+                                <>
+                                  {mentors.filter(mentor => {
+                                    if (!searchTerm.trim()) return true;
+                                    const search = searchTerm.toLowerCase();
+                                    return (
+                                      mentor.mentor_name?.toLowerCase().includes(search) ||
+                                      mentor.location?.toLowerCase().includes(search) ||
+                                      mentor.mentor_type?.toLowerCase().includes(search) ||
+                                      mentor.expertise_areas?.some((area: string) => area.toLowerCase().includes(search)) ||
+                                      mentor.sectors?.some((sector: string) => sector.toLowerCase().includes(search))
+                                    );
+                                  }).length === 0 ? (
+                                    <Card className="text-center py-12">
+                                      <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                                      <h3 className="text-lg font-semibold text-slate-800 mb-2">
+                                        {searchTerm ? 'No mentors found' : 'No mentors available'}
+                                      </h3>
+                                      <p className="text-slate-600">
+                                        {searchTerm 
+                                          ? 'Try adjusting your search terms.' 
+                                          : 'Check back later for available mentors.'}
+                                      </p>
+                                    </Card>
+                                  ) : (
+                                    <div className="space-y-6">
+                                      {mentors.filter(mentor => {
+                                        if (!searchTerm.trim()) return true;
+                                        const search = searchTerm.toLowerCase();
+                                        return (
+                                          mentor.mentor_name?.toLowerCase().includes(search) ||
+                                          mentor.location?.toLowerCase().includes(search) ||
+                                          mentor.mentor_type?.toLowerCase().includes(search) ||
+                                          mentor.expertise_areas?.some((area: string) => area.toLowerCase().includes(search)) ||
+                                          mentor.sectors?.some((sector: string) => sector.toLowerCase().includes(search))
+                                        );
+                                      }).map((mentor) => {
+                                        const videoEmbedUrl = mentor.media_type === 'video' && mentor.video_url 
+                                          ? getYoutubeEmbedUrl(mentor.video_url) 
+                                          : null;
+
+                                        // Create a component for each mentor card with its own state
+                                        return <MentorCardWithDetails 
+                                          key={mentor.id || mentor.user_id} 
+                                          mentor={mentor} 
+                                          videoEmbedUrl={videoEmbedUrl}
+                                          onConnect={() => {
+                                            setSelectedMentor(mentor);
+                                            setConnectModalOpen(true);
+                                          }}
+                                        />;
+                                      })}
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                       )}
 
@@ -651,13 +1321,13 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                           <Button
                                             size="sm"
                                             variant="outline"
-                                            className="text-green-600 border-green-300 hover:bg-green-50"
+                                            className="text-blue-600 border-blue-300 hover:bg-blue-50"
                                             onClick={() => {
-                                              setSelectedMentorForScheduling(request);
-                                              setSchedulingModalOpen(true);
+                                              setSelectedMentorForView(request);
+                                              setViewScheduleSectionOpen(true);
                                             }}
                                           >
-                                            <Video className="mr-1 h-3 w-3" /> Schedule
+                                            <Eye className="mr-1 h-3 w-3" /> View
                                           </Button>
                                         </td>
                                       </tr>
@@ -890,6 +1560,39 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             setSelectedMentor(null);
           }}
         />
+      )}
+
+      {/* View Schedule Section Modal */}
+      {viewScheduleSectionOpen && selectedMentorForView && currentStartup?.id && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-10">
+              <h3 className="text-lg font-semibold text-slate-900">
+                Schedule Management - {selectedMentorForView.mentor_name || 'Mentor'}
+              </h3>
+              <button
+                onClick={() => {
+                  setViewScheduleSectionOpen(false);
+                  setSelectedMentorForView(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <StartupMentorScheduleSection
+                startupId={currentStartup.id}
+                mentorId={selectedMentorForView.mentor_id}
+                assignmentId={selectedMentorForView.assignment_id || 0}
+                mentorName={selectedMentorForView.mentor_name || 'Mentor'}
+                onUpdate={async () => {
+                  await loadAcceptedMentorRequests();
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Scheduling Modal */}

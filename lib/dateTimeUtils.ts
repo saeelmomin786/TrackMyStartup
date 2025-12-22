@@ -1,5 +1,5 @@
 /**
- * Format date to dd mm yyyy format
+ * Format date to dd-mm-yyyy format
  */
 export const formatDateDDMMYYYY = (dateString: string | Date): string => {
   try {
@@ -12,7 +12,29 @@ export const formatDateDDMMYYYY = (dateString: string | Date): string => {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
     
-    return `${day} ${month} ${year}`;
+    return `${day}-${month}-${year}`;
+  } catch (error) {
+    return dateString.toString();
+  }
+};
+
+/**
+ * Format date to dd-mm-yyyy day format (e.g., "22-12-2025 Monday")
+ */
+export const formatDateDDMMYYYYWithDay = (dateString: string | Date): string => {
+  try {
+    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+    if (isNaN(date.getTime())) {
+      return dateString.toString();
+    }
+    
+    const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const weekday = weekdays[date.getDay()];
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}-${month}-${year} ${weekday}`;
   } catch (error) {
     return dateString.toString();
   }
@@ -54,7 +76,7 @@ export const formatDateTime = (dateString: string, timeString: string): { date: 
 };
 
 /**
- * Format date with weekday: "Day, dd mm yyyy"
+ * Format date with weekday: "dd-mm-yyyy day" (e.g., "22-12-2025 Monday")
  */
 export const formatDateWithWeekday = (dateString: string | Date): string => {
   try {
@@ -69,7 +91,7 @@ export const formatDateWithWeekday = (dateString: string | Date): string => {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
     
-    return `${weekday}, ${day} ${month} ${year}`;
+    return `${day}-${month}-${year} ${weekday}`;
   } catch (error) {
     return dateString.toString();
   }

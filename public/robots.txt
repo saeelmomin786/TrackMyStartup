@@ -18,6 +18,7 @@ Allow: /investor/
 Allow: /mentor/
 Allow: /advisor/
 
-# Sitemap location (update with your production domain)
-Sitemap: https://trackmystartup.com/sitemap.xml
+# Sitemap location (dynamic sitemap from API)
+Sitemap: https://www.trackmystartup.com/api/sitemap.xml
+Sitemap: https://trackmystartup.com/api/sitemap.xml
 

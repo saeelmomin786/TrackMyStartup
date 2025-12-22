@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Startup, StartupDomain } from '../types';
-import { Plus, X, Save, Edit, Trash2, Eye } from 'lucide-react';
+import { Plus, X, Save, Edit, Trash2, Eye, Upload, Link as LinkIcon, Cloud } from 'lucide-react';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
+import Select from './ui/Select';
 import { supabase } from '../lib/supabase';
 import { mentorService, MentorAssignment, MentorMetrics } from '../lib/mentorService';
 
@@ -47,7 +48,19 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
     from_date: '',
     to_date: '',
     currently_in_position: false,
+    proof_documents: [] as Array<{
+      document_type: string;
+      google_drive_link?: string;
+      uploaded_file_url?: string;
+      file_name?: string;
+    }>,
   });
+
+  // State for managing proof documents
+  const [proofDocumentType, setProofDocumentType] = useState('');
+  const [proofGoogleDriveLink, setProofGoogleDriveLink] = useState('');
+  const [proofUploadFile, setProofUploadFile] = useState<File | null>(null);
+  const [uploadingProof, setUploadingProof] = useState(false);
 
   const [editingId, setEditingId] = useState<number | null>(null);
 
@@ -232,7 +245,8 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
       }
       
       console.log('✅ Authentication verified for founded startup:', { providedMentorId: mentorId, authUserId: actualMentorId });
-      // Store startup_name, email_id, website, sector, position, dates, and currently_in_position in notes as JSON
+      
+      // Store startup_name, email_id, website, sector, position, dates, currently_in_position, and proof_documents in notes as JSON
       const notesData = JSON.stringify({
         startup_name: foundedForm.startup_name,
         email_id: foundedForm.email_id,
@@ -242,6 +256,7 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
         from_date: foundedForm.from_date || null,
         to_date: foundedForm.to_date || null,
         currently_in_position: foundedForm.currently_in_position,
+        proof_documents: foundedForm.proof_documents || [],
       });
 
       if (editingId) {
@@ -302,8 +317,12 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
         from_date: '',
         to_date: '',
         currently_in_position: false,
+        proof_documents: [],
       });
       setEditingId(null);
+      setProofDocumentType('');
+      setProofGoogleDriveLink('');
+      setProofUploadFile(null);
       onUpdate();
     } catch (error) {
       console.error('Error saving founded startup:', error);
@@ -428,16 +447,20 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
           onClick={() => {
             setActiveSection('founded');
             setEditingId(null);
-            setFoundedForm({ 
-              startup_name: '', 
-              email_id: '', 
-              website: '', 
-              sector: '', 
-              position: '',
-              from_date: '',
-              to_date: '',
-              currently_in_position: false,
-            });
+                    setFoundedForm({ 
+                      startup_name: '', 
+                      email_id: '', 
+                      website: '', 
+                      sector: '', 
+                      position: '',
+                      from_date: '',
+                      to_date: '',
+                      currently_in_position: false,
+                      proof_documents: [],
+                    });
+                    setProofDocumentType('');
+                    setProofGoogleDriveLink('');
+                    setProofUploadFile(null);
           }}
           className={`py-2 px-4 border-b-2 font-medium text-sm ${
             activeSection === 'founded'
@@ -853,6 +876,252 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
               </div>
             </div>
 
+            {/* Proof of Startup Section */}
+            <div className="border-t pt-4 mt-4">
+              <h4 className="text-base font-semibold text-slate-700 mb-4">Proof of Startup Documents</h4>
+              
+              {/* Display existing proof documents */}
+              {foundedForm.proof_documents && foundedForm.proof_documents.length > 0 && (
+                <div className="mb-4 space-y-2">
+                  {foundedForm.proof_documents.map((doc, index) => (
+                    <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-slate-700">{doc.document_type}</p>
+                        {doc.google_drive_link && (
+                          <a 
+                            href={doc.google_drive_link} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-1"
+                          >
+                            <LinkIcon className="h-3 w-3" />
+                            Google Drive Link
+                          </a>
+                        )}
+                        {doc.uploaded_file_url && (
+                          <a 
+                            href={doc.uploaded_file_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-1"
+                          >
+                            <Upload className="h-3 w-3" />
+                            {doc.file_name || 'Uploaded File'}
+                          </a>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const updatedDocs = foundedForm.proof_documents.filter((_, i) => i !== index);
+                          setFoundedForm({ ...foundedForm, proof_documents: updatedDocs });
+                        }}
+                        className="text-red-600 border-red-300 hover:bg-red-50"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add new proof document */}
+              <div className="space-y-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                <div>
+                  <Select
+                    label="Document Type"
+                    value={proofDocumentType}
+                    onChange={(e) => setProofDocumentType(e.target.value)}
+                    className="w-full"
+                  >
+                    <option value="">Select Document Type</option>
+                    <option value="DPIIT Certificate">DPIIT Certificate</option>
+                    <option value="Registration Certificate">Registration Certificate</option>
+                    <option value="Udhyam Adhar">Udhyam Adhar</option>
+                    <option value="Pan Card">Pan Card</option>
+                    <option value="Other">Other</option>
+                  </Select>
+                </div>
+
+                {proofDocumentType && (
+                  <div className="space-y-4">
+                    {/* Cloud Drive Link Input */}
+                    <div>
+                      <Input
+                        type="url"
+                        value={proofGoogleDriveLink}
+                        onChange={(e) => setProofGoogleDriveLink(e.target.value)}
+                        placeholder="Paste your cloud drive link here..."
+                        className="w-full"
+                      />
+                    </div>
+
+                    {/* OR Separator */}
+                    <div className="text-center">
+                      <span className="text-sm text-slate-500">OR</span>
+                    </div>
+
+                    {/* Two Buttons */}
+                    <div className="flex flex-col sm:flex-row gap-3 items-center justify-center">
+                      {/* Cloud Drive Button */}
+                      <Button
+                        type="button"
+                        variant="primary"
+                        onClick={async () => {
+                          if (!proofDocumentType) {
+                            alert('Please select a document type');
+                            return;
+                          }
+
+                          if (!proofGoogleDriveLink) {
+                            alert('Please paste your cloud drive link');
+                            return;
+                          }
+
+                          // Add document to proof_documents array
+                          const newDocument = {
+                            document_type: proofDocumentType,
+                            google_drive_link: proofGoogleDriveLink,
+                          };
+
+                          setFoundedForm({
+                            ...foundedForm,
+                            proof_documents: [...(foundedForm.proof_documents || []), newDocument],
+                          });
+
+                          // Reset form fields
+                          setProofDocumentType('');
+                          setProofGoogleDriveLink('');
+                          setProofUploadFile(null);
+                        }}
+                        disabled={!proofGoogleDriveLink || !proofDocumentType}
+                        className="w-full sm:w-auto flex items-center justify-center gap-2"
+                      >
+                        <LinkIcon className="h-4 w-4" />
+                        Cloud Drive (Recommended)
+                      </Button>
+
+                      {/* Upload File Button */}
+                      <label className="w-full sm:w-auto">
+                        <input
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+
+                            if (!proofDocumentType) {
+                              alert('Please select a document type first');
+                              e.target.value = '';
+                              return;
+                            }
+
+                            setProofUploadFile(file);
+
+                            // Get auth user ID for file upload
+                            const { data: { user: authUser } } = await supabase.auth.getUser();
+                            if (!authUser) {
+                              alert('Not authenticated. Please log in again.');
+                              return;
+                            }
+                            const actualMentorId = authUser.id;
+
+                            setUploadingProof(true);
+                            try {
+                              const fileExt = file.name.split('.').pop();
+                              const storageFileName = `proof-${Date.now()}.${fileExt}`;
+                              const filePath = `${actualMentorId}/${storageFileName}`;
+
+                              const { error: uploadError } = await supabase.storage
+                                .from('mentor-proof-documents')
+                                .upload(filePath, file, {
+                                  cacheControl: '3600',
+                                  upsert: false
+                                });
+
+                              if (uploadError) {
+                                throw uploadError;
+                              }
+
+                              const { data: { publicUrl } } = supabase.storage
+                                .from('mentor-proof-documents')
+                                .getPublicUrl(filePath);
+
+                              // Add document to proof_documents array
+                              const newDocument = {
+                                document_type: proofDocumentType,
+                                uploaded_file_url: publicUrl,
+                                file_name: file.name,
+                              };
+
+                              setFoundedForm({
+                                ...foundedForm,
+                                proof_documents: [...(foundedForm.proof_documents || []), newDocument],
+                              });
+
+                              // Reset form fields
+                              setProofDocumentType('');
+                              setProofGoogleDriveLink('');
+                              setProofUploadFile(null);
+                              e.target.value = '';
+                            } catch (error: any) {
+                              console.error('Error uploading proof document:', error);
+                              let errorMessage = 'Failed to upload file';
+                              
+                              if (error.message?.includes('Bucket not found') || error.message?.includes('does not exist')) {
+                                errorMessage = 'Storage bucket not found. Please contact administrator to set up mentor-proof-documents bucket.';
+                              } else if (error.message?.includes('new row violates row-level security') || error.message?.includes('permission')) {
+                                errorMessage = 'Permission denied. Please check storage bucket policies. Error: ' + error.message;
+                              } else if (error.message) {
+                                errorMessage = `Upload failed: ${error.message}`;
+                              }
+                              
+                              alert(errorMessage);
+                              setProofUploadFile(null);
+                              e.target.value = '';
+                            } finally {
+                              setUploadingProof(false);
+                            }
+                          }}
+                          className="hidden"
+                          disabled={uploadingProof || !proofDocumentType}
+                          id="proof-file-upload"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={uploadingProof || !proofDocumentType}
+                          className="w-full sm:w-auto flex items-center justify-center gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 bg-white"
+                          onClick={() => {
+                            if (!proofDocumentType) {
+                              alert('Please select a document type first');
+                              return;
+                            }
+                            const fileInput = document.getElementById('proof-file-upload') as HTMLInputElement;
+                            fileInput?.click();
+                          }}
+                        >
+                          {uploadingProof ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                              Uploading...
+                            </>
+                          ) : (
+                            <>
+                              <Cloud className="h-4 w-4" />
+                              Upload File
+                            </>
+                          )}
+                        </Button>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="flex justify-end gap-2">
               {editingId && (
                 <Button
@@ -869,7 +1138,11 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
                       from_date: '',
                       to_date: '',
                       currently_in_position: false,
+                      proof_documents: [],
                     });
+                    setProofDocumentType('');
+                    setProofGoogleDriveLink('');
+                    setProofUploadFile(null);
                   }}
                 >
                   Cancel
@@ -990,6 +1263,7 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
                                         from_date: notesData.from_date || '',
                                         to_date: notesData.to_date || '',
                                         currently_in_position: notesData.currently_in_position || false,
+                                        proof_documents: notesData.proof_documents || [],
                                       });
                                       setEditingId(startup.id);
                                     } catch (e) {

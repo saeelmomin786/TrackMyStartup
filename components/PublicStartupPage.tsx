@@ -14,7 +14,9 @@ import { paymentService } from '../lib/paymentService';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { getVideoEmbedUrl, VideoSource } from '../lib/videoUtils';
 import LogoTMS from './public/logoTMS.svg';
-import { createSlug, createProfileUrl } from '../lib/slugUtils';
+import { createSlug, createProfileUrl, parseProfileUrl } from '../lib/slugUtils';
+import { resolveSlug } from '../lib/slugResolver';
+import SEOHead from './SEOHead';
 
 const PublicStartupPage: React.FC = () => {
   const [startup, setStartup] = useState<Startup | null>(null);
@@ -25,7 +27,39 @@ const PublicStartupPage: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasDueDiligenceAccess, setHasDueDiligenceAccess] = useState(false);
 
-  const startupId = getQueryParam('startupId') || getQueryParam('id');
+  // Check for path-based URL first (e.g., /startup/startup-name)
+  const pathProfile = parseProfileUrl(window.location.pathname);
+  const queryStartupId = getQueryParam('startupId') || getQueryParam('id');
+  
+  // Resolve startup ID from slug if path-based URL is used
+  const [startupId, setStartupId] = useState<string | null>(null);
+  
+  useEffect(() => {
+    const resolveStartupId = async () => {
+      if (pathProfile && pathProfile.view === 'startup') {
+        // Path-based URL: resolve slug to ID
+        console.log('🔍 Resolving startup slug:', pathProfile.slug);
+        const resolvedId = await resolveSlug('startup', pathProfile.slug);
+        console.log('🔍 Resolved startup ID:', resolvedId);
+        if (resolvedId) {
+          setStartupId(String(resolvedId));
+        } else {
+          console.error('❌ Startup not found for slug:', pathProfile.slug);
+          setError(`Startup not found: ${pathProfile.slug}`);
+          setLoading(false);
+        }
+      } else if (queryStartupId) {
+        // Query param URL (backward compatibility)
+        // Note: Redirect is handled in App.tsx, but we still need to set the ID for loading
+        setStartupId(queryStartupId);
+      } else {
+        setError('Startup ID is required');
+        setLoading(false);
+      }
+    };
+    
+    resolveStartupId();
+  }, [pathProfile, queryStartupId]);
 
   // Check authentication - re-check when URL changes or component mounts
   // Also check periodically to catch auth state changes from App.tsx
@@ -80,8 +114,7 @@ const PublicStartupPage: React.FC = () => {
 
   useEffect(() => {
     if (!startupId) {
-      setError('Startup ID is required');
-      setLoading(false);
+      // Don't set error here - it's already handled in resolveStartupId
       return;
     }
 
@@ -95,15 +128,34 @@ const PublicStartupPage: React.FC = () => {
         const currentAuthUser = authStatus ? await authService.getCurrentUser() : null;
         const isUserAuthenticated = !!currentAuthUser;
 
-        // Load startup data - use public view if not authenticated, full table if authenticated
-        // Public view only exposes: id, name, sector, current_valuation, currency, compliance_status
-        // Note: pitch_video_url is in fundraising_details, not startups table
-        const tableName = isUserAuthenticated ? 'startups' : 'startups_public';
-        const { data: startupData, error: startupError } = await supabase
-          .from(tableName)
+        // Try startups_public first (works for both authenticated and unauthenticated)
+        // If that fails and user is authenticated, try startups table
+        let startupData = null;
+        let startupError = null;
+        
+        // First try public view (accessible to everyone)
+        let { data, error } = await supabase
+          .from('startups_public')
           .select('*')
           .eq('id', startupId)
           .single();
+        
+        if (!error && data) {
+          startupData = data;
+        } else {
+          startupError = error;
+          // If public view fails and user is authenticated, try full table
+          if (isUserAuthenticated) {
+            console.log('Public view failed, trying startups table for authenticated user');
+            const result = await supabase
+              .from('startups')
+              .select('*')
+              .eq('id', startupId)
+              .single();
+            startupData = result.data;
+            startupError = result.error;
+          }
+        }
 
         if (startupError) {
           console.error('Error loading startup:', startupError);
@@ -199,14 +251,24 @@ const PublicStartupPage: React.FC = () => {
     checkDueDiligence();
   }, [isAuthenticated, currentUser?.id, startup?.id]);
 
+  // Clean up ?page=landing from URL if present (for SEO) - MUST be before any early returns
+  useEffect(() => {
+    if (getQueryParam('page') === 'landing' && pathProfile) {
+      // Remove page=landing from URL for cleaner SEO
+      const url = new URL(window.location.href);
+      url.searchParams.delete('page');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [pathProfile]);
+
   const handleShare = async () => {
     if (!startup) return;
 
-    // Create clean public shareable link (ensure it's the public format)
+    // Create SEO-friendly public shareable link with slug in path
     const startupName = startup.name || 'Startup';
     const slug = createSlug(startupName);
-    const baseUrl = window.location.origin + window.location.pathname;
-    const shareUrl = createProfileUrl(baseUrl, 'startup', 'startupId', String(startup.id), slug);
+    const baseUrl = window.location.origin;
+    const shareUrl = createProfileUrl(baseUrl, 'startup', slug, String(startup.id));
     const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nValuation: ${formatCurrency(startup.current_valuation || 0, startup.currency || 'INR')}\n\nView startup: ${shareUrl}`;
 
     try {
@@ -261,14 +323,11 @@ const PublicStartupPage: React.FC = () => {
     if (!authCheck || !currentAuthUser) {
       // Show message and redirect to login page immediately
       messageService.error('Login Required', 'You must be logged in to make an offer. Please log in to continue.', 3000);
-      // Store the current URL to redirect back after login (preserve the startup card view)
+      // Store the current URL to redirect back after login (preserve the SEO-friendly URL)
       const currentUrl = window.location.href;
       sessionStorage.setItem('redirectAfterLogin', currentUrl);
-      // Redirect to login page immediately (remove page=landing if present to avoid conflicts)
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.delete('view');
-      url.searchParams.delete('startupId');
-      url.searchParams.delete('id');
+      // Redirect to clean login page
+      const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
@@ -277,12 +336,11 @@ const PublicStartupPage: React.FC = () => {
     // Check if user is Investor or Investment Advisor
     if (currentUser?.role !== 'Investor' && currentUser?.role !== 'Investment Advisor') {
       messageService.error('Access Restricted', 'Only Investors and Investment Advisors can make offers. Please log in with an Investor or Investment Advisor account.', 3000);
-      // Store the current URL to redirect back after login (preserve the startup card view)
+      // Store the current URL to redirect back after login (preserve the SEO-friendly URL)
       const currentUrl = window.location.href;
       sessionStorage.setItem('redirectAfterLogin', currentUrl);
-      // Redirect to login page (remove page=landing if present to avoid conflicts)
-      const url = new URL(window.location.href);
-      url.searchParams.delete('page');
+      // Redirect to clean login page
+      const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
@@ -296,12 +354,8 @@ const PublicStartupPage: React.FC = () => {
 
     console.log('✅ Redirecting to investor view with make offer modal for startup:', startup.id);
     // Redirect to investor view with make offer modal
-    // Remove public startup page params and set investor view params
-    const url = new URL(window.location.origin + window.location.pathname);
-    url.searchParams.delete('view');
-    url.searchParams.delete('startupId');
-    url.searchParams.delete('id');
-    url.searchParams.delete('page');
+    // Use clean URL without path-based params
+    const url = new URL(window.location.origin);
     url.searchParams.set('view', 'investor');
     url.searchParams.set('tab', 'reels');
     url.searchParams.set('pitchId', String(startup.id));
@@ -319,14 +373,11 @@ const PublicStartupPage: React.FC = () => {
     if (!authCheck || !currentAuthUser) {
       // Show message and redirect to login page
       messageService.error('Login Required', `You must be logged in to view the ${documentType}. Please log in to continue.`, 3000);
-      // Store the current URL to redirect back after login
+      // Store the current URL to redirect back after login (preserve SEO-friendly URL)
       const currentUrl = window.location.href;
       sessionStorage.setItem('redirectAfterLogin', currentUrl);
-      // Redirect to login page
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.delete('view');
-      url.searchParams.delete('startupId');
-      url.searchParams.delete('id');
+      // Redirect to clean login page
+      const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
@@ -352,14 +403,11 @@ const PublicStartupPage: React.FC = () => {
     if (!authCheck || !currentAuthUser?.id) {
       // Show message and redirect to login page immediately
       messageService.error('Login Required', 'You must be logged in to request due diligence access. Please log in to continue.', 3000);
-      // Store the current URL to redirect back after login (preserve the startup card view)
+      // Store the current URL to redirect back after login (preserve SEO-friendly URL)
       const currentUrl = window.location.href;
       sessionStorage.setItem('redirectAfterLogin', currentUrl);
-      // Redirect to login page immediately (remove page=landing if present to avoid conflicts)
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.delete('view');
-      url.searchParams.delete('startupId');
-      url.searchParams.delete('id');
+      // Redirect to clean login page
+      const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
@@ -372,14 +420,11 @@ const PublicStartupPage: React.FC = () => {
     if (user?.role !== 'Investor' && user?.role !== 'Investment Advisor') {
       console.log('❌ User role not allowed for due diligence:', user?.role);
       messageService.error('Access Restricted', 'Only Investors and Investment Advisors can request due diligence. Please log in with an Investor or Investment Advisor account.', 3000);
-      // Store the current URL to redirect back after login (preserve the startup card view)
+      // Store the current URL to redirect back after login (preserve SEO-friendly URL)
       const currentUrl = window.location.href;
       sessionStorage.setItem('redirectAfterLogin', currentUrl);
-      // Redirect to login page (remove page=landing if present to avoid conflicts)
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.delete('view');
-      url.searchParams.delete('startupId');
-      url.searchParams.delete('id');
+      // Redirect to clean login page
+      const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
@@ -399,12 +444,8 @@ const PublicStartupPage: React.FC = () => {
       
       // If already approved, redirect to dashboard
       if (hasAccess) {
-        // Remove public startup page params and set investor view params
-        const url = new URL(window.location.origin + window.location.pathname);
-        url.searchParams.delete('view');
-        url.searchParams.delete('startupId');
-        url.searchParams.delete('id');
-        url.searchParams.delete('page');
+        // Redirect to investor view with clean URL
+        const url = new URL(window.location.origin);
         url.searchParams.set('view', 'investor');
         url.searchParams.set('startupId', String(startup.id));
         url.searchParams.set('tab', 'dashboard');
@@ -640,8 +681,39 @@ const PublicStartupPage: React.FC = () => {
   // If no fundraising details exist, still show the profile (startup may not have set up fundraising yet)
   const isFundraisingInactive = fundraisingDetails !== null && fundraisingDetails.active === false;
 
+  // SEO data - Clean URL (remove query parameters like ?page=landing for SEO)
+  const startupName = startup?.name || 'Startup';
+  const startupDescription = startup?.description || 
+    `${startupName} is ${startup?.sector ? `a ${startup.sector} startup` : 'a startup'}${fundraisingDetails?.active ? ' actively raising funds' : ''}. ${fundraisingDetails?.value && fundraisingDetails?.equity ? `Seeking ${formatCurrency(fundraisingDetails.value, startup?.currency || 'INR')} for ${fundraisingDetails.equity}% equity.` : ''}${startup?.current_valuation ? ` Current valuation: ${formatCurrency(startup.current_valuation, startup.currency || 'INR')}.` : ''}`;
+  // Canonical URL should be clean (no query parameters) for SEO
+  const cleanPath = window.location.pathname; // Already clean from slug-based URL
+  const canonicalUrl = `${window.location.origin}${cleanPath}`;
+  const ogImage = fundraisingDetails?.logoUrl && fundraisingDetails.logoUrl !== '#' 
+    ? fundraisingDetails.logoUrl 
+    : undefined;
+
   return (
     <div className="min-h-screen bg-slate-100">
+      {/* SEO Head Component */}
+      {startup && (
+        <SEOHead
+          title={`${startupName} - Startup Profile | TrackMyStartup`}
+          description={startupDescription}
+          canonicalUrl={canonicalUrl}
+          ogImage={ogImage}
+          ogType="website"
+          profileType="startup"
+          name={startupName}
+          website={fundraisingDetails?.websiteUrl && fundraisingDetails.websiteUrl !== '#' ? fundraisingDetails.websiteUrl : undefined}
+          linkedin={fundraisingDetails?.linkedInUrl && fundraisingDetails.linkedInUrl !== '#' ? fundraisingDetails.linkedInUrl : undefined}
+          location={startup.sector}
+          sector={startup.sector}
+          valuation={startup.current_valuation}
+          currency={startup.currency || 'INR'}
+          investmentAsk={fundraisingDetails?.value}
+          equityOffered={fundraisingDetails?.equity}
+        />
+      )}
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4 flex justify-between items-center">

@@ -1,0 +1,23 @@
+# robots.txt for TrackMyStartup
+# Allow all search engines to crawl the site
+
+User-agent: *
+Allow: /
+
+# Disallow admin and private pages
+Disallow: /?page=login
+Disallow: /?page=register
+Disallow: /?view=investor
+Disallow: /?view=startup
+Disallow: /?view=mentor
+Disallow: /?view=advisor
+
+# Allow public profile pages (SEO-friendly URLs)
+Allow: /startup/
+Allow: /investor/
+Allow: /mentor/
+Allow: /advisor/
+
+# Sitemap location (update with your production domain)
+Sitemap: https://trackmystartup.com/sitemap.xml
+

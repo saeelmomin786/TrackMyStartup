@@ -84,16 +84,10 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
     // Use firm_name for advisor (as per user requirement)
     const firmName = advisor.firm_name || advisor.advisor_name || 'Investment Advisor';
     const slug = createSlug(firmName);
-    const baseUrl = window.location.origin + window.location.pathname;
+    const baseUrl = window.location.origin;
     
-    let shareUrl: string;
-    if (advisor.id) {
-      shareUrl = createProfileUrl(baseUrl, 'advisor', 'advisorId', advisor.id, slug);
-    } else if (advisor.user_id) {
-      shareUrl = createProfileUrl(baseUrl, 'advisor', 'userId', advisor.user_id, slug);
-    } else {
-      return;
-    }
+    // Use SEO-friendly path-based URL
+    const shareUrl = createProfileUrl(baseUrl, 'advisor', slug, advisor.user_id || advisor.id);
     
     const displayName = advisor.firm_name || advisor.advisor_name || 'Investment Advisor';
     const shareText = `Investment Advisor: ${displayName}\nFirm: ${advisor.firm_name || 'N/A'}\nLocation: ${advisor.global_hq || 'N/A'}\nInvestment Range: ${advisor.minimum_investment && advisor.maximum_investment ? `${formatCurrency(advisor.minimum_investment, advisor.currency)} - ${formatCurrency(advisor.maximum_investment, advisor.currency)}` : 'N/A'}\n\nView advisor profile: ${shareUrl}`;
@@ -136,16 +130,10 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
       // Use firm_name for advisor (as per user requirement)
       const firmName = advisor.firm_name || advisor.advisor_name || 'Investment Advisor';
       const slug = createSlug(firmName);
-      const baseUrl = window.location.origin + window.location.pathname;
+      const baseUrl = window.location.origin;
       
-      let url: string;
-      if (advisor.id) {
-        url = createProfileUrl(baseUrl, 'advisor', 'advisorId', advisor.id, slug);
-      } else if (advisor.user_id) {
-        url = createProfileUrl(baseUrl, 'advisor', 'userId', advisor.user_id, slug);
-      } else {
-        return;
-      }
+      // Use SEO-friendly path-based URL
+      const url = createProfileUrl(baseUrl, 'advisor', slug, advisor.user_id || advisor.id);
       window.location.href = url;
     }
   };

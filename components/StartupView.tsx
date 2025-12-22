@@ -372,11 +372,14 @@ const StartupView: React.FC<StartupViewProps> = ({
                     
                     <div className="flex gap-2">
                       <Button 
-                        onClick={() => {
-                          const url = new URL(window.location.href);
-                          url.searchParams.set('view', 'startup');
-                          url.searchParams.set('startupId', String(startup.id));
-                          window.location.href = url.toString();
+                        onClick={async () => {
+                          // Use SEO-friendly URL
+                          const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+                          const startupName = startup.name || 'Startup';
+                          const slug = createSlug(startupName);
+                          const baseUrl = window.location.origin;
+                          const url = createProfileUrl(baseUrl, 'startup', slug, String(startup.id));
+                          window.location.href = url;
                         }}
                         className="flex-1 flex items-center justify-center gap-2"
                         size="sm"

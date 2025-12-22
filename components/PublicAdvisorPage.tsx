@@ -5,6 +5,9 @@ import { getQueryParam } from '../lib/urlState';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import { advisorConnectionRequestService } from '../lib/advisorConnectionRequestService';
+import { parseProfileUrl } from '../lib/slugUtils';
+import { resolveSlug } from '../lib/slugResolver';
+import SEOHead from './SEOHead';
 
 interface InvestmentAdvisorProfile {
   id?: string;
@@ -40,12 +43,50 @@ const PublicAdvisorPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'none' | 'pending' | 'accepted' | 'checking'>('checking');
 
+  // Check for path-based URL first (e.g., /advisor/advisor-name)
+  const pathProfile = parseProfileUrl(window.location.pathname);
+  const queryUserId = getQueryParam('userId');
+  const queryAdvisorId = getQueryParam('advisorId');
+  
+  // Resolve IDs from slug if path-based URL is used
+  const [userId, setUserId] = useState<string | null>(null);
+  const [advisorId, setAdvisorId] = useState<string | null>(null);
+  
   useEffect(() => {
-    const userId = getQueryParam('userId');
-    const advisorId = getQueryParam('advisorId');
+    const resolveAdvisorId = async () => {
+      if (pathProfile && pathProfile.view === 'advisor') {
+        // Path-based URL: resolve slug to user_id
+        const resolvedId = await resolveSlug('advisor', pathProfile.slug);
+        if (resolvedId) {
+          setUserId(String(resolvedId));
+          // Clean up any query parameters for SEO (keep URL clean)
+          if (window.history && (queryUserId || queryAdvisorId)) {
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('userId');
+            newUrl.searchParams.delete('advisorId');
+            window.history.replaceState({}, '', newUrl.toString());
+          }
+        } else {
+          setError('Advisor not found');
+          setLoading(false);
+        }
+      } else if (queryUserId || queryAdvisorId) {
+        // Query param URL (backward compatibility)
+        setUserId(queryUserId || null);
+        setAdvisorId(queryAdvisorId || null);
+      } else {
+        setError('Advisor identifier is missing.');
+        setLoading(false);
+        return;
+      }
+    };
+    
+    resolveAdvisorId();
+  }, [pathProfile, queryUserId, queryAdvisorId]);
+
+  useEffect(() => {
     if (!userId && !advisorId) {
-      setError('Advisor identifier is missing.');
-      setLoading(false);
+      // Don't set error here - it's already handled in resolveAdvisorId
       return;
     }
 
@@ -131,6 +172,15 @@ const PublicAdvisorPage: React.FC = () => {
     }
   }, [advisor]);
 
+  // Clean up ?page=landing from URL if present (for SEO) - MUST be before any early returns
+  useEffect(() => {
+    if (getQueryParam('page') === 'landing' && pathProfile) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('page');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [pathProfile]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -153,8 +203,46 @@ const PublicAdvisorPage: React.FC = () => {
     );
   }
 
+  // Helper function for currency formatting
+  const formatCurrency = (value: number, currency: string = 'USD') => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency,
+      notation: 'compact',
+      maximumFractionDigits: 0
+    }).format(value);
+  };
+
+  // SEO data - Clean URL (remove query parameters for SEO)
+  const advisorName = advisor?.firm_name || advisor?.advisor_name || 'Investment Advisor';
+  const advisorDescription = `${advisorName}${advisor?.global_hq ? ` - Investment advisory firm based in ${advisor.global_hq}` : ' - Investment advisory firm'}. ${advisor?.service_types && advisor.service_types.length > 0 ? `Services: ${advisor.service_types.join(', ')}. ` : ''}${advisor?.investment_stages && advisor.investment_stages.length > 0 ? `Investment stages: ${advisor.investment_stages.join(', ')}. ` : ''}${advisor?.minimum_investment && advisor?.maximum_investment ? `Investment range: ${formatCurrency(advisor.minimum_investment, advisor.currency || 'USD')} - ${formatCurrency(advisor.maximum_investment, advisor.currency || 'USD')}. ` : ''}${advisor?.service_description ? advisor.service_description : ''}`;
+  const cleanPath = window.location.pathname; // Already clean from slug-based URL
+  const canonicalUrl = `${window.location.origin}${cleanPath}`;
+  const ogImage = advisor?.logo_url && advisor.logo_url !== '#' ? advisor.logo_url : undefined;
+  const ticketSize = advisor?.minimum_investment && advisor?.maximum_investment
+    ? `${formatCurrency(advisor.minimum_investment, advisor.currency || 'USD')} - ${formatCurrency(advisor.maximum_investment, advisor.currency || 'USD')}`
+    : undefined;
+
   return (
     <div className="min-h-screen bg-slate-50 py-8 px-4">
+      {/* SEO Head Component */}
+      {advisor && (
+        <SEOHead
+          title={`${advisorName} - Investment Advisor Profile | TrackMyStartup`}
+          description={advisorDescription}
+          canonicalUrl={canonicalUrl}
+          ogImage={ogImage}
+          ogType="profile"
+          profileType="advisor"
+          name={advisorName}
+          website={advisor.website && advisor.website !== '#' ? advisor.website : undefined}
+          linkedin={advisor.linkedin_link && advisor.linkedin_link !== '#' ? advisor.linkedin_link : undefined}
+          email={advisor.email}
+          location={advisor.global_hq}
+          firmType="Investment Advisory"
+          ticketSize={ticketSize}
+        />
+      )}
       <div className="max-w-5xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-slate-900">Investment Advisor Profile</h1>
@@ -192,11 +280,9 @@ const PublicAdvisorPage: React.FC = () => {
               const role = (user?.user_metadata as any)?.role;
               const redirectToLogin = () => {
                 sessionStorage.setItem('redirectAfterLogin', window.location.href);
-                const url = new URL(window.location.origin + window.location.pathname);
+                // Redirect to clean login page
+                const url = new URL(window.location.origin);
                 url.searchParams.set('page', 'login');
-                url.searchParams.delete('view');
-                url.searchParams.delete('advisorId');
-                url.searchParams.delete('userId');
                 window.location.href = url.toString();
               };
 
@@ -275,11 +361,9 @@ const PublicAdvisorPage: React.FC = () => {
               const role = (user?.user_metadata as any)?.role;
               const redirectToLogin = () => {
                 sessionStorage.setItem('redirectAfterLogin', window.location.href);
-                const url = new URL(window.location.origin + window.location.pathname);
+                // Redirect to clean login page
+                const url = new URL(window.location.origin);
                 url.searchParams.set('page', 'login');
-                url.searchParams.delete('view');
-                url.searchParams.delete('advisorId');
-                url.searchParams.delete('userId');
                 window.location.href = url.toString();
               };
 
@@ -325,14 +409,19 @@ const PublicAdvisorPage: React.FC = () => {
 
                 // Also create request in advisor_connection_requests for tracking
                 try {
-                  // Get startup ID
+                  // Get startup ID and name
                   const { data: startupData } = await supabase
                     .from('startups')
-                    .select('id')
+                    .select('id, name')
                     .eq('user_id', user.id)
                     .maybeSingle();
 
-                  const startupProfileUrl = window.location.origin + window.location.pathname + `?view=startup&startupId=${startupData?.id || ''}`;
+                  // Generate SEO-friendly URL
+                  const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+                  const startupName = startupData?.name || 'Startup';
+                  const slug = createSlug(startupName);
+                  const baseUrl = window.location.origin;
+                  const startupProfileUrl = createProfileUrl(baseUrl, 'startup', slug, String(startupData?.id || ''));
                   
                   await advisorConnectionRequestService.createRequest({
                     advisor_id: advisor.user_id,

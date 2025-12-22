@@ -7,6 +7,9 @@ import MentorCard from './mentor/MentorCard';
 import { authService, AuthUser } from '../lib/auth';
 import { messageService } from '../lib/messageService';
 import { investorConnectionRequestService } from '../lib/investorConnectionRequestService';
+import { parseProfileUrl } from '../lib/slugUtils';
+import { resolveSlug } from '../lib/slugResolver';
+import SEOHead from './SEOHead';
 
 interface MentorProfile {
   id?: string;
@@ -48,9 +51,49 @@ const PublicMentorPage: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [connectStatus, setConnectStatus] = useState<'idle' | 'requested' | 'already'>('idle');
+  const [professionalExperiences, setProfessionalExperiences] = useState<any[]>([]);
+  const [startupAssignments, setStartupAssignments] = useState<any[]>([]);
+  const [foundedStartups, setFoundedStartups] = useState<any[]>([]);
 
-  const mentorId = getQueryParam('mentorId');
-  const userId = getQueryParam('userId');
+  // Check for path-based URL first (e.g., /mentor/mentor-name)
+  const pathProfile = parseProfileUrl(window.location.pathname);
+  const queryMentorId = getQueryParam('mentorId');
+  const queryUserId = getQueryParam('userId');
+  
+  // Resolve IDs from slug if path-based URL is used
+  const [mentorId, setMentorId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  
+  useEffect(() => {
+    const resolveMentorId = async () => {
+      if (pathProfile && pathProfile.view === 'mentor') {
+        // Path-based URL: resolve slug to user_id
+        const resolvedId = await resolveSlug('mentor', pathProfile.slug);
+        if (resolvedId) {
+          setUserId(String(resolvedId));
+          // Clean up any query parameters for SEO (keep URL clean)
+          if (window.history && (queryUserId || queryMentorId)) {
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('userId');
+            newUrl.searchParams.delete('mentorId');
+            window.history.replaceState({}, '', newUrl.toString());
+          }
+        } else {
+          setError('Mentor not found');
+          setLoading(false);
+        }
+      } else if (queryMentorId || queryUserId) {
+        // Query param URL (backward compatibility)
+        setMentorId(queryMentorId || null);
+        setUserId(queryUserId || null);
+      } else {
+        setError('Mentor identifier is missing.');
+        setLoading(false);
+      }
+    };
+    
+    resolveMentorId();
+  }, [pathProfile, queryMentorId, queryUserId]);
 
   // Check authentication
   useEffect(() => {
@@ -93,8 +136,7 @@ const PublicMentorPage: React.FC = () => {
 
   useEffect(() => {
     if (!mentorId && !userId) {
-      setError('Mentor identifier is missing.');
-      setLoading(false);
+      // Don't set error here - it's already handled in resolveMentorId
       return;
     }
 
@@ -136,6 +178,64 @@ const PublicMentorPage: React.FC = () => {
         }
 
         setMentor(mentorData);
+
+        // Load professional experiences for SEO
+        if (mentorData.user_id) {
+          try {
+            const { data: expData } = await supabase
+              .from('mentor_professional_experience')
+              .select('company, position')
+              .eq('mentor_id', mentorData.user_id)
+              .order('from_date', { ascending: false })
+              .limit(5);
+            if (expData) setProfessionalExperiences(expData);
+          } catch (err) {
+            console.warn('Could not load professional experiences for SEO:', err);
+          }
+
+          // Load startup assignments for SEO
+          try {
+            const { data: assignmentsData } = await supabase
+              .from('mentor_startup_assignments')
+              .select(`
+                startups (
+                  name
+                )
+              `)
+              .eq('mentor_id', mentorData.user_id)
+              .in('status', ['active', 'completed'])
+              .limit(5);
+            if (assignmentsData) {
+              const startupNames = assignmentsData
+                .map((a: any) => a.startups?.name)
+                .filter(Boolean);
+              setStartupAssignments(startupNames);
+            }
+          } catch (err) {
+            console.warn('Could not load startup assignments for SEO:', err);
+          }
+
+          // Load founded startups for SEO
+          try {
+            const { data: foundedData } = await supabase
+              .from('mentor_founded_startups')
+              .select(`
+                startups (
+                  name
+                )
+              `)
+              .eq('mentor_id', mentorData.user_id)
+              .limit(5);
+            if (foundedData) {
+              const startupNames = foundedData
+                .map((f: any) => f.startups?.name)
+                .filter(Boolean);
+              setFoundedStartups(startupNames);
+            }
+          } catch (err) {
+            console.warn('Could not load founded startups for SEO:', err);
+          }
+        }
       } catch (err: any) {
         console.error('Error loading mentor profile', err);
         setError('Unable to load mentor profile.');
@@ -148,6 +248,15 @@ const PublicMentorPage: React.FC = () => {
   }, [mentorId, userId]);
 
   const isOwnMentorProfile = !!mentor && !!authUserId && mentor.user_id === authUserId;
+
+  // Clean up ?page=landing from URL if present (for SEO) - MUST be before any early returns
+  useEffect(() => {
+    if (getQueryParam('page') === 'landing' && pathProfile) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('page');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [pathProfile]);
 
   // Check on load if this startup has already requested this mentor
   useEffect(() => {
@@ -201,10 +310,8 @@ const PublicMentorPage: React.FC = () => {
       const currentUrl = window.location.href;
       sessionStorage.setItem('redirectAfterLogin', currentUrl);
 
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.delete('view');
-      url.searchParams.delete('mentorId');
-      url.searchParams.delete('userId');
+      // Redirect to clean login page
+      const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
@@ -359,8 +466,72 @@ const PublicMentorPage: React.FC = () => {
     );
   }
 
+  // SEO data - Clean URL (remove query parameters for SEO)
+  const mentorName = mentor?.mentor_name || mentor?.user?.name || 'Mentor';
+  
+  // Build rich SEO description with all available data
+  const descriptionParts: string[] = [];
+  descriptionParts.push(`${mentorName}${mentor?.mentor_type ? ` is a ${mentor.mentor_type}` : ' is a mentor'}`);
+  if (mentor?.location) descriptionParts.push(`based in ${mentor.location}`);
+  if (mentor?.expertise_areas && mentor.expertise_areas.length > 0) {
+    descriptionParts.push(`Expertise: ${mentor.expertise_areas.join(', ')}`);
+  }
+  if (mentor?.sectors && mentor.sectors.length > 0) {
+    descriptionParts.push(`Sectors: ${mentor.sectors.join(', ')}`);
+  }
+  if (mentor?.years_of_experience) {
+    descriptionParts.push(`${mentor.years_of_experience} years of experience`);
+  }
+  if (mentor?.companies_mentored) {
+    descriptionParts.push(`Mentored ${mentor.companies_mentored} companies`);
+  }
+  
+  // Add professional experiences (company names)
+  if (professionalExperiences.length > 0) {
+    const companies = professionalExperiences
+      .map(exp => exp.company)
+      .filter(Boolean)
+      .slice(0, 3);
+    if (companies.length > 0) {
+      descriptionParts.push(`Experience at: ${companies.join(', ')}`);
+    }
+  }
+  
+  // Add startup assignments (startup names mentored)
+  if (startupAssignments.length > 0) {
+    const startupNames = startupAssignments.slice(0, 3);
+    descriptionParts.push(`Mentoring: ${startupNames.join(', ')}`);
+  }
+  
+  // Add founded startups
+  if (foundedStartups.length > 0) {
+    const foundedNames = foundedStartups.slice(0, 3);
+    descriptionParts.push(`Founded: ${foundedNames.join(', ')}`);
+  }
+  
+  const mentorDescription = descriptionParts.join('. ') + '.';
+  const cleanPath = window.location.pathname; // Already clean from slug-based URL
+  const canonicalUrl = `${window.location.origin}${cleanPath}`;
+  const ogImage = mentor?.logo_url && mentor.logo_url !== '#' ? mentor.logo_url : undefined;
+
   return (
     <div className="min-h-screen bg-slate-50 py-4 px-3 sm:px-4">
+      {/* SEO Head Component */}
+      {mentor && (
+        <SEOHead
+          title={`${mentorName} - Mentor Profile | TrackMyStartup`}
+          description={mentorDescription}
+          canonicalUrl={canonicalUrl}
+          ogImage={ogImage}
+          ogType="profile"
+          profileType="mentor"
+          name={mentorName}
+          website={mentor.website && mentor.website !== '#' ? mentor.website : undefined}
+          linkedin={mentor.linkedin_link && mentor.linkedin_link !== '#' ? mentor.linkedin_link : undefined}
+          email={mentor.email}
+          location={mentor.location}
+        />
+      )}
       <div className="max-w-2xl mx-auto">
         <div className="mb-4">
           <h1 className="text-2xl font-bold text-slate-900">Mentor Profile</h1>

@@ -114,16 +114,10 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
 
     const mentorName = mentor.mentor_name || mentor.user?.name || 'Mentor';
     const slug = createSlug(mentorName);
-    const baseUrl = window.location.origin + window.location.pathname;
+    const baseUrl = window.location.origin;
     
-    let shareUrl: string;
-    if (mentor.id) {
-      shareUrl = createProfileUrl(baseUrl, 'mentor', 'mentorId', mentor.id, slug);
-    } else if (mentor.user_id) {
-      shareUrl = createProfileUrl(baseUrl, 'mentor', 'userId', mentor.user_id, slug);
-    } else {
-      return;
-    }
+    // Use SEO-friendly path-based URL
+    const shareUrl = createProfileUrl(baseUrl, 'mentor', slug, mentor.user_id || mentor.id);
 
     const location = mentor.location || '';
     const expertise = (mentor.expertise_areas || []).join(', ');

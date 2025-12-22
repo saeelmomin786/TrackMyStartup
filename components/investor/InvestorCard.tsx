@@ -79,19 +79,13 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
     : null;
 
   const handleShare = async () => {
-    // Create clean public shareable link similar to startup sharing
+    // Create SEO-friendly public shareable link
     const investorName = investor.investor_name || investor.user?.name || 'Investor';
     const slug = createSlug(investorName);
-    const baseUrl = window.location.origin + window.location.pathname;
+    const baseUrl = window.location.origin;
     
-    let shareUrl: string;
-    if (investor.id) {
-      shareUrl = createProfileUrl(baseUrl, 'investor', 'investorId', investor.id, slug);
-    } else if (investor.user_id) {
-      shareUrl = createProfileUrl(baseUrl, 'investor', 'userId', investor.user_id, slug);
-    } else {
-      return;
-    }
+    // Use SEO-friendly path-based URL
+    const shareUrl = createProfileUrl(baseUrl, 'investor', slug, investor.user_id || investor.id);
     
     const investorCurrency = (investor as any).currency || 'USD';
     const shareText = `Investor: ${investor.investor_name || 'Investor'}\nFirm Type: ${investor.firm_type || 'N/A'}\nLocation: ${investor.global_hq || 'N/A'}\nInvestment Range: ${investor.ticket_size_min && investor.ticket_size_max ? `${formatCurrency(investor.ticket_size_min, investorCurrency)} - ${formatCurrency(investor.ticket_size_max, investorCurrency)}` : 'N/A'}\n\nView investor profile: ${shareUrl}`;
@@ -133,19 +127,13 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
     if (onView) {
       onView(investor);
     } else {
-      // Navigate to public investor profile page via URL (similar to startup sharing)
+      // Navigate to SEO-friendly public investor profile page
       const investorName = investor.investor_name || investor.user?.name || 'Investor';
       const slug = createSlug(investorName);
-      const baseUrl = window.location.origin + window.location.pathname;
+      const baseUrl = window.location.origin;
       
-      let url: string;
-      if (investor.id) {
-        url = createProfileUrl(baseUrl, 'investor', 'investorId', investor.id, slug);
-      } else if (investor.user_id) {
-        url = createProfileUrl(baseUrl, 'investor', 'userId', investor.user_id, slug);
-      } else {
-        return;
-      }
+      // Use SEO-friendly path-based URL
+      const url = createProfileUrl(baseUrl, 'investor', slug, investor.user_id || investor.id);
       window.location.href = url;
     }
   };

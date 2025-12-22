@@ -10,6 +10,9 @@ import { getVideoEmbedUrl } from '../lib/videoUtils';
 import LogoTMS from './public/logoTMS.svg';
 import InvestorCard from './investor/InvestorCard';
 import { investorConnectionRequestService } from '../lib/investorConnectionRequestService';
+import { parseProfileUrl } from '../lib/slugUtils';
+import { resolveSlug } from '../lib/slugResolver';
+import SEOHead from './SEOHead';
 
 interface InvestorProfile {
   id?: string;
@@ -43,8 +46,45 @@ const PublicInvestorPage: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [totalStartupsInvested, setTotalStartupsInvested] = useState<number>(0);
 
-  const investorId = getQueryParam('investorId');
-  const userId = getQueryParam('userId');
+  // Check for path-based URL first (e.g., /investor/investor-name)
+  const pathProfile = parseProfileUrl(window.location.pathname);
+  const queryInvestorId = getQueryParam('investorId');
+  const queryUserId = getQueryParam('userId');
+  
+  // Resolve IDs from slug if path-based URL is used
+  const [investorId, setInvestorId] = useState<string | null>(queryInvestorId || null);
+  const [userId, setUserId] = useState<string | null>(queryUserId || null);
+  
+  useEffect(() => {
+    const resolveInvestorId = async () => {
+      if (pathProfile && pathProfile.view === 'investor') {
+        // Path-based URL: resolve slug to user_id
+        const resolvedId = await resolveSlug('investor', pathProfile.slug);
+        if (resolvedId) {
+          setUserId(String(resolvedId));
+          // Clean up any query parameters for SEO (keep URL clean)
+          if (window.history && (queryUserId || queryInvestorId)) {
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('userId');
+            newUrl.searchParams.delete('investorId');
+            window.history.replaceState({}, '', newUrl.toString());
+          }
+        } else {
+          setError('Investor not found');
+          setLoading(false);
+        }
+      } else if (queryInvestorId || queryUserId) {
+        // Query param URL (backward compatibility)
+        setInvestorId(queryInvestorId || null);
+        setUserId(queryUserId || null);
+      } else {
+        setError('Investor ID is required');
+        setLoading(false);
+      }
+    };
+    
+    resolveInvestorId();
+  }, [pathProfile, queryInvestorId, queryUserId]);
 
   // Check authentication
   useEffect(() => {
@@ -76,11 +116,19 @@ const PublicInvestorPage: React.FC = () => {
     };
   }, []);
 
+  // Clean up ?page=landing from URL if present (for SEO) - MUST be before any early returns
+  useEffect(() => {
+    if (getQueryParam('page') === 'landing' && pathProfile) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('page');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [pathProfile]);
+
   // Load investor profile
   useEffect(() => {
     if (!investorId && !userId) {
-      setError('Investor ID is required');
-      setLoading(false);
+      // Don't set error here - it's already handled in resolveInvestorId
       return;
     }
 
@@ -187,16 +235,10 @@ const PublicInvestorPage: React.FC = () => {
     const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
     const investorName = investor.investor_name || investor.user?.name || 'Investor';
     const slug = createSlug(investorName);
-    const baseUrl = window.location.origin + window.location.pathname;
+    const baseUrl = window.location.origin;
     
-    let shareUrl: string;
-    if (investor.id) {
-      shareUrl = createProfileUrl(baseUrl, 'investor', 'investorId', investor.id, slug);
-    } else if (investor.user_id) {
-      shareUrl = createProfileUrl(baseUrl, 'investor', 'userId', investor.user_id, slug);
-    } else {
-      return;
-    }
+    // Use SEO-friendly path-based URL
+    const shareUrl = createProfileUrl(baseUrl, 'investor', slug, investor.user_id || investor.id);
     
     const formatCurrency = (value?: number, currency: string = 'USD') => {
       if (!value) return 'N/A';
@@ -241,11 +283,8 @@ const PublicInvestorPage: React.FC = () => {
       const currentUrl = window.location.href;
       sessionStorage.setItem('redirectAfterLogin', currentUrl);
       
-      // Redirect to login page
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.delete('view');
-      url.searchParams.delete('investorId');
-      url.searchParams.delete('userId');
+      // Redirect to clean login page
+      const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
@@ -284,11 +323,8 @@ const PublicInvestorPage: React.FC = () => {
       const currentUrl = window.location.href;
       sessionStorage.setItem('redirectAfterLogin', currentUrl);
       
-      // Redirect to login page
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.delete('view');
-      url.searchParams.delete('investorId');
-      url.searchParams.delete('userId');
+      // Redirect to clean login page
+      const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
@@ -404,8 +440,47 @@ const PublicInvestorPage: React.FC = () => {
     );
   }
 
+  // Helper function for currency formatting (used in SEO)
+  const formatCurrencyForSEO = (value?: number, currency: string = 'USD') => {
+    if (!value) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency,
+      notation: 'compact',
+      maximumFractionDigits: 0
+    }).format(value);
+  };
+
+  // SEO data - Clean URL (remove query parameters for SEO)
+  const investorName = investor?.investor_name || investor?.user?.name || 'Investor';
+  const investorDescription = `${investorName}${investor?.firm_type ? ` - ${investor.firm_type}` : ''}${investor?.global_hq ? ` based in ${investor.global_hq}` : ''}. ${investor?.ticket_size_min && investor?.ticket_size_max ? `Investment range: ${formatCurrencyForSEO(investor.ticket_size_min, investor.currency || 'USD')} - ${formatCurrencyForSEO(investor.ticket_size_max, investor.currency || 'USD')}. ` : ''}${investor?.investment_stages && investor.investment_stages.length > 0 ? `Investment stages: ${investor.investment_stages.join(', ')}. ` : ''}${investor?.geography && investor.geography.length > 0 ? `Geographic focus: ${investor.geography.join(', ')}.` : ''}`;
+  const cleanPath = window.location.pathname; // Already clean from slug-based URL
+  const canonicalUrl = `${window.location.origin}${cleanPath}`;
+  const ogImage = investor?.logo_url && investor.logo_url !== '#' ? investor.logo_url : undefined;
+  const ticketSize = investor?.ticket_size_min && investor?.ticket_size_max 
+    ? `${formatCurrencyForSEO(investor.ticket_size_min, investor.currency || 'USD')} - ${formatCurrencyForSEO(investor.ticket_size_max, investor.currency || 'USD')}`
+    : undefined;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* SEO Head Component */}
+      {investor && (
+        <SEOHead
+          title={`${investorName} - Investor Profile | TrackMyStartup`}
+          description={investorDescription}
+          canonicalUrl={canonicalUrl}
+          ogImage={ogImage}
+          ogType="profile"
+          profileType="investor"
+          name={investorName}
+          website={investor.website && investor.website !== '#' ? investor.website : undefined}
+          linkedin={investor.linkedin_link && investor.linkedin_link !== '#' ? investor.linkedin_link : undefined}
+          email={investor.email}
+          location={investor.global_hq}
+          firmType={investor.firm_type}
+          ticketSize={ticketSize}
+        />
+      )}
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

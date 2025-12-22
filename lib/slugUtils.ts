@@ -26,31 +26,59 @@ export function createSlug(text: string | null | undefined): string {
 }
 
 /**
- * Generates a profile URL with slug
- * @param baseUrl - The base URL (window.location.origin + window.location.pathname)
+ * Generates a SEO-friendly profile URL with slug in the path
+ * @param baseUrl - The base URL (window.location.origin)
  * @param view - The view type ('startup', 'mentor', 'investor', 'advisor')
- * @param id - The ID parameter name ('startupId', 'mentorId', 'investorId', 'advisorId', or 'userId')
- * @param idValue - The ID value
- * @param slug - The slug to include in the URL
- * @returns The complete URL with slug
+ * @param slug - The slug to include in the URL path
+ * @param idValue - The ID value (optional, for backward compatibility)
+ * @returns The complete URL with slug in path format: /startup/startup-name
  */
 export function createProfileUrl(
   baseUrl: string,
   view: 'startup' | 'mentor' | 'investor' | 'advisor',
-  id: string,
-  idValue: string,
-  slug: string
+  slug: string,
+  idValue?: string
 ): string {
-  const url = new URL(baseUrl);
-  url.searchParams.set('view', view);
-  url.searchParams.set(id, idValue);
+  // Remove trailing slash from baseUrl
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '');
   
-  // Add slug if provided
+  // Create SEO-friendly path-based URL
+  // Format: /startup/startup-name or /mentor/mentor-name, etc.
   if (slug) {
-    url.searchParams.set('name', slug);
+    return `${cleanBaseUrl}/${view}/${slug}`;
   }
   
+  // Fallback to query params if no slug (backward compatibility)
+  const url = new URL(cleanBaseUrl);
+  if (idValue) {
+    const idParam = view === 'startup' ? 'startupId' : 
+                   view === 'mentor' ? 'mentorId' : 
+                   view === 'investor' ? 'investorId' : 
+                   'advisorId';
+    url.searchParams.set('view', view);
+    url.searchParams.set(idParam, idValue);
+  }
   return url.toString();
+}
+
+/**
+ * Parses a URL path to extract profile type and slug
+ * @param pathname - The pathname from window.location.pathname
+ * @returns Object with view type and slug, or null if not a profile URL
+ */
+export function parseProfileUrl(pathname: string): { view: 'startup' | 'mentor' | 'investor' | 'advisor'; slug: string } | null {
+  const pathParts = pathname.split('/').filter(part => part);
+  
+  if (pathParts.length >= 2) {
+    const view = pathParts[0] as 'startup' | 'mentor' | 'investor' | 'advisor';
+    const slug = pathParts[1];
+    
+    if (['startup', 'mentor', 'investor', 'advisor'].includes(view) && slug) {
+      return { view, slug };
+    }
+  }
+  
+  return null;
 }
 
 

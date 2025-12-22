@@ -958,6 +958,35 @@ class MentorService {
     }
   }
 
+  // Delete a founded startup entry
+  async deleteFoundedStartup(foundedStartupId: number): Promise<boolean> {
+    try {
+      // Get current auth user ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        console.error('❌ No authenticated user found');
+        return false;
+      }
+
+      const { error } = await supabase
+        .from('mentor_founded_startups')
+        .delete()
+        .eq('id', foundedStartupId)
+        .eq('mentor_id', authUser.id);
+
+      if (error) {
+        console.error('Error deleting founded startup:', error);
+        return false;
+      }
+
+      console.log('✅ Founded startup deleted:', foundedStartupId);
+      return true;
+    } catch (error) {
+      console.error('Error deleting founded startup:', error);
+      return false;
+    }
+  }
+
   // Format currency
   formatCurrency(value: number, currency: string = 'USD'): string {
     try {

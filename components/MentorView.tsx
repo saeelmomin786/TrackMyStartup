@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Startup, InvestmentType, ComplianceStatus } from '../types';
-import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar } from 'lucide-react';
+import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar, Edit, Save, Image as ImageIcon } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { AuthUser } from '../lib/auth';
@@ -12,6 +12,8 @@ import { investorConnectionRequestService, InvestorConnectionRequest } from '../
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Badge from './ui/Badge';
+import Input from './ui/Input';
+import Select from './ui/Select';
 import ProfilePage from './ProfilePage';
 import StartupHealthView from './StartupHealthView';
 import MentorDataForm from './MentorDataForm';
@@ -97,7 +99,29 @@ const MentorView: React.FC<MentorViewProps> = ({
   const [manageAvailabilityModalOpen, setManageAvailabilityModalOpen] = useState(false);
   
   // State for Schedule Tab Sub-tabs
-  const [scheduleSubTab, setScheduleSubTab] = useState<'availability' | 'upcoming' | 'past'>('upcoming');
+  const [scheduleSubTab, setScheduleSubTab] = useState<'availability' | 'sessions'>('availability');
+  
+  // State for Launching Soon modal
+  const [showLaunchingSoonModal, setShowLaunchingSoonModal] = useState(false);
+  
+  // State for profile editing and save refs
+  const [isEditingProfile, setIsEditingProfile] = useState(true);
+  const profileFormSaveRef = useRef<(() => Promise<void>) | null>(null);
+  const profileFormEditingRef = useRef<{ isEditing: boolean; setIsEditing: (val: boolean) => void } | null>(null);
+
+  // Sync previewProfile changes back to form when editing sections on right side
+  useEffect(() => {
+    if (previewProfile && isEditingProfile) {
+      // This will trigger the externalProfile sync in MentorProfileForm
+    }
+  }, [previewProfile, isEditingProfile]);
+  
+  // Show launching soon modal when collaboration tab is opened
+  useEffect(() => {
+    if (activeTab === 'collaboration') {
+      setShowLaunchingSoonModal(true);
+    }
+  }, [activeTab]);
   
   // Handle navigation from profile form to dashboard
   const handleNavigateToDashboard = (section?: 'active' | 'completed' | 'founded') => {
@@ -358,12 +382,19 @@ const MentorView: React.FC<MentorViewProps> = ({
 
       // Create a connection request using investor_connection_requests table
       // This allows mentors to connect with startups and other users
+      // Generate SEO-friendly URL
+      const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+      const startupName = startup.name || 'Startup';
+      const slug = createSlug(startupName);
+      const baseUrl = window.location.origin;
+      const startupProfileUrl = createProfileUrl(baseUrl, 'startup', slug, String(startup.id));
+      
       await investorConnectionRequestService.createRequest({
         investor_id: startup.user_id,
         requester_id: currentUser.id,
         requester_type: 'Mentor',
         startup_id: startup.id,
-        startup_profile_url: window.location.origin + window.location.pathname + `?view=startup&startupId=${startup.id}`,
+        startup_profile_url: startupProfileUrl,
         message: `${currentUser.name || 'A mentor'} wants to connect with your startup.`
       });
 
@@ -436,14 +467,14 @@ ${mentorName}`;
       <div className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Mentor Dashboard</h1>
-              <p className="text-sm text-slate-600 mt-1">Welcome back, {currentUser?.name || 'Mentor'}</p>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-slate-900">Mentor Dashboard</h1>
+              <p className="text-xs sm:text-sm text-slate-600 mt-1">Welcome back, {currentUser?.name || 'Mentor'}</p>
               {currentUser?.mentor_code && (
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2 flex flex-col sm:flex-row items-start sm:items-center gap-2">
                   <span className="text-xs text-slate-500">Your Mentor Code:</span>
-                  <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-md border border-blue-200">
-                    <span className="text-sm font-mono font-semibold text-blue-700">
+                  <div className="flex items-center gap-2 bg-blue-50 px-2 sm:px-3 py-1 rounded-md border border-blue-200">
+                    <span className="text-xs sm:text-sm font-mono font-semibold text-blue-700">
                       {currentUser.mentor_code}
                     </span>
                     <button
@@ -458,7 +489,7 @@ ${mentorName}`;
                       className="text-blue-600 hover:text-blue-800 transition-colors"
                       title="Copy mentor code"
                     >
-                      <Copy className="h-3 w-3" />
+                      <Copy className="h-3 w-3 sm:h-4 sm:w-4" />
                     </button>
                   </div>
                 </div>
@@ -467,7 +498,8 @@ ${mentorName}`;
             <Button
               variant="outline"
               onClick={() => setShowProfilePage(true)}
-              className="w-full sm:w-auto"
+              size="sm"
+              className="w-full sm:w-auto flex-shrink-0"
             >
               Profile
             </Button>
@@ -477,64 +509,67 @@ ${mentorName}`;
 
       {/* Tabs */}
       <div className="bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex overflow-x-auto space-x-4 sm:space-x-8 -mb-px">
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
+          <div className="flex overflow-x-auto space-x-2 sm:space-x-4 md:space-x-6 lg:space-x-8 -mb-px scrollbar-hide">
             <button
               onClick={() => setActiveTab('dashboard')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center whitespace-nowrap ${
+              className={`py-3 sm:py-4 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm flex items-center whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'dashboard'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              <LayoutGrid className="h-5 w-5 mr-2" />
-              Dashboard
+              <LayoutGrid className="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
+              <span className="hidden sm:inline">Dashboard</span>
+              <span className="sm:hidden">Dash</span>
             </button>
             <button
               onClick={() => setActiveTab('schedule')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center whitespace-nowrap ${
+              className={`py-3 sm:py-4 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm flex items-center whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'schedule'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              <Calendar className="h-5 w-5 mr-2" />
+              <Calendar className="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
               Schedule
             </button>
             <button
               onClick={() => setActiveTab('discover')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center whitespace-nowrap ${
+              className={`py-3 sm:py-4 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm flex items-center whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'discover'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              <Film className="h-5 w-5 mr-2" />
-              Discover Pitches
+              <Film className="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
+              <span className="hidden md:inline">Discover Pitches</span>
+              <span className="md:hidden">Discover</span>
             </button>
             <button
               onClick={() => setActiveTab('portfolio')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center whitespace-nowrap ${
+              className={`py-3 sm:py-4 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm flex items-center whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'portfolio'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              <Briefcase className="h-5 w-5 mr-2" />
+              <Briefcase className="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
               Portfolio
             </button>
             <button
               onClick={() => setActiveTab('collaboration')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center relative whitespace-nowrap ${
+              className={`py-3 sm:py-4 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm flex items-center relative whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'collaboration'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              <Users className="h-5 w-5 mr-2" />
-              Collaboration
+              <Users className="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
+              <span className="hidden sm:inline">Collaboration</span>
+              <span className="sm:hidden">Collab</span>
               {collaboratorRequests.filter(r => r.status === 'pending').length > 0 && (
-                <span className="ml-2 px-2 py-0.5 text-xs font-semibold text-white bg-amber-500 rounded-full">
+                <span className="ml-1 sm:ml-2 px-1.5 sm:px-2 py-0.5 text-xs font-semibold text-white bg-amber-500 rounded-full">
                   {collaboratorRequests.filter(r => r.status === 'pending').length}
                 </span>
               )}
@@ -544,7 +579,7 @@ ${mentorName}`;
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
         {activeTab === 'dashboard' && (
           <div className="space-y-8 animate-fade-in">
             {isLoadingMetrics ? (
@@ -558,15 +593,15 @@ ${mentorName}`;
             ) : (
               <>
                 {/* Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <Card className="flex-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  <Card className="flex-1 p-4 sm:p-6">
                     <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-slate-500">Requests Received</p>
-                        <p className="text-2xl font-bold text-slate-800">{mentorMetrics?.requestsReceived || 0}</p>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs sm:text-sm font-medium text-slate-500">Requests Received</p>
+                        <p className="text-xl sm:text-2xl font-bold text-slate-800 mt-1">{mentorMetrics?.requestsReceived || 0}</p>
                       </div>
-                      <div className="p-3 bg-blue-100 rounded-full">
-                        <Mail className="h-6 w-6 text-blue-600" />
+                      <div className="p-2 sm:p-3 bg-blue-100 rounded-full flex-shrink-0 ml-2">
+                        <Mail className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
                       </div>
                     </div>
                   </Card>
@@ -661,19 +696,17 @@ ${mentorName}`;
                   )}
                 </Card>
 
-                {/* Pending Requests */}
-                {mentorMetrics && (
-                  <MentorPendingRequestsSection
-                    requests={mentorMetrics.pendingRequests}
-                    onRequestAction={async () => {
-                                            // Reload mentor metrics
-                                            if (currentUser?.id) {
-                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
-                                              setMentorMetrics(metrics);
-                      }
-                    }}
-                  />
-                )}
+                {/* Pending Request */}
+                <MentorPendingRequestsSection
+                  requests={mentorMetrics?.pendingRequests || []}
+                  onRequestAction={async () => {
+                                          // Reload mentor metrics
+                                          if (currentUser?.id) {
+                                            const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                            setMentorMetrics(metrics);
+                    }
+                  }}
+                />
 
                 {/* Combined Mentor Startups Section */}
                 {mentorMetrics && (
@@ -1112,6 +1145,30 @@ ${mentorName}`;
                                   >
                                         <UserPlus className="mr-1 h-3 w-3" /> Add to TMS
                                   </Button>
+                                    )}
+                                    {/* Delete button for manually entered startups */}
+                                    {!isOnTMS && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-red-600 border-red-300 hover:bg-red-50"
+                                        onClick={async () => {
+                                          if (confirm(`Are you sure you want to delete ${startup.name}? This action cannot be undone.`)) {
+                                            const success = await mentorService.deleteFoundedStartup(startup.id);
+                                            if (success) {
+                                              // Reload mentor metrics
+                                              if (currentUser?.id) {
+                                                const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                                setMentorMetrics(metrics);
+                                              }
+                                            } else {
+                                              alert('Failed to delete startup experience. Please try again.');
+                                            }
+                                          }
+                                        }}
+                                      >
+                                        <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                      </Button>
                                     )}
                                   </div>
                                 </td>
@@ -1560,38 +1617,68 @@ ${mentorName}`;
         {activeTab === 'portfolio' && (
           <div className="space-y-6 animate-fade-in">
             {/* Two-column layout: Form on left, Preview on right */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 xl:gap-6 items-stretch">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-stretch">
               {/* Left: Mentor Profile Form */}
               {currentUser && (
-                <Card className="p-4 sm:p-6 h-full">
-                  <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-slate-900">Mentor Profile</h2>
-                    <p className="text-xs sm:text-sm text-slate-500">
-                      Fill out your mentor profile details. Changes will be reflected in the preview.
-                    </p>
+                <Card className="p-3 sm:p-4 md:p-6 h-full">
+                  <div className="mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <h2 className="text-base sm:text-lg font-semibold text-slate-900">Mentor Profile</h2>
+                      <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                        Fill out your mentor profile details. Changes will be reflected in the preview.
+                      </p>
+                    </div>
+                    <Button
+                      variant={isEditingProfile ? "outline" : "primary"}
+                      size="sm"
+                      onClick={() => {
+                        if (profileFormEditingRef.current) {
+                          profileFormEditingRef.current.setIsEditing(!isEditingProfile);
+                        }
+                        setIsEditingProfile(!isEditingProfile);
+                      }}
+                      className="w-full sm:w-auto flex-shrink-0"
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      <span className="hidden sm:inline">{isEditingProfile ? 'Cancel Editing' : 'Edit Profile'}</span>
+                      <span className="sm:hidden">{isEditingProfile ? 'Cancel' : 'Edit'}</span>
+                    </Button>
                   </div>
                   <MentorProfileForm
                     currentUser={currentUser}
                     mentorMetrics={mentorMetrics}
                     onSave={(profile) => {
                       console.log('Profile saved:', profile);
+                      setIsEditingProfile(false);
+                      if (profileFormEditingRef.current) {
+                        profileFormEditingRef.current.setIsEditing(false);
+                      }
                     }}
                     onProfileChange={(profile) => {
                       setPreviewProfile(profile);
                     }}
-                    isViewOnly={false}
+                    isViewOnly={!isEditingProfile}
                     onNavigateToDashboard={handleNavigateToDashboard}
                     startups={startups}
                     onMetricsUpdate={fetchMetrics}
+                    excludeSections={['feeStructure', 'media']}
+                    externalProfile={previewProfile}
+                    onSaveRef={(saveFn) => {
+                      profileFormSaveRef.current = saveFn;
+                    }}
+                    onEditingStateRef={(state) => {
+                      profileFormEditingRef.current = state;
+                      setIsEditingProfile(state.isEditing);
+                    }}
                   />
                 </Card>
               )}
 
-              {/* Right: Mentor Profile Card Preview */}
-              <div className="flex flex-col h-full max-w-xl w-full mx-auto xl:mx-0">
+              {/* Right: Mentor Profile Card Preview + Fee Structure + Media */}
+              <div className="flex flex-col h-full w-full lg:max-w-xl lg:mx-auto space-y-3 sm:space-y-4">
                 <div className="mb-3">
-                  <h3 className="text-lg font-semibold text-slate-900">Your Mentor Card</h3>
-                  <p className="text-xs text-slate-500">
+                  <h3 className="text-base sm:text-lg font-semibold text-slate-900">Your Mentor Card</h3>
+                  <p className="text-xs sm:text-sm text-slate-500">
                     This is how your profile will appear to startups on the Discover page
                   </p>
                 </div>
@@ -1622,6 +1709,215 @@ ${mentorName}`;
                     </div>
                   </Card>
                 )}
+
+                {/* Fee Structure Section - Moved to Right Side */}
+                {previewProfile && (
+                  <Card className="p-3 sm:p-4 md:p-6">
+                    <div className="space-y-4">
+                      <div className="border-b pb-2">
+                        <h4 className="text-base font-medium text-slate-700 mb-1">Fee Structure</h4>
+                        <p className="text-sm font-medium text-amber-600">
+                          Note: Track My Startup will charge 20% of mentoring fees to cover operations.
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <Select
+                          label="Fee Type"
+                          value={previewProfile.fee_type || ''}
+                          onChange={(e) => {
+                            setPreviewProfile({ ...previewProfile, fee_type: e.target.value });
+                          }}
+                          disabled={!isEditingProfile}
+                        >
+                          <option value="">Select Fee Type</option>
+                          <option value="Free">Free</option>
+                          <option value="Fees">Fees</option>
+                          <option value="Stock Options">Stock Options</option>
+                          <option value="Hybrid">Hybrid</option>
+                        </Select>
+
+                        {(previewProfile.fee_type === 'Fees' || previewProfile.fee_type === 'Hybrid') && (
+                          <Select
+                            label="Currency"
+                            value={previewProfile.fee_currency || 'USD'}
+                            onChange={(e) => {
+                              setPreviewProfile({ ...previewProfile, fee_currency: e.target.value });
+                            }}
+                            disabled={!isEditingProfile}
+                          >
+                            <option value="USD">USD</option>
+                            <option value="INR">INR</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBP">GBP</option>
+                            <option value="SGD">SGD</option>
+                            <option value="AED">AED</option>
+                          </Select>
+                        )}
+
+                        {(previewProfile.fee_type === 'Fees' || previewProfile.fee_type === 'Hybrid') && (
+                          <>
+                            <Input
+                              label="Minimum Fee Amount"
+                              type="number"
+                              value={previewProfile.fee_amount_min?.toString() || ''}
+                              onChange={(e) => {
+                                setPreviewProfile({ ...previewProfile, fee_amount_min: e.target.value ? parseFloat(e.target.value) : null });
+                              }}
+                              disabled={!isEditingProfile}
+                              placeholder="e.g., 1000"
+                            />
+                            <Input
+                              label="Maximum Fee Amount"
+                              type="number"
+                              value={previewProfile.fee_amount_max?.toString() || ''}
+                              onChange={(e) => {
+                                setPreviewProfile({ ...previewProfile, fee_amount_max: e.target.value ? parseFloat(e.target.value) : null });
+                              }}
+                              disabled={!isEditingProfile}
+                              placeholder="e.g., 5000"
+                            />
+                          </>
+                        )}
+
+                        {(previewProfile.fee_type === 'Stock Options' || previewProfile.fee_type === 'Hybrid') && (
+                          <>
+                            <Input
+                              label="Minimum Stock Options Amount (ESOP)"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={previewProfile.equity_amount_min?.toString() || ''}
+                              onChange={(e) => {
+                                setPreviewProfile({ ...previewProfile, equity_amount_min: e.target.value ? parseFloat(e.target.value) : null });
+                              }}
+                              disabled={!isEditingProfile}
+                              placeholder="e.g., 1000"
+                            />
+                            <Input
+                              label="Maximum Stock Options Amount (ESOP)"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={previewProfile.equity_amount_max?.toString() || ''}
+                              onChange={(e) => {
+                                setPreviewProfile({ ...previewProfile, equity_amount_max: e.target.value ? parseFloat(e.target.value) : null });
+                              }}
+                              disabled={!isEditingProfile}
+                              placeholder="e.g., 5000"
+                            />
+                          </>
+                        )}
+
+                        <div className="sm:col-span-2">
+                          <Input
+                            label="Fee Description"
+                            type="text"
+                            value={previewProfile.fee_description || ''}
+                            onChange={(e) => {
+                              setPreviewProfile({ ...previewProfile, fee_description: e.target.value });
+                            }}
+                            disabled={!isEditingProfile}
+                            placeholder="Additional details about your fee structure"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Profile Photo / Video Section - Moved to Right Side */}
+                {previewProfile && (
+                  <Card className="p-3 sm:p-4 md:p-6">
+                    <div className="space-y-4">
+                      <h4 className="text-base font-medium text-slate-700 border-b pb-2">Profile Photo / Video</h4>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Media Type</label>
+                        <div className="flex gap-4">
+                          <label className="flex items-center">
+                            <input
+                              type="radio"
+                              name="media_type"
+                              value="logo"
+                              checked={previewProfile.media_type === 'logo'}
+                              onChange={() => {
+                                setPreviewProfile({ ...previewProfile, media_type: 'logo' });
+                              }}
+                              disabled={!isEditingProfile}
+                              className="mr-2"
+                            />
+                            <ImageIcon className="h-4 w-4 mr-1" />
+                            <span className="text-sm text-slate-600">Profile Photo</span>
+                          </label>
+                          <label className="flex items-center">
+                            <input
+                              type="radio"
+                              name="media_type"
+                              value="video"
+                              checked={previewProfile.media_type === 'video'}
+                              onChange={() => {
+                                setPreviewProfile({ ...previewProfile, media_type: 'video' });
+                              }}
+                              disabled={!isEditingProfile}
+                              className="mr-2"
+                            />
+                            <Video className="h-4 w-4 mr-1" />
+                            <span className="text-sm text-slate-600">Profile Video</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {previewProfile.media_type === 'logo' ? (
+                        <div className="space-y-4">
+                          <label className="block text-sm font-medium text-slate-700 mb-2">Profile Photo</label>
+                          {previewProfile.logo_url && (
+                            <div className="mb-4">
+                              <img src={previewProfile.logo_url} alt="Profile Photo" className="h-24 w-24 object-contain border border-slate-200 rounded" />
+                            </div>
+                          )}
+                          {isEditingProfile && (
+                            <Input
+                              label="Profile Photo URL"
+                              type="url"
+                              value={previewProfile.logo_url || ''}
+                              onChange={(e) => {
+                                setPreviewProfile({ ...previewProfile, logo_url: e.target.value });
+                              }}
+                              disabled={!isEditingProfile}
+                              placeholder="https://example.com/profile-photo.png"
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <Input
+                          label="Profile Video URL"
+                          value={previewProfile.video_url || ''}
+                          onChange={(e) => {
+                            setPreviewProfile({ ...previewProfile, video_url: e.target.value });
+                          }}
+                          disabled={!isEditingProfile}
+                          placeholder="https://www.youtube.com/watch?v=..."
+                        />
+                      )}
+
+                      {/* Save Button - Full Width */}
+                      {isEditingProfile && (
+                        <Button
+                          variant="primary"
+                          className="w-full"
+                          onClick={async () => {
+                            if (profileFormSaveRef.current) {
+                              await profileFormSaveRef.current();
+                            }
+                          }}
+                        >
+                          <Save className="h-4 w-4 mr-2" />
+                          Save Profile
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+                )}
               </div>
             </div>
           </div>
@@ -1648,40 +1944,29 @@ ${mentorName}`;
               </div>
 
               {/* Sub-tabs for Schedule */}
-              <div className="border-b border-slate-200 mb-6">
-                <nav className="-mb-px flex space-x-4" aria-label="Schedule Tabs">
+              <div className="border-b border-slate-200 mb-4 sm:mb-6">
+                <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto scrollbar-hide" aria-label="Schedule Tabs">
                   <button
                     onClick={() => setScheduleSubTab('availability')}
-                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                    className={`py-2 sm:py-3 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center flex-shrink-0 ${
                       scheduleSubTab === 'availability'
                         ? 'border-blue-500 text-blue-600'
                         : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                     }`}
                   >
-                    <Clock className="h-4 w-4 inline mr-2" />
+                    <Clock className="h-4 w-4 mr-1 sm:mr-2" />
                     Availability
                   </button>
                   <button
-                    onClick={() => setScheduleSubTab('upcoming')}
-                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                      scheduleSubTab === 'upcoming'
+                    onClick={() => setScheduleSubTab('sessions')}
+                    className={`py-2 sm:py-3 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center flex-shrink-0 ${
+                      scheduleSubTab === 'sessions'
                         ? 'border-green-500 text-green-600'
                         : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                     }`}
                   >
-                    <Calendar className="h-4 w-4 inline mr-2" />
-                    Upcoming Sessions
-                  </button>
-                  <button
-                    onClick={() => setScheduleSubTab('past')}
-                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                      scheduleSubTab === 'past'
-                        ? 'border-purple-500 text-purple-600'
-                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                    }`}
-                  >
-                    <CheckCircle className="h-4 w-4 inline mr-2" />
-                    Past Sessions
+                    <Calendar className="h-4 w-4 mr-1 sm:mr-2" />
+                    My Sessions
                   </button>
                 </nav>
               </div>
@@ -1693,22 +1978,22 @@ ${mentorName}`;
                 </div>
               )}
 
-              {/* Upcoming Sessions Sub-tab */}
-              {scheduleSubTab === 'upcoming' && currentUser?.id && (
-                <div>
-                  <ScheduledSessionsSection
-                    mentorId={currentUser.id}
-                    userType="Mentor"
-                  />
-                </div>
-              )}
-
-              {/* Past Sessions Sub-tab */}
-              {scheduleSubTab === 'past' && currentUser?.id && (
-                <div>
-                  <PastSessionsSection
-                    mentorId={currentUser.id}
-                  />
+              {/* My Sessions Sub-tab - Shows both Upcoming and Past Sessions */}
+              {scheduleSubTab === 'sessions' && currentUser?.id && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-800 mb-4">Upcoming Sessions</h3>
+                    <ScheduledSessionsSection
+                      mentorId={currentUser.id}
+                      userType="Mentor"
+                    />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-800 mb-4">Past Sessions</h3>
+                    <PastSessionsSection
+                      mentorId={currentUser.id}
+                    />
+                  </div>
                 </div>
               )}
             </Card>
@@ -1716,8 +2001,41 @@ ${mentorName}`;
         )}
 
         {activeTab === 'collaboration' && (
-          <div className="space-y-6 animate-fade-in">
-            <Card>
+          <div className="space-y-6 animate-fade-in relative">
+            {/* Launching Soon Modal */}
+            {showLaunchingSoonModal && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-50 p-4" onClick={() => setShowLaunchingSoonModal(false)}>
+                <Card className="bg-white border-2 border-blue-300 shadow-xl w-full max-w-md mx-auto relative" onClick={(e) => e.stopPropagation()}>
+                  <div className="py-8 sm:py-10 px-6 text-center relative">
+                    <button
+                      onClick={() => setShowLaunchingSoonModal(false)}
+                      className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors z-10"
+                      aria-label="Close"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 mb-4">
+                      <Clock className="h-8 w-8 text-blue-600" />
+                    </div>
+                    <h3 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
+                      Launching Soon
+                    </h3>
+                    <p className="text-base sm:text-lg text-slate-600 max-w-md mx-auto mb-6">
+                      This feature is coming soon! Stay tuned for exciting collaboration tools.
+                    </p>
+                    <Button
+                      variant="primary"
+                      onClick={() => setShowLaunchingSoonModal(false)}
+                      className="w-full sm:w-auto"
+                    >
+                      Got it
+                    </Button>
+                  </div>
+                </Card>
+              </div>
+            )}
+            
+            <Card className={showLaunchingSoonModal ? 'opacity-60 pointer-events-none' : ''}>
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-xl font-semibold text-slate-900">Collaboration</h2>
@@ -1731,7 +2049,8 @@ ${mentorName}`;
                 <Button
                   size="sm"
                   variant={collaborationSubTab === 'explore-collaborators' ? 'primary' : 'outline'}
-                  onClick={() => setCollaborationSubTab('explore-collaborators')}
+                  onClick={() => setShowLaunchingSoonModal(true)}
+                  disabled={true}
                 >
                   <Search className="h-4 w-4 mr-2" />
                   Explore Collaborators
@@ -1739,14 +2058,16 @@ ${mentorName}`;
                 <Button
                   size="sm"
                   variant={collaborationSubTab === 'my-collaborators' ? 'primary' : 'outline'}
-                  onClick={() => setCollaborationSubTab('my-collaborators')}
+                  onClick={() => setShowLaunchingSoonModal(true)}
+                  disabled={true}
                 >
                   My Collaborators
                 </Button>
                 <Button
                   size="sm"
                   variant={collaborationSubTab === 'requests' ? 'primary' : 'outline'}
-                  onClick={() => setCollaborationSubTab('requests')}
+                  onClick={() => setShowLaunchingSoonModal(true)}
+                  disabled={true}
                 >
                   Collaborator Requests
                   {collaboratorRequests.filter(r => r.status === 'pending').length > 0 && (
@@ -1797,30 +2118,8 @@ ${mentorName}`;
                               size="sm"
                               variant="outline"
                               className="w-full"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                // Navigate to explore users of this role type in same tab
-                                const baseUrl = window.location.origin + window.location.pathname;
-                                const url = new URL(baseUrl);
-                                url.search = '';
-
-                                if (profileType.role === 'Investor') {
-                                  url.searchParams.set('view', 'explore');
-                                  url.searchParams.set('role', 'Investor');
-                                } else if (profileType.role === 'Investment Advisor') {
-                                  url.searchParams.set('view', 'explore');
-                                  url.searchParams.set('role', 'Investment Advisor');
-                                } else if (profileType.role === 'Incubation') {
-                                  url.searchParams.set('view', 'explore');
-                                  url.searchParams.set('role', 'Startup Facilitation Center');
-                                } else {
-                                  url.searchParams.set('view', 'explore');
-                                  url.searchParams.set('role', profileType.role);
-                                }
-
-                                window.location.href = url.toString();
-                              }}
+                              onClick={() => setShowLaunchingSoonModal(true)}
+                              disabled={true}
                             >
                               <Eye className="h-3 w-3 mr-2" />
                               Explore
@@ -1851,7 +2150,7 @@ ${mentorName}`;
                           </div>
 
                           {/* Content */}
-                          <div className="md:w-3/4 p-4 sm:p-6 flex flex-col gap-3">
+                          <div className="w-full md:w-3/4 p-4 sm:p-6 flex flex-col gap-2 sm:gap-3">
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <div className="flex items-center gap-2 mb-1">
@@ -1867,8 +2166,9 @@ ${mentorName}`;
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => window.open(request.advisor_profile_url!, '_blank')}
+                                  onClick={() => setShowLaunchingSoonModal(true)}
                                   className="flex-shrink-0"
+                                  disabled={true}
                                 >
                                   <Eye className="h-4 w-4 mr-2" />
                                   View Profile
@@ -1924,8 +2224,9 @@ ${mentorName}`;
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => window.open(request.advisor_profile_url!, '_blank')}
+                                onClick={() => setShowLaunchingSoonModal(true)}
                                 className="flex-shrink-0"
+                                disabled={true}
                               >
                                 <Eye className="h-4 w-4 mr-2" />
                                 View Profile
@@ -1944,23 +2245,8 @@ ${mentorName}`;
                               <Button
                                 size="sm"
                                 variant="primary"
-                                onClick={async () => {
-                                  if (!currentUser?.id) return;
-                                  try {
-                                    await investorConnectionRequestService.updateRequestStatus(request.id, 'accepted', currentUser.id);
-                                    // Reload requests
-                                    const investorRequests = await investorConnectionRequestService.getRequestsForInvestor(currentUser.id!);
-                                    const collaboratorSide = (investorRequests || []).filter(
-                                      r => r.requester_type !== 'Startup'
-                                    );
-                                    setCollaboratorRequests(collaboratorSide);
-                                    const accepted = collaboratorSide.filter(r => r.status === 'accepted');
-                                    setCollaborators(accepted);
-                                  } catch (error) {
-                                    console.error('Error accepting request:', error);
-                                    alert('Failed to accept request. Please try again.');
-                                  }
-                                }}
+                                onClick={() => setShowLaunchingSoonModal(true)}
+                                disabled={true}
                               >
                                 <CheckSquare className="h-4 w-4 mr-2" />
                                 Accept
@@ -1968,23 +2254,8 @@ ${mentorName}`;
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={async () => {
-                                  if (!currentUser?.id) return;
-                                  try {
-                                    await investorConnectionRequestService.updateRequestStatus(request.id, 'rejected', currentUser.id);
-                                    // Reload requests
-                                    const investorRequests = await investorConnectionRequestService.getRequestsForInvestor(currentUser.id!);
-                                    const collaboratorSide = (investorRequests || []).filter(
-                                      r => r.requester_type !== 'Startup'
-                                    );
-                                    setCollaboratorRequests(collaboratorSide);
-                                    const accepted = collaboratorSide.filter(r => r.status === 'accepted');
-                                    setCollaborators(accepted);
-                                  } catch (error) {
-                                    console.error('Error rejecting request:', error);
-                                    alert('Failed to reject request. Please try again.');
-                                  }
-                                }}
+                                onClick={() => setShowLaunchingSoonModal(true)}
+                                disabled={true}
                               >
                                 <XCircle className="h-4 w-4 mr-2" />
                                 Reject

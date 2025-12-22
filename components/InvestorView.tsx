@@ -82,12 +82,12 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     const handleShare = async (startup: ActiveFundraisingStartup) => {
         console.log('Share button clicked for startup:', startup.name);
         console.log('Startup object:', startup);
-        // Build a public shareable link to the startup page
+        // Build a SEO-friendly public shareable link to the startup page
         const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
         const startupName = startup.name || 'Startup';
         const slug = createSlug(startupName);
-        const baseUrl = window.location.origin + window.location.pathname;
-        const shareUrl = createProfileUrl(baseUrl, 'startup', 'startupId', String(startup.id), slug);
+        const baseUrl = window.location.origin;
+        const shareUrl = createProfileUrl(baseUrl, 'startup', slug, String(startup.id));
         const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\n\nView startup: ${shareUrl}`;
         console.log('Share details:', details);
         try {

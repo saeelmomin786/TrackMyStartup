@@ -131,21 +131,11 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
   const pendingRequests = requests.filter(r => r.status === 'pending');
   const negotiatingRequests = requests.filter(r => r.status === 'negotiating');
 
-  if (pendingRequests.length === 0 && negotiatingRequests.length === 0) {
-    return (
-      <Card>
-        <div className="text-center py-8 text-slate-600">
-          <p className="text-sm">No pending or negotiating requests.</p>
-        </div>
-      </Card>
-    );
-  }
-
   return (
     <>
-      {pendingRequests.length > 0 && (
-        <Card>
-          <h3 className="text-lg font-semibold text-slate-900 mb-4">Pending Requests</h3>
+      <Card>
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Pending Request</h3>
+        {pendingRequests.length > 0 ? (
           <div className="space-y-4">
             {pendingRequests.map((request) => (
               <div key={request.id} className="border border-slate-200 rounded-lg p-4">
@@ -225,8 +215,12 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
               </div>
             ))}
           </div>
-        </Card>
-      )}
+        ) : (
+          <div className="text-center py-8 text-slate-500">
+            <p className="text-sm">No pending requests.</p>
+          </div>
+        )}
+      </Card>
 
       {negotiatingRequests.length > 0 && (
         <Card className="mt-4">

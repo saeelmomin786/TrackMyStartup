@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { Startup, NewInvestment, ComplianceStatus, StartupAdditionRequest, FundraisingDetails, InvestmentRecord, InvestmentType, UserRole, Founder, User, VerificationRequest, InvestmentOffer } from './types';
 import { authService, AuthUser } from './lib/auth';
@@ -26,6 +26,7 @@ import { CompleteRegistrationPage } from './components/CompleteRegistrationPage'
 import ResetPasswordPage from './components/ResetPasswordPage';
 import LandingPage from './components/LandingPage';
 import { getQueryParam, setQueryParam } from './lib/urlState';
+import { parseProfileUrl } from './lib/slugUtils';
 import Footer from './components/Footer';
 import PageRouter from './components/PageRouter';
 import PublicProgramView from './components/PublicProgramView';
@@ -119,33 +120,127 @@ const App: React.FC = () => {
   const isPublicProgramView = getQueryParam('view') === 'program' && getQueryParam('opportunityId');
   const isPublicAdminProgramView = getQueryParam('view') === 'admin-program' && getQueryParam('programId');
   
-  // Check if we're on a public startup page (ignore page parameter)
+  // Check for path-based URLs (e.g., /startup/startup-name, /investor/investor-name)
+  // Use useMemo to ensure parseProfileUrl is available
+  const pathProfile = useMemo(() => {
+    try {
+      return parseProfileUrl(window.location.pathname);
+    } catch (e) {
+      console.error('Error parsing profile URL:', e);
+      return null;
+    }
+  }, []);
+  const isPathBasedStartup = pathProfile?.view === 'startup';
+  const isPathBasedInvestor = pathProfile?.view === 'investor';
+  const isPathBasedAdvisor = pathProfile?.view === 'advisor';
+  const isPathBasedMentor = pathProfile?.view === 'mentor';
+  
+  // Check if we're on a public startup page (path-based or query param)
   // This should work even when user is authenticated - it's a public view of a startup
-  const isPublicStartupPage = (getQueryParam('view') === 'startup' || getQueryParam('startupId') || getQueryParam('id')) && (getQueryParam('startupId') || getQueryParam('id'));
+  const isPublicStartupPage = isPathBasedStartup || ((getQueryParam('view') === 'startup' || getQueryParam('startupId') || getQueryParam('id')) && (getQueryParam('startupId') || getQueryParam('id')));
   
   // Check if we're on a public investor page
-  const isPublicInvestorPage = getQueryParam('view') === 'investor' && (getQueryParam('investorId') || getQueryParam('userId'));
+  const isPublicInvestorPage = isPathBasedInvestor || (getQueryParam('view') === 'investor' && (getQueryParam('investorId') || getQueryParam('userId')));
   // Check if we're on a public investment advisor page
-  const isPublicAdvisorPage = getQueryParam('view') === 'advisor' && (getQueryParam('advisorId') || getQueryParam('userId'));
+  const isPublicAdvisorPage = isPathBasedAdvisor || (getQueryParam('view') === 'advisor' && (getQueryParam('advisorId') || getQueryParam('userId')));
   // Check if we're on a public mentor page
-  const isPublicMentorPage = getQueryParam('view') === 'mentor' && (getQueryParam('mentorId') || getQueryParam('userId'));
+  const isPublicMentorPage = isPathBasedMentor || (getQueryParam('view') === 'mentor' && (getQueryParam('mentorId') || getQueryParam('userId')));
   // Check if we're on explore profiles page
   const isExploreProfilesPage = getQueryParam('view') === 'explore' && getQueryParam('role');
   
-  // Clean up page=landing from public startup URLs to avoid routing conflicts
-  // Do this in useEffect to avoid side effects during render
+  // Redirect old query-parameter URLs to SEO-friendly path-based URLs
   useEffect(() => {
-    if (isPublicStartupPage && getQueryParam('page') === 'landing') {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('page');
-      window.history.replaceState({}, '', url.toString());
-    }
-    if (isPublicInvestorPage && getQueryParam('page') === 'landing') {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('page');
-      window.history.replaceState({}, '', url.toString());
-    }
-  }, [isPublicStartupPage, isPublicInvestorPage]);
+    const redirectToSeoUrl = async () => {
+      // Check for old startup URL format
+      const queryStartupId = getQueryParam('startupId') || getQueryParam('id');
+      if (queryStartupId && !pathProfile) {
+        try {
+          // Load startup name and redirect
+          const { data: startupData, error } = await supabase
+            .from('startups_public')
+            .select('id, name')
+            .eq('id', queryStartupId)
+            .single();
+          
+          if (!error && startupData && (startupData as any).name) {
+            const { createSlug } = await import('./lib/slugUtils');
+            const slug = createSlug((startupData as any).name);
+            const newUrl = `${window.location.origin}/startup/${slug}`;
+            window.location.replace(newUrl);
+            return;
+          }
+        } catch (err) {
+          console.error('Error redirecting startup URL:', err);
+        }
+      }
+      
+      // Check for old mentor URL format (query params)
+      const queryMentorId = getQueryParam('mentorId');
+      const queryUserId = getQueryParam('userId');
+      if ((queryMentorId || queryUserId) && getQueryParam('view') === 'mentor' && !pathProfile) {
+        try {
+          const userIdToCheck = queryUserId || queryMentorId;
+          // Load mentor name and redirect
+          const { data: mentorData, error } = await supabase
+            .from('mentor_profiles')
+            .select('user_id, mentor_name')
+            .eq('user_id', userIdToCheck)
+            .single();
+          
+          if (!error && mentorData && mentorData.mentor_name) {
+            const { createSlug } = await import('./lib/slugUtils');
+            const slug = createSlug(mentorData.mentor_name);
+            const newUrl = `${window.location.origin}/mentor/${slug}`;
+            window.location.replace(newUrl);
+            return;
+          }
+        } catch (err) {
+          console.error('Error redirecting mentor URL:', err);
+        }
+      }
+      
+      // Check for invalid mentor slug (like "mentorId" as literal text)
+      if (pathProfile && pathProfile.view === 'mentor' && (pathProfile.slug === 'mentorId' || pathProfile.slug === 'mentorid')) {
+        // This is an invalid slug, try to get mentor from query params or redirect to error
+        const queryMentorId = getQueryParam('mentorId');
+        const queryUserId = getQueryParam('userId');
+        if (queryMentorId || queryUserId) {
+          try {
+            const userIdToCheck = queryUserId || queryMentorId;
+            const { data: mentorData, error } = await supabase
+              .from('mentor_profiles')
+              .select('user_id, mentor_name')
+              .eq('user_id', userIdToCheck)
+              .single();
+            
+            if (!error && mentorData && mentorData.mentor_name) {
+              const { createSlug } = await import('./lib/slugUtils');
+              const slug = createSlug(mentorData.mentor_name);
+              const newUrl = `${window.location.origin}/mentor/${slug}`;
+              window.location.replace(newUrl);
+              return;
+            }
+          } catch (err) {
+            console.error('Error redirecting invalid mentor slug:', err);
+          }
+        }
+      }
+      
+      // Clean up page=landing from public startup URLs
+      if (isPublicStartupPage && getQueryParam('page') === 'landing') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('page');
+        window.history.replaceState({}, '', url.toString());
+      }
+      if (isPublicInvestorPage && getQueryParam('page') === 'landing') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('page');
+        window.history.replaceState({}, '', url.toString());
+      }
+    };
+    
+    redirectToSeoUrl();
+  }, [isPublicStartupPage, isPublicInvestorPage, pathProfile]);
   
   
   

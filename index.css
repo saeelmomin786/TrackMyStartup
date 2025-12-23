@@ -60,4 +60,13 @@
     border-color: transparent;
     box-shadow: 0 0 0 2px #3b82f6;
   }
+  
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
 }

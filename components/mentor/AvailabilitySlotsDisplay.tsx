@@ -176,15 +176,16 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
   return (
     <>
       <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-slate-900">Availability Slots</h3>
-          <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
+          <h3 className="text-base sm:text-lg font-semibold text-slate-900">Availability Slots</h3>
+          <div className="flex gap-2 flex-wrap">
             <Button
               size="sm"
               variant="outline"
               onClick={loadSlots}
+              className="text-xs sm:text-sm"
             >
-              <RefreshCw className="h-4 w-4 mr-1" /> Refresh
+              <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" /> Refresh
             </Button>
             <Button
               size="sm"
@@ -192,8 +193,9 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
                 setEditingSlot(null);
                 setManageModalOpen(true);
               }}
+              className="text-xs sm:text-sm"
             >
-              <Calendar className="h-4 w-4 mr-1" /> Create Slot
+              <Calendar className="h-3 w-3 sm:h-4 sm:w-4 mr-1" /> Create Slot
             </Button>
           </div>
         </div>
@@ -218,15 +220,15 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
             {/* Recurring Slots */}
             {recurringSlots.length > 0 && (
               <div>
-                <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                  <RefreshCw className="h-4 w-4" />
+                <h4 className="text-xs sm:text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4" />
                   Recurring Slots
                 </h4>
                 <div className="space-y-3">
                   {recurringSlots.map((slot) => (
                     <div
                       key={slot.id}
-                      className={`border rounded-lg p-4 ${
+                      className={`border rounded-lg p-3 sm:p-4 ${
                         slot.isBooked
                           ? 'bg-green-50 border-green-200'
                           : slot.is_active
@@ -234,34 +236,34 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
                           : 'bg-slate-50 border-slate-200 opacity-60'
                       }`}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
                             {slot.isBooked ? (
-                              <CheckCircle className="h-5 w-5 text-green-600" />
+                              <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 text-green-600 flex-shrink-0" />
                             ) : slot.is_active ? (
-                              <Clock className="h-5 w-5 text-blue-600" />
+                              <Clock className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 flex-shrink-0" />
                             ) : (
-                              <XCircle className="h-5 w-5 text-slate-400" />
+                              <XCircle className="h-4 w-4 sm:h-5 sm:w-5 text-slate-400 flex-shrink-0" />
                             )}
-                            <span className="font-medium text-slate-900">
+                            <span className="font-medium text-sm sm:text-base text-slate-900">
                               {DAYS_OF_WEEK[slot.day_of_week || 0]?.label || 'Unknown'}
                             </span>
                             {slot.isBooked && (
-                              <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                              <span className="px-2 py-0.5 sm:py-1 bg-green-100 text-green-800 text-xs rounded-full whitespace-nowrap">
                                 Booked
                               </span>
                             )}
                             {!slot.is_active && (
-                              <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-full">
+                              <span className="px-2 py-0.5 sm:py-1 bg-slate-100 text-slate-600 text-xs rounded-full whitespace-nowrap">
                                 Inactive
                               </span>
                             )}
                           </div>
-                          <div className="text-sm text-slate-600 space-y-1">
+                          <div className="text-xs sm:text-sm text-slate-600 space-y-1">
                             <div className="flex items-center gap-2">
-                              <Clock className="h-4 w-4" />
-                              <span>
+                              <Clock className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
+                              <span className="break-words">
                                 {formatTimeAMPM(slot.start_time)} - {formatTimeAMPM(slot.end_time)}
                               </span>
                             </div>
@@ -281,25 +283,27 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
                               </div>
                             )}
                             {slot.isBooked && slot.bookedBy && (
-                              <div className="text-xs text-green-700 font-medium mt-1">
+                              <div className="text-xs text-green-700 font-medium mt-1 break-words">
                                 Booked by: {slot.bookedBy}
                               </div>
                             )}
                           </div>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap sm:flex-nowrap">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleEdit(slot)}
+                            className="text-xs sm:text-sm"
                           >
-                            <Edit2 className="h-3 w-3" />
+                            <Edit2 className="h-3 w-3 sm:mr-1" />
+                            <span className="hidden sm:inline">Edit</span>
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleToggleActive(slot)}
-                            className={slot.is_active ? 'text-orange-600' : 'text-green-600'}
+                            className={`text-xs sm:text-sm ${slot.is_active ? 'text-orange-600' : 'text-green-600'}`}
                           >
                             {slot.is_active ? 'Deactivate' : 'Activate'}
                           </Button>
@@ -307,9 +311,10 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
                             size="sm"
                             variant="outline"
                             onClick={() => handleDelete(slot.id)}
-                            className="text-red-600"
+                            className="text-red-600 text-xs sm:text-sm"
                           >
-                            <Trash2 className="h-3 w-3" />
+                            <Trash2 className="h-3 w-3 sm:mr-1" />
+                            <span className="hidden sm:inline">Delete</span>
                           </Button>
                         </div>
                       </div>
@@ -322,15 +327,15 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
             {/* One-Time Slots */}
             {oneTimeSlots.length > 0 && (
               <div>
-                <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
+                <h4 className="text-xs sm:text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <Calendar className="h-3 w-3 sm:h-4 sm:w-4" />
                   One-Time Slots
                 </h4>
                 <div className="space-y-3">
                   {oneTimeSlots.map((slot) => (
                     <div
                       key={slot.id}
-                      className={`border rounded-lg p-4 ${
+                      className={`border rounded-lg p-3 sm:p-4 ${
                         slot.isBooked
                           ? 'bg-green-50 border-green-200'
                           : slot.is_active
@@ -338,57 +343,59 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
                           : 'bg-slate-50 border-slate-200 opacity-60'
                       }`}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
                             {slot.isBooked ? (
-                              <CheckCircle className="h-5 w-5 text-green-600" />
+                              <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 text-green-600 flex-shrink-0" />
                             ) : slot.is_active ? (
-                              <Clock className="h-5 w-5 text-blue-600" />
+                              <Clock className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 flex-shrink-0" />
                             ) : (
-                              <XCircle className="h-5 w-5 text-slate-400" />
+                              <XCircle className="h-4 w-4 sm:h-5 sm:w-5 text-slate-400 flex-shrink-0" />
                             )}
-                            <span className="font-medium text-slate-900">
+                            <span className="font-medium text-sm sm:text-base text-slate-900">
                               {slot.specific_date ? formatDateDDMMYYYYWithDay(slot.specific_date) : 'No date'}
                             </span>
                             {slot.isBooked && (
-                              <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                              <span className="px-2 py-0.5 sm:py-1 bg-green-100 text-green-800 text-xs rounded-full whitespace-nowrap">
                                 Booked
                               </span>
                             )}
                             {!slot.is_active && (
-                              <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-full">
+                              <span className="px-2 py-0.5 sm:py-1 bg-slate-100 text-slate-600 text-xs rounded-full whitespace-nowrap">
                                 Inactive
                               </span>
                             )}
                           </div>
-                          <div className="text-sm text-slate-600 space-y-1">
+                          <div className="text-xs sm:text-sm text-slate-600 space-y-1">
                             <div className="flex items-center gap-2">
-                              <Clock className="h-4 w-4" />
-                              <span>
+                              <Clock className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
+                              <span className="break-words">
                                 {formatTimeAMPM(slot.start_time)} - {formatTimeAMPM(slot.end_time)}
                               </span>
                             </div>
                             {slot.isBooked && slot.bookedBy && (
-                              <div className="text-xs text-green-700 font-medium mt-1">
+                              <div className="text-xs text-green-700 font-medium mt-1 break-words">
                                 Booked by: {slot.bookedBy}
                               </div>
                             )}
                           </div>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap sm:flex-nowrap">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleEdit(slot)}
+                            className="text-xs sm:text-sm"
                           >
-                            <Edit2 className="h-3 w-3" />
+                            <Edit2 className="h-3 w-3 sm:mr-1" />
+                            <span className="hidden sm:inline">Edit</span>
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleToggleActive(slot)}
-                            className={slot.is_active ? 'text-orange-600' : 'text-green-600'}
+                            className={`text-xs sm:text-sm ${slot.is_active ? 'text-orange-600' : 'text-green-600'}`}
                           >
                             {slot.is_active ? 'Deactivate' : 'Activate'}
                           </Button>
@@ -396,9 +403,10 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
                             size="sm"
                             variant="outline"
                             onClick={() => handleDelete(slot.id)}
-                            className="text-red-600"
+                            className="text-red-600 text-xs sm:text-sm"
                           >
-                            <Trash2 className="h-3 w-3" />
+                            <Trash2 className="h-3 w-3 sm:mr-1" />
+                            <span className="hidden sm:inline">Delete</span>
                           </Button>
                         </div>
                       </div>

@@ -718,44 +718,50 @@ ${mentorName}`;
                       <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700">My Startups</h3>
                       {/* Tabs */}
                       <div className="border-b border-slate-200">
-                        <nav className="-mb-px flex space-x-4" aria-label="Tabs">
+                        <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto scrollbar-hide" aria-label="Tabs">
                           <button
                             onClick={() => setMentorStartupsTab('active')}
-                            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex-shrink-0 ${
                               mentorStartupsTab === 'active'
                                 ? 'border-green-500 text-green-600'
                                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
-                              <Clock className="h-4 w-4" />
-                              Currently Mentoring ({mentorMetrics.activeAssignments.length})
+                            <div className="flex items-center gap-1 sm:gap-2">
+                              <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
+                              <span className="hidden sm:inline">Currently Mentoring</span>
+                              <span className="sm:hidden">Active</span>
+                              <span>({mentorMetrics.activeAssignments.length})</span>
                             </div>
                           </button>
                           <button
                             onClick={() => setMentorStartupsTab('completed')}
-                            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex-shrink-0 ${
                               mentorStartupsTab === 'completed'
                                 ? 'border-purple-500 text-purple-600'
                                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
-                              <CheckCircle2 className="h-4 w-4" />
-                              Previously Mentored ({mentorMetrics.completedAssignments.length})
+                            <div className="flex items-center gap-1 sm:gap-2">
+                              <CheckCircle2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                              <span className="hidden sm:inline">Previously Mentored</span>
+                              <span className="sm:hidden">Previous</span>
+                              <span>({mentorMetrics.completedAssignments.length})</span>
                             </div>
                           </button>
                           <button
                             onClick={() => setMentorStartupsTab('founded')}
-                            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex-shrink-0 ${
                               mentorStartupsTab === 'founded'
                                 ? 'border-orange-500 text-orange-600'
                                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
-                              <Star className="h-4 w-4" />
-                              Startup Experience ({mentorMetrics.foundedStartups.length})
+                            <div className="flex items-center gap-1 sm:gap-2">
+                              <Star className="h-3 w-3 sm:h-4 sm:w-4" />
+                              <span className="hidden sm:inline">Startup Experience</span>
+                              <span className="sm:hidden">Experience</span>
+                              <span>({mentorMetrics.foundedStartups.length})</span>
                             </div>
                           </button>
                         </nav>
@@ -766,172 +772,172 @@ ${mentorName}`;
                     {mentorStartupsTab === 'active' && mentorMetrics.activeAssignments.length > 0 && (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-slate-200">
-                        <thead className="bg-slate-50">
-                          <tr>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From Date</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ESOP</th>
-                            <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-slate-200">
-                          {mentorMetrics.activeAssignments.map(assignment => {
-                            // Parse notes to get startup_name, email_id, website, and sector
-                            let startupName = assignment.startup?.name || `Startup #${assignment.startup_id || 'N/A'}`;
-                            let emailId = '';
-                            let website = '';
-                            let sector = '';
-                            let fromDate = '';
-                            
-                            if (assignment.notes) {
-                              try {
-                                const notesData = JSON.parse(assignment.notes);
-                                startupName = notesData.startup_name || startupName;
-                                emailId = notesData.email_id || '';
-                                website = notesData.website || '';
-                                sector = notesData.sector || '';
-                                fromDate = notesData.from_date || '';
-                              } catch (e) {
-                                // Notes is not JSON, use startup data
-                                website = assignment.startup?.domain || '';
-                                sector = assignment.startup?.sector || '';
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                              <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Website</th>
+                              <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                              <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">From Date</th>
+                              <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Fee</th>
+                              <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">ESOP</th>
+                              <th className="px-4 sm:px-6 py-3 text-right text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-slate-200">
+                            {mentorMetrics.activeAssignments.map(assignment => {
+                              // Parse notes to get startup_name, email_id, website, and sector
+                              let startupName = assignment.startup?.name || `Startup #${assignment.startup_id || 'N/A'}`;
+                              let emailId = '';
+                              let website = '';
+                              let sector = '';
+                              let fromDate = '';
+                              
+                              if (assignment.notes) {
+                                try {
+                                  const notesData = JSON.parse(assignment.notes);
+                                  startupName = notesData.startup_name || startupName;
+                                  emailId = notesData.email_id || '';
+                                  website = notesData.website || '';
+                                  sector = notesData.sector || '';
+                                  fromDate = notesData.from_date || '';
+                                } catch (e) {
+                                  // Notes is not JSON, use startup data
+                                  website = assignment.startup?.domain || '';
+                                  sector = assignment.startup?.sector || '';
+                                }
+                              } else if (assignment.startup) {
+                                website = assignment.startup.domain || '';
+                                sector = assignment.startup.sector || '';
                               }
-                            } else if (assignment.startup) {
-                              website = assignment.startup.domain || '';
-                              sector = assignment.startup.sector || '';
-                            }
-                            
-                            // If from_date not in notes, use assigned_at
-                            if (!fromDate && assignment.assigned_at) {
-                              fromDate = assignment.assigned_at.split('T')[0];
-                            }
+                              
+                              // If from_date not in notes, use assigned_at
+                              if (!fromDate && assignment.assigned_at) {
+                                fromDate = assignment.assigned_at.split('T')[0];
+                              }
 
-                            return (
-                              <tr key={assignment.id}>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                                  <div className="text-xs sm:text-sm font-medium text-slate-900">
-                                    {startupName}
-                                  </div>
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {website ? (
-                                    <a 
-                                      href={website.startsWith('http') ? website : `https://${website}`} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer" 
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      {website}
-                                    </a>
-                                  ) : 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {sector || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {fromDate || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {assignment.esop_percentage > 0 ? `${assignment.esop_percentage}%` : 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
-                                  <div className="flex items-center justify-end gap-2">
-                                    {/* Schedule button - only for TMS startups */}
-                                    {assignment.startup && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="text-green-600 border-green-300 hover:bg-green-50"
-                                        onClick={() => {
-                                          setSelectedAssignmentForSchedule(assignment);
-                                          setScheduleSectionOpen(true);
-                                        }}
+                              return (
+                                <tr key={assignment.id} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
+                                    <div className="text-sm font-medium text-slate-900">
+                                      {startupName}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {website ? (
+                                      <a 
+                                        href={website.startsWith('http') ? website : `https://${website}`} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer" 
+                                        className="text-blue-600 hover:underline"
                                       >
-                                        <Calendar className="mr-1 h-3 w-3" /> Schedule
-                                      </Button>
-                                    )}
-                                    {/* Only show Invite to TMS if assignment didn't come from a request */}
-                                    {!(assignment as any).fromRequest && (
+                                        {website}
+                                      </a>
+                                    ) : 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {sector || 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {fromDate || 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {assignment.esop_percentage > 0 ? `${assignment.esop_percentage}%` : 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                    <div className="flex items-center justify-end gap-2">
+                                      {/* Schedule button - only for TMS startups */}
+                                      {assignment.startup && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-green-600 border-green-300 hover:bg-green-50"
+                                          onClick={() => {
+                                            setSelectedAssignmentForSchedule(assignment);
+                                            setScheduleSectionOpen(true);
+                                          }}
+                                        >
+                                          <Calendar className="mr-1 h-3 w-3" /> Schedule
+                                        </Button>
+                                      )}
+                                      {/* Only show Invite to TMS if assignment didn't come from a request */}
+                                      {!(assignment as any).fromRequest && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleInviteToTMS(startupName, emailId)}
+                                          className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                        >
+                                          <Send className="mr-1 h-3 w-3" /> Invite to TMS
+                                        </Button>
+                                      )}
+                                      {assignment.startup && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleViewStartup(assignment.startup!)}
+                                        >
+                                          <Eye className="mr-2 h-4 w-4" /> View
+                                        </Button>
+                                      )}
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        onClick={() => handleInviteToTMS(startupName, emailId)}
-                                        className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                                      >
-                                        <Send className="mr-1 h-3 w-3" /> Invite to TMS
-                                      </Button>
-                                    )}
-                                    {assignment.startup && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => handleViewStartup(assignment.startup!)}
-                                      >
-                                        <Eye className="mr-2 h-4 w-4" /> View
-                                      </Button>
-                                    )}
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="text-purple-600 border-purple-300 hover:bg-purple-50"
-                                      onClick={async () => {
-                                        if (confirm(`Mark ${startupName} as completed? This will move it to Previously Mentored section.`)) {
-                                          const success = await mentorService.completeMentoringAssignment(assignment.id);
-                                          if (success) {
-                                            // Reload mentor metrics
-                                            if (currentUser?.id) {
-                                              const metrics = await mentorService.getMentorMetrics(currentUser.id);
-                                              setMentorMetrics(metrics);
-                                              // Switch to Previously Mentored tab to show the moved startup
-                                              if (metrics.completedAssignments.length > 0) {
-                                                setMentorStartupsTab('completed');
-                                              }
-                                            }
-                                          } else {
-                                            alert('Failed to mark mentoring as completed. Please try again.');
-                                          }
-                                        }
-                                      }}
-                                    >
-                                      <CheckCircle2 className="mr-1 h-3 w-3" /> Update
-                                    </Button>
-                                    {/* Only show Delete button for manually entered startups (not TMS startups) */}
-                                    {!assignment.startup && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="text-red-600 border-red-300 hover:bg-red-50"
+                                        className="text-purple-600 border-purple-300 hover:bg-purple-50"
                                         onClick={async () => {
-                                          if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
-                                            const success = await mentorService.deleteMentoringAssignment(assignment.id);
+                                          if (confirm(`Mark ${startupName} as completed? This will move it to Previously Mentored section.`)) {
+                                            const success = await mentorService.completeMentoringAssignment(assignment.id);
                                             if (success) {
                                               // Reload mentor metrics
                                               if (currentUser?.id) {
                                                 const metrics = await mentorService.getMentorMetrics(currentUser.id);
                                                 setMentorMetrics(metrics);
+                                                // Switch to Previously Mentored tab to show the moved startup
+                                                if (metrics.completedAssignments.length > 0) {
+                                                  setMentorStartupsTab('completed');
+                                                }
                                               }
                                             } else {
-                                              alert('Failed to delete mentoring assignment. Please try again.');
+                                              alert('Failed to mark mentoring as completed. Please try again.');
                                             }
                                           }
                                         }}
                                       >
-                                        <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                        <CheckCircle2 className="mr-1 h-3 w-3" /> Update
                                       </Button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                      {/* Only show Delete button for manually entered startups (not TMS startups) */}
+                                      {!assignment.startup && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-red-600 border-red-300 hover:bg-red-50"
+                                          onClick={async () => {
+                                            if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
+                                              const success = await mentorService.deleteMentoringAssignment(assignment.id);
+                                              if (success) {
+                                                // Reload mentor metrics
+                                                if (currentUser?.id) {
+                                                  const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                                  setMentorMetrics(metrics);
+                                                }
+                                              } else {
+                                                alert('Failed to delete mentoring assignment. Please try again.');
+                                              }
+                                            }
+                                          }}
+                                        >
+                                          <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                     </div>
                     )}
 
@@ -941,14 +947,14 @@ ${mentorName}`;
                       <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50">
                           <tr>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From Date</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">To Date</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fee Earned</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ESOP Value</th>
-                            <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Website</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">From Date</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">To Date</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Fee Earned</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">ESOP Value</th>
+                            <th className="px-4 sm:px-6 py-3 text-right text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200">
@@ -991,89 +997,89 @@ ${mentorName}`;
                             }
 
                             return (
-                              <tr key={assignment.id}>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                                  <div className="text-xs sm:text-sm font-medium text-slate-900">
-                                    {startupName}
-                                  </div>
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {website ? (
-                                    <a 
-                                      href={website.startsWith('http') ? website : `https://${website}`} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer" 
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      {website}
-                                    </a>
-                                  ) : 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {sector || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {fromDate || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {toDate || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {mentorService.formatCurrency(assignment.esop_value || 0, 'USD')}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
-                                  <div className="flex items-center justify-end gap-2">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => handleInviteToTMS(startupName, emailId)}
-                                      className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                                    >
-                                      <Send className="mr-1 h-3 w-3" /> Invite to TMS
-                                    </Button>
-                                    {assignment.startup && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => handleViewStartup(assignment.startup!)}
+                                <tr key={assignment.id} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
+                                    <div className="text-sm font-medium text-slate-900">
+                                      {startupName}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {website ? (
+                                      <a 
+                                        href={website.startsWith('http') ? website : `https://${website}`} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer" 
+                                        className="text-blue-600 hover:underline"
                                       >
-                                        <Eye className="mr-2 h-4 w-4" /> View
-                                      </Button>
-                                    )}
-                                    {/* Only show Delete button for manually entered startups (not TMS startups) */}
-                                    {!assignment.startup && (
+                                        {website}
+                                      </a>
+                                    ) : 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {sector || 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {fromDate || 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {toDate || 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {mentorService.formatCurrency(assignment.esop_value || 0, 'USD')}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                    <div className="flex items-center justify-end gap-2">
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="text-red-600 border-red-300 hover:bg-red-50"
-                                        onClick={async () => {
-                                          if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
-                                            const success = await mentorService.deleteMentoringAssignment(assignment.id);
-                                            if (success) {
-                                              // Reload mentor metrics
-                                              if (currentUser?.id) {
-                                                const metrics = await mentorService.getMentorMetrics(currentUser.id);
-                                                setMentorMetrics(metrics);
+                                        onClick={() => handleInviteToTMS(startupName, emailId)}
+                                        className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                      >
+                                        <Send className="mr-1 h-3 w-3" /> Invite to TMS
+                                      </Button>
+                                      {assignment.startup && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleViewStartup(assignment.startup!)}
+                                        >
+                                          <Eye className="mr-2 h-4 w-4" /> View
+                                        </Button>
+                                      )}
+                                      {/* Only show Delete button for manually entered startups (not TMS startups) */}
+                                      {!assignment.startup && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-red-600 border-red-300 hover:bg-red-50"
+                                          onClick={async () => {
+                                            if (confirm(`Are you sure you want to delete ${startupName}? This action cannot be undone.`)) {
+                                              const success = await mentorService.deleteMentoringAssignment(assignment.id);
+                                              if (success) {
+                                                // Reload mentor metrics
+                                                if (currentUser?.id) {
+                                                  const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                                  setMentorMetrics(metrics);
+                                                }
+                                              } else {
+                                                alert('Failed to delete mentoring assignment. Please try again.');
                                               }
-                                            } else {
-                                              alert('Failed to delete mentoring assignment. Please try again.');
                                             }
-                                          }
-                                        }}
-                                      >
-                                        <Trash2 className="mr-1 h-3 w-3" /> Delete
-                                      </Button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
+                                          }}
+                                        >
+                                          <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
                           })}
-                        </tbody>
-                      </table>
+                          </tbody>
+                        </table>
                     </div>
                     )}
 
@@ -1083,100 +1089,100 @@ ${mentorName}`;
                       <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50">
                           <tr>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Website</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sector</th>
-                            <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Current Valuation</th>
-                            <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Website</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Sector</th>
+                            <th className="px-4 sm:px-6 py-3 text-left text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Current Valuation</th>
+                            <th className="px-4 sm:px-6 py-3 text-right text-xs sm:text-sm font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200">
                           {mentorMetrics.foundedStartups.map(startup => {
-                            // Get email_id, website, and sector from the startup object
-                            const emailId = (startup as any).email_id || '';
-                            const website = (startup as any).website || startup.domain || '';
-                            const sector = (startup as any).sector || startup.sector || '';
-                            
-                            // Check if startup is on TMS (has user_id or is a valid TMS startup)
-                            // If startup was created from notes (manually entered), it won't have user_id
-                            const isOnTMS = startup.user_id || (startup.id && typeof startup.id === 'number' && startup.id > 0 && !startup.notes);
+                              // Get email_id, website, and sector from the startup object
+                              const emailId = (startup as any).email_id || '';
+                              const website = (startup as any).website || startup.domain || '';
+                              const sector = (startup as any).sector || startup.sector || '';
+                              
+                              // Check if startup is on TMS (has user_id or is a valid TMS startup)
+                              // If startup was created from notes (manually entered), it won't have user_id
+                              const isOnTMS = startup.user_id || (startup.id && typeof startup.id === 'number' && startup.id > 0 && !startup.notes);
 
-                            return (
-                              <tr key={startup.id || `manual-${startup.name}`}>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                                  <div className="text-xs sm:text-sm font-medium text-slate-900">{startup.name}</div>
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {website ? (
-                                    <a 
-                                      href={website.startsWith('http') ? website : `https://${website}`} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer" 
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      {website}
-                                    </a>
-                                  ) : 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {sector || 'N/A'}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-slate-500">
-                                  {formatCurrency(startup.currentValuation || 0, startup.currency || 'USD')}
-                                </td>
-                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-right text-xs sm:text-sm font-medium">
-                                  <div className="flex items-center justify-end gap-2">
-                                    {isOnTMS ? (
-                                      // Startup is already on TMS - show View button
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                        onClick={() => handleViewStartup(startup as Startup)}
+                              return (
+                                <tr key={startup.id || `manual-${startup.name}`} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
+                                    <div className="text-sm font-medium text-slate-900">{startup.name}</div>
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {website ? (
+                                      <a 
+                                        href={website.startsWith('http') ? website : `https://${website}`} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer" 
+                                        className="text-blue-600 hover:underline"
                                       >
-                                        <Eye className="mr-2 h-4 w-4" /> View
-                                      </Button>
-                                    ) : (
-                                      // Startup not on TMS yet - show Add to TMS button
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => setShowAddProfileModal(true)}
-                                    className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                                  >
-                                        <UserPlus className="mr-1 h-3 w-3" /> Add to TMS
-                                  </Button>
-                                    )}
-                                    {/* Delete button for manually entered startups */}
-                                    {!isOnTMS && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="text-red-600 border-red-300 hover:bg-red-50"
-                                        onClick={async () => {
-                                          if (confirm(`Are you sure you want to delete ${startup.name}? This action cannot be undone.`)) {
-                                            const success = await mentorService.deleteFoundedStartup(startup.id);
-                                            if (success) {
-                                              // Reload mentor metrics
-                                              if (currentUser?.id) {
-                                                const metrics = await mentorService.getMentorMetrics(currentUser.id);
-                                                setMentorMetrics(metrics);
+                                        {website}
+                                      </a>
+                                    ) : 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {sector || 'N/A'}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                    {formatCurrency(startup.currentValuation || 0, startup.currency || 'USD')}
+                                  </td>
+                                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                    <div className="flex items-center justify-end gap-2">
+                                      {isOnTMS ? (
+                                        // Startup is already on TMS - show View button
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleViewStartup(startup as Startup)}
+                                        >
+                                          <Eye className="mr-2 h-4 w-4" /> View
+                                        </Button>
+                                      ) : (
+                                        // Startup not on TMS yet - show Add to TMS button
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => setShowAddProfileModal(true)}
+                                          className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                        >
+                                          <UserPlus className="mr-1 h-3 w-3" /> Add to TMS
+                                        </Button>
+                                      )}
+                                      {/* Delete button for manually entered startups */}
+                                      {!isOnTMS && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-red-600 border-red-300 hover:bg-red-50"
+                                          onClick={async () => {
+                                            if (confirm(`Are you sure you want to delete ${startup.name}? This action cannot be undone.`)) {
+                                              const success = await mentorService.deleteFoundedStartup(startup.id);
+                                              if (success) {
+                                                // Reload mentor metrics
+                                                if (currentUser?.id) {
+                                                  const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                                                  setMentorMetrics(metrics);
+                                                }
+                                              } else {
+                                                alert('Failed to delete startup experience. Please try again.');
                                               }
-                                            } else {
-                                              alert('Failed to delete startup experience. Please try again.');
                                             }
-                                          }
-                                        }}
-                                      >
-                                        <Trash2 className="mr-1 h-3 w-3" /> Delete
-                                      </Button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                          }}
+                                        >
+                                          <Trash2 className="mr-1 h-3 w-3" /> Delete
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                     </div>
                     )}
 

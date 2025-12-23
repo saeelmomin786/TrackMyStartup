@@ -4,7 +4,7 @@ import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import Input from '../ui/Input';
 import { MentorRequest } from '../../lib/mentorService';
-import { CheckCircle, XCircle, MessageSquare, DollarSign, TrendingUp } from 'lucide-react';
+import { CheckCircle, XCircle, MessageSquare, DollarSign, TrendingUp, ExternalLink } from 'lucide-react';
 import { formatDateDDMMYYYY } from '../../lib/dateTimeUtils';
 
 // Helper function to format currency
@@ -131,6 +131,35 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
   const pendingRequests = requests.filter(r => r.status === 'pending');
   const negotiatingRequests = requests.filter(r => r.status === 'negotiating');
 
+  // Generate startup card link
+  const getStartupCardLink = async (startupId: number | undefined, startupName: string | undefined): Promise<string | null> => {
+    if (!startupId || !startupName) return null;
+    
+    try {
+      const { createSlug, createProfileUrl } = await import('../../lib/slugUtils');
+      const slug = createSlug(startupName);
+      const baseUrl = window.location.origin;
+      const startupProfileUrl = createProfileUrl(baseUrl, 'startup', slug, String(startupId));
+      return startupProfileUrl;
+    } catch (error) {
+      console.error('Error generating startup link:', error);
+      // Fallback to query param URL
+      return `${window.location.origin}/startup?startupId=${startupId}`;
+    }
+  };
+
+  const handleViewStartupCard = async (request: MentorRequest) => {
+    const link = await getStartupCardLink(request.startup_id, request.startup_name);
+    if (link) {
+      window.open(link, '_blank');
+    } else {
+      // Fallback if link generation fails
+      if (request.startup_id) {
+        window.open(`${window.location.origin}/startup?startupId=${request.startup_id}`, '_blank');
+      }
+    }
+  };
+
   return (
     <>
       <Card>
@@ -186,7 +215,17 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
                   </div>
                 )}
 
-                <div className="flex gap-2 mt-4">
+                <div className="flex flex-wrap gap-2 mt-4">
+                  {request.startup_id && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-purple-600 border-purple-300 hover:bg-purple-50"
+                      onClick={() => handleViewStartupCard(request)}
+                    >
+                      <ExternalLink className="mr-1 h-3 w-3" /> View Startup Card
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -234,6 +273,19 @@ const MentorPendingRequestsSection: React.FC<MentorPendingRequestsSectionProps> 
                     <p className="text-xs text-blue-600 mt-1">Awaiting startup response</p>
                   </div>
                 </div>
+
+                {request.startup_id && (
+                  <div className="mb-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-purple-600 border-purple-300 hover:bg-purple-50"
+                      onClick={() => handleViewStartupCard(request)}
+                    >
+                      <ExternalLink className="mr-1 h-3 w-3" /> View Startup Card
+                    </Button>
+                  </div>
+                )}
 
                 {request.negotiated_fee_amount || request.negotiated_equity_amount || request.negotiated_esop_percentage ? (
                   <div className="p-3 bg-white rounded-md mb-3">

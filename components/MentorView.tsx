@@ -893,9 +893,6 @@ ${mentorName}`;
 
                 {/* Combined Mentor Startups Section */}
                 {mentorMetrics && (
-                  (mentorMetrics.activeAssignments.length > 0 || 
-                   mentorMetrics.completedAssignments.length > 0 || 
-                   mentorMetrics.foundedStartups.length > 0) && (
                   <Card>
                     <div className="mb-4">
                       <div className="flex items-center justify-between mb-4">
@@ -1420,7 +1417,6 @@ ${mentorName}`;
                       </div>
                     )}
                   </Card>
-                  )
                 )}
               </>
             )}

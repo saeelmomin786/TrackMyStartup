@@ -46,7 +46,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
     
     if (!supabaseUrl || !supabaseAnonKey) {
-      throw new Error('Missing Supabase configuration');
+      console.error('[SITEMAP ERROR] Missing Supabase configuration:', {
+        hasUrl: !!supabaseUrl,
+        hasKey: !!supabaseAnonKey,
+        envKeys: Object.keys(process.env).filter(k => k.includes('SUPABASE'))
+      });
+      // Return sitemap with just homepage if config is missing
+      sitemap += `
+</urlset>`;
+      return res.status(200).send(sitemap);
     }
     
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -60,6 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       // Fallback to startups table if public view doesn't exist or fails
       if (startupError) {
+        console.warn('[SITEMAP] startups_public failed, trying startups table:', startupError.message);
         const fallback = await supabase
           .from('startups')
           .select('id, name, updated_at')
@@ -68,24 +77,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         startupError = fallback.error;
       }
 
-      if (!startupError && startups) {
+      if (startupError) {
+        console.error('[SITEMAP ERROR] Failed to fetch startups:', startupError);
+      } else if (startups && startups.length > 0) {
+        console.log(`[SITEMAP] Found ${startups.length} startups`);
         for (const startup of startups) {
-          const slug = createSlug(startup.name);
-          const lastmod = startup.updated_at 
-            ? new Date(startup.updated_at).toISOString().split('T')[0]
-            : new Date().toISOString().split('T')[0];
-          
-          sitemap += `
+          if (startup.name) {
+            const slug = createSlug(startup.name);
+            const lastmod = startup.updated_at 
+              ? new Date(startup.updated_at).toISOString().split('T')[0]
+              : new Date().toISOString().split('T')[0];
+            
+            sitemap += `
   <url>
     <loc>${SITE_URL}/startup/${slug}</loc>
     <lastmod>${lastmod}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>`;
+          }
         }
+      } else {
+        console.warn('[SITEMAP] No startups found');
       }
     } catch (err) {
-      console.error('Error fetching startups for sitemap:', err);
+      console.error('[SITEMAP ERROR] Exception fetching startups:', err);
     }
 
     // Fetch all mentors
@@ -95,24 +111,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('user_id, mentor_name, updated_at')
         .limit(1000);
 
-      if (!mentorError && mentors) {
+      if (mentorError) {
+        console.error('[SITEMAP ERROR] Failed to fetch mentors:', mentorError);
+      } else if (mentors && mentors.length > 0) {
+        console.log(`[SITEMAP] Found ${mentors.length} mentors`);
         for (const mentor of mentors) {
-          const slug = createSlug(mentor.mentor_name);
-          const lastmod = mentor.updated_at 
-            ? new Date(mentor.updated_at).toISOString().split('T')[0]
-            : new Date().toISOString().split('T')[0];
-          
-          sitemap += `
+          if (mentor.mentor_name) {
+            const slug = createSlug(mentor.mentor_name);
+            const lastmod = mentor.updated_at 
+              ? new Date(mentor.updated_at).toISOString().split('T')[0]
+              : new Date().toISOString().split('T')[0];
+            
+            sitemap += `
   <url>
     <loc>${SITE_URL}/mentor/${slug}</loc>
     <lastmod>${lastmod}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>`;
+          }
         }
+      } else {
+        console.warn('[SITEMAP] No mentors found');
       }
     } catch (err) {
-      console.error('Error fetching mentors for sitemap:', err);
+      console.error('[SITEMAP ERROR] Exception fetching mentors:', err);
     }
 
     // Fetch all investors
@@ -122,24 +145,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('user_id, investor_name, updated_at')
         .limit(1000);
 
-      if (!investorError && investors) {
+      if (investorError) {
+        console.error('[SITEMAP ERROR] Failed to fetch investors:', investorError);
+      } else if (investors && investors.length > 0) {
+        console.log(`[SITEMAP] Found ${investors.length} investors`);
         for (const investor of investors) {
-          const slug = createSlug(investor.investor_name);
-          const lastmod = investor.updated_at 
-            ? new Date(investor.updated_at).toISOString().split('T')[0]
-            : new Date().toISOString().split('T')[0];
-          
-          sitemap += `
+          if (investor.investor_name) {
+            const slug = createSlug(investor.investor_name);
+            const lastmod = investor.updated_at 
+              ? new Date(investor.updated_at).toISOString().split('T')[0]
+              : new Date().toISOString().split('T')[0];
+            
+            sitemap += `
   <url>
     <loc>${SITE_URL}/investor/${slug}</loc>
     <lastmod>${lastmod}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>`;
+          }
         }
+      } else {
+        console.warn('[SITEMAP] No investors found');
       }
     } catch (err) {
-      console.error('Error fetching investors for sitemap:', err);
+      console.error('[SITEMAP ERROR] Exception fetching investors:', err);
     }
 
     // Fetch all advisors
@@ -149,35 +179,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('user_id, firm_name, advisor_name, updated_at')
         .limit(1000);
 
-      if (!advisorError && advisors) {
+      if (advisorError) {
+        console.error('[SITEMAP ERROR] Failed to fetch advisors:', advisorError);
+      } else if (advisors && advisors.length > 0) {
+        console.log(`[SITEMAP] Found ${advisors.length} advisors`);
         for (const advisor of advisors) {
           // Use firm_name as primary, fallback to advisor_name
           const name = advisor.firm_name || advisor.advisor_name;
-          const slug = createSlug(name);
-          const lastmod = advisor.updated_at 
-            ? new Date(advisor.updated_at).toISOString().split('T')[0]
-            : new Date().toISOString().split('T')[0];
-          
-          sitemap += `
+          if (name) {
+            const slug = createSlug(name);
+            const lastmod = advisor.updated_at 
+              ? new Date(advisor.updated_at).toISOString().split('T')[0]
+              : new Date().toISOString().split('T')[0];
+            
+            sitemap += `
   <url>
     <loc>${SITE_URL}/advisor/${slug}</loc>
     <lastmod>${lastmod}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>`;
+          }
         }
+      } else {
+        console.warn('[SITEMAP] No advisors found');
       }
     } catch (err) {
-      console.error('Error fetching advisors for sitemap:', err);
+      console.error('[SITEMAP ERROR] Exception fetching advisors:', err);
     }
 
     // Close sitemap
     sitemap += `
 </urlset>`;
 
+    console.log('[SITEMAP] Generated successfully');
     return res.status(200).send(sitemap);
   } catch (error) {
-    console.error('Error generating sitemap:', error);
+    console.error('[SITEMAP ERROR] Fatal error generating sitemap:', error);
     // Return a basic sitemap even on error
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

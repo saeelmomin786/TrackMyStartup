@@ -42,8 +42,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   </url>`;
 
     // Initialize Supabase client
+    // Check both VITE_ and non-VITE_ versions (Vercel serverless functions may not expose VITE_ vars)
     const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    
+    // Debug: Log what we found (without exposing the actual key)
+    console.log('[SITEMAP] Environment check:', {
+      hasUrl: !!supabaseUrl,
+      hasKey: !!supabaseAnonKey,
+      urlSource: process.env.SUPABASE_URL ? 'SUPABASE_URL' : (process.env.VITE_SUPABASE_URL ? 'VITE_SUPABASE_URL' : 'none'),
+      keySource: process.env.SUPABASE_ANON_KEY ? 'SUPABASE_ANON_KEY' : (process.env.VITE_SUPABASE_ANON_KEY ? 'VITE_SUPABASE_ANON_KEY' : 'none'),
+      urlLength: supabaseUrl?.length || 0,
+      keyLength: supabaseAnonKey?.length || 0,
+      allSupabaseVars: Object.keys(process.env).filter(k => k.includes('SUPABASE'))
+    });
     
     if (!supabaseUrl || !supabaseAnonKey) {
       console.error('[SITEMAP ERROR] Missing Supabase configuration:', {
@@ -55,6 +67,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sitemap += `
 </urlset>`;
       return res.status(200).send(sitemap);
+    }
+    
+    // Validate the key format (should be a JWT token)
+    if (supabaseAnonKey && !supabaseAnonKey.startsWith('eyJ')) {
+      console.error('[SITEMAP ERROR] Invalid API key format - should start with "eyJ" (JWT token)');
+      console.error('[SITEMAP ERROR] Key preview:', supabaseAnonKey.substring(0, 20) + '...');
     }
     
     const supabase = createClient(supabaseUrl, supabaseAnonKey);

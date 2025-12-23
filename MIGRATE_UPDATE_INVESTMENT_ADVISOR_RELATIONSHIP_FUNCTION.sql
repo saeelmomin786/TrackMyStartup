@@ -72,3 +72,5 @@ SELECT '✅ Function update_investment_advisor_relationship() migrated to use us
 
 
 
+
+

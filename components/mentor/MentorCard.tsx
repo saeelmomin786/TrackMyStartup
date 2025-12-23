@@ -62,6 +62,8 @@ interface MentorCardProps {
   onConnect?: () => void;
   connectLabel?: string;
   connectDisabled?: boolean;
+  isPublicView?: boolean; // If true, skip loading metrics (for public pages)
+  currentUserId?: string | null; // Current authenticated user ID (to check if viewing own profile)
 }
 
 interface StartupAssignment {
@@ -92,7 +94,7 @@ interface FoundedStartup {
   };
 }
 
-const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, connectLabel, connectDisabled }) => {
+const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, connectLabel, connectDisabled, isPublicView = false, currentUserId = null }) => {
   const [professionalExperiences, setProfessionalExperiences] = useState<ProfessionalExperience[]>([]);
   const [showProfessionalExp, setShowProfessionalExp] = useState(false);
   const [loadingExp, setLoadingExp] = useState(false);
@@ -161,12 +163,16 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
     }
   };
 
-  // Fetch metrics if not provided
+  // Fetch metrics if not provided (only for authenticated users viewing their own profile, not on public pages)
   useEffect(() => {
+    // Skip metrics loading on public pages or if not viewing own profile
+    if (isPublicView) return;
+    if (currentUserId && mentor.user_id !== currentUserId) return;
+    
     if (mentor.user_id && (!mentor.startupsMentoring && !mentor.startupsMentoredPreviously && !mentor.verifiedStartupsMentored)) {
       loadMetrics();
     }
-  }, [mentor.user_id]);
+  }, [mentor.user_id, isPublicView, currentUserId]);
 
   const loadMetrics = async () => {
     if (!mentor.user_id || loadingMetrics) return;

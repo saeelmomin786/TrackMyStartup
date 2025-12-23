@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -36,6 +36,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
   const [editingSlot, setEditingSlot] = useState<AvailabilitySlot | null>(initialSlot || null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const prevIsOpenRef = useRef(false);
 
   // Form state
   const [slotType, setSlotType] = useState<'recurring' | 'one-time'>('recurring');
@@ -63,6 +64,9 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
 
   useEffect(() => {
     if (isOpen && mentorId) {
+      const isModalJustOpened = !prevIsOpenRef.current;
+      prevIsOpenRef.current = true;
+      
       loadSlots();
       if (initialSlot) {
         setEditingSlot(initialSlot);
@@ -76,13 +80,16 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
         setValidFrom(initialSlot.valid_from || '');
         setValidUntil(initialSlot.valid_until || '');
         setTimezone(initialSlot.timezone || 'UTC');
-      } else {
-        // Reset form when no initial slot
+      } else if (isModalJustOpened) {
+        // Only reset form when modal first opens, not on every render
         setEditingSlot(null);
         setShowAddForm(false);
       }
+      // If modal is already open and user has manually shown the form, don't reset it
+    } else if (!isOpen) {
+      prevIsOpenRef.current = false;
     }
-  }, [isOpen, mentorId]);
+  }, [isOpen, mentorId, initialSlot]);
   
   // Separate effect for initialSlot to avoid dependency array issues
   useEffect(() => {

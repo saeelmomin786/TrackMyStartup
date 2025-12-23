@@ -40,3 +40,5 @@ SELECT '✅ View v_incubation_opportunities migrated to use user_profiles (NO FA
 
 
 
+
+

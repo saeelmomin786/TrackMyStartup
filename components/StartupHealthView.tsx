@@ -25,6 +25,8 @@ import SchedulingModal from './mentor/SchedulingModal';
 import StartupMentorScheduleSection from './startup/StartupMentorScheduleSection';
 import { formatDateDDMMYYYY } from '../lib/dateTimeUtils';
 import { mentorService } from '../lib/mentorService';
+import { createSlug, createProfileUrl } from '../lib/slugUtils';
+import Modal from './ui/Modal';
 
 const ArrowLeftIcon = ArrowLeft;
 
@@ -282,8 +284,74 @@ const MentorCardWithDetails: React.FC<{
     return mentor.fee_type === 'Stock Options' ? 'Stock Options' : mentor.fee_type;
   };
 
+  const handleShare = async () => {
+    if (!mentor.user_id && !mentor.id) return;
+
+    const mentorName = mentor.mentor_name || 'Mentor';
+    const slug = createSlug(mentorName);
+    const baseUrl = window.location.origin;
+    
+    // Use SEO-friendly path-based URL
+    const shareUrl = createProfileUrl(baseUrl, 'mentor', slug, mentor.user_id || mentor.id);
+
+    const location = mentor.location || '';
+    const expertise = (mentor.expertise_areas || []).join(', ');
+    const sectors = (mentor.sectors || []).join(', ');
+
+    const shareText = [
+      `Mentor: ${mentorName}`,
+      location ? `Location: ${location}` : null,
+      expertise ? `Expertise: ${expertise}` : null,
+      sectors ? `Sectors: ${sectors}` : null,
+      '',
+      `View mentor profile: ${shareUrl}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${mentorName} - Mentor Profile`,
+          text: shareText,
+          url: shareUrl,
+        });
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        alert('Mentor profile link copied to clipboard!');
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = shareUrl;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        alert('Mentor profile link copied to clipboard!');
+      }
+    } catch (err) {
+      console.error('Share failed', err);
+      if (err instanceof Error && err.name !== 'AbortError') {
+        alert('Unable to share. Try copying manually.');
+      }
+    }
+  };
+
   return (
-    <Card className="p-6">
+    <Card className="p-6 relative">
+      {/* Share Button - Top Right Corner */}
+      {(mentor.id || mentor.user_id) && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleShare();
+          }}
+          className="absolute top-6 right-6 z-10 p-2 bg-white hover:bg-slate-50 rounded-full shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center border border-slate-200"
+          title="Share mentor profile"
+        >
+          <Share2 className="h-4 w-4 text-slate-700" />
+        </button>
+      )}
+
       <div className="flex flex-col md:flex-row gap-6">
         {/* Media Section - Right Side */}
         <div className="md:w-1/3">
@@ -322,7 +390,7 @@ const MentorCardWithDetails: React.FC<{
         {/* Content Section - Left Side */}
         <div className="md:w-2/3 flex flex-col relative">
           {/* Header */}
-          <div className="mb-3">
+          <div className="mb-3 pr-10">
             <div className="flex items-start justify-between gap-3 mb-2">
               <h3 className="text-xl font-bold text-slate-800 flex-1">
                 {mentor.mentor_name || 'Mentor'}
@@ -843,6 +911,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [showNotifications, setShowNotifications] = useState(false);
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
     const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>('explore');
+    const [showLaunchingSoonModal, setShowLaunchingSoonModal] = useState(false);
     
     // State for service exploration
     const [selectedServiceType, setSelectedServiceType] = useState<string | null>(null);
@@ -1112,6 +1181,13 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             loadMentors();
         }
     }, [selectedServiceType, activeTab, servicesSubTab]);
+
+    // Show Launching Soon modal when Services tab is opened
+    useEffect(() => {
+        if (activeTab === 'services') {
+            setShowLaunchingSoonModal(true);
+        }
+    }, [activeTab]);
 
     const loadMentors = async () => {
         setLoadingMentors(true);
@@ -1383,7 +1459,9 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         <Button
                           size="sm"
                           variant={servicesSubTab === 'explore' ? 'primary' : 'outline'}
-                          onClick={() => setServicesSubTab('explore')}
+                          onClick={() => setShowLaunchingSoonModal(true)}
+                          disabled
+                          className="opacity-50 cursor-not-allowed"
                         >
                           <Search className="h-4 w-4 mr-2" />
                           Explore
@@ -1391,7 +1469,9 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         <Button
                           size="sm"
                           variant={servicesSubTab === 'requested' ? 'primary' : 'outline'}
-                          onClick={() => setServicesSubTab('requested')}
+                          onClick={() => setShowLaunchingSoonModal(true)}
+                          disabled
+                          className="opacity-50 cursor-not-allowed"
                         >
                           <Bell className="h-4 w-4 mr-2" />
                           Requested
@@ -1399,7 +1479,9 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         <Button
                           size="sm"
                           variant={servicesSubTab === 'my-services' ? 'primary' : 'outline'}
-                          onClick={() => setServicesSubTab('my-services')}
+                          onClick={() => setShowLaunchingSoonModal(true)}
+                          disabled
+                          className="opacity-50 cursor-not-allowed"
                         >
                           <Users className="h-4 w-4 mr-2" />
                           My Services
@@ -1453,36 +1535,13 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                         <Button
                                           size="sm"
                                           variant="outline"
-                                          className="w-full"
+                                          className="w-full opacity-50 cursor-not-allowed"
                                           onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            
-                                            // For Mentor, show inline. For others, redirect
-                                            if (profileType.role === 'Mentor') {
-                                              setSelectedServiceType('Mentor');
-                                            } else {
-                                              const baseUrl = window.location.origin + window.location.pathname;
-                                              const url = new URL(baseUrl);
-                                              url.search = '';
-
-                                              if (profileType.role === 'Investor') {
-                                                url.searchParams.set('view', 'explore');
-                                                url.searchParams.set('role', 'Investor');
-                                              } else if (profileType.role === 'Investment Advisor') {
-                                                url.searchParams.set('view', 'advisor');
-                                                url.searchParams.set('role', 'Investment Advisor');
-                                              } else if (profileType.role === 'Incubation') {
-                                                url.searchParams.set('view', 'explore');
-                                                url.searchParams.set('role', 'Startup Facilitation Center');
-                                              } else {
-                                                url.searchParams.set('view', 'explore');
-                                                url.searchParams.set('role', profileType.role);
-                                              }
-
-                                              window.location.href = url.toString();
-                                            }
+                                            setShowLaunchingSoonModal(true);
                                           }}
+                                          disabled
                                         >
                                           <Eye className="h-3 w-3 mr-2" />
                                           Explore
@@ -1501,9 +1560,10 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    setSelectedServiceType(null);
-                                    setSearchTerm('');
+                                    setShowLaunchingSoonModal(true);
                                   }}
+                                  disabled
+                                  className="opacity-50 cursor-not-allowed"
                                 >
                                   <ArrowLeftIcon className="h-4 w-4 mr-2" />
                                   Back
@@ -1586,8 +1646,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                           mentor={mentor} 
                                           videoEmbedUrl={videoEmbedUrl}
                                           onConnect={() => {
-                                            setSelectedMentor(mentor);
-                                            setConnectModalOpen(true);
+                                            setShowLaunchingSoonModal(true);
                                           }}
                                         />;
                                       })}
@@ -1651,11 +1710,11 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                           <Button
                                             size="sm"
                                             variant="outline"
-                                            className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                            className="text-blue-600 border-blue-300 hover:bg-blue-50 opacity-50 cursor-not-allowed"
                                             onClick={() => {
-                                              setSelectedMentorForView(request);
-                                              setViewScheduleSectionOpen(true);
+                                              setShowLaunchingSoonModal(true);
                                             }}
+                                            disabled
                                           >
                                             <Eye className="mr-1 h-3 w-3" /> View
                                           </Button>
@@ -1941,6 +2000,34 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             await loadAcceptedMentorRequests();
           }}
         />
+      )}
+
+      {/* Launching Soon Modal */}
+      {showLaunchingSoonModal && (
+        <Modal
+          isOpen={showLaunchingSoonModal}
+          onClose={() => setShowLaunchingSoonModal(false)}
+          title="Launching Soon"
+          size="medium"
+        >
+          <div className="text-center py-6">
+            <div className="mb-4">
+              <Building2 className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+            </div>
+            <h3 className="text-xl font-semibold text-slate-900 mb-2">
+              Services Feature Coming Soon
+            </h3>
+            <p className="text-slate-600 mb-6">
+              We're working hard to bring you an amazing services experience. This feature will be available soon!
+            </p>
+            <Button
+              onClick={() => setShowLaunchingSoonModal(false)}
+              variant="primary"
+            >
+              Got it
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   );

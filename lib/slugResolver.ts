@@ -73,11 +73,23 @@ export async function resolveMentorSlug(slug: string): Promise<string | null> {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (uuidRegex.test(slug)) {
       // It's a UUID, try to find mentor by user_id
-      const { data: mentor, error } = await supabase
-        .from('mentor_profiles')
+      // Try public table first
+      let { data: mentor, error } = await supabase
+        .from('mentors_public_table')
         .select('user_id, mentor_name')
         .eq('user_id', slug)
         .single();
+      
+      // Fallback to main table if public table doesn't exist
+      if (error && (error.message.includes('does not exist') || error.code === '42P01')) {
+        const fallback = await supabase
+          .from('mentor_profiles')
+          .select('user_id, mentor_name')
+          .eq('user_id', slug)
+          .single();
+        mentor = fallback.data;
+        error = fallback.error;
+      }
       
       if (!error && mentor) {
         return mentor.user_id;
@@ -85,10 +97,20 @@ export async function resolveMentorSlug(slug: string): Promise<string | null> {
       return null;
     }
     
-    // Query mentor_profiles table
-    const { data: mentors, error } = await supabase
-      .from('mentor_profiles')
+    // Try public table first, fallback to main table
+    let { data: mentors, error } = await supabase
+      .from('mentors_public_table')
       .select('user_id, mentor_name');
+    
+    // Fallback to main table if public table doesn't exist
+    if (error && (error.message.includes('does not exist') || error.code === '42P01')) {
+      console.warn('[slugResolver] Public table not available, falling back to main table');
+      const fallback = await supabase
+        .from('mentor_profiles')
+        .select('user_id, mentor_name');
+      mentors = fallback.data;
+      error = fallback.error;
+    }
     
     if (error) {
       console.error('Error resolving mentor slug:', error);
@@ -149,11 +171,21 @@ export async function resolveInvestorSlug(slug: string): Promise<string | null> 
  */
 export async function resolveAdvisorSlug(slug: string): Promise<string | null> {
   try {
-    // Query investment_advisor_profiles table
-    // Use firm_name as primary identifier (as per user requirement)
-    const { data: advisors, error } = await supabase
-      .from('investment_advisor_profiles')
-      .select('user_id, firm_name, advisor_name');
+    // Try public table first, fallback to main table
+    // Use display_name/firm_name as primary identifier (as per user requirement)
+    let { data: advisors, error } = await supabase
+      .from('advisors_public_table')
+      .select('user_id, firm_name, advisor_name, display_name');
+    
+    // Fallback to main table if public table doesn't exist
+    if (error && (error.message.includes('does not exist') || error.code === '42P01')) {
+      console.warn('[slugResolver] Public table not available, falling back to main table');
+      const fallback = await supabase
+        .from('investment_advisor_profiles')
+        .select('user_id, firm_name, advisor_name');
+      advisors = fallback.data;
+      error = fallback.error;
+    }
     
     if (error) {
       console.error('Error resolving advisor slug:', error);
@@ -162,11 +194,12 @@ export async function resolveAdvisorSlug(slug: string): Promise<string | null> {
     
     if (!advisors) return null;
     
-    // Find advisor where slug matches firm_name (preferred) or advisor_name
+    // Find advisor where slug matches display_name (preferred), firm_name, or advisor_name
     const matchingAdvisor = advisors.find(advisor => {
-      const firmSlug = createSlug(advisor.firm_name);
-      const advisorSlug = createSlug(advisor.advisor_name);
-      return firmSlug === slug || advisorSlug === slug;
+      const displaySlug = (advisor as any).display_name ? createSlug((advisor as any).display_name) : null;
+      const firmSlug = advisor.firm_name ? createSlug(advisor.firm_name) : null;
+      const advisorSlug = advisor.advisor_name ? createSlug(advisor.advisor_name) : null;
+      return displaySlug === slug || firmSlug === slug || advisorSlug === slug;
     });
     
     return matchingAdvisor?.user_id || null;

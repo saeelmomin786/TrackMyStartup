@@ -67,3 +67,4 @@ The `anon` (anonymous) key is **designed to be public** - it's used in frontend 
 
 **Remember: The anon key is meant to be public, but rotating it is still a good security practice!** 🔒
 
+

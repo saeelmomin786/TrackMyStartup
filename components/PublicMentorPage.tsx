@@ -145,15 +145,36 @@ const PublicMentorPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        let query = supabase.from('mentor_profiles').select('*').limit(1);
+        // Use public table for better security and performance
+        // Try public table first, fallback to main table if needed
+        let query = supabase.from('mentors_public_table').select('*').limit(1);
+        let usePublicTable = true;
 
-        if (mentorId) {
-          query = query.eq('id', mentorId);
-        } else if (userId) {
-          query = query.eq('user_id', userId);
+        // Public table uses user_id as primary key
+        const lookupId = userId || mentorId;
+        if (lookupId) {
+          query = query.eq('user_id', lookupId);
         }
 
-        const { data, error } = await query.single();
+        let { data, error } = await query.single();
+
+        // Fallback to main table if public table doesn't exist or query fails
+        if (error && (error.message.includes('does not exist') || error.code === '42P01')) {
+          console.warn('[PublicMentorPage] Public table not available, falling back to main table');
+          usePublicTable = false;
+          query = supabase.from('mentor_profiles').select('*').limit(1);
+          
+          if (mentorId) {
+            // mentorId might be the old 'id' field (UUID) or user_id
+            query = query.or(`id.eq.${mentorId},user_id.eq.${mentorId}`);
+          } else if (userId) {
+            query = query.eq('user_id', userId);
+          }
+          
+          const fallbackResult = await query.single();
+          data = fallbackResult.data;
+          error = fallbackResult.error;
+        }
 
         if (error) {
           throw error;
@@ -550,6 +571,8 @@ const PublicMentorPage: React.FC = () => {
               : undefined
           }
           connectDisabled={isOwnMentorProfile || connectStatus !== 'idle'}
+          isPublicView={true}
+          currentUserId={authUserId}
         />
       </div>
     </div>

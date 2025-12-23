@@ -73,20 +73,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (supabaseAnonKey && !supabaseAnonKey.startsWith('eyJ')) {
       console.error('[SITEMAP ERROR] Invalid API key format - should start with "eyJ" (JWT token)');
       console.error('[SITEMAP ERROR] Key preview:', supabaseAnonKey.substring(0, 20) + '...');
+      console.error('[SITEMAP ERROR] Key length:', supabaseAnonKey.length);
+      // Return sitemap with just homepage if key format is wrong
+      sitemap += `
+</urlset>`;
+      return res.status(200).send(sitemap);
     }
     
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-    // Fetch all startups (try public view first, fallback to startups table)
+    // Validate URL format (should be a Supabase URL)
+    if (supabaseUrl && (!supabaseUrl.startsWith('https://') || !supabaseUrl.includes('.supabase.co'))) {
+      console.error('[SITEMAP ERROR] Invalid Supabase URL format');
+      console.error('[SITEMAP ERROR] URL:', supabaseUrl);
+      // Return sitemap with just homepage if URL format is wrong
+      sitemap += `
+</urlset>`;
+      return res.status(200).send(sitemap);
+    }
+    
+    // Test the connection before proceeding
+    console.log('[SITEMAP] Testing Supabase connection...');
+    const testSupabase = createClient(supabaseUrl, supabaseAnonKey);
+    
+    // Try a simple query to verify the key works
     try {
+      const { error: testError } = await testSupabase.from('startups_public').select('id').limit(1);
+      if (testError && testError.message.includes('Invalid API key')) {
+        console.error('[SITEMAP ERROR] API key validation failed:', {
+          error: testError.message,
+          hint: testError.hint,
+          urlLength: supabaseUrl.length,
+          keyLength: supabaseAnonKey.length,
+          keyStartsWithEyJ: supabaseAnonKey.startsWith('eyJ'),
+          urlFormat: supabaseUrl.startsWith('https://') && supabaseUrl.includes('.supabase.co')
+        });
+        // Return sitemap with just homepage if key doesn't work
+        sitemap += `
+</urlset>`;
+        return res.status(200).send(sitemap);
+      }
+      console.log('[SITEMAP] Supabase connection test passed');
+    } catch (testErr: any) {
+      console.error('[SITEMAP ERROR] Connection test failed:', testErr);
+    }
+    
+    const supabase = testSupabase;
+
+    // Fetch all startups from existing public view (enhanced with updated_at)
+    try {
+      // Use existing startups_public view (enhanced with updated_at)
       let { data: startups, error: startupError } = await supabase
         .from('startups_public')
         .select('id, name, updated_at')
         .limit(1000);
       
-      // Fallback to startups table if public view doesn't exist or fails
+      // If view doesn't have updated_at, try without it
+      if (startupError && startupError.message.includes('updated_at')) {
+        console.warn('[SITEMAP] startups_public view missing updated_at, trying without it');
+        const viewRetry = await supabase
+          .from('startups_public')
+          .select('id, name')
+          .limit(1000);
+        startups = viewRetry.data;
+        startupError = viewRetry.error;
+      }
+      
+      // Final fallback to main table (if view doesn't exist)
       if (startupError) {
-        console.warn('[SITEMAP] startups_public failed, trying startups table:', startupError.message);
+        console.warn('[SITEMAP] startups_public view failed, trying main startups table:', startupError.message);
         const fallback = await supabase
           .from('startups')
           .select('id, name, updated_at')
@@ -102,8 +155,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         for (const startup of startups) {
           if (startup.name) {
             const slug = createSlug(startup.name);
-            const lastmod = startup.updated_at 
-              ? new Date(startup.updated_at).toISOString().split('T')[0]
+            // Handle missing updated_at gracefully
+            const lastmod = (startup as any).updated_at 
+              ? new Date((startup as any).updated_at).toISOString().split('T')[0]
               : new Date().toISOString().split('T')[0];
             
             sitemap += `
@@ -113,21 +167,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>`;
+          } else {
+            console.warn(`[SITEMAP] Skipping startup ${startup.id} - missing name`);
           }
         }
       } else {
-        console.warn('[SITEMAP] No startups found');
+        console.warn('[SITEMAP] No startups found - check if startups exist in database and have names');
       }
     } catch (err) {
       console.error('[SITEMAP ERROR] Exception fetching startups:', err);
     }
 
-    // Fetch all mentors
+    // Fetch all mentors from public table (secure and fast)
     try {
-      const { data: mentors, error: mentorError } = await supabase
-        .from('mentor_profiles')
+      // Try new public table first
+      let { data: mentors, error: mentorError } = await supabase
+        .from('mentors_public_table')
         .select('user_id, mentor_name, updated_at')
         .limit(1000);
+      
+      // Fallback to main table if public table doesn't exist yet
+      if (mentorError && mentorError.message.includes('does not exist')) {
+        console.warn('[SITEMAP] mentors_public_table not found, trying mentor_profiles');
+        const fallback = await supabase
+          .from('mentor_profiles')
+          .select('user_id, mentor_name, updated_at')
+          .limit(1000);
+        mentors = fallback.data;
+        mentorError = fallback.error;
+      }
 
       if (mentorError) {
         console.error('[SITEMAP ERROR] Failed to fetch mentors:', mentorError);
@@ -156,12 +224,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[SITEMAP ERROR] Exception fetching mentors:', err);
     }
 
-    // Fetch all investors
+    // Fetch all investors from public table (secure and fast)
     try {
-      const { data: investors, error: investorError } = await supabase
-        .from('investor_profiles')
+      // Try new public table first
+      let { data: investors, error: investorError } = await supabase
+        .from('investors_public_table')
         .select('user_id, investor_name, updated_at')
         .limit(1000);
+      
+      // Fallback to main table if public table doesn't exist yet
+      if (investorError && investorError.message.includes('does not exist')) {
+        console.warn('[SITEMAP] investors_public_table not found, trying investor_profiles');
+        const fallback = await supabase
+          .from('investor_profiles')
+          .select('user_id, investor_name, updated_at')
+          .limit(1000);
+        investors = fallback.data;
+        investorError = fallback.error;
+      }
 
       if (investorError) {
         console.error('[SITEMAP ERROR] Failed to fetch investors:', investorError);
@@ -190,20 +270,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[SITEMAP ERROR] Exception fetching investors:', err);
     }
 
-    // Fetch all advisors
+    // Fetch all advisors from public table (secure and fast)
     try {
-      const { data: advisors, error: advisorError } = await supabase
-        .from('investment_advisor_profiles')
-        .select('user_id, firm_name, advisor_name, updated_at')
+      // Try new public table first
+      let { data: advisors, error: advisorError } = await supabase
+        .from('advisors_public_table')
+        .select('user_id, display_name, updated_at')
         .limit(1000);
+      
+      // Fallback to main table if public table doesn't exist yet
+      if (advisorError && advisorError.message.includes('does not exist')) {
+        console.warn('[SITEMAP] advisors_public_table not found, trying investment_advisor_profiles');
+        const fallback = await supabase
+          .from('investment_advisor_profiles')
+          .select('user_id, firm_name, advisor_name, updated_at')
+          .limit(1000);
+        advisors = fallback.data;
+        advisorError = fallback.error;
+      }
 
       if (advisorError) {
         console.error('[SITEMAP ERROR] Failed to fetch advisors:', advisorError);
       } else if (advisors && advisors.length > 0) {
         console.log(`[SITEMAP] Found ${advisors.length} advisors`);
         for (const advisor of advisors) {
-          // Use firm_name as primary, fallback to advisor_name
-          const name = advisor.firm_name || advisor.advisor_name;
+          // Use display_name from public table, or fallback to firm_name/advisor_name
+          const name = (advisor as any).display_name || (advisor as any).firm_name || (advisor as any).advisor_name;
           if (name) {
             const slug = createSlug(name);
             const lastmod = advisor.updated_at 

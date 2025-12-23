@@ -119,3 +119,4 @@ And logs should show:
 
 **The key is: Your frontend uses `VITE_` variables, but your API needs non-`VITE_` variables!** 🔑
 
+

@@ -214,6 +214,42 @@ const MentorView: React.FC<MentorViewProps> = ({
     }
   }, [currentUser?.id, activeTab]);
 
+  // Load mentor's favorites from database
+  useEffect(() => {
+    const loadFavorites = async () => {
+      // Get auth user ID (required for foreign key constraint)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+      const authUserId = authUser.id;
+      
+      try {
+        const { data, error } = await supabase
+          .from('investor_favorites')
+          .select('startup_id')
+          .eq('investor_id', authUserId); // Use auth user ID, not profile ID
+        
+        if (error) {
+          // If table doesn't exist yet, silently fail (table will be created by SQL script)
+          if (error.code !== 'PGRST116') {
+            console.error('Error loading favorites:', error);
+          }
+          return;
+        }
+        
+        if (data) {
+          const favoriteIds = new Set(data.map((fav: any) => fav.startup_id));
+          setFavoritedPitches(favoriteIds);
+        }
+      } catch (error) {
+        console.error('Error loading favorites:', error);
+      }
+    };
+
+    if (currentUser?.id) {
+      loadFavorites();
+    }
+  }, [currentUser?.id]);
+
   // Fetch active fundraising startups for discover section
   useEffect(() => {
     if (activeTab === 'discover') {
@@ -336,19 +372,88 @@ const MentorView: React.FC<MentorViewProps> = ({
     setSelectedStartup(null);
   };
 
-  const toggleFavorite = (pitchId: number) => {
-    setFavoritedPitches(prev => {
-      const next = new Set(prev);
-      if (next.has(pitchId)) {
-        next.delete(pitchId);
+  const handleFavoriteToggle = async (startupId: number) => {
+    console.log('❤️ handleFavoriteToggle called for startup ID:', startupId);
+    console.log('❤️ Current user ID:', currentUser?.id);
+    console.log('❤️ Current user role:', currentUser?.role);
+    
+    // Get auth user ID (required for foreign key constraint)
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
+      alert('Please log in to favorite startups.');
+      return;
+    }
+    const authUserId = authUser.id;
+    console.log('❤️ Auth user ID (for foreign key):', authUserId);
+    
+    const isCurrentlyFavorited = favoritedPitches.has(startupId);
+    console.log('❤️ Is currently favorited:', isCurrentlyFavorited);
+    
+    try {
+      if (isCurrentlyFavorited) {
+        // Remove favorite
+        console.log('❤️ Removing favorite...');
+        const { error, data } = await supabase
+          .from('investor_favorites')
+          .delete()
+          .eq('investor_id', authUserId) // Use auth user ID, not profile ID
+          .eq('startup_id', startupId)
+          .select();
+        
+        console.log('❤️ Delete result:', { error, data });
+        
+        if (error) {
+          console.error('❤️ Delete error details:', error);
+          throw error;
+        }
+        
+        setFavoritedPitches(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(startupId);
+          console.log('❤️ Updated favoritedPitches after delete:', Array.from(newSet));
+          return newSet;
+        });
+        console.log('❤️ Favorite removed successfully');
       } else {
-        next.add(pitchId);
+        // Add favorite
+        console.log('❤️ Adding favorite...');
+        const { error, data } = await supabase
+          .from('investor_favorites')
+          .insert([{
+            investor_id: authUserId, // Use auth user ID, not profile ID (satisfies foreign key)
+            startup_id: startupId
+          }])
+          .select();
+        
+        console.log('❤️ Insert result:', { error, data });
+        
+        if (error) {
+          console.error('❤️ Insert error details:', error);
+          console.error('❤️ Error code:', error.code);
+          console.error('❤️ Error message:', error.message);
+          console.error('❤️ Error details:', error.details);
+          throw error;
+        }
+        
+        setFavoritedPitches(prev => {
+          const newSet = new Set(prev);
+          newSet.add(startupId);
+          console.log('❤️ Updated favoritedPitches after insert:', Array.from(newSet));
+          return newSet;
+        });
+        console.log('❤️ Favorite added successfully');
       }
-      return next;
-    });
+    } catch (error: any) {
+      console.error('❤️ Error toggling favorite:', error);
+      console.error('❤️ Error type:', typeof error);
+      console.error('❤️ Error object:', JSON.stringify(error, null, 2));
+      
+      // Show more detailed error message
+      const errorMessage = error?.message || error?.details || 'Unknown error occurred';
+      const errorCode = error?.code || 'UNKNOWN';
+      alert(`Failed to update favorite. Error: ${errorCode} - ${errorMessage}\n\nPlease make sure you have run the FIX_MENTOR_FAVORITES.sql script in your Supabase database.`);
+    }
   };
-
-  const handleFavoriteToggle = toggleFavorite;
 
   const handleShare = (pitch: ActiveFundraisingStartup) => {
     const url = window.location.href.split('?')[0] + `?startup=${pitch.id}`;
@@ -1323,24 +1428,6 @@ ${mentorName}`;
                     <span className="hidden sm:inline">Favorites</span>
                     <span className="sm:hidden">Fav</span>
                   </button>
-                
-                  <button
-                    onClick={() => {
-                      setDiscoverySubTab('due-diligence');
-                      setShowOnlyValidated(false);
-                      setShowOnlyFavorites(false);
-                      setShowOnlyDueDiligence(true);
-                    }}
-                    className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
-                      discoverySubTab === 'due-diligence'
-                        ? 'border-purple-500 text-purple-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
-                    <Shield className="h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden md:inline">Due Diligence</span>
-                    <span className="md:hidden">DD</span>
-                  </button>
                 </nav>
               </div>
                 
@@ -1348,9 +1435,7 @@ ${mentorName}`;
                 <div className="flex items-center gap-2 text-slate-600">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                   <span className="text-xs sm:text-sm font-medium">
-                    {discoverySubTab === 'due-diligence'
-                      ? `${dueDiligenceStartups.size} due diligence requests`
-                      : `${activeFundraisingStartups.length} active pitches`}
+                    {`${activeFundraisingStartups.length} active pitches`}
                   </span>
                 </div>
                 
@@ -1381,9 +1466,7 @@ ${mentorName}`;
                           ? 'No Verified Startups' 
                           : showOnlyFavorites 
                             ? 'No Favorited Pitches'
-                            : showOnlyDueDiligence
-                              ? 'No Due Diligence Access Yet'
-                              : 'No Active Fundraising'
+                            : 'No Active Fundraising'
                       }
                     </h3>
                     <p className="text-slate-500">
@@ -1393,9 +1476,7 @@ ${mentorName}`;
                           ? 'No Startup Nation verified startups are currently fundraising. Try removing the verification filter or check back later.'
                           : showOnlyFavorites 
                             ? 'Start favoriting pitches to see them here.'
-                            : showOnlyDueDiligence
-                              ? 'Due diligence requests you send will appear here immediately, even before startups approve them.'
-                              : 'No startups are currently fundraising. Check back later for new opportunities.'
+                            : 'No startups are currently fundraising. Check back later for new opportunities.'
                       }
                     </p>
                   </div>
@@ -1406,7 +1487,6 @@ ${mentorName}`;
                   const embedUrl = videoEmbedInfo?.embedUrl || investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
                   const videoSource = videoEmbedInfo?.source || null;
                   const isFavorited = favoritedPitches.has(inv.id);
-                  const hasDueDiligence = dueDiligenceStartups.has(inv.id);
 
                   return (
                     <Card key={inv.id} className="p-6">
@@ -1623,24 +1703,6 @@ ${mentorName}`;
                             >
                               <Heart className={`h-4 w-4 mr-2 ${isFavorited ? 'fill-current text-red-500' : ''}`} />
                               {isFavorited ? 'Favorited' : 'Favorite'}
-                            </Button>
-
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDueDiligenceClick(inv)}
-                            >
-                              <Shield className="h-4 w-4 mr-2" />
-                              {hasDueDiligence ? 'Due Diligence Requested' : 'Due Diligence'}
-                            </Button>
-
-                            <Button
-                              size="sm"
-                              variant="primary"
-                              onClick={() => handleConnect(inv)}
-                            >
-                              <UserPlus className="h-4 w-4 mr-2" />
-                              Connect
                             </Button>
                           </div>
                         </div>

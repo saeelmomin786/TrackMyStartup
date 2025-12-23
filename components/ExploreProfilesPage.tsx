@@ -145,11 +145,23 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
           }));
           setProfiles(profilesWithUsers);
         } else if (role === 'Investment Advisor') {
-          // Load investment advisor profiles
-          const { data, error: advisorError } = await supabase
-            .from('investment_advisor_profiles')
+          // Load investment advisor profiles from public table (secure, read-only)
+          // Try public table first, fallback to main table if needed
+          let { data, error: advisorError } = await supabase
+            .from('advisors_public_table')
             .select('*')
-            .order('advisor_name', { ascending: true });
+            .order('display_name', { ascending: true });
+          
+          // Fallback to main table if public table doesn't exist
+          if (advisorError && (advisorError.message?.includes('does not exist') || advisorError.code === '42P01')) {
+            console.warn('[ExploreProfilesPage] Public table not available, falling back to main table');
+            const fallback = await supabase
+              .from('investment_advisor_profiles')
+              .select('*')
+              .order('advisor_name', { ascending: true });
+            data = fallback.data;
+            advisorError = fallback.error;
+          }
 
           // Handle 404 or table not found errors gracefully
           if (advisorError) {
@@ -187,11 +199,23 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
           });
           setProfiles(profilesWithUsers);
         } else if (role === 'Mentor') {
-          // Load mentor profiles
-          const { data, error: mentorError } = await supabase
-            .from('mentor_profiles')
+          // Load mentor profiles from public table (secure, read-only)
+          // Try public table first, fallback to main table if needed
+          let { data, error: mentorError } = await supabase
+            .from('mentors_public_table')
             .select('*')
             .order('mentor_name', { ascending: true });
+          
+          // Fallback to main table if public table doesn't exist
+          if (mentorError && (mentorError.message?.includes('does not exist') || mentorError.code === '42P01')) {
+            console.warn('[ExploreProfilesPage] Public table not available, falling back to main table');
+            const fallback = await supabase
+              .from('mentor_profiles')
+              .select('*')
+              .order('mentor_name', { ascending: true });
+            data = fallback.data;
+            mentorError = fallback.error;
+          }
 
           // Handle 404 or table not found errors gracefully
           if (mentorError) {

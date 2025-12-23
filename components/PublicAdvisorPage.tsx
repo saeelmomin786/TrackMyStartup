@@ -93,18 +93,42 @@ const PublicAdvisorPage: React.FC = () => {
     const loadAdvisor = async () => {
       setLoading(true);
       try {
-        const query = supabase
-          .from('investment_advisor_profiles')
+        // Use public table for better security and performance
+        // Try public table first, fallback to main table if needed
+        let query = supabase
+          .from('advisors_public_table')
           .select('*')
           .limit(1);
+        let usePublicTable = true;
 
-        if (advisorId) {
-          query.eq('id', advisorId);
-        } else {
-          query.eq('user_id', userId);
+        // Public table uses user_id as primary key
+        const lookupId = userId || advisorId;
+        if (lookupId) {
+          query = query.eq('user_id', lookupId);
         }
 
-        const { data, error } = await query.single();
+        let { data, error } = await query.single();
+
+        // Fallback to main table if public table doesn't exist or query fails
+        if (error && (error.message.includes('does not exist') || error.code === '42P01')) {
+          console.warn('[PublicAdvisorPage] Public table not available, falling back to main table');
+          usePublicTable = false;
+          query = supabase
+            .from('investment_advisor_profiles')
+            .select('*')
+            .limit(1);
+
+          if (advisorId) {
+            // advisorId might be the old 'id' field (UUID) or user_id
+            query = query.or(`id.eq.${advisorId},user_id.eq.${advisorId}`);
+          } else {
+            query = query.eq('user_id', userId);
+          }
+
+          const fallbackResult = await query.single();
+          data = fallbackResult.data;
+          error = fallbackResult.error;
+        }
         if (error) {
           throw error;
         }

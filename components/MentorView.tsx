@@ -81,6 +81,39 @@ const MentorView: React.FC<MentorViewProps> = ({
   // Mentor profile state
   const [previewProfile, setPreviewProfile] = useState<any>(null);
   
+  // Currency state - get from profile or default to USD
+  const [selectedCurrency, setSelectedCurrency] = useState<string>('USD');
+  
+  // Update currency when profile changes
+  useEffect(() => {
+    if (previewProfile?.fee_currency) {
+      setSelectedCurrency(previewProfile.fee_currency);
+    } else {
+      // Try to load currency from profile if not in previewProfile
+      const loadCurrency = async () => {
+        if (currentUser?.id) {
+          try {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (authUser) {
+              const { data: profileData } = await supabase
+                .from('mentor_profiles')
+                .select('fee_currency')
+                .eq('user_id', authUser.id)
+                .maybeSingle();
+              
+              if (profileData && (profileData as any).fee_currency) {
+                setSelectedCurrency((profileData as any).fee_currency);
+              }
+            }
+          } catch (error) {
+            console.error('Error loading currency:', error);
+          }
+        }
+      };
+      loadCurrency();
+    }
+  }, [previewProfile, currentUser?.id]);
+  
   // Tab state for mentor startups section
   const [mentorStartupsTab, setMentorStartupsTab] = useState<'active' | 'completed' | 'founded'>('active');
   
@@ -643,7 +676,7 @@ ${mentorName}`;
                       <div>
                         <p className="text-sm font-medium text-slate-500">Total Earnings (Fees)</p>
                         <p className="text-2xl font-bold text-slate-800">
-                          {mentorService.formatCurrency(mentorMetrics?.totalEarningsFees || 0, 'USD')}
+                          {mentorService.formatCurrency(mentorMetrics?.totalEarningsFees || 0, selectedCurrency)}
                         </p>
                       </div>
                       <div className="p-3 bg-yellow-100 rounded-full">
@@ -656,7 +689,7 @@ ${mentorName}`;
                       <div>
                         <p className="text-sm font-medium text-slate-500">Total Earnings (ESOP)</p>
                         <p className="text-2xl font-bold text-slate-800">
-                          {mentorService.formatCurrency(mentorMetrics?.totalEarningsESOP || 0, 'USD')}
+                          {mentorService.formatCurrency(mentorMetrics?.totalEarningsESOP || 0, selectedCurrency)}
                         </p>
                       </div>
                       <div className="p-3 bg-indigo-100 rounded-full">
@@ -841,7 +874,7 @@ ${mentorName}`;
                                     {fromDate || 'N/A'}
                                   </td>
                                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                    {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
+                                    {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || selectedCurrency)}
                                   </td>
                                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                                     {assignment.esop_percentage > 0 ? `${assignment.esop_percentage}%` : 'N/A'}
@@ -1025,10 +1058,10 @@ ${mentorName}`;
                                     {toDate || 'N/A'}
                                   </td>
                                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                    {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || 'USD')}
+                                    {mentorService.formatCurrency(assignment.fee_amount || 0, assignment.fee_currency || selectedCurrency)}
                                   </td>
                                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                    {mentorService.formatCurrency(assignment.esop_value || 0, 'USD')}
+                                    {mentorService.formatCurrency(assignment.esop_value || 0, selectedCurrency)}
                                   </td>
                                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <div className="flex items-center justify-end gap-2">
@@ -1128,7 +1161,7 @@ ${mentorName}`;
                                     {sector || 'N/A'}
                                   </td>
                                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                    {formatCurrency(startup.currentValuation || 0, startup.currency || 'USD')}
+                                    {formatCurrency(startup.currentValuation || 0, startup.currency || selectedCurrency)}
                                   </td>
                                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <div className="flex items-center justify-end gap-2">
@@ -1472,7 +1505,7 @@ ${mentorName}`;
                               <div className="flex items-center gap-1.5">
                                 <span className="text-xs text-slate-500">Investment Ask:</span>
                                 <span className="text-xs font-medium text-slate-600">
-                                  {investorService.formatCurrency(inv.investmentValue, inv.currency || 'USD')}
+                                  {investorService.formatCurrency(inv.investmentValue, inv.currency || selectedCurrency)}
                                 </span>
                               </div>
                               <div className="flex items-center gap-1.5">
@@ -1490,7 +1523,7 @@ ${mentorName}`;
                               )}
                               <div className="flex items-center gap-1.5">
                                 <span className="text-xs text-slate-500">Currency:</span>
-                                <span className="text-xs font-medium text-slate-600">{inv.currency || 'USD'}</span>
+                                <span className="text-xs font-medium text-slate-600">{inv.currency || selectedCurrency}</span>
                               </div>
                               {inv.stage && (
                                 <div className="flex items-center gap-1.5">
@@ -1659,6 +1692,10 @@ ${mentorName}`;
                       if (profileFormEditingRef.current) {
                         profileFormEditingRef.current.setIsEditing(false);
                       }
+                      // Update currency when profile is saved
+                      if (profile.fee_currency) {
+                        setSelectedCurrency(profile.fee_currency);
+                      }
                     }}
                     onProfileChange={(profile) => {
                       setPreviewProfile(profile);
@@ -1747,7 +1784,9 @@ ${mentorName}`;
                             label="Currency"
                             value={previewProfile.fee_currency || 'USD'}
                             onChange={(e) => {
-                              setPreviewProfile({ ...previewProfile, fee_currency: e.target.value });
+                              const newCurrency = e.target.value;
+                              setPreviewProfile({ ...previewProfile, fee_currency: newCurrency });
+                              setSelectedCurrency(newCurrency);
                             }}
                             disabled={!isEditingProfile}
                           >

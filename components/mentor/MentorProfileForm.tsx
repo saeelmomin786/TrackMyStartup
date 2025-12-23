@@ -127,15 +127,38 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   const feeTypes = ['Free', 'Fees', 'Stock Options', 'Hybrid'];
   const currencies = ['USD', 'INR', 'EUR', 'GBP', 'SGD', 'AED'];
 
+  // Load profile on mount and when metrics update (metrics may affect profile counts)
   useEffect(() => {
-    loadProfile();
-    loadProfessionalExperiences();
-  }, [currentUser.id]);
+    const loadData = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        await loadProfile();
+        await loadProfessionalExperiences();
+      }
+    };
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mentorMetrics?.startupsMentoring, mentorMetrics?.startupsMentoredPreviously, mentorMetrics?.startupsFounded]); // Reload when metrics change
 
-  // Sync with external profile changes (from right side sections)
+  // Sync with external profile changes (from right side sections like Fee Structure, Media)
+  // Merge external changes with current profile state to avoid overwriting unsaved changes
   useEffect(() => {
     if (externalProfile) {
-      setProfile(externalProfile);
+      setProfile(prev => {
+        // Merge external profile with current profile, giving priority to external changes
+        // for fields that are managed externally (feeStructure, media)
+        const merged: MentorProfile = {
+          ...prev,
+          ...externalProfile,
+          // Preserve form-specific fields that shouldn't be overwritten
+          user_id: prev.user_id || externalProfile.user_id,
+          expertise_areas: prev.expertise_areas || externalProfile.expertise_areas || [],
+          sectors: prev.sectors || externalProfile.sectors || [],
+          mentoring_stages: prev.mentoring_stages || externalProfile.mentoring_stages || [],
+          previous_companies: prev.previous_companies || externalProfile.previous_companies || [],
+        };
+        return merged;
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalProfile]);
@@ -315,26 +338,29 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         setAuthUserId(userIdForExp);
       }
       
-      const expData: any = {
+      const expData: {
+        mentor_id: string;
+        company: string;
+        position: string;
+        description: string;
+        from_date: string;
+        currently_working: boolean;
+        to_date: string | null;
+      } = {
         mentor_id: userIdForExp, // Use auth_user_id, not profile ID
         company: expForm.company,
         position: expForm.position,
         description: expForm.description,
         from_date: expForm.from_date,
         currently_working: expForm.currently_working,
+        to_date: (!expForm.currently_working && expForm.to_date) ? expForm.to_date : null,
       };
-      
-      if (!expForm.currently_working && expForm.to_date) {
-        expData.to_date = expForm.to_date;
-      } else {
-        expData.to_date = null;
-      }
       
       if (editingExpId) {
         console.log('Updating professional experience:', { editingExpId, userIdForExp, expData });
         const { error, data } = await supabase
           .from('mentor_professional_experience')
-          .update(expData)
+          .update(expData as Record<string, any>)
           .eq('id', editingExpId)
           .eq('mentor_id', userIdForExp) // Use auth_user_id, not profile ID
           .select();
@@ -495,6 +521,8 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
       const userId = authUser.id;
       setAuthUserId(userId); // Store auth_user_id
       
+      // Force fresh data by adding a timestamp to bypass cache
+      // Always fetch fresh data from database (no cache)
       const { data, error } = await supabase
         .from('mentor_profiles')
         .select('*')
@@ -507,16 +535,17 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
       }
 
       if (data) {
-        const loadedProfile = {
-          ...data,
+        const profileData = data as any as MentorProfile;
+        const loadedProfile: MentorProfile = {
+          ...profileData,
           user_id: userId, // Use auth_user_id, not profile ID
-          expertise_areas: data.expertise_areas || [],
-          sectors: data.sectors || [],
-          mentoring_stages: data.mentoring_stages || [],
-          previous_companies: data.previous_companies || [],
+          expertise_areas: profileData.expertise_areas || [],
+          sectors: profileData.sectors || [],
+          mentoring_stages: profileData.mentoring_stages || [],
+          previous_companies: profileData.previous_companies || [],
           // Auto-populate from metrics if not set
-          companies_mentored: data.companies_mentored || mentorMetrics?.startupsMentoring || 0,
-          companies_founded: data.companies_founded || mentorMetrics?.startupsFounded || 0
+          companies_mentored: profileData.companies_mentored || mentorMetrics?.startupsMentoring || 0,
+          companies_founded: profileData.companies_founded || mentorMetrics?.startupsFounded || 0
         };
         setProfile(loadedProfile);
         if (onProfileChange) {
@@ -524,7 +553,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         }
       } else {
         // Initialize with metrics if available
-        const initialProfile = {
+        const initialProfile: MentorProfile = {
           ...profile,
           user_id: userId, // Use auth_user_id, not profile ID
           companies_mentored: mentorMetrics?.startupsMentoring || 0,
@@ -654,14 +683,20 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         setAuthUserId(userIdForSave);
       }
       
+      // Merge external profile changes (from right side sections) before saving
+      // This ensures all changes from both form and preview sections are saved
+      const profileToSave = externalProfile 
+        ? { ...profile, ...externalProfile } // Merge external changes
+        : profile;
+      
       // Auto-populate counts from metrics before saving
       const profileData = {
-        ...profile,
+        ...profileToSave,
         user_id: userIdForSave, // CRITICAL: Use auth_user_id, not profile ID
         companies_mentored: mentorMetrics 
           ? (mentorMetrics.startupsMentoring + mentorMetrics.startupsMentoredPreviously)
-          : profile.companies_mentored || 0,
-        companies_founded: mentorMetrics?.startupsFounded || profile.companies_founded || 0,
+          : profileToSave.companies_mentored || 0,
+        companies_founded: mentorMetrics?.startupsFounded || profileToSave.companies_founded || 0,
         // Note: Previously Mentored is calculated from startupsMentoredPreviously, not stored separately
         updated_at: new Date().toISOString()
       };
@@ -692,10 +727,25 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
       }
 
       console.log('Profile saved successfully:', data);
-      setProfile(data);
+      
+      // CRITICAL: Reload profile from database to ensure we have the latest data
+      // This prevents stale data issues after refresh
+      await loadProfile();
+      
+      // Update state with fresh data from database
+      if (data) {
+        const savedProfile = data as any as MentorProfile;
+        setProfile(savedProfile);
+        if (onProfileChange) {
+          onProfileChange(savedProfile);
+        }
+      }
+      
       setIsEditing(false);
       if (onSave) {
-        onSave(data);
+        // Pass the fresh data from database, not just the saved data
+        const freshData = data as any as MentorProfile;
+        onSave(freshData);
       }
       alert('Profile saved successfully!');
     } catch (error: any) {

@@ -176,28 +176,8 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
   return (
     <>
       <Card>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
+        <div className="mb-4">
           <h3 className="text-base sm:text-lg font-semibold text-slate-900">Availability Slots</h3>
-          <div className="flex gap-2 flex-wrap">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={loadSlots}
-              className="text-xs sm:text-sm"
-            >
-              <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" /> Refresh
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setEditingSlot(null);
-                setManageModalOpen(true);
-              }}
-              className="text-xs sm:text-sm"
-            >
-              <Calendar className="h-3 w-3 sm:h-4 sm:w-4 mr-1" /> Create Slot
-            </Button>
-          </div>
         </div>
 
         {slots.length === 0 ? (

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Startup, InvestmentType, ComplianceStatus } from '../types';
-import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar, Edit, Save, Image as ImageIcon } from 'lucide-react';
+import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar, Edit, Save, Image as ImageIcon, Upload, Link, Cloud } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { AuthUser } from '../lib/auth';
@@ -141,6 +141,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   const [isEditingProfile, setIsEditingProfile] = useState(true);
   const profileFormSaveRef = useRef<(() => Promise<void>) | null>(null);
   const profileFormEditingRef = useRef<{ isEditing: boolean; setIsEditing: (val: boolean) => void } | null>(null);
+  
+  // State for profile photo input mode
+  const [photoInputMode, setPhotoInputMode] = useState<'url' | 'file'>('url');
 
   // Sync previewProfile changes back to form when editing sections on right side
   useEffect(() => {
@@ -572,6 +575,78 @@ ${mentorName}`;
     window.open(mailtoLink, '_blank');
   };
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (!validTypes.includes(file.type)) {
+      alert('Invalid file type. Please upload an image (JPEG, PNG, GIF, WebP, or SVG)');
+      return;
+    }
+
+    // Validate file size (10MB limit)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      alert('File size too large. Please upload an image smaller than 10MB');
+      return;
+    }
+
+    try {
+      // Get auth user ID for file naming
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        alert('Not authenticated. Please log in again.');
+        return;
+      }
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${authUser.id}-${Date.now()}.${fileExt}`;
+      const filePath = `mentor-logos/${fileName}`;
+
+      console.log('Uploading profile photo:', { filePath, fileSize: file.size, fileType: file.type });
+
+      const { error: uploadError } = await supabase.storage
+        .from('mentor-assets')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        let errorMessage = 'Failed to upload profile photo';
+        
+        if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('does not exist')) {
+          errorMessage = 'Storage bucket not found. Please contact administrator to set up mentor-assets bucket.';
+        } else if (uploadError.message?.includes('new row violates row-level security') || uploadError.message?.includes('permission')) {
+          errorMessage = 'Permission denied. Please check storage bucket policies. Error: ' + uploadError.message;
+        } else if (uploadError.message) {
+          errorMessage = `Upload failed: ${uploadError.message}`;
+        }
+        
+        alert(errorMessage);
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('mentor-assets')
+        .getPublicUrl(filePath);
+
+      console.log('Profile photo uploaded successfully:', publicUrl);
+      setPreviewProfile({ 
+        ...previewProfile, 
+        logo_url: publicUrl,
+        media_type: 'logo'
+      });
+      alert('Profile photo uploaded successfully!');
+    } catch (error: any) {
+      console.error('Error uploading profile photo:', error);
+      alert(`Failed to upload profile photo: ${error.message || 'Unknown error'}`);
+    }
+  };
+
   if (selectedStartup) {
     return (
       <StartupHealthView
@@ -804,36 +879,6 @@ ${mentorName}`;
                   </Card>
                 </div>
 
-                {/* Add/Edit Data Form */}
-                <Card>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-slate-700">Manage Your Mentoring Data</h3>
-                    <Button
-                      variant={showAddForm ? "outline" : "primary"}
-                      onClick={() => setShowAddForm(!showAddForm)}
-                    >
-                      {showAddForm ? (
-                        <>
-                          <X className="h-4 w-4 mr-2" /> Hide Form
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="h-4 w-4 mr-2" /> Add/Edit Data
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  {showAddForm && currentUser?.id && (
-                    <MentorDataForm
-                      mentorId={currentUser.id}
-                      startups={startups}
-                      onUpdate={fetchMetrics}
-                      mentorMetrics={mentorMetrics}
-                      initialSection={formSection || undefined}
-                    />
-                  )}
-                </Card>
-
                 {/* Pending Request */}
                 <MentorPendingRequestsSection
                   requests={mentorMetrics?.pendingRequests || []}
@@ -853,7 +898,38 @@ ${mentorName}`;
                    mentorMetrics.foundedStartups.length > 0) && (
                   <Card>
                     <div className="mb-4">
-                      <h3 className="text-base sm:text-lg font-semibold mb-4 text-slate-700">My Startups</h3>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-base sm:text-lg font-semibold text-slate-700">My Startups</h3>
+                        <Button
+                          variant={showAddForm ? "outline" : "primary"}
+                          size="sm"
+                          onClick={() => setShowAddForm(!showAddForm)}
+                        >
+                          {showAddForm ? (
+                            <>
+                              <X className="h-4 w-4 mr-2" /> Hide Form
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="h-4 w-4 mr-2" /> Add/Edit Data
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      
+                      {/* Add/Edit Data Form - Show when button is clicked */}
+                      {showAddForm && currentUser?.id && (
+                        <div className="mb-4 pb-4 border-b border-slate-200">
+                          <MentorDataForm
+                            mentorId={currentUser.id}
+                            startups={startups}
+                            onUpdate={fetchMetrics}
+                            mentorMetrics={mentorMetrics}
+                            initialSection={formSection || undefined}
+                          />
+                        </div>
+                      )}
+                      
                       {/* Tabs */}
                       <div className="border-b border-slate-200">
                         <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto scrollbar-hide" aria-label="Tabs">
@@ -1748,8 +1824,10 @@ ${mentorName}`;
                   <MentorProfileForm
                     currentUser={currentUser}
                     mentorMetrics={mentorMetrics}
-                    onSave={(profile) => {
+                    onSave={async (profile) => {
                       console.log('Profile saved:', profile);
+                      // Update previewProfile with saved data to ensure consistency
+                      setPreviewProfile(profile);
                       setIsEditingProfile(false);
                       if (profileFormEditingRef.current) {
                         profileFormEditingRef.current.setIsEditing(false);
@@ -1758,8 +1836,13 @@ ${mentorName}`;
                       if (profile.fee_currency) {
                         setSelectedCurrency(profile.fee_currency);
                       }
+                      // Reload metrics to ensure all data is fresh
+                      if (currentUser?.id) {
+                        await fetchMetrics();
+                      }
                     }}
                     onProfileChange={(profile) => {
+                      // Update previewProfile whenever form state changes
                       setPreviewProfile(profile);
                     }}
                     isViewOnly={!isEditingProfile}
@@ -1983,16 +2066,70 @@ ${mentorName}`;
                             </div>
                           )}
                           {isEditingProfile && (
-                            <Input
-                              label="Profile Photo URL"
-                              type="url"
-                              value={previewProfile.logo_url || ''}
-                              onChange={(e) => {
-                                setPreviewProfile({ ...previewProfile, logo_url: e.target.value });
-                              }}
-                              disabled={!isEditingProfile}
-                              placeholder="https://example.com/profile-photo.png"
-                            />
+                            <>
+                              {/* URL Input Field - Shown when URL mode is selected */}
+                              {photoInputMode === 'url' && (
+                                <Input
+                                  label="Profile Photo URL"
+                                  type="url"
+                                  value={previewProfile.logo_url || ''}
+                                  onChange={(e) => {
+                                    setPreviewProfile({ ...previewProfile, logo_url: e.target.value });
+                                  }}
+                                  disabled={!isEditingProfile}
+                                  placeholder="Paste your cloud drive link here..."
+                                />
+                              )}
+                              
+                              {/* File Upload - Shown when File mode is selected */}
+                              {photoInputMode === 'file' && (
+                                <div className="space-y-2">
+                                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-gray-400 transition-colors">
+                                    <label className="cursor-pointer flex flex-col items-center justify-center space-y-2">
+                                      <Cloud className="w-8 h-8 text-gray-400" />
+                                      <div className="text-center">
+                                        <p className="text-sm font-medium text-gray-700">Click to upload profile photo</p>
+                                        <p className="text-xs text-gray-500">Max 10MB • JPEG, PNG, GIF, WebP, SVG</p>
+                                      </div>
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleLogoUpload}
+                                        className="hidden"
+                                      />
+                                    </label>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Input Mode Toggle Buttons */}
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant={photoInputMode === 'url' ? 'primary' : 'outline'}
+                                  size="sm"
+                                  onClick={() => setPhotoInputMode('url')}
+                                  className="flex items-center gap-2"
+                                >
+                                  <Link className="w-4 h-4" />
+                                  Cloud Drive <span className="text-xs opacity-90">(Recommended)</span>
+                                </Button>
+                                <span className="text-sm text-slate-500 font-medium">OR</span>
+                                <Button
+                                  type="button"
+                                  variant={photoInputMode === 'file' ? 'primary' : 'outline'}
+                                  size="sm"
+                                  onClick={() => setPhotoInputMode('file')}
+                                  className="flex items-center gap-2"
+                                >
+                                  <Cloud className="w-4 h-4 flex-shrink-0" />
+                                  <div className="flex flex-col items-start leading-none">
+                                    <span className="text-xs">Upload</span>
+                                    <span className="text-xs">File</span>
+                                  </div>
+                                </Button>
+                              </div>
+                            </>
                           )}
                         </div>
                       ) : (

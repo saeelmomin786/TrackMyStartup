@@ -622,20 +622,13 @@ const MentorView: React.FC<MentorViewProps> = ({
       return;
     }
 
-    if (!currentUser?.id || !currentUser?.mentor_code) {
+    if (!currentUser?.mentor_code) {
       alert('Mentor information not available. Please refresh and try again.');
       return;
     }
 
     const mentorName = currentUser?.name || 'Mentor';
     const mentorCode = currentUser.mentor_code;
-    
-    // Get auth user ID for mentor
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser) {
-      alert('Not authenticated. Please log in again.');
-      return;
-    }
 
     try {
       const response = await fetch('/api/invite-startup-mentor', {
@@ -647,10 +640,8 @@ const MentorView: React.FC<MentorViewProps> = ({
           startupName,
           contactEmail: contactEmail,
           contactName: startupName,
-          mentorId: authUser.id,
           mentorCode,
-          mentorName,
-          redirectUrl: typeof window !== 'undefined' ? window.location.origin : undefined
+          mentorName
         }),
       });
 
@@ -675,11 +666,7 @@ const MentorView: React.FC<MentorViewProps> = ({
       const result = await response.json();
       
       if (result.success) {
-        alert(`Invitation sent successfully to ${contactEmail}! ${result.message || ''}`);
-        // Reload metrics to refresh the UI
-        if (currentUser?.id) {
-          await fetchMetrics();
-        }
+        alert(`Invitation email sent successfully to ${contactEmail}!`);
       } else {
         alert(`Failed to send invite: ${result.error || result.message || 'Unknown error'}`);
       }

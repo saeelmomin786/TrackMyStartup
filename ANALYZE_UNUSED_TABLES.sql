@@ -106,3 +106,7 @@ ORDER BY (n_tup_ins + n_tup_upd + n_tup_del) ASC, pg_total_relation_size(scheman
 
 
 
+
+
+
+

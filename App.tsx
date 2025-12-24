@@ -137,7 +137,9 @@ const App: React.FC = () => {
   
   // Check if we're on a public startup page (path-based or query param)
   // This should work even when user is authenticated - it's a public view of a startup
-  const isPublicStartupPage = isPathBasedStartup || ((getQueryParam('view') === 'startup' || getQueryParam('startupId') || getQueryParam('id')) && (getQueryParam('startupId') || getQueryParam('id')));
+  // Support both 'startupId'/'id' (new format) and 'startup' (backward compatibility)
+  const startupIdParam = getQueryParam('startupId') || getQueryParam('id') || getQueryParam('startup');
+  const isPublicStartupPage = isPathBasedStartup || ((getQueryParam('view') === 'startup' || startupIdParam) && startupIdParam);
   
   // Check if we're on a public investor page
   const isPublicInvestorPage = isPathBasedInvestor || (getQueryParam('view') === 'investor' && (getQueryParam('investorId') || getQueryParam('userId')));
@@ -152,7 +154,8 @@ const App: React.FC = () => {
   useEffect(() => {
     const redirectToSeoUrl = async () => {
       // Check for old startup URL format
-      const queryStartupId = getQueryParam('startupId') || getQueryParam('id');
+      // Support both 'startupId'/'id' (new format) and 'startup' (backward compatibility)
+      const queryStartupId = getQueryParam('startupId') || getQueryParam('id') || getQueryParam('startup');
       if (queryStartupId && !pathProfile) {
         try {
           // Load startup name and redirect

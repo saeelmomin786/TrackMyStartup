@@ -88,3 +88,7 @@ SELECT '✅ Function create_investment_offers_automatically() migrated to use us
 
 
 
+
+
+
+

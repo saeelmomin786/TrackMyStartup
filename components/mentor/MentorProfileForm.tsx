@@ -72,7 +72,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   onSaveRef,
   onEditingStateRef
 }) => {
-  const [isEditing, setIsEditing] = useState(true);
+  const [isEditing, setIsEditing] = useState(!isViewOnly);
   const [isSaving, setIsSaving] = useState(false);
   // Get auth_user_id - mentor_profiles uses auth_user_id, not profile ID
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -127,6 +127,11 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   const feeTypes = ['Free', 'Fees', 'Stock Options', 'Hybrid'];
   const currencies = ['USD', 'INR', 'EUR', 'GBP', 'SGD', 'AED'];
 
+  // Sync isEditing with isViewOnly prop
+  useEffect(() => {
+    setIsEditing(!isViewOnly);
+  }, [isViewOnly]);
+
   // Load profile on mount and when metrics update (metrics may affect profile counts)
   useEffect(() => {
     const loadData = async () => {
@@ -134,6 +139,18 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
       if (authUser) {
         await loadProfile();
         await loadProfessionalExperiences();
+      }
+    };
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Load on initial mount
+
+  // Reload profile when metrics change
+  useEffect(() => {
+    const loadData = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        await loadProfile();
       }
     };
     loadData();
@@ -556,6 +573,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
         const initialProfile: MentorProfile = {
           ...profile,
           user_id: userId, // Use auth_user_id, not profile ID
+          mentor_name: profile.mentor_name || currentUser.name || '',
           companies_mentored: mentorMetrics?.startupsMentoring || 0,
           companies_founded: mentorMetrics?.startupsFounded || 0
         };
@@ -665,6 +683,29 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   const handleSave = async () => {
     if (!profile.mentor_name) {
       alert('Please enter mentor name');
+      return;
+    }
+
+    // Validate fee amounts
+    if ((profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') &&
+        profile.fee_amount_min !== null && 
+        profile.fee_amount_min !== undefined &&
+        profile.fee_amount_max !== null && 
+        profile.fee_amount_max !== undefined &&
+        profile.fee_amount_min >= profile.fee_amount_max) {
+      alert('Minimum fee amount must be less than maximum fee amount. Please correct the values before saving.');
+      return;
+    }
+
+    // Also validate external profile if it exists
+    if (externalProfile && 
+        (externalProfile.fee_type === 'Fees' || externalProfile.fee_type === 'Hybrid') &&
+        externalProfile.fee_amount_min !== null && 
+        externalProfile.fee_amount_min !== undefined &&
+        externalProfile.fee_amount_max !== null && 
+        externalProfile.fee_amount_max !== undefined &&
+        externalProfile.fee_amount_min >= externalProfile.fee_amount_max) {
+      alert('Minimum fee amount must be less than maximum fee amount. Please correct the values before saving.');
       return;
     }
 
@@ -1332,26 +1373,66 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
             {/* Minimum Fee Amount - Show for Fees and Hybrid */}
             {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
-              <Input
-                label="Minimum Fee Amount"
-                type="number"
-                value={profile.fee_amount_min?.toString() || ''}
-                onChange={(e) => handleChange('fee_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
-                disabled={!isEditing || isViewOnly}
-                placeholder="e.g., 1000"
-              />
+              <div>
+                <Input
+                  label="Minimum Fee Amount"
+                  type="number"
+                  value={profile.fee_amount_min?.toString() || ''}
+                  onChange={(e) => handleChange('fee_amount_min', e.target.value ? parseFloat(e.target.value) : null)}
+                  disabled={!isEditing || isViewOnly}
+                  placeholder="e.g., 1000"
+                  className={
+                    profile.fee_amount_min !== null && 
+                    profile.fee_amount_min !== undefined &&
+                    profile.fee_amount_max !== null && 
+                    profile.fee_amount_max !== undefined && 
+                    profile.fee_amount_min >= profile.fee_amount_max
+                      ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                      : ''
+                  }
+                />
+                {profile.fee_amount_min !== null && 
+                 profile.fee_amount_min !== undefined &&
+                 profile.fee_amount_max !== null && 
+                 profile.fee_amount_max !== undefined && 
+                 profile.fee_amount_min >= profile.fee_amount_max && (
+                  <p className="mt-1 text-sm text-red-600">
+                    Minimum fee must be less than maximum fee
+                  </p>
+                )}
+              </div>
             )}
 
             {/* Maximum Fee Amount - Show for Fees and Hybrid */}
             {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
-              <Input
-                label="Maximum Fee Amount"
-                type="number"
-                value={profile.fee_amount_max?.toString() || ''}
-                onChange={(e) => handleChange('fee_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
-                disabled={!isEditing || isViewOnly}
-                placeholder="e.g., 5000"
-              />
+              <div>
+                <Input
+                  label="Maximum Fee Amount"
+                  type="number"
+                  value={profile.fee_amount_max?.toString() || ''}
+                  onChange={(e) => handleChange('fee_amount_max', e.target.value ? parseFloat(e.target.value) : null)}
+                  disabled={!isEditing || isViewOnly}
+                  placeholder="e.g., 5000"
+                  className={
+                    profile.fee_amount_min !== null && 
+                    profile.fee_amount_min !== undefined &&
+                    profile.fee_amount_max !== null && 
+                    profile.fee_amount_max !== undefined && 
+                    profile.fee_amount_min >= profile.fee_amount_max
+                      ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                      : ''
+                  }
+                />
+                {profile.fee_amount_min !== null && 
+                 profile.fee_amount_min !== undefined &&
+                 profile.fee_amount_max !== null && 
+                 profile.fee_amount_max !== undefined && 
+                 profile.fee_amount_min >= profile.fee_amount_max && (
+                  <p className="mt-1 text-sm text-red-600">
+                    Maximum fee must be greater than minimum fee
+                  </p>
+                )}
+              </div>
             )}
 
               {/* Minimum Stock Options Amount (ESOP) - Show for Stock Options and Hybrid */}

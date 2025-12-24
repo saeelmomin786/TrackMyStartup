@@ -74,3 +74,7 @@ SELECT '✅ Function get_applications_with_codes() migrated to use user_profiles
 
 
 
+
+
+
+

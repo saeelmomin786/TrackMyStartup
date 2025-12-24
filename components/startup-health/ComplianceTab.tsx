@@ -533,6 +533,13 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
             if (result && result.success) {
                 console.log('✅ Upload successful:', result);
                 
+                // Show success message
+                messageService.success(
+                    'Document Uploaded',
+                    `Compliance document "${selectedTask.taskName}" has been uploaded successfully.`,
+                    3000
+                );
+                
                 // Check if status update had any issues (it's logged but doesn't fail the upload)
                 if (result.statusUpdateError) {
                     console.warn('⚠️ Upload succeeded but status update failed:', result.statusUpdateError);
@@ -599,6 +606,14 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
             
             if (result && result.success) {
                 console.log('✅ Cloud drive URL saved successfully:', result);
+                
+                // Show success message
+                messageService.success(
+                    'Document Saved',
+                    `Cloud drive link for "${selectedTask.taskName}" has been saved successfully.`,
+                    3000
+                );
+                
                 setUploadSuccess(true);
                 setCloudDriveUrl('');
                 setUseCloudDrive(false);

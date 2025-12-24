@@ -1348,6 +1348,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 console.log('📁 Uploading pitch deck:', pitchDeckFile.name);
                 deckUrl = await capTableService.uploadPitchDeck(pitchDeckFile, startup.id);
                 console.log('✅ Pitch deck uploaded:', deckUrl);
+                messageService.success(
+                    'Document Uploaded',
+                    'Pitch deck has been uploaded successfully.',
+                    3000
+                );
                 // Clear the file after successful upload
                 setPitchDeckFile(null);
             }
@@ -1540,6 +1545,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             let proofUrl = '';
             if (proofFile) {
                 proofUrl = await capTableService.uploadProofDocument(startup.id, proofFile);
+                messageService.success(
+                    'Document Uploaded',
+                    'Proof document has been uploaded successfully.',
+                    3000
+                );
             }
             
             const newInvestment = {
@@ -1748,11 +1758,20 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/signed_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
                         signedAgreementUrl = uploadResult.url;
+                        messageService.success(
+                            'Document Uploaded',
+                            'Signed agreement has been uploaded successfully.',
+                            3000
+                        );
                     } else {
                         throw new Error(uploadResult.error || 'Upload failed');
                     }
                 } catch (uploadErr) {
                     console.error('Failed to upload agreement file:', uploadErr);
+                    messageService.error(
+                        'Upload Failed',
+                        'Failed to upload agreement file. Please try again.'
+                    );
                     setError('Failed to upload agreement file');
                     return;
                 }
@@ -1861,11 +1880,20 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/signed_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
                         signedAgreementUrl = uploadResult.url;
+                        messageService.success(
+                            'Document Uploaded',
+                            'Signed agreement has been uploaded successfully.',
+                            3000
+                        );
                     } else {
                         throw new Error(uploadResult.error || 'Upload failed');
                     }
                 } catch (uploadErr) {
                     console.error('Failed to upload agreement file:', uploadErr);
+                    messageService.error(
+                        'Upload Failed',
+                        'Failed to upload agreement file. Please try again.'
+                    );
                     setError('Failed to upload agreement file');
                     return;
                 }
@@ -1994,6 +2022,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/mentor_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
                         signedAgreementUrl = uploadResult.url;
+                        messageService.success(
+                            'Document Uploaded',
+                            'Mentor agreement has been uploaded successfully.',
+                            3000
+                        );
                     } else {
                         console.warn('Failed to upload agreement file, continuing without it:', uploadResult.error);
                         // Don't fail the entire operation if file upload fails
@@ -2092,11 +2125,20 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     const uploadResult = await storageService.uploadFile(agreementFile, 'startup-documents', 'agreements/' + startup.id + '/mentor_agreement_' + Date.now() + '_' + agreementFile.name);
                     if (uploadResult.success && uploadResult.url) {
                         signedAgreementUrl = uploadResult.url;
+                        messageService.success(
+                            'Document Uploaded',
+                            'Mentor agreement has been uploaded successfully.',
+                            3000
+                        );
                     } else {
                         throw new Error(uploadResult.error || 'Upload failed');
                     }
                 } catch (uploadErr) {
                     console.error('Failed to upload agreement file:', uploadErr);
+                    messageService.error(
+                        'Upload Failed',
+                        'Failed to upload agreement file. Please try again.'
+                    );
                     setError('Failed to upload agreement file');
                     return;
                 }

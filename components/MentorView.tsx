@@ -376,10 +376,6 @@ const MentorView: React.FC<MentorViewProps> = ({
   };
 
   const handleFavoriteToggle = async (startupId: number) => {
-    console.log('❤️ handleFavoriteToggle called for startup ID:', startupId);
-    console.log('❤️ Current user ID:', currentUser?.id);
-    console.log('❤️ Current user role:', currentUser?.role);
-    
     // Get auth user ID (required for foreign key constraint)
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) {
@@ -387,91 +383,130 @@ const MentorView: React.FC<MentorViewProps> = ({
       return;
     }
     const authUserId = authUser.id;
-    console.log('❤️ Auth user ID (for foreign key):', authUserId);
     
     const isCurrentlyFavorited = favoritedPitches.has(startupId);
-    console.log('❤️ Is currently favorited:', isCurrentlyFavorited);
+    
+    // Optimistically update UI
+    setFavoritedPitches(prev => {
+      const newSet = new Set(prev);
+      if (isCurrentlyFavorited) {
+        newSet.delete(startupId);
+      } else {
+        newSet.add(startupId);
+      }
+      return newSet;
+    });
     
     try {
       if (isCurrentlyFavorited) {
         // Remove favorite
-        console.log('❤️ Removing favorite...');
-        const { error, data } = await supabase
+        const { error } = await supabase
           .from('investor_favorites')
           .delete()
           .eq('investor_id', authUserId) // Use auth user ID, not profile ID
-          .eq('startup_id', startupId)
-          .select();
-        
-        console.log('❤️ Delete result:', { error, data });
+          .eq('startup_id', startupId);
         
         if (error) {
-          console.error('❤️ Delete error details:', error);
-          throw error;
+          // Revert optimistic update on error
+          setFavoritedPitches(prev => {
+            const newSet = new Set(prev);
+            newSet.add(startupId);
+            return newSet;
+          });
+          
+          if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+            alert('Permission denied. Please ensure RLS policies allow mentors to manage favorites. You may need to run the FIX_MENTOR_FAVORITES.sql script in your Supabase database.');
+          } else {
+            throw error;
+          }
         }
-        
-        setFavoritedPitches(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(startupId);
-          console.log('❤️ Updated favoritedPitches after delete:', Array.from(newSet));
-          return newSet;
-        });
-        console.log('❤️ Favorite removed successfully');
       } else {
         // Add favorite
-        console.log('❤️ Adding favorite...');
-        const { error, data } = await supabase
+        const { error } = await supabase
           .from('investor_favorites')
           .insert([{
             investor_id: authUserId, // Use auth user ID, not profile ID (satisfies foreign key)
             startup_id: startupId
-          }])
-          .select();
-        
-        console.log('❤️ Insert result:', { error, data });
+          }]);
         
         if (error) {
-          console.error('❤️ Insert error details:', error);
-          console.error('❤️ Error code:', error.code);
-          console.error('❤️ Error message:', error.message);
-          console.error('❤️ Error details:', error.details);
-          throw error;
+          // Revert optimistic update on error
+          setFavoritedPitches(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(startupId);
+            return newSet;
+          });
+          
+          if (error.code === '23505') {
+            // Unique constraint violation - already favorited (shouldn't happen but handle gracefully)
+            console.log('Already favorited');
+          } else if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+            alert('Permission denied. Please ensure RLS policies allow mentors to manage favorites. You may need to run the FIX_MENTOR_FAVORITES.sql script in your Supabase database.');
+          } else {
+            throw error;
+          }
         }
-        
-        setFavoritedPitches(prev => {
-          const newSet = new Set(prev);
-          newSet.add(startupId);
-          console.log('❤️ Updated favoritedPitches after insert:', Array.from(newSet));
-          return newSet;
-        });
-        console.log('❤️ Favorite added successfully');
       }
     } catch (error: any) {
-      console.error('❤️ Error toggling favorite:', error);
-      console.error('❤️ Error type:', typeof error);
-      console.error('❤️ Error object:', JSON.stringify(error, null, 2));
-      
-      // Show more detailed error message
+      console.error('Error toggling favorite:', error);
       const errorMessage = error?.message || error?.details || 'Unknown error occurred';
       const errorCode = error?.code || 'UNKNOWN';
-      alert(`Failed to update favorite. Error: ${errorCode} - ${errorMessage}\n\nPlease make sure you have run the FIX_MENTOR_FAVORITES.sql script in your Supabase database.`);
+      alert(`Failed to update favorite. Error: ${errorCode} - ${errorMessage}`);
     }
   };
 
-  const handleShare = (pitch: ActiveFundraisingStartup) => {
-    const url = window.location.href.split('?')[0] + `?startup=${pitch.id}`;
-    if (navigator.share) {
-      navigator.share({
-        title: `Check out ${pitch.name}`,
-        text: `${pitch.name} - ${pitch.sector}`,
-        url: url
-      }).catch(() => {
-        navigator.clipboard.writeText(url);
-        alert('Link copied to clipboard!');
-      });
-    } else {
-      navigator.clipboard.writeText(url);
-      alert('Link copied to clipboard!');
+  const handleShare = async (pitch: ActiveFundraisingStartup) => {
+    try {
+      const baseUrl = window.location.origin;
+      // Use startupId parameter (App.tsx expects startupId or id, not startup)
+      const url = `${baseUrl}/?view=startup&startupId=${pitch.id}`;
+      
+      // Try Web Share API first (works on mobile and some desktop browsers)
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: `Check out ${pitch.name}`,
+            text: `${pitch.name} - ${pitch.sector}`,
+            url: url
+          });
+          return; // Successfully shared
+        } catch (shareError: any) {
+          // User cancelled or share failed, fall through to clipboard
+          if (shareError.name === 'AbortError') {
+            return; // User cancelled, don't show error
+          }
+        }
+      }
+      
+      // Fallback to clipboard
+      try {
+        await navigator.clipboard.writeText(url);
+        alert(`Link copied to clipboard!\n\n${url}`);
+      } catch (clipboardError) {
+        // Clipboard API failed, show URL in prompt
+        const userConfirmed = confirm(
+          `Share this startup pitch:\n\n${pitch.name}\n\nCopy this link:\n${url}\n\nClick OK to copy, or Cancel to close.`
+        );
+        if (userConfirmed) {
+          // Create a temporary textarea to select and copy
+          const textarea = document.createElement('textarea');
+          textarea.value = url;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            document.execCommand('copy');
+            alert('Link copied to clipboard!');
+          } catch (err) {
+            alert(`Please copy this link manually:\n\n${url}`);
+          }
+          document.body.removeChild(textarea);
+        }
+      }
+    } catch (error: any) {
+      console.error('Error sharing:', error);
+      alert(`Failed to share. Please copy this link manually:\n\n${window.location.origin}/?view=startup&startupId=${pitch.id}`);
     }
   };
 
@@ -550,29 +585,108 @@ const MentorView: React.FC<MentorViewProps> = ({
     }
   };
 
-  const handleInviteToTMS = (startupName: string, emailId?: string) => {
+  const handleInviteToTMS = async (startupName: string, emailId?: string, assignment?: any) => {
+    let contactEmail = emailId?.trim();
+    
+    // If email not in notes, try to get it from startup's user profile if startup exists on TMS
+    if (!contactEmail && assignment?.startup_id) {
+      try {
+        // Get startup's user_id from startups table
+        const { data: startupData, error: startupError } = await supabase
+          .from('startups')
+          .select('user_id')
+          .eq('id', assignment.startup_id)
+          .single();
+        
+        if (!startupError && startupData && (startupData as any).user_id) {
+          const userId = (startupData as any).user_id;
+          // Get email from user_profiles
+          const { data: userProfile, error: profileError } = await supabase
+            .from('user_profiles')
+            .select('email')
+            .eq('auth_user_id', userId)
+            .eq('role', 'Startup')
+            .single();
+          
+          if (!profileError && userProfile && (userProfile as any).email) {
+            contactEmail = (userProfile as any).email;
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching startup email:', error);
+      }
+    }
+
+    if (!contactEmail) {
+      alert('Email address is required to send the invitation. Please ensure the startup has a valid email address in the assignment notes or the startup is registered on TMS.');
+      return;
+    }
+
+    if (!currentUser?.id || !currentUser?.mentor_code) {
+      alert('Mentor information not available. Please refresh and try again.');
+      return;
+    }
+
     const mentorName = currentUser?.name || 'Mentor';
-    const invitationSubject = `Invitation to Join TrackMyStartup - ${startupName}`;
-    const invitationBody = `Hello,
+    const mentorCode = currentUser.mentor_code;
+    
+    // Get auth user ID for mentor
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
+      alert('Not authenticated. Please log in again.');
+      return;
+    }
 
-I'm ${mentorName}, and I'd like to invite ${startupName} to join TrackMyStartup - a comprehensive platform for startup growth and management.
+    try {
+      const response = await fetch('/api/invite-startup-mentor', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          startupName,
+          contactEmail: contactEmail,
+          contactName: startupName,
+          mentorId: authUser.id,
+          mentorCode,
+          mentorName,
+          redirectUrl: typeof window !== 'undefined' ? window.location.origin : undefined
+        }),
+      });
 
-With TrackMyStartup, you'll get access to:
-• Complete startup health tracking
-• Financial modeling and projections
-• Compliance management
-• Investor relations
-• Team management
-• Fundraising tools
-• And much more!
+      if (!response.ok) {
+        let errorData;
+        const responseText = await response.text();
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('API error - could not parse JSON:', responseText);
+          errorData = { error: `Server error (${response.status}): ${responseText || 'Unknown error'}` };
+        }
+        console.error('API error response:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        alert(`Failed to send invite: ${errorData.error || errorData.message || `Error ${response.status}`}`);
+        return;
+      }
 
-Join us on TrackMyStartup to take your startup to the next level.
-
-Best regards,
-${mentorName}`;
-
-    const mailtoLink = `mailto:${emailId || ''}?subject=${encodeURIComponent(invitationSubject)}&body=${encodeURIComponent(invitationBody)}`;
-    window.open(mailtoLink, '_blank');
+      const result = await response.json();
+      
+      if (result.success) {
+        alert(`Invitation sent successfully to ${contactEmail}! ${result.message || ''}`);
+        // Reload metrics to refresh the UI
+        if (currentUser?.id) {
+          await fetchMetrics();
+        }
+      } else {
+        alert(`Failed to send invite: ${result.error || result.message || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      console.error('Error sending invite:', error);
+      alert(`Failed to send invite: ${error.message || 'Unknown error occurred. Please try again.'}`);
+    }
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -708,14 +822,6 @@ ${mentorName}`;
                 </div>
               )}
             </div>
-            <Button
-              variant="outline"
-              onClick={() => setShowProfilePage(true)}
-              size="sm"
-              className="w-full sm:w-auto flex-shrink-0"
-            >
-              Profile
-            </Button>
           </div>
         </div>
       </div>
@@ -1078,7 +1184,7 @@ ${mentorName}`;
                                         <Button
                                           size="sm"
                                           variant="outline"
-                                          onClick={() => handleInviteToTMS(startupName, emailId)}
+                                          onClick={() => handleInviteToTMS(startupName, emailId, assignment)}
                                           className="text-blue-600 border-blue-300 hover:bg-blue-50"
                                         >
                                           <Send className="mr-1 h-3 w-3" /> Invite to TMS
@@ -1246,7 +1352,7 @@ ${mentorName}`;
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        onClick={() => handleInviteToTMS(startupName, emailId)}
+                                        onClick={() => handleInviteToTMS(startupName, emailId, assignment)}
                                         className="text-blue-600 border-blue-300 hover:bg-blue-50"
                                       >
                                         <Send className="mr-1 h-3 w-3" /> Invite to TMS
@@ -1821,6 +1927,28 @@ ${mentorName}`;
                     currentUser={currentUser}
                     mentorMetrics={mentorMetrics}
                     onSave={async (profile) => {
+                      // Validate fee amounts before saving
+                      if ((profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') &&
+                          profile.fee_amount_min !== null && 
+                          profile.fee_amount_min !== undefined &&
+                          profile.fee_amount_max !== null && 
+                          profile.fee_amount_max !== undefined &&
+                          profile.fee_amount_min >= profile.fee_amount_max) {
+                        alert('Minimum fee amount must be less than maximum fee amount. Please correct the values before saving.');
+                        return;
+                      }
+                      
+                      // Also validate previewProfile fee amounts
+                      if ((previewProfile?.fee_type === 'Fees' || previewProfile?.fee_type === 'Hybrid') &&
+                          previewProfile.fee_amount_min !== null && 
+                          previewProfile.fee_amount_min !== undefined &&
+                          previewProfile.fee_amount_max !== null && 
+                          previewProfile.fee_amount_max !== undefined &&
+                          previewProfile.fee_amount_min >= previewProfile.fee_amount_max) {
+                        alert('Minimum fee amount must be less than maximum fee amount. Please correct the values before saving.');
+                        return;
+                      }
+                      
                       console.log('Profile saved:', profile);
                       // Update previewProfile with saved data to ensure consistency
                       setPreviewProfile(profile);
@@ -1942,26 +2070,60 @@ ${mentorName}`;
 
                         {(previewProfile.fee_type === 'Fees' || previewProfile.fee_type === 'Hybrid') && (
                           <>
-                            <Input
-                              label="Minimum Fee Amount"
-                              type="number"
-                              value={previewProfile.fee_amount_min?.toString() || ''}
-                              onChange={(e) => {
-                                setPreviewProfile({ ...previewProfile, fee_amount_min: e.target.value ? parseFloat(e.target.value) : null });
-                              }}
-                              disabled={!isEditingProfile}
-                              placeholder="e.g., 1000"
-                            />
-                            <Input
-                              label="Maximum Fee Amount"
-                              type="number"
-                              value={previewProfile.fee_amount_max?.toString() || ''}
-                              onChange={(e) => {
-                                setPreviewProfile({ ...previewProfile, fee_amount_max: e.target.value ? parseFloat(e.target.value) : null });
-                              }}
-                              disabled={!isEditingProfile}
-                              placeholder="e.g., 5000"
-                            />
+                            <div>
+                              <Input
+                                label="Minimum Fee Amount"
+                                type="number"
+                                value={previewProfile.fee_amount_min?.toString() || ''}
+                                onChange={(e) => {
+                                  const minValue = e.target.value ? parseFloat(e.target.value) : null;
+                                  setPreviewProfile({ ...previewProfile, fee_amount_min: minValue });
+                                }}
+                                disabled={!isEditingProfile}
+                                placeholder="e.g., 1000"
+                                className={
+                                  previewProfile.fee_amount_min !== null && 
+                                  previewProfile.fee_amount_max !== null && 
+                                  previewProfile.fee_amount_min >= previewProfile.fee_amount_max
+                                    ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                                    : ''
+                                }
+                              />
+                              {previewProfile.fee_amount_min !== null && 
+                               previewProfile.fee_amount_max !== null && 
+                               previewProfile.fee_amount_min >= previewProfile.fee_amount_max && (
+                                <p className="mt-1 text-sm text-red-600">
+                                  Minimum fee must be less than maximum fee
+                                </p>
+                              )}
+                            </div>
+                            <div>
+                              <Input
+                                label="Maximum Fee Amount"
+                                type="number"
+                                value={previewProfile.fee_amount_max?.toString() || ''}
+                                onChange={(e) => {
+                                  const maxValue = e.target.value ? parseFloat(e.target.value) : null;
+                                  setPreviewProfile({ ...previewProfile, fee_amount_max: maxValue });
+                                }}
+                                disabled={!isEditingProfile}
+                                placeholder="e.g., 5000"
+                                className={
+                                  previewProfile.fee_amount_min !== null && 
+                                  previewProfile.fee_amount_max !== null && 
+                                  previewProfile.fee_amount_min >= previewProfile.fee_amount_max
+                                    ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                                    : ''
+                                }
+                              />
+                              {previewProfile.fee_amount_min !== null && 
+                               previewProfile.fee_amount_max !== null && 
+                               previewProfile.fee_amount_min >= previewProfile.fee_amount_max && (
+                                <p className="mt-1 text-sm text-red-600">
+                                  Maximum fee must be greater than minimum fee
+                                </p>
+                              )}
+                            </div>
                           </>
                         )}
 

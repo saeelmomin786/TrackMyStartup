@@ -3,6 +3,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { Briefcase, MapPin, DollarSign, TrendingUp, Eye, Image as ImageIcon, Video, Globe, Linkedin, Mail, Building2, Share2, Send, UserPlus } from 'lucide-react';
 import { createSlug, createProfileUrl } from '../../lib/slugUtils';
+import { getVideoEmbedUrl } from '../../lib/videoUtils';
 
 interface InvestorProfile {
   id?: string;
@@ -47,23 +48,6 @@ interface InvestorCardProps {
 }
 
 const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStartupsInvested, isPublicPage = false, isAuthenticated = false, currentUser = null, onConnect, onApproach }) => {
-  const getYoutubeEmbedUrl = (url?: string): string | null => {
-    if (!url) return null;
-    try {
-      const urlObj = new URL(url);
-      if (urlObj.hostname.includes('youtube.com')) {
-        const videoId = urlObj.searchParams.get('v');
-        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-      } else if (urlObj.hostname.includes('youtu.be')) {
-        const videoId = urlObj.pathname.slice(1);
-        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  };
-
   const formatCurrency = (value?: number, currency: string = 'USD') => {
     if (!value) return 'N/A';
     return new Intl.NumberFormat('en-US', {
@@ -74,9 +58,13 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
     }).format(value);
   };
 
-  const videoEmbedUrl = investor.media_type === 'video' && investor.video_url 
-    ? getYoutubeEmbedUrl(investor.video_url) 
+  // Get video embed info using the comprehensive video utility
+  const videoEmbedInfo = investor.media_type === 'video' && investor.video_url 
+    ? getVideoEmbedUrl(investor.video_url, false)
     : null;
+  
+  const videoEmbedUrl = videoEmbedInfo?.embedUrl || null;
+  const videoSource = videoEmbedInfo?.source || null;
 
   const handleShare = async () => {
     // Create SEO-friendly public shareable link
@@ -160,14 +148,28 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
           </div>
         ) : videoEmbedUrl ? (
           <div className="relative w-full h-full">
-            <iframe
-              src={videoEmbedUrl}
-              title={`Video for ${investor.investor_name}`}
-              frameBorder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              className="absolute top-0 left-0 w-full h-full"
-            />
+            {videoSource === 'direct' ? (
+              // Direct video URL - use HTML5 video player
+              <video
+                src={videoEmbedUrl}
+                controls
+                muted
+                playsInline
+                className="absolute top-0 left-0 w-full h-full object-cover"
+              >
+                Your browser does not support the video tag.
+              </video>
+            ) : (
+              // Embedded video (YouTube, Vimeo, Google Drive, OneDrive, etc.)
+              <iframe
+                src={videoEmbedUrl}
+                title={`Video for ${investor.investor_name}`}
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="absolute top-0 left-0 w-full h-full"
+              />
+            )}
           </div>
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-400">

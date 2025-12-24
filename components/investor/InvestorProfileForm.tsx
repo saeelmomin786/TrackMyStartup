@@ -881,11 +881,11 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
             </div>
           ) : (
             <Input
-              label="YouTube Video URL"
+              label="Video URL"
               value={profile.video_url || ''}
               onChange={(e) => handleChange('video_url', e.target.value)}
               disabled={!isEditing || isViewOnly}
-              placeholder="https://www.youtube.com/watch?v=..."
+              placeholder="YouTube, Vimeo, Google Drive, OneDrive, or direct video URL"
             />
           )}
         </div>

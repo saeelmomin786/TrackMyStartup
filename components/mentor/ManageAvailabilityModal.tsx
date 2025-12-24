@@ -37,6 +37,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const prevIsOpenRef = useRef(false);
+  const userManuallyOpenedFormRef = useRef(false);
 
   // Form state
   const [slotType, setSlotType] = useState<'recurring' | 'one-time'>('recurring');
@@ -65,12 +66,21 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
   useEffect(() => {
     if (isOpen && mentorId) {
       const isModalJustOpened = !prevIsOpenRef.current;
+      
+      // If modal is already open and user has manually shown the form, preserve it
+      if (!isModalJustOpened && userManuallyOpenedFormRef.current) {
+        // Only reload slots, don't reset form state
+        loadSlots();
+        return;
+      }
+      
       prevIsOpenRef.current = true;
       
       loadSlots();
       if (initialSlot) {
         setEditingSlot(initialSlot);
         setShowAddForm(true);
+        userManuallyOpenedFormRef.current = true;
         // Populate form with initial slot data
         setSlotType(initialSlot.is_recurring ? 'recurring' : 'one-time');
         setDayOfWeek(initialSlot.day_of_week ?? 1);
@@ -84,10 +94,11 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
         // Only reset form when modal first opens, not on every render
         setEditingSlot(null);
         setShowAddForm(false);
+        userManuallyOpenedFormRef.current = false;
       }
-      // If modal is already open and user has manually shown the form, don't reset it
     } else if (!isOpen) {
       prevIsOpenRef.current = false;
+      userManuallyOpenedFormRef.current = false;
     }
   }, [isOpen, mentorId, initialSlot]);
   
@@ -96,6 +107,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
     if (isOpen && initialSlot) {
       setEditingSlot(initialSlot);
       setShowAddForm(true);
+      userManuallyOpenedFormRef.current = true;
       setSlotType(initialSlot.is_recurring ? 'recurring' : 'one-time');
       setDayOfWeek(initialSlot.day_of_week ?? 1);
       setSpecificDate(initialSlot.specific_date || '');
@@ -139,6 +151,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
     setTimezone('UTC');
     setEditingSlot(null);
     setShowAddForm(false);
+    userManuallyOpenedFormRef.current = false;
     setError(null);
     setSuccess(null);
   };
@@ -225,6 +238,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
     setValidUntil(slot.valid_until || '');
     setTimezone(slot.timezone || 'UTC');
     setShowAddForm(true);
+    userManuallyOpenedFormRef.current = true;
     setError(null);
     setSuccess(null);
   };
@@ -441,6 +455,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
                 onClick={() => {
                   resetForm();
                   setShowAddForm(true);
+                  userManuallyOpenedFormRef.current = true;
                 }}
                 size="sm"
               >

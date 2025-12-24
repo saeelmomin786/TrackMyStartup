@@ -629,8 +629,18 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       if (pitchDeckFile) {
         try {
           pitchDeckUrl = await capTableService.uploadPitchDeck(pitchDeckFile, startup.id);
+          messageService.success(
+            'Document Uploaded',
+            'Pitch deck has been uploaded successfully.',
+            3000
+          );
         } catch (e) {
           console.warn('Pitch deck upload failed (non‑blocking):', e);
+          messageService.error(
+            'Upload Failed',
+            'Failed to upload pitch deck. Please try again.',
+            5000
+          );
         }
       }
 
@@ -639,16 +649,36 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         try {
           // This will replace existing logo file in storage
           logoUrl = await capTableService.uploadLogo(logoFile, startup.id);
+          messageService.success(
+            'Document Uploaded',
+            'Company logo has been uploaded successfully.',
+            3000
+          );
         } catch (e) {
           console.warn('Logo upload failed (non‑blocking):', e);
+          messageService.error(
+            'Upload Failed',
+            'Failed to upload company logo. Please try again.',
+            5000
+          );
         }
       }
 
       if (businessPlanFile) {
         try {
           businessPlanUrl = await capTableService.uploadBusinessPlan(businessPlanFile, startup.id);
+          messageService.success(
+            'Document Uploaded',
+            'Business plan has been uploaded successfully.',
+            3000
+          );
         } catch (e) {
           console.warn('Business plan upload failed (non‑blocking):', e);
+          messageService.error(
+            'Upload Failed',
+            'Failed to upload business plan. Please try again.',
+            5000
+          );
         }
       }
 

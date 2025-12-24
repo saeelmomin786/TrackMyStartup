@@ -74,3 +74,7 @@ SELECT '✅ Function safe_delete_startup_user() migrated to use user_profiles (N
 
 
 
+
+
+
+

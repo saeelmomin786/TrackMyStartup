@@ -82,3 +82,7 @@ SELECT '✅ Function generate_investor_code() migrated to use user_profiles (NO 
 
 
 
+
+
+
+

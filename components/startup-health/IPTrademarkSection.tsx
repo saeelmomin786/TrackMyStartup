@@ -10,6 +10,7 @@ import {
     UserRole
 } from '../../types';
 import { ipTrademarkService } from '../../lib/ipTrademarkService';
+import { messageService } from '../../lib/messageService';
 import { 
     Plus, 
     Edit, 
@@ -140,6 +141,11 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
                     currentUser?.email || 'Unknown',
                     cloudDriveUrl
                 );
+                messageService.success(
+                    'Document Saved',
+                    `IP/Trademark document has been saved successfully.`,
+                    3000
+                );
             } else if (selectedFile) {
                 // Upload file
                 await ipTrademarkService.uploadIPTrademarkDocument(
@@ -148,8 +154,16 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
                     documentType,
                     currentUser?.email || 'Unknown'
                 );
+                messageService.success(
+                    'Document Uploaded',
+                    `IP/Trademark document "${selectedFile.name}" has been uploaded successfully.`,
+                    3000
+                );
             } else {
-                alert('Please provide either a cloud drive URL or upload a file');
+                messageService.warning(
+                    'Missing Document',
+                    'Please provide either a cloud drive URL or upload a file'
+                );
                 return;
             }
             
@@ -160,6 +174,10 @@ const IPTrademarkSection: React.FC<IPTrademarkSectionProps> = ({
             loadRecords();
         } catch (error) {
             console.error('Error uploading document:', error);
+            messageService.error(
+                'Upload Failed',
+                error instanceof Error ? error.message : 'Failed to upload document. Please try again.'
+            );
         } finally {
             setUploading(false);
         }

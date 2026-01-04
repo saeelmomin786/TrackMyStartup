@@ -36,12 +36,30 @@ const MentorCardWithDetails: React.FC<{
   videoEmbedUrl: string | null;
   onConnect: () => void;
 }> = ({ mentor, videoEmbedUrl, onConnect }) => {
-  const [metrics, setMetrics] = useState({
-    startupsMentoring: 0,
-    startupsMentoredPreviously: 0,
-    verifiedStartupsMentored: 0,
+  const [metrics, setMetrics] = useState(() => {
+    // Initialize with mentor prop values if available, otherwise 0
+    const initialMetrics = {
+      startupsMentoring: mentor.startupsMentoring !== undefined ? mentor.startupsMentoring : 0,
+      startupsMentoredPreviously: mentor.startupsMentoredPreviously !== undefined ? mentor.startupsMentoredPreviously : 0,
+      verifiedStartupsMentored: mentor.verifiedStartupsMentored !== undefined ? mentor.verifiedStartupsMentored : 0,
+    };
+    console.log('📊 MentorCardWithDetails: Initial metrics state:', {
+      mentorName: mentor.mentor_name,
+      mentorUserId: mentor.user_id,
+      initialMetrics,
+      mentorProps: {
+        startupsMentoring: mentor.startupsMentoring,
+        startupsMentoredPreviously: mentor.startupsMentoredPreviously,
+        verifiedStartupsMentored: mentor.verifiedStartupsMentored,
+      },
+      hasMetricsInProp: mentor.startupsMentoring !== undefined || 
+                        mentor.startupsMentoredPreviously !== undefined || 
+                        mentor.verifiedStartupsMentored !== undefined,
+    });
+    return initialMetrics;
   });
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+  const [metricsLoaded, setMetricsLoaded] = useState(false);
   const [professionalExperiences, setProfessionalExperiences] = useState<any[]>([]);
   const [showMetricsModal, setShowMetricsModal] = useState(false);
   const [showProfessionalExpModal, setShowProfessionalExpModal] = useState(false);
@@ -54,10 +72,96 @@ const MentorCardWithDetails: React.FC<{
   const [showStartupExp, setShowStartupExp] = useState(false);
   const [loadingStartupExp, setLoadingStartupExp] = useState(false);
 
-  // Load metrics
+  // Update metrics when mentor prop changes (if metrics are already loaded)
   useEffect(() => {
-    if (mentor.user_id) {
+    // Always update metrics from mentor prop if they exist (even if 0)
+    const hasMetricsInProp = mentor.startupsMentoring !== undefined || 
+                              mentor.startupsMentoredPreviously !== undefined || 
+                              mentor.verifiedStartupsMentored !== undefined;
+    
+    if (hasMetricsInProp) {
+      const newMetrics = {
+        startupsMentoring: mentor.startupsMentoring ?? 0,
+        startupsMentoredPreviously: mentor.startupsMentoredPreviously ?? 0,
+        verifiedStartupsMentored: mentor.verifiedStartupsMentored ?? 0,
+      };
+      
+      console.log('📊 MentorCardWithDetails: Updating metrics from mentor prop:', {
+        mentorName: mentor.mentor_name,
+        mentorUserId: mentor.user_id,
+        propValues: {
+          startupsMentoring: mentor.startupsMentoring,
+          startupsMentoredPreviously: mentor.startupsMentoredPreviously,
+          verifiedStartupsMentored: mentor.verifiedStartupsMentored,
+        },
+        newMetrics: {
+          startupsMentoring: newMetrics.startupsMentoring,
+          startupsMentoredPreviously: newMetrics.startupsMentoredPreviously,
+          verifiedStartupsMentored: newMetrics.verifiedStartupsMentored,
+        },
+        currentMetrics: {
+          startupsMentoring: metrics.startupsMentoring,
+          startupsMentoredPreviously: metrics.startupsMentoredPreviously,
+          verifiedStartupsMentored: metrics.verifiedStartupsMentored,
+        },
+        willUpdate: JSON.stringify(newMetrics) !== JSON.stringify(metrics),
+      });
+      
+      // Always update to ensure state is in sync with prop
+      setMetrics(prevMetrics => {
+        // Check if values actually changed
+        const valuesChanged = prevMetrics.startupsMentoring !== newMetrics.startupsMentoring ||
+                              prevMetrics.startupsMentoredPreviously !== newMetrics.startupsMentoredPreviously ||
+                              prevMetrics.verifiedStartupsMentored !== newMetrics.verifiedStartupsMentored;
+        
+        if (valuesChanged) {
+          console.log('📊 MentorCardWithDetails: State updated!', {
+            mentorName: mentor.mentor_name,
+            from: prevMetrics,
+            to: newMetrics,
+          });
+        } else {
+          console.log('📊 MentorCardWithDetails: Metrics unchanged, keeping current state', {
+            mentorName: mentor.mentor_name,
+            currentMetrics: {
+              startupsMentoring: prevMetrics.startupsMentoring,
+              startupsMentoredPreviously: prevMetrics.startupsMentoredPreviously,
+              verifiedStartupsMentored: prevMetrics.verifiedStartupsMentored,
+            },
+            newMetrics: {
+              startupsMentoring: newMetrics.startupsMentoring,
+              startupsMentoredPreviously: newMetrics.startupsMentoredPreviously,
+              verifiedStartupsMentored: newMetrics.verifiedStartupsMentored,
+            },
+            propValues: {
+              startupsMentoring: mentor.startupsMentoring,
+              startupsMentoredPreviously: mentor.startupsMentoredPreviously,
+              verifiedStartupsMentored: mentor.verifiedStartupsMentored,
+            },
+          });
+        }
+        
+        // Always return newMetrics to ensure state matches prop
+        return newMetrics;
+      });
+      setMetricsLoaded(true);
+    }
+  }, [mentor.startupsMentoring, mentor.startupsMentoredPreviously, mentor.verifiedStartupsMentored, mentor.user_id, mentor.mentor_name]);
+
+  // Load metrics if not provided (check for undefined, not just falsy values)
+  useEffect(() => {
+    if (!mentor.user_id) return;
+    
+    const hasMetricsInProp = mentor.startupsMentoring !== undefined || 
+                              mentor.startupsMentoredPreviously !== undefined || 
+                              mentor.verifiedStartupsMentored !== undefined;
+    
+    if (!hasMetricsInProp && !metricsLoaded) {
+      console.log('📊 MentorCardWithDetails: Metrics not provided, loading for:', mentor.mentor_name || mentor.user_id);
       loadMetrics();
+    } else if (hasMetricsInProp) {
+      console.log('📊 MentorCardWithDetails: Metrics already provided for:', mentor.mentor_name || mentor.user_id);
+      setMetricsLoaded(true);
     }
   }, [mentor.user_id]);
 
@@ -83,17 +187,20 @@ const MentorCardWithDetails: React.FC<{
   }, [showStartupExp, mentor.user_id]);
 
   const loadMetrics = async () => {
-    if (!mentor.user_id || loadingMetrics) return;
+    if (!mentor.user_id || loadingMetrics || metricsLoaded) return;
     setLoadingMetrics(true);
     try {
+      console.log('📊 MentorCardWithDetails: Loading metrics for:', mentor.mentor_name || mentor.user_id);
       const mentorMetrics = await mentorService.getMentorMetrics(mentor.user_id);
+      console.log('📊 MentorCardWithDetails: Loaded metrics:', mentorMetrics);
       setMetrics({
         startupsMentoring: mentorMetrics.startupsMentoring,
         startupsMentoredPreviously: mentorMetrics.startupsMentoredPreviously,
         verifiedStartupsMentored: mentorMetrics.verifiedStartupsMentored,
       });
+      setMetricsLoaded(true);
     } catch (error) {
-      console.error('Error loading mentor metrics:', error);
+      console.error('❌ MentorCardWithDetails: Error loading mentor metrics:', error);
     } finally {
       setLoadingMetrics(false);
     }
@@ -770,29 +877,57 @@ const MentorCardWithDetails: React.FC<{
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+                  {(() => {
+                    const activeValue = mentor.startupsMentoring !== undefined ? mentor.startupsMentoring : metrics.startupsMentoring;
+                    const previousValue = mentor.startupsMentoredPreviously !== undefined ? mentor.startupsMentoredPreviously : metrics.startupsMentoredPreviously;
+                    const totalValue = activeValue + previousValue;
+                    const verifiedValue = mentor.verifiedStartupsMentored !== undefined ? mentor.verifiedStartupsMentored : metrics.verifiedStartupsMentored;
+                    
+                    console.log(`📊 RENDERING metrics for ${mentor.mentor_name}:`, {
+                      propValues: {
+                        startupsMentoring: mentor.startupsMentoring,
+                        startupsMentoredPreviously: mentor.startupsMentoredPreviously,
+                        verifiedStartupsMentored: mentor.verifiedStartupsMentored,
+                      },
+                      stateValues: {
+                        startupsMentoring: metrics.startupsMentoring,
+                        startupsMentoredPreviously: metrics.startupsMentoredPreviously,
+                        verifiedStartupsMentored: metrics.verifiedStartupsMentored,
+                      },
+                      renderedValues: {
+                        active: activeValue,
+                        previous: previousValue,
+                        total: totalValue,
+                        verified: verifiedValue,
+                      },
+                    });
+                    
+                    return null;
+                  })()}
                   <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
                     <div className="text-3xl font-bold text-slate-800 mb-2">
-                      {metrics.startupsMentoring}
+                      {mentor.startupsMentoring !== undefined ? mentor.startupsMentoring : metrics.startupsMentoring}
                     </div>
                     <div className="text-sm text-slate-600 font-medium">Startup Mentoring</div>
                     <div className="text-xs text-slate-500 mt-1">(Active)</div>
                   </div>
                   <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
                     <div className="text-3xl font-bold text-slate-800 mb-2">
-                      {metrics.startupsMentoredPreviously}
+                      {mentor.startupsMentoredPreviously !== undefined ? mentor.startupsMentoredPreviously : metrics.startupsMentoredPreviously}
                     </div>
                     <div className="text-sm text-slate-600 font-medium">Previously Mentored</div>
                   </div>
                   <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
                     <div className="text-3xl font-bold text-slate-800 mb-2">
-                      {metrics.startupsMentoring + metrics.startupsMentoredPreviously}
+                      {(mentor.startupsMentoring !== undefined ? mentor.startupsMentoring : metrics.startupsMentoring) + 
+                       (mentor.startupsMentoredPreviously !== undefined ? mentor.startupsMentoredPreviously : metrics.startupsMentoredPreviously)}
                     </div>
                     <div className="text-sm text-slate-600 font-medium">Startups Mentored</div>
                     <div className="text-xs text-slate-500 mt-1">(Total)</div>
                   </div>
                   <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
                     <div className="text-3xl font-bold text-blue-600 mb-2">
-                      {metrics.verifiedStartupsMentored}
+                      {mentor.verifiedStartupsMentored !== undefined ? mentor.verifiedStartupsMentored : metrics.verifiedStartupsMentored}
                     </div>
                     <div className="text-sm text-slate-600 font-medium">Verified Mentored</div>
                     <div className="text-xs text-blue-600 mt-1">(TMS Users)</div>
@@ -911,7 +1046,6 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [showNotifications, setShowNotifications] = useState(false);
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
     const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>('explore');
-    const [showLaunchingSoonModal, setShowLaunchingSoonModal] = useState(false);
     
     // State for service exploration
     const [selectedServiceType, setSelectedServiceType] = useState<string | null>(null);
@@ -1182,20 +1316,64 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         }
     }, [selectedServiceType, activeTab, servicesSubTab]);
 
-    // Show Launching Soon modal when Services tab is opened
-    useEffect(() => {
-        if (activeTab === 'services') {
-            setShowLaunchingSoonModal(true);
-        }
-    }, [activeTab]);
 
     const loadMentors = async () => {
         setLoadingMentors(true);
         try {
             const mentorProfiles = await mentorService.getAllMentorProfiles();
-            setMentors(mentorProfiles);
+            console.log('📊 Loaded mentor profiles:', mentorProfiles.length);
+            
+            // Load metrics for each mentor
+            const mentorsWithMetrics = await Promise.all(
+                mentorProfiles.map(async (mentor: any) => {
+                    if (!mentor.user_id) {
+                        console.warn('⚠️ Mentor missing user_id:', mentor);
+                        return {
+                            ...mentor,
+                            startupsMentoring: 0,
+                            startupsMentoredPreviously: 0,
+                            verifiedStartupsMentored: 0,
+                        };
+                    }
+                    
+                    try {
+                        const metrics = await mentorService.getMentorMetrics(mentor.user_id);
+                        console.log(`✅ Loaded metrics for ${mentor.mentor_name || mentor.user_id}:`, metrics);
+                        return {
+                            ...mentor,
+                            startupsMentoring: metrics.startupsMentoring,
+                            startupsMentoredPreviously: metrics.startupsMentoredPreviously,
+                            verifiedStartupsMentored: metrics.verifiedStartupsMentored,
+                        };
+                    } catch (metricsError) {
+                        console.error('❌ Could not load metrics for mentor:', mentor.user_id, mentor.mentor_name, metricsError);
+                        return {
+                            ...mentor,
+                            startupsMentoring: 0,
+                            startupsMentoredPreviously: 0,
+                            verifiedStartupsMentored: 0,
+                        };
+                    }
+                })
+            );
+            
+            console.log('📊 Final mentors with metrics:', mentorsWithMetrics.length, 'mentors');
+            // Log first few mentors' metrics to verify
+            mentorsWithMetrics.slice(0, 3).forEach((mentor: any, index: number) => {
+              console.log(`📊 Mentor ${index + 1} metrics:`, {
+                name: mentor.mentor_name,
+                user_id: mentor.user_id,
+                startupsMentoring: mentor.startupsMentoring,
+                startupsMentoredPreviously: mentor.startupsMentoredPreviously,
+                verifiedStartupsMentored: mentor.verifiedStartupsMentored,
+                hasAllMetrics: mentor.startupsMentoring !== undefined && 
+                              mentor.startupsMentoredPreviously !== undefined && 
+                              mentor.verifiedStartupsMentored !== undefined,
+              });
+            });
+            setMentors(mentorsWithMetrics);
         } catch (error) {
-            console.error('Error loading mentors:', error);
+            console.error('❌ Error loading mentors:', error);
             setMentors([]);
         } finally {
             setLoadingMentors(false);
@@ -1459,9 +1637,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         <Button
                           size="sm"
                           variant={servicesSubTab === 'explore' ? 'primary' : 'outline'}
-                          onClick={() => setShowLaunchingSoonModal(true)}
-                          disabled
-                          className="opacity-50 cursor-not-allowed"
+                          onClick={() => setServicesSubTab('explore')}
                         >
                           <Search className="h-4 w-4 mr-2" />
                           Explore
@@ -1469,9 +1645,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         <Button
                           size="sm"
                           variant={servicesSubTab === 'requested' ? 'primary' : 'outline'}
-                          onClick={() => setShowLaunchingSoonModal(true)}
-                          disabled
-                          className="opacity-50 cursor-not-allowed"
+                          onClick={() => setServicesSubTab('requested')}
                         >
                           <Bell className="h-4 w-4 mr-2" />
                           Requested
@@ -1479,9 +1653,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         <Button
                           size="sm"
                           variant={servicesSubTab === 'my-services' ? 'primary' : 'outline'}
-                          onClick={() => setShowLaunchingSoonModal(true)}
-                          disabled
-                          className="opacity-50 cursor-not-allowed"
+                          onClick={() => setServicesSubTab('my-services')}
                         >
                           <Users className="h-4 w-4 mr-2" />
                           My Services
@@ -1535,13 +1707,12 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                         <Button
                                           size="sm"
                                           variant="outline"
-                                          className="w-full opacity-50 cursor-not-allowed"
+                                          className="w-full"
                                           onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            setShowLaunchingSoonModal(true);
+                                            setSelectedServiceType(profileType.role);
                                           }}
-                                          disabled
                                         >
                                           <Eye className="h-3 w-3 mr-2" />
                                           Explore
@@ -1560,10 +1731,8 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    setShowLaunchingSoonModal(true);
+                                    setSelectedServiceType(null);
                                   }}
-                                  disabled
-                                  className="opacity-50 cursor-not-allowed"
                                 >
                                   <ArrowLeftIcon className="h-4 w-4 mr-2" />
                                   Back
@@ -1641,12 +1810,15 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                           : null;
 
                                         // Create a component for each mentor card with its own state
+                                        // Use a key that includes metrics to force re-render when metrics change
+                                        const mentorKey = `${mentor.id || mentor.user_id}-${mentor.startupsMentoring ?? 0}-${mentor.startupsMentoredPreviously ?? 0}-${mentor.verifiedStartupsMentored ?? 0}`;
                                         return <MentorCardWithDetails 
-                                          key={mentor.id || mentor.user_id} 
+                                          key={mentorKey} 
                                           mentor={mentor} 
                                           videoEmbedUrl={videoEmbedUrl}
                                           onConnect={() => {
-                                            setShowLaunchingSoonModal(true);
+                                            setSelectedMentor(mentor);
+                                            setConnectModalOpen(true);
                                           }}
                                         />;
                                       })}
@@ -1710,11 +1882,11 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                           <Button
                                             size="sm"
                                             variant="outline"
-                                            className="text-blue-600 border-blue-300 hover:bg-blue-50 opacity-50 cursor-not-allowed"
+                                            className="text-blue-600 border-blue-300 hover:bg-blue-50"
                                             onClick={() => {
-                                              setShowLaunchingSoonModal(true);
+                                              setSelectedMentorForView(request);
+                                              setViewScheduleSectionOpen(true);
                                             }}
-                                            disabled
                                           >
                                             <Eye className="mr-1 h-3 w-3" /> View
                                           </Button>
@@ -2002,33 +2174,6 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         />
       )}
 
-      {/* Launching Soon Modal */}
-      {showLaunchingSoonModal && (
-        <Modal
-          isOpen={showLaunchingSoonModal}
-          onClose={() => setShowLaunchingSoonModal(false)}
-          title="Launching Soon"
-          size="medium"
-        >
-          <div className="text-center py-6">
-            <div className="mb-4">
-              <Building2 className="h-16 w-16 text-blue-600 mx-auto mb-4" />
-            </div>
-            <h3 className="text-xl font-semibold text-slate-900 mb-2">
-              Services Feature Coming Soon
-            </h3>
-            <p className="text-slate-600 mb-6">
-              We're working hard to bring you an amazing services experience. This feature will be available soon!
-            </p>
-            <Button
-              onClick={() => setShowLaunchingSoonModal(false)}
-              variant="primary"
-            >
-              Got it
-            </Button>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 };

@@ -19,6 +19,8 @@ export default {
           800: '#1e40af',
           900: '#1e3a8a',
         },
+        'brand-primary': '#2563eb',
+        'brand-secondary': '#1d4ed8',
       },
     },
   },

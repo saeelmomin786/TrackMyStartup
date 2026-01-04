@@ -112,9 +112,12 @@ const App: React.FC = () => {
     }
   }, []); // Run once on mount
 
-  // Check if we're on a standalone page (footer links)
-  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products', '/diagnostic'];
+  // Check if we're on a standalone page (footer links and service pages)
+  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products', '/diagnostic', '/unified-mentor-network', '/tms-virtual-conference', '/grant-opportunities', '/blogs', '/events'];
   const currentPath = window.location.pathname;
+  const isServicePage = currentPath.startsWith('/services/');
+  const isBlogDetailPage = currentPath.startsWith('/blogs/') && currentPath !== '/blogs';
+  const isEventDetailPage = currentPath.startsWith('/events/') && currentPath !== '/events';
   
   // Check if we're on a public program view page
   const isPublicProgramView = getQueryParam('view') === 'program' && getQueryParam('opportunityId');
@@ -247,7 +250,7 @@ const App: React.FC = () => {
   
   
   
-  if (standalonePages.includes(currentPath)) {
+  if (standalonePages.includes(currentPath) || isServicePage || isBlogDetailPage || isEventDetailPage) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col">
         <main className="flex-1">

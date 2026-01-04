@@ -87,13 +87,9 @@ class MentorService {
         if (profile?.auth_user_id) {
           // Found profile ID, convert to auth_user_id
           actualMentorId = profile.auth_user_id;
-        } else if (authUser?.id && mentorId !== authUser.id) {
-          // If mentorId doesn't match auth.uid() and isn't a profile ID,
-          // and we're getting metrics for current user, use auth.uid()
-          // (This handles the case where currentUser.id is a profile ID)
-          actualMentorId = authUser.id;
         }
-        // Otherwise, use mentorId as-is (might be auth_user_id for another user)
+        // Otherwise, use mentorId as-is (it's the auth_user_id for the mentor we want metrics for)
+        // DO NOT override with authUser.id - we want metrics for the mentor, not the current user!
       }
       
       // Get active assignments (gracefully handle if table doesn't exist)

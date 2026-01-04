@@ -104,11 +104,11 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
   const [foundedStartups, setFoundedStartups] = useState<FoundedStartup[]>([]);
   const [showStartupExp, setShowStartupExp] = useState(false);
   const [loadingStartupExp, setLoadingStartupExp] = useState(false);
-  const [metrics, setMetrics] = useState({
+  const [metrics, setMetrics] = useState(() => ({
     startupsMentoring: mentor.startupsMentoring ?? 0,
     startupsMentoredPreviously: mentor.startupsMentoredPreviously ?? 0,
     verifiedStartupsMentored: mentor.verifiedStartupsMentored ?? 0,
-  });
+  }));
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
   const handleShare = async () => {
@@ -162,6 +162,30 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
       }
     }
   };
+
+  // Update metrics when mentor prop changes (especially for public views where metrics are loaded asynchronously)
+  useEffect(() => {
+    // Always update metrics from mentor prop if they exist (even if 0)
+    if (mentor.startupsMentoring !== undefined || 
+        mentor.startupsMentoredPreviously !== undefined || 
+        mentor.verifiedStartupsMentored !== undefined) {
+      setMetrics(prevMetrics => {
+        const newMetrics = {
+          startupsMentoring: mentor.startupsMentoring !== undefined ? mentor.startupsMentoring : prevMetrics.startupsMentoring,
+          startupsMentoredPreviously: mentor.startupsMentoredPreviously !== undefined ? mentor.startupsMentoredPreviously : prevMetrics.startupsMentoredPreviously,
+          verifiedStartupsMentored: mentor.verifiedStartupsMentored !== undefined ? mentor.verifiedStartupsMentored : prevMetrics.verifiedStartupsMentored,
+        };
+        
+        // Only update if values actually changed
+        if (newMetrics.startupsMentoring !== prevMetrics.startupsMentoring ||
+            newMetrics.startupsMentoredPreviously !== prevMetrics.startupsMentoredPreviously ||
+            newMetrics.verifiedStartupsMentored !== prevMetrics.verifiedStartupsMentored) {
+          return newMetrics;
+        }
+        return prevMetrics;
+      });
+    }
+  }, [mentor.startupsMentoring, mentor.startupsMentoredPreviously, mentor.verifiedStartupsMentored]);
 
   // Fetch metrics if not provided (only for authenticated users viewing their own profile, not on public pages)
   useEffect(() => {

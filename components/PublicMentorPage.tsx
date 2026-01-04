@@ -41,6 +41,10 @@ interface MentorProfile {
   logo_url?: string;
   video_url?: string;
   media_type?: 'logo' | 'video';
+  // Metrics
+  startupsMentoring?: number;
+  startupsMentoredPreviously?: number;
+  verifiedStartupsMentored?: number;
 }
 
 const PublicMentorPage: React.FC = () => {
@@ -195,6 +199,83 @@ const PublicMentorPage: React.FC = () => {
               name: userData.name,
               email: userData.email,
             };
+          }
+
+          // Load metrics for public display
+          try {
+            // Query active assignments
+            const { data: activeAssignments, error: activeError } = await supabase
+              .from('mentor_startup_assignments')
+              .select(`
+                id,
+                startup_id,
+                status,
+                startups (
+                  id,
+                  user_id
+                )
+              `)
+              .eq('mentor_id', mentorData.user_id)
+              .eq('status', 'active');
+
+            // Query completed assignments
+            const { data: completedAssignments, error: completedError } = await supabase
+              .from('mentor_startup_assignments')
+              .select(`
+                id,
+                startup_id,
+                status,
+                startups (
+                  id,
+                  user_id
+                )
+              `)
+              .eq('mentor_id', mentorData.user_id)
+              .eq('status', 'completed');
+
+            if (activeError) {
+              console.error('Error loading active assignments:', activeError);
+            }
+            if (completedError) {
+              console.error('Error loading completed assignments:', completedError);
+            }
+
+            if (!activeError && !completedError) {
+              // Calculate metrics
+              const activeCount = activeAssignments?.length || 0;
+              const completedCount = completedAssignments?.length || 0;
+              
+              // Calculate verified startups (only those with user_id - registered users on TMS)
+              const verifiedActive = (activeAssignments || []).filter((a: any) => 
+                a.startup_id && a.startups && a.startups.user_id
+              ).length;
+              const verifiedCompleted = (completedAssignments || []).filter((a: any) => 
+                a.startup_id && a.startups && a.startups.user_id
+              ).length;
+              const verifiedCount = verifiedActive + verifiedCompleted;
+
+              mentorData.startupsMentoring = activeCount;
+              mentorData.startupsMentoredPreviously = completedCount;
+              mentorData.verifiedStartupsMentored = verifiedCount;
+              
+              console.log('✅ Loaded mentor metrics:', {
+                startupsMentoring: activeCount,
+                startupsMentoredPreviously: completedCount,
+                verifiedStartupsMentored: verifiedCount
+              });
+            } else {
+              // Set defaults if query fails (likely due to RLS)
+              console.warn('⚠️ Could not load metrics - RLS may be blocking. Setting defaults to 0.');
+              mentorData.startupsMentoring = 0;
+              mentorData.startupsMentoredPreviously = 0;
+              mentorData.verifiedStartupsMentored = 0;
+            }
+          } catch (metricsError) {
+            console.error('❌ Error loading mentor metrics for public view:', metricsError);
+            // Set defaults if metrics loading fails
+            mentorData.startupsMentoring = 0;
+            mentorData.startupsMentoredPreviously = 0;
+            mentorData.verifiedStartupsMentored = 0;
           }
         }
 

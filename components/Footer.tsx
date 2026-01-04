@@ -64,6 +64,15 @@ const Footer: React.FC = () => {
                 </a>
               </div>
               <div className="flex items-start space-x-3">
+                <a href="mailto:sarvesh.gadkari@trackmystartup.com" className="flex items-start space-x-3 hover:opacity-80 transition-opacity">
+                  <Mail className="h-4 w-4 text-brand-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-slate-300 text-sm">Technical Support</p>
+                    <p className="text-white text-sm">sarvesh.gadkari@trackmystartup.com</p>
+                  </div>
+                </a>
+              </div>
+              <div className="flex items-start space-x-3">
                 <a href="tel:+919146169956" className="flex items-start space-x-3 hover:opacity-80 transition-opacity">
                   <Phone className="h-4 w-4 text-brand-primary mt-0.5 flex-shrink-0" />
                   <div>
@@ -86,12 +95,113 @@ const Footer: React.FC = () => {
           <div className="space-y-4">
             <h4 className="text-md font-semibold text-white">Quick Links</h4>
             <ul className="space-y-2">
+              {/* Service Pages */}
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/services/startups')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  For Startups
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/services/incubation-centers')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  For Incubation Centers
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/services/investors')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  For Investors
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/services/investment-advisors')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  For Investment Advisors
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/services/ca')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  For CA
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/services/cs')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  For CS
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/services/mentors')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  For Mentor
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              {/* Other Pages */}
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/unified-mentor-network')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  Unified Mentor Network
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/grant-opportunities')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  Grant Opportunities
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/events')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  Events
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => handleLinkClick('/blogs')}
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  Blogs
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </li>
               <li>
                 <button
                   onClick={() => handleLinkClick('/about')}
                   className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
                 >
-                  About Us - E&P Community Farms
+                  About Us
                   <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </button>
               </li>
@@ -100,38 +210,17 @@ const Footer: React.FC = () => {
                   onClick={() => handleLinkClick('/contact')}
                   className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
                 >
-                  Contact - E&P Community Farms
-                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => handleLinkClick('/products')}
-                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
-                >
-                  Product Price & Registration
+                  Contact Us
                   <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </button>
               </li>
             </ul>
           </div>
 
-          {/* Specialized Contacts */}
+          {/* Legal & Policies */}
           <div className="space-y-4">
-            <h4 className="text-md font-semibold text-white">Specialized Support</h4>
+            <h4 className="text-md font-semibold text-white">Legal & Policies</h4>
             <ul className="space-y-2">
-              <li>
-                <a href="mailto:incubation_center@trackmystartup.com" className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group">
-                  Incubation Centers
-                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </a>
-              </li>
-              <li>
-                <a href="mailto:investment_advisor@trackmystartup.com" className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group">
-                  Investment Advisors
-                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </a>
-              </li>
               <li>
                 <button
                   onClick={() => handleLinkClick('/privacy-policy')}

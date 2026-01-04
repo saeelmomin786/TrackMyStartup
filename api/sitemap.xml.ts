@@ -5,10 +5,11 @@ import { createClient } from '@supabase/supabase-js';
  * Dynamic sitemap generator for SEO
  * This endpoint generates a sitemap.xml with all public profile URLs
  * 
- * Access at: https://www.trackmystartup.com/api/sitemap.xml
+ * Access at: https://trackmystartup.com/api/sitemap.xml
  */
 
-const SITE_URL = 'https://www.trackmystartup.com';
+// Get site URL from environment variable or use default
+const SITE_URL = process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://trackmystartup.com';
 
 // Helper function to create slug
 function createSlug(text: string): string {
@@ -39,6 +40,138 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
+  </url>
+  
+  <!-- Static Pages -->
+  <url>
+    <loc>${SITE_URL}/about</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/contact</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/products</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/diagnostic</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/unified-mentor-network</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/tms-virtual-conference</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/grant-opportunities</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/blogs</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/events</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/events/tms-virtual-conference</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  
+  <!-- Service Pages -->
+  <url>
+    <loc>${SITE_URL}/services/startups</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/services/incubation-centers</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/services/investors</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/services/investment-advisors</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/services/ca</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/services/cs</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/services/mentors</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  
+  <!-- Legal & Policy Pages -->
+  <url>
+    <loc>${SITE_URL}/privacy-policy</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/cancellation-refunds</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/shipping</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/terms-conditions</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
   </url>`;
 
     // Initialize Supabase client
@@ -178,20 +311,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[SITEMAP ERROR] Exception fetching startups:', err);
     }
 
-    // Fetch all mentors from public table (secure and fast)
+    // Fetch all mentors from Unified Mentor Network (same source as /unified-mentor-network page)
+    // These are all mentors displayed on the Unified Mentor Network page
+    // Includes LinkedIn, website, and other fields for SEO purposes
     try {
-      // Try new public table first
+      // Try new public table first (same table used by UnifiedMentorNetworkPage)
+      // Fetch all relevant fields including website and linkedin_link for SEO
       let { data: mentors, error: mentorError } = await supabase
         .from('mentors_public_table')
-        .select('user_id, mentor_name, updated_at')
+        .select('user_id, mentor_name, website, linkedin_link, updated_at')
+        .order('mentor_name', { ascending: true })
         .limit(1000);
       
-      // Fallback to main table if public table doesn't exist yet
+      // Fallback to main table if public table doesn't exist yet (same fallback as UnifiedMentorNetworkPage)
       if (mentorError && mentorError.message.includes('does not exist')) {
         console.warn('[SITEMAP] mentors_public_table not found, trying mentor_profiles');
         const fallback = await supabase
           .from('mentor_profiles')
-          .select('user_id, mentor_name, updated_at')
+          .select('user_id, mentor_name, website, linkedin_link, updated_at')
+          .order('mentor_name', { ascending: true })
           .limit(1000);
         mentors = fallback.data;
         mentorError = fallback.error;
@@ -200,7 +338,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (mentorError) {
         console.error('[SITEMAP ERROR] Failed to fetch mentors:', mentorError);
       } else if (mentors && mentors.length > 0) {
-        console.log(`[SITEMAP] Found ${mentors.length} mentors`);
+        console.log(`[SITEMAP] Found ${mentors.length} mentors from Unified Mentor Network`);
+        let mentorsWithLinks = 0;
         for (const mentor of mentors) {
           if (mentor.mentor_name) {
             const slug = createSlug(mentor.mentor_name);
@@ -208,6 +347,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               ? new Date(mentor.updated_at).toISOString().split('T')[0]
               : new Date().toISOString().split('T')[0];
             
+            // Track mentors with external links for SEO (website and LinkedIn are on profile pages, not in sitemap)
+            if ((mentor as any).website || (mentor as any).linkedin_link) {
+              mentorsWithLinks++;
+            }
+            
+            // Each mentor profile from Unified Mentor Network is accessible at /mentor/{slug}
+            // The profile page includes LinkedIn, website, and other links for SEO
+            // External links (LinkedIn, website) are displayed on the profile page itself,
+            // which helps with SEO through structured data and proper linking
             sitemap += `
   <url>
     <loc>${SITE_URL}/mentor/${slug}</loc>
@@ -215,10 +363,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>`;
+          } else {
+            console.warn(`[SITEMAP] Skipping mentor ${mentor.user_id} - missing mentor_name`);
           }
         }
+        if (mentorsWithLinks > 0) {
+          console.log(`[SITEMAP] ${mentorsWithLinks} mentors have LinkedIn/website links (displayed on profile pages for SEO)`);
+        }
       } else {
-        console.warn('[SITEMAP] No mentors found');
+        console.warn('[SITEMAP] No mentors found from Unified Mentor Network');
       }
     } catch (err) {
       console.error('[SITEMAP ERROR] Exception fetching mentors:', err);
@@ -316,6 +469,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (err) {
       console.error('[SITEMAP ERROR] Exception fetching advisors:', err);
+    }
+
+    // Fetch all blog posts from blogs table
+    try {
+      let { data: blogs, error: blogError } = await supabase
+        .from('blogs')
+        .select('slug, publish_date, updated_at')
+        .order('publish_date', { ascending: false })
+        .limit(1000);
+      
+      if (blogError) {
+        console.error('[SITEMAP ERROR] Failed to fetch blogs:', blogError);
+      } else if (blogs && blogs.length > 0) {
+        console.log(`[SITEMAP] Found ${blogs.length} blog posts`);
+        for (const blog of blogs) {
+          if (blog.slug) {
+            const lastmod = (blog as any).updated_at 
+              ? new Date((blog as any).updated_at).toISOString().split('T')[0]
+              : (blog.publish_date 
+                  ? new Date(blog.publish_date).toISOString().split('T')[0]
+                  : new Date().toISOString().split('T')[0]);
+            
+            sitemap += `
+  <url>
+    <loc>${SITE_URL}/blogs/${blog.slug}</loc>
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>`;
+          }
+        }
+      } else {
+        console.warn('[SITEMAP] No blog posts found');
+      }
+    } catch (err) {
+      console.error('[SITEMAP ERROR] Exception fetching blogs:', err);
     }
 
     // Close sitemap

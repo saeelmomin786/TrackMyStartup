@@ -14,5 +14,24 @@
          }
       ]
     }
-  ]
+  ],
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|sogou|exabot|facebot|ia_archiver|twitterbot|linkedinbot|applebot|facebookexternalhit|rogerbot|semrushbot|ahrefsbot).*"
+        }
+      ],
+      "destination": "/api/prerender?path=/$1"
+    }
+  ],
+  "functions": {
+    "api/prerender.ts": {
+      "runtime": "@vercel/node@3",
+      "maxDuration": 30
+    }
+  }
 }

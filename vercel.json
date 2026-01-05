@@ -25,7 +25,7 @@
           "value": "(?i).*(googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|sogou|exabot|facebot|ia_archiver|twitterbot|linkedinbot|applebot|facebookexternalhit|rogerbot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|megaindex|blexbot|crawler|spider|bot).*"
         }
       ],
-      "destination": "/api/$1"
+      "destination": "/api/prerender-direct?path=$1"
     }
   ]
 }

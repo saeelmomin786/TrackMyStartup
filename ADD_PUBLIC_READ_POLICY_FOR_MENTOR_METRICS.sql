@@ -18,3 +18,5 @@ USING (true);
 -- Grant SELECT permission to anonymous users
 GRANT SELECT ON public.mentor_startup_assignments TO anon;
 
+
+

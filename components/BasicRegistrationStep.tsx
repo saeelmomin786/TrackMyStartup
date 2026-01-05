@@ -5,6 +5,7 @@ import Input from './ui/Input';
 import { UserRole } from '../types';
 import { Mail, CheckCircle, AlertCircle, XCircle, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../lib/auth';
+import { getInvestmentAdvisorCode } from '../lib/investorAdvisorUtils';
 
 interface BasicRegistrationStepProps {
   onEmailVerified: (userData: {
@@ -63,6 +64,24 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
       });
     }
   }, [isAddingProfile]);
+
+  // Auto-populate investment advisor code from referrer domain on mount
+  useEffect(() => {
+    const fetchAdvisorCode = async () => {
+      const advisorCode = await getInvestmentAdvisorCode();
+      if (advisorCode) {
+        console.log('✅ Auto-populating Investment Advisor Code:', advisorCode);
+        setFormData(prev => {
+          // Only set if not already set
+          if (!prev.investmentAdvisorCode) {
+            return { ...prev, investmentAdvisorCode: advisorCode };
+          }
+          return prev;
+        });
+      }
+    };
+    fetchAdvisorCode();
+  }, []); // Run once on mount
   
   // New state for email validation
   const [emailValidation, setEmailValidation] = useState<{

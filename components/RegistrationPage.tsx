@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Founder, UserRole } from '../types';
 import { authService, AuthUser } from '../lib/auth';
 import { storageService } from '../lib/storage';
+import { getInvestmentAdvisorCode } from '../lib/investorAdvisorUtils';
 import Card from './ui/Card';
 import Input from './ui/Input';
 import Select from './ui/Select';
@@ -49,6 +50,18 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
 
     // State for founders, only relevant for 'Startup' role
     const [founders, setFounders] = useState<FounderStateItem[]>([{ id: Date.now(), name: '', email: '' }]);
+
+    // Auto-populate investment advisor code from referrer domain on mount
+    useEffect(() => {
+        const fetchAdvisorCode = async () => {
+            const advisorCode = await getInvestmentAdvisorCode();
+            if (advisorCode && !investmentAdvisorCode) {
+                console.log('✅ Auto-populating Investment Advisor Code:', advisorCode);
+                setInvestmentAdvisorCode(advisorCode);
+            }
+        };
+        fetchAdvisorCode();
+    }, []); // Run once on mount
 
     const handleFounderChange = (id: number, field: keyof Omit<FounderStateItem, 'id'>, value: string) => {
         setFounders(founders.map(f => f.id === id ? { ...f, [field]: value } : f));
@@ -135,6 +148,7 @@ const RegistrationPage: React.FC<RegistrationPageProps> = ({ onRegister, onNavig
                 role,
                 startupName: role === 'Startup' ? startupName : undefined,
                 firmName: role === 'Investment Advisor' ? firmName : undefined,
+                investmentAdvisorCode: investmentAdvisorCode || undefined,
                 founders: role === 'Startup' ? founders.map(({ id, ...rest }) => rest) : [],
                 fileUrls: {
                     governmentId: governmentIdUrl,

@@ -26,10 +26,12 @@ interface EmployeesTabProps {
 // Remove local formatCurrency function - using utility function instead
 
 // Dynamic data generation based on startup - now using real data
-const generateMonthlyExpenseData = async (startup: Startup, year: number) => {
+const generateMonthlyExpenseData = async (startup: Startup, year: number | 'all') => {
   try {
-    console.log('🔍 Loading monthly data for startup:', startup.id);
-    const monthlyData = await employeesService.getMonthlySalaryData(startup.id, year);
+    console.log('🔍 Loading monthly data for startup:', startup.id, 'year:', year === 'all' ? 'all (Till Date)' : year);
+    // Pass null to getMonthlySalaryData when 'all' is selected to get all-time data
+    const yearParam = year === 'all' ? null : year;
+    const monthlyData = await employeesService.getMonthlySalaryData(startup.id, yearParam);
     console.log('✅ Monthly data loaded:', monthlyData);
     
     if (monthlyData.length === 0) {
@@ -37,14 +39,13 @@ const generateMonthlyExpenseData = async (startup: Startup, year: number) => {
       return [];
     }
     
-    // Convert ESOP from cumulative to monthly so graphs reflect allocation type per month
-    const adjusted = monthlyData.map((item: any, index: number) => {
-      const prevTotal = index > 0 ? (monthlyData[index - 1]?.total_esop || 0) : 0;
-      const monthlyEsop = Math.max(0, (item.total_esop || 0) - prevTotal);
+    // Keep ESOP as cumulative (from ledger), salary remains as monthly total
+    // The service already returns cumulative ESOP (total_esop), so we use it directly
+    const adjusted = monthlyData.map((item: any) => {
       return {
         name: item.month_name,
-        salary: item.total_salary,
-        esop: monthlyEsop
+        salary: item.total_salary, // Monthly salary total for that month
+        esop: item.total_esop // Cumulative ESOP (already cumulative from service)
       };
     });
 
@@ -99,7 +100,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
     const [formError, setFormError] = useState<string | null>(null);
     const [monthlyExpenseData, setMonthlyExpenseData] = useState<any[]>([]);
     const [availableYears, setAvailableYears] = useState<number[]>([]);
-    const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+    const [selectedYear, setSelectedYear] = useState<number | 'all'>('all'); // Default to 'all' (Till Date)
     const [startMonth, setStartMonth] = useState<number>(1); // 1-12
     const [endMonth, setEndMonth] = useState<number>(12); // 1-12
     const [departmentData, setDepartmentData] = useState<any[]>([]);
@@ -1039,7 +1040,11 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                     <div className="flex flex-wrap gap-3 items-end">
                         <div>
                             <label className="block text-xs text-slate-500 mb-1">Year</label>
-                            <select className="border border-slate-300 rounded px-2 py-1" value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
+                            <select className="border border-slate-300 rounded px-2 py-1" value={selectedYear} onChange={(e) => {
+                                const value = e.target.value;
+                                setSelectedYear(value === 'all' ? 'all' : Number(value));
+                            }}>
+                                <option value="all">Till Date</option>
                                 {(availableYears.length > 0 ? availableYears : [new Date().getFullYear()]).map(y => (
                                     <option key={y} value={y}>{y}</option>
                                 ))}
@@ -1065,9 +1070,19 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 </div>
                 <Card>
                     <h3 className="text-lg font-semibold mb-4 text-slate-700">Monthly Salary Expense</h3>
+                    <p className="text-xs text-slate-500 mb-2">
+                        {selectedYear === 'all' 
+                          ? 'Shows salary expenditure till date from Employee Ledger' 
+                          : 'Shows potential salary expenditure throughout the year based on annual salary and joining dates'}
+                    </p>
                     <div style={{ width: '100%', height: 250 }}>
                         <ResponsiveContainer>
                             <LineChart data={monthlyExpenseData.filter(d => {
+                                // For "Till Date", show all data (month filter doesn't apply across years)
+                                // For specific year, apply month filter
+                                if (selectedYear === 'all') {
+                                  return true; // Show all months when "Till Date" is selected
+                                }
                                 const monthIndex = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(d.name) + 1;
                                 return monthIndex >= startMonth && monthIndex <= endMonth;
                             })}>
@@ -1083,9 +1098,19 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                 </Card>
                 <Card>
                     <h3 className="text-lg font-semibold mb-4 text-slate-700">Cumulative ESOP Expenses</h3>
+                    <p className="text-xs text-slate-500 mb-2">
+                        {selectedYear === 'all' 
+                          ? 'Shows cumulative ESOP allocation till date from Employee Ledger' 
+                          : 'Shows cumulative ESOP allocation for the selected year'}
+                    </p>
                     <div style={{ width: '100%', height: 250 }}>
                         <ResponsiveContainer>
                             <LineChart data={monthlyExpenseData.filter(d => {
+                                // For "Till Date", show all data (month filter doesn't apply across years)
+                                // For specific year, apply month filter
+                                if (selectedYear === 'all') {
+                                  return true; // Show all months when "Till Date" is selected
+                                }
                                 const monthIndex = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(d.name) + 1;
                                 return monthIndex >= startMonth && monthIndex <= endMonth;
                             })}>
@@ -1184,7 +1209,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             ))}
                         </Select>
                         <Input label="Department" name="department" required />
-                        <Input label="Salary (Annual)" name="salary" type="number" min="0" required />
+                        <Input label="Annual salary" name="salary" type="number" min="0" required />
                         <Input 
                             label={`ESOP Allocation (${startupCurrency})`} 
                             name="esopAllocation" 
@@ -1623,7 +1648,7 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
                             ))}
                         </Select>
                         <Input label="Department" value={editFormData.department} onChange={(e) => setEditFormData({ ...editFormData, department: e.target.value })} />
-                        <Input label="Salary" type="number" value={editFormData.salary} onChange={(e) => setEditFormData({ ...editFormData, salary: Number(e.target.value) || 0 })} />
+                        <Input label="Annual salary" type="number" value={editFormData.salary} onChange={(e) => setEditFormData({ ...editFormData, salary: Number(e.target.value) || 0 })} />
                         <Input label={`ESOP Allocation (${startupCurrency})`} type="number" value={editFormData.esopAllocation} onChange={(e) => {
                             const val = Number(e.target.value) || 0;
                             setEditFormData({ ...editFormData, esopAllocation: val, esopPerAllocation: editFormData.allocationType === 'monthly' ? val/12 : editFormData.allocationType === 'quarterly' ? val/4 : val });

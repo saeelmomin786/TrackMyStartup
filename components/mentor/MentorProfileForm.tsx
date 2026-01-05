@@ -88,8 +88,8 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   const [isExpertiseOpen, setIsExpertiseOpen] = useState(false);
   const [isSectorsOpen, setIsSectorsOpen] = useState(false);
   const [isStagesOpen, setIsStagesOpen] = useState(false);
-  const [showAddFormModal, setShowAddFormModal] = useState(false);
-  const [formSection, setFormSection] = useState<'active' | 'founded'>('active');
+  const [showMentoringFormModal, setShowMentoringFormModal] = useState(false);
+  const [showStartupExperienceFormModal, setShowStartupExperienceFormModal] = useState(false);
   const expertiseRef = useRef<HTMLDivElement>(null);
   const sectorsRef = useRef<HTMLDivElement>(null);
   const stagesRef = useRef<HTMLDivElement>(null);
@@ -106,13 +106,23 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     currently_working: false,
   });
   
-  const handleOpenAddForm = (section: 'active' | 'founded') => {
-    setFormSection(section);
-    setShowAddFormModal(true);
+  const handleOpenMentoringForm = () => {
+    setShowMentoringFormModal(true);
   };
   
-  const handleCloseAddForm = () => {
-    setShowAddFormModal(false);
+  const handleCloseMentoringForm = () => {
+    setShowMentoringFormModal(false);
+    if (onMetricsUpdate) {
+      onMetricsUpdate();
+    }
+  };
+
+  const handleOpenStartupExperienceForm = () => {
+    setShowStartupExperienceFormModal(true);
+  };
+  
+  const handleCloseStartupExperienceForm = () => {
+    setShowStartupExperienceFormModal(false);
     if (onMetricsUpdate) {
       onMetricsUpdate();
     }
@@ -1035,10 +1045,10 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
         </div>
 
-        {/* Startup Experience */}
+        {/* Mentoring Experience Section */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b pb-2">
-            <h4 className="text-base font-medium text-slate-700">Startup Experience</h4>
+            <h4 className="text-base font-medium text-slate-700">Mentoring Experience</h4>
             <div className="flex items-center gap-3">
               {(professionalExperiences.length > 0 || (mentorMetrics && (mentorMetrics.activeAssignments?.length > 0 || mentorMetrics.completedAssignments?.length > 0))) && (
                 <div className="text-sm text-slate-600">
@@ -1051,16 +1061,16 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => handleOpenAddForm('founded')}
+                  onClick={handleOpenMentoringForm}
                   className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
-                  title="Add startup experience"
+                  title="Add mentoring experience"
                 >
                   <Plus className="h-4 w-4" />
-                  <span>Add Startup</span>
+                  <span>Add Mentoring</span>
                 </Button>
               )}
-              </div>
             </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
@@ -1103,23 +1113,9 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Startup Experience
-                <span className="ml-2 text-xs text-slate-500">(Verified from your dashboard)</span>
-              </label>
-              <div className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
-                {mentorMetrics?.startupsFounded || profile.companies_founded || 0}
-              </div>
-              <input
-                type="hidden"
-                value={mentorMetrics?.startupsFounded || profile.companies_founded || 0}
-                onChange={() => {}}
-              />
-            </div>
-
           </div>
 
+          {/* Mentoring Approach, Availability, and Preferred Engagement */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Mentoring Approach</label>
             <textarea
@@ -1156,6 +1152,45 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
                 <option key={option} value={option}>{option}</option>
               ))}
             </Select>
+          </div>
+        </div>
+
+        {/* Startup Experience Section */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b pb-2">
+            <h4 className="text-base font-medium text-slate-700">Startup Experience</h4>
+            <div className="flex items-center gap-3">
+              {!isViewOnly && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOpenStartupExperienceForm}
+                  className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
+                  title="Add startup experience"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Startup Experience</span>
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Startup Experience
+                <span className="ml-2 text-xs text-slate-500">(Verified from your dashboard)</span>
+              </label>
+              <div className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-slate-700 font-medium">
+                {mentorMetrics?.startupsFounded || profile.companies_founded || 0}
+              </div>
+              <input
+                type="hidden"
+                value={mentorMetrics?.startupsFounded || profile.companies_founded || 0}
+                onChange={() => {}}
+              />
+            </div>
           </div>
         </div>
 
@@ -1556,15 +1591,11 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
 
       </div>
 
-      {/* Add Startup Form Modal */}
+      {/* Add Mentoring Experience Modal */}
       <Modal
-        isOpen={showAddFormModal}
-        onClose={handleCloseAddForm}
-        title={
-          formSection === 'active' 
-            ? 'Add Mentoring' 
-            : 'Add Startup Experience'
-        }
+        isOpen={showMentoringFormModal}
+        onClose={handleCloseMentoringForm}
+        title="Add Mentoring Experience"
         size="large"
       >
         {currentUser?.id && (
@@ -1572,13 +1603,38 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             mentorId={currentUser.id}
             startups={startups}
             onUpdate={() => {
-              handleCloseAddForm();
+              handleCloseMentoringForm();
               if (onMetricsUpdate) {
                 onMetricsUpdate();
               }
             }}
             mentorMetrics={mentorMetrics}
-            initialSection={formSection}
+            initialSection="active"
+            showOnlySection="active"
+          />
+        )}
+      </Modal>
+
+      {/* Add Startup Experience Modal */}
+      <Modal
+        isOpen={showStartupExperienceFormModal}
+        onClose={handleCloseStartupExperienceForm}
+        title="Add Startup Experience"
+        size="large"
+      >
+        {currentUser?.id && (
+          <MentorDataForm
+            mentorId={currentUser.id}
+            startups={startups}
+            onUpdate={() => {
+              handleCloseStartupExperienceForm();
+              if (onMetricsUpdate) {
+                onMetricsUpdate();
+              }
+            }}
+            mentorMetrics={mentorMetrics}
+            initialSection="founded"
+            showOnlySection="founded"
           />
         )}
       </Modal>

@@ -90,11 +90,20 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
     try {
       setIsLoading(true);
       setError(null);
-      const year = filters.year === 'all' ? new Date().getFullYear() : (filters.year || new Date().getFullYear());
+      // When year is 'all', don't pass year filter to get all records
+      // For chart functions that require a year, use current year as default when 'all' is selected
+      const yearForCharts = filters.year === 'all' ? new Date().getFullYear() : (filters.year || new Date().getFullYear());
+      const recordFilters: FinancialFilters = { ...filters };
+      // Remove year filter if it's 'all' so all records are returned
+      if (recordFilters.year === 'all') {
+        delete recordFilters.year;
+      }
 
-      console.log('🔄 Loading financial data for startup:', startup.id, 'year:', year, 'filter year:', filters.year);
+      console.log('🔄 Loading financial data for startup:', startup.id, 'year filter:', filters.year, 'year for charts:', yearForCharts);
       console.log('🏢 Startup object:', startup);
 
+      // When 'all' is selected, we'll calculate vertical data from allRecords manually
+      // Otherwise, use the year-specific functions
       const [
         allRecords,
         revenueVertical,
@@ -107,11 +116,15 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         yearsData,
         investmentRecords
       ] = await Promise.all([
-        financialsService.getFinancialRecords(startup.id, { year }),
-        financialsService.getRevenueByVertical(startup.id, year),
-        financialsService.getExpensesByVertical(startup.id, year),
-        financialsService.getExpenses(startup.id, filters),
-        financialsService.getRevenues(startup.id, filters),
+        financialsService.getFinancialRecords(startup.id, recordFilters),
+        filters.year === 'all' 
+          ? Promise.resolve([]) // Will be calculated from allRecords below
+          : financialsService.getRevenueByVertical(startup.id, yearForCharts),
+        filters.year === 'all'
+          ? Promise.resolve([]) // Will be calculated from allRecords below
+          : financialsService.getExpensesByVertical(startup.id, yearForCharts),
+        financialsService.getExpenses(startup.id, recordFilters),
+        financialsService.getRevenues(startup.id, recordFilters),
         financialsService.getFinancialSummary(startup.id),
         financialsService.getEntities(startup.id),
         financialsService.getVerticals(startup.id),
@@ -173,7 +186,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         monthlyData[month] = { revenue: 0, expenses: 0 };
       });
       
-      // Aggregate data by month
+      // Aggregate data by month (when 'all' is selected, this aggregates across all years)
       allRecords.forEach(record => {
         const monthIndex = new Date(record.date).getMonth();
         const monthName = months[monthIndex];
@@ -190,8 +203,34 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         revenue: monthlyData[month].revenue,
         expenses: monthlyData[month].expenses
       }));
-      const finalRevenueByVertical = revenueVertical || [];
-      const finalExpensesByVertical = expenseVertical || [];
+      
+      // Calculate vertical data from all records when 'all' is selected
+      let finalRevenueByVertical = revenueVertical || [];
+      let finalExpensesByVertical = expenseVertical || [];
+      
+      if (filters.year === 'all') {
+        // Calculate revenue by vertical from all records
+        const revenueByVerticalMap: { [key: string]: number } = {};
+        allRecords
+          .filter(record => record.record_type === 'revenue')
+          .forEach(record => {
+            revenueByVerticalMap[record.vertical] = (revenueByVerticalMap[record.vertical] || 0) + record.amount;
+          });
+        finalRevenueByVertical = Object.entries(revenueByVerticalMap)
+          .map(([name, value]) => ({ name, value }))
+          .sort((a, b) => b.value - a.value);
+        
+        // Calculate expenses by vertical from all records
+        const expensesByVerticalMap: { [key: string]: number } = {};
+        allRecords
+          .filter(record => record.record_type === 'expense')
+          .forEach(record => {
+            expensesByVerticalMap[record.vertical] = (expensesByVerticalMap[record.vertical] || 0) + record.amount;
+          });
+        finalExpensesByVertical = Object.entries(expensesByVerticalMap)
+          .map(([name, value]) => ({ name, value }))
+          .sort((a, b) => b.value - a.value);
+      }
 
       console.log('📊 Final chart data:', {
         monthlyData: finalMonthlyData,
@@ -469,10 +508,11 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
   // Manual chart data calculation to ensure charts update
   const calculateChartDataManually = async () => {
     try {
-      const year = filters.year === 'all' ? new Date().getFullYear() : (filters.year || new Date().getFullYear());
-      
-      // Get all records for the current year and entity filter
-      const recordFilters: FinancialFilters = { year: year };
+      // Get all records based on filters (when 'all' is selected, don't filter by year)
+      const recordFilters: FinancialFilters = {};
+      if (filters.year !== 'all' && filters.year) {
+        recordFilters.year = filters.year;
+      }
       if (filters.entity !== 'all') {
         recordFilters.entity = filters.entity;
       }
@@ -480,15 +520,18 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       
       console.log('🔍 All records for chart calculation:', allRecords);
       
-      // Calculate monthly data
+      // Calculate monthly data (aggregate across all years when 'all' is selected)
       const monthlyData: { [key: string]: { revenue: number; expenses: number } } = {};
-      for (let month = 1; month <= 12; month++) {
-        const monthName = new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'short' });
-        monthlyData[monthName] = { revenue: 0, expenses: 0 };
-      }
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      // Initialize all months
+      months.forEach(month => {
+        monthlyData[month] = { revenue: 0, expenses: 0 };
+      });
       
       allRecords.forEach(record => {
-        const monthName = new Date(record.date).toLocaleDateString('en-US', { month: 'short' });
+        const monthIndex = new Date(record.date).getMonth();
+        const monthName = months[monthIndex];
         const amt = typeof record.amount === 'string' ? parseFloat(record.amount) || 0 : record.amount || 0;
         if (record.record_type === 'revenue') {
           monthlyData[monthName].revenue += amt;
@@ -615,9 +658,11 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
           <p className="text-2xl font-bold">{(() => {
             const fallback = startup.totalFunding || 0;
             const tf = totalFundingFromRecords > 0 ? totalFundingFromRecords : fallback;
-            return formatCurrency(tf - (summary?.total_expenses || 0), startupCurrency);
+            const totalRevenue = summary?.total_revenue || 0;
+            const totalExpenses = summary?.total_expenses || 0;
+            return formatCurrency(tf + totalRevenue - totalExpenses, startupCurrency);
           })()}</p>
-            <p className="text-xs text-slate-400">Total Funding - Total Expenditure</p>
+            <p className="text-xs text-slate-400">Total Funding + Total Revenue - Total Expenditure</p>
         </Card>
       </div>
 

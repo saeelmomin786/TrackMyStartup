@@ -257,6 +257,17 @@ const Footer: React.FC = () => {
                   <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </button>
               </li>
+              <li>
+                <a
+                  href="/api/sitemap.xml"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-300 hover:text-white text-sm transition-colors duration-200 flex items-center group"
+                >
+                  Sitemap
+                  <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </a>
+              </li>
             </ul>
           </div>
         </div>

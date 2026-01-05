@@ -16,6 +16,9 @@ interface MentorProfile {
   startupsMentoring?: number;
   startupsMentoredPreviously?: number;
   verifiedStartupsMentored?: number;
+  // Experience years
+  startupExperienceYears?: number;
+  professionalExperienceYears?: number;
 }
 
 interface MentorGridCardProps {
@@ -78,6 +81,15 @@ const MentorGridCard: React.FC<MentorGridCardProps> = ({
   const startupsMentoredPreviously = mentor.startupsMentoredPreviously ?? 0;
   const totalStartupsMentored = startupsMentoring + startupsMentoredPreviously;
   const verifiedMentored = mentor.verifiedStartupsMentored ?? 0;
+  
+  // Experience years - use provided values or calculate from years_of_experience
+  const startupExperienceYears = mentor.startupExperienceYears ?? 0;
+  const professionalExperienceYears = mentor.professionalExperienceYears ?? mentor.years_of_experience ?? 0;
+  
+  // Debug log to verify values are being passed
+  if (process.env.NODE_ENV === 'development' && mentor.mentor_name) {
+    console.log(`MentorCard ${mentor.mentor_name}: startupExperienceYears=${startupExperienceYears}, professionalExperienceYears=${professionalExperienceYears}`);
+  }
 
   const primaryDesignation = mentor.mentor_type || mentor.current_role || 'Mentor';
 
@@ -145,13 +157,14 @@ const MentorGridCard: React.FC<MentorGridCardProps> = ({
         {/* Stats Grid - 2x2 layout */}
         <div className="grid grid-cols-2 gap-3 mb-4 pt-3 border-t border-slate-100">
           <div className="text-center">
-            <div className="text-xl font-bold text-slate-800">{startupsMentoring}</div>
-            <div className="text-xs text-slate-500 leading-tight mt-1">Startup Mentoring</div>
-            <div className="text-[10px] text-slate-400 leading-tight">(Active)</div>
+            <div className="text-xl font-bold text-slate-800">{startupExperienceYears}</div>
+            <div className="text-xs text-slate-500 leading-tight mt-1">Startup Experience</div>
+            <div className="text-[10px] text-slate-400 leading-tight">(years)</div>
           </div>
           <div className="text-center">
-            <div className="text-xl font-bold text-slate-800">{startupsMentoredPreviously}</div>
-            <div className="text-xs text-slate-500 leading-tight mt-1">Previously Mentored</div>
+            <div className="text-xl font-bold text-slate-800">{professionalExperienceYears}</div>
+            <div className="text-xs text-slate-500 leading-tight mt-1">Professional Experience</div>
+            <div className="text-[10px] text-slate-400 leading-tight">(years)</div>
           </div>
           <div className="text-center">
             <div className="text-xl font-bold text-slate-800">{totalStartupsMentored}</div>

@@ -3,7 +3,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import CloudDriveInput from '../ui/CloudDriveInput';
-import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText, Share2 } from 'lucide-react';
+import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText, Share2, Eye } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { messageService } from '../../lib/messageService';
 import Modal from '../ui/Modal';
@@ -503,25 +503,41 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                                 <span className="ml-2 inline-block px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-[10px] font-medium whitespace-nowrap">Applications closing today</span>
                                             )}
                                         </div>
-                                        {!hasApplied ? (
-                                            canApply ? (
-                                                <Button 
-                                                    type="button" 
-                                                    className="w-full mt-3" 
-                                                    onClick={() => openApplyModal(opp.id)}
-                                                >
-                                                    <Zap className="h-4 w-4 mr-2" /> Apply for Program
-                                                </Button>
-                                            ) : (
-                                                <Button type="button" className="w-full mt-3" variant="secondary" disabled>
-                                                    Application closed
-                                                </Button>
-                                            )
-                                        ) : (
-                                            <Button type="button" className="w-full mt-3" variant="secondary" disabled>
-                                                <Check className="h-4 w-4 mr-2" /> You have applied for this program
+                                        <div className="flex gap-2 mt-3">
+                                            <Button 
+                                                type="button" 
+                                                variant="outline"
+                                                className="flex-1" 
+                                                onClick={() => {
+                                                    const url = new URL(window.location.origin);
+                                                    url.searchParams.set('view', 'program');
+                                                    url.searchParams.set('opportunityId', opp.id);
+                                                    window.location.href = url.toString();
+                                                }}
+                                            >
+                                                <Eye className="h-4 w-4 mr-2" />
+                                                View
                                             </Button>
-                                        )}
+                                            {!hasApplied ? (
+                                                canApply ? (
+                                                    <Button 
+                                                        type="button" 
+                                                        className="flex-1" 
+                                                        onClick={() => openApplyModal(opp.id)}
+                                                    >
+                                                        <Zap className="h-4 w-4 mr-2" /> Apply
+                                                    </Button>
+                                                ) : (
+                                                    <Button type="button" className="flex-1" variant="secondary" disabled>
+                                                        Closed
+                                                    </Button>
+                                                )
+                                            ) : (
+                                                <Button type="button" className="flex-1" variant="secondary" disabled>
+                                                    <Check className="h-4 w-4 mr-2" /> Applied
+                                                </Button>
+                                            )}
+                                        </div>
                                         {/* per-application materials are collected in modal; no prerequisite */}
                                     </div>
                                 </div>
@@ -577,11 +593,27 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                         <p className="text-xs text-slate-500 mt-2">Deadline: <span className="font-semibold">{p.deadline}</span></p>
                                     </div>
                                     <div className="border-t pt-4 mt-4">
-                                        <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="block">
-                                            <button className="w-full inline-flex items-center justify-center px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm">
-                                                Apply
-                                            </button>
-                                        </a>
+                                        <div className="flex gap-2">
+                                            <Button 
+                                                type="button"
+                                                variant="outline"
+                                                className="flex-1"
+                                                onClick={() => {
+                                                    const url = new URL(window.location.origin);
+                                                    url.searchParams.set('view', 'admin-program');
+                                                    url.searchParams.set('programId', p.id);
+                                                    window.location.href = url.toString();
+                                                }}
+                                            >
+                                                <Eye className="h-4 w-4 mr-2" />
+                                                View
+                                            </Button>
+                                            <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="flex-1">
+                                                <Button className="w-full">
+                                                    Apply
+                                                </Button>
+                                            </a>
+                                        </div>
                                     </div>
                                 </div>
                             </Card>

@@ -137,6 +137,128 @@ const UnifiedMentorNetworkPage: React.FC = () => {
                 .eq('mentor_id', mentor.user_id)
                 .eq('status', 'completed');
 
+              // Calculate startup experience years from founded startups
+              let startupExperienceYears = 0;
+              try {
+                const { data: foundedStartups, error: foundedError } = await supabase
+                  .from('mentor_founded_startups')
+                  .select('notes')
+                  .eq('mentor_id', mentor.user_id);
+                
+                if (foundedError) {
+                  console.warn('Error loading founded startups for mentor:', mentor.user_id, foundedError);
+                } else if (foundedStartups && foundedStartups.length > 0) {
+                  const now = new Date();
+                  const intervals: Array<{ start: Date; end: Date }> = [];
+                  
+                  foundedStartups.forEach((startup: any) => {
+                    if (startup.notes) {
+                      try {
+                        const notesData = JSON.parse(startup.notes);
+                        if (notesData.from_date) {
+                          const startDate = new Date(notesData.from_date);
+                          // Handle currently_in_position and null to_date
+                          const endDate = notesData.currently_in_position === true || !notesData.to_date || notesData.to_date === "null" || notesData.to_date === null
+                            ? now 
+                            : new Date(notesData.to_date);
+                          intervals.push({ start: startDate, end: endDate });
+                        }
+                      } catch (e) {
+                        // Skip invalid notes
+                        console.warn('Error parsing startup notes for mentor:', mentor.user_id, e);
+                      }
+                    }
+                  });
+                  
+                  // Merge overlapping intervals and calculate total months
+                  if (intervals.length > 0) {
+                    intervals.sort((a, b) => a.start.getTime() - b.start.getTime());
+                    const merged: Array<{ start: Date; end: Date }> = [];
+                    let current = intervals[0];
+                    
+                    for (let i = 1; i < intervals.length; i++) {
+                      if (intervals[i].start <= current.end) {
+                        current.end = new Date(Math.max(current.end.getTime(), intervals[i].end.getTime()));
+                      } else {
+                        merged.push(current);
+                        current = intervals[i];
+                      }
+                    }
+                    merged.push(current);
+                    
+                    let totalMonths = 0;
+                    merged.forEach(interval => {
+                      const months = (interval.end.getFullYear() - interval.start.getFullYear()) * 12 +
+                        (interval.end.getMonth() - interval.start.getMonth());
+                      totalMonths += months;
+                    });
+                    
+                    startupExperienceYears = Math.floor(totalMonths / 12);
+                    console.log(`Calculated startup experience for mentor ${mentor.user_id}: ${startupExperienceYears} years from ${intervals.length} intervals`);
+                  } else {
+                    console.log(`No valid date intervals found for mentor ${mentor.user_id} startup experience`);
+                  }
+                } else {
+                  console.log(`No founded startups found for mentor ${mentor.user_id}`);
+                }
+              } catch (e) {
+                // If calculation fails, use 0
+                console.warn('Could not calculate startup experience for mentor:', mentor.user_id, e);
+              }
+
+              // Professional experience years - calculate from professional experience table
+              let professionalExperienceYears = mentor.years_of_experience || 0;
+              try {
+                const { data: professionalExpData } = await supabase
+                  .from('mentor_professional_experience')
+                  .select('*')
+                  .eq('mentor_id', mentor.user_id);
+
+                if (professionalExpData && professionalExpData.length > 0) {
+                  const now = new Date();
+                  const intervals: Array<{ start: Date; end: Date }> = [];
+                  
+                  professionalExpData.forEach((pe: any) => {
+                    if (pe.from_date) {
+                      const startDate = new Date(pe.from_date);
+                      const endDate = pe.currently_working || !pe.to_date
+                        ? now
+                        : new Date(pe.to_date);
+                      intervals.push({ start: startDate, end: endDate });
+                    }
+                  });
+                  
+                  // Merge overlapping intervals and calculate total months
+                  if (intervals.length > 0) {
+                    intervals.sort((a, b) => a.start.getTime() - b.start.getTime());
+                    const merged: Array<{ start: Date; end: Date }> = [];
+                    let current = intervals[0];
+                    
+                    for (let i = 1; i < intervals.length; i++) {
+                      if (intervals[i].start <= current.end) {
+                        current.end = new Date(Math.max(current.end.getTime(), intervals[i].end.getTime()));
+                      } else {
+                        merged.push(current);
+                        current = intervals[i];
+                      }
+                    }
+                    merged.push(current);
+                    
+                    let totalMonths = 0;
+                    merged.forEach(interval => {
+                      const months = (interval.end.getFullYear() - interval.start.getFullYear()) * 12 +
+                        (interval.end.getMonth() - interval.start.getMonth());
+                      totalMonths += months;
+                    });
+                    
+                    professionalExperienceYears = Math.floor(totalMonths / 12);
+                  }
+                }
+              } catch (e) {
+                // If calculation fails, fallback to years_of_experience
+                console.warn('Could not calculate professional experience for mentor:', mentor.user_id, e);
+              }
+
               if (!activeError && !completedError) {
                 // Calculate metrics
                 const activeCount = activeAssignments?.length || 0;
@@ -156,6 +278,8 @@ const UnifiedMentorNetworkPage: React.FC = () => {
                   startupsMentoring: activeCount,
                   startupsMentoredPreviously: completedCount,
                   verifiedStartupsMentored: verifiedCount,
+                  startupExperienceYears,
+                  professionalExperienceYears,
                 };
               } else {
                 // Set defaults if query fails
@@ -164,6 +288,8 @@ const UnifiedMentorNetworkPage: React.FC = () => {
                   startupsMentoring: 0,
                   startupsMentoredPreviously: 0,
                   verifiedStartupsMentored: 0,
+                  startupExperienceYears,
+                  professionalExperienceYears,
                 };
               }
             } catch (metricsError) {
@@ -173,6 +299,8 @@ const UnifiedMentorNetworkPage: React.FC = () => {
                 startupsMentoring: 0,
                 startupsMentoredPreviously: 0,
                 verifiedStartupsMentored: 0,
+                startupExperienceYears: 0,
+                professionalExperienceYears: mentor.years_of_experience || 0,
               };
             }
           })

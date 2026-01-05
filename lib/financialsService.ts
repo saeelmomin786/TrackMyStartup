@@ -395,7 +395,7 @@ class FinancialsService {
       .single();
     
     const total_funding = startupData?.total_funding || 0;
-    const available_funds = total_revenue - total_expenses; // Changed: available funds = revenue - expenses, not funding - expenses
+    const available_funds = total_funding + total_revenue - total_expenses; // Available funds = Total Funding + Total Revenue - Total Expenditure
     
     return {
       total_funding,

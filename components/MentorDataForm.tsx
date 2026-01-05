@@ -14,17 +14,11 @@ interface MentorDataFormProps {
   onUpdate: () => void;
   mentorMetrics?: MentorMetrics | null;
   initialSection?: 'active' | 'founded';
+  showOnlySection?: 'active' | 'founded'; // If set, only show this section
 }
 
-const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onUpdate, mentorMetrics, initialSection }) => {
-  const [activeSection, setActiveSection] = useState<'active' | 'founded'>(initialSection || 'active');
-  
-  // Update active section when initialSection prop changes
-  useEffect(() => {
-    if (initialSection) {
-      setActiveSection(initialSection);
-    }
-  }, [initialSection]);
+const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onUpdate, mentorMetrics, initialSection, showOnlySection }) => {
+  // If showOnlySection is set, only show that section; otherwise show both sections
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Combined form state for mentoring (both active and completed)
@@ -247,14 +241,15 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
       console.log('✅ Authentication verified for founded startup:', { providedMentorId: mentorId, authUserId: actualMentorId });
       
       // Store startup_name, email_id, website, sector, position, dates, currently_in_position, and proof_documents in notes as JSON
+      // Ensure dates are properly formatted: empty strings become null, and to_date is null if currently_in_position is true
       const notesData = JSON.stringify({
         startup_name: foundedForm.startup_name,
         email_id: foundedForm.email_id,
         website: foundedForm.website,
         sector: foundedForm.sector,
         position: foundedForm.position,
-        from_date: foundedForm.from_date || null,
-        to_date: foundedForm.to_date || null,
+        from_date: (foundedForm.from_date && foundedForm.from_date.trim()) || null,
+        to_date: foundedForm.currently_in_position ? null : ((foundedForm.to_date && foundedForm.to_date.trim()) || null),
         currently_in_position: foundedForm.currently_in_position,
         proof_documents: foundedForm.proof_documents || [],
       });
@@ -384,7 +379,6 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
       to_date: toDate,
       currently_mentoring: currentlyMentoring,
     });
-    setActiveSection('active');
     setEditingId(assignment.id);
   };
 
@@ -418,64 +412,15 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
   };
 
   return (
-    <div className="space-y-6">
-      {/* Section Tabs */}
-      <div className="flex space-x-4 border-b border-slate-200">
-        <button
-          onClick={() => {
-            setActiveSection('active');
-            setEditingId(null);
-            setMentoringForm({
-              startup_name: '',
-              email_id: '',
-              website: '',
-              sector: '',
-              from_date: '',
-              to_date: '',
-              currently_mentoring: false,
-            });
-          }}
-          className={`py-2 px-4 border-b-2 font-medium text-sm ${
-            activeSection === 'active'
-              ? 'border-blue-500 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Mentoring
-        </button>
-        <button
-          onClick={() => {
-            setActiveSection('founded');
-            setEditingId(null);
-                    setFoundedForm({ 
-                      startup_name: '', 
-                      email_id: '', 
-                      website: '', 
-                      sector: '', 
-                      position: '',
-                      from_date: '',
-                      to_date: '',
-                      currently_in_position: false,
-                      proof_documents: [],
-                    });
-                    setProofDocumentType('');
-                    setProofGoogleDriveLink('');
-                    setProofUploadFile(null);
-          }}
-          className={`py-2 px-4 border-b-2 font-medium text-sm ${
-            activeSection === 'founded'
-              ? 'border-blue-500 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Startup Experience
-        </button>
-      </div>
-
-      {/* Mentoring Form (Combined Active and Completed) */}
-      {activeSection === 'active' && (
-        <>
-          <Card>
+    <div className="space-y-8">
+      {/* Mentoring Experience Section */}
+      {(!showOnlySection || showOnlySection === 'active') && (
+      <div className="space-y-4">
+        <div className="border-b border-slate-200 pb-3">
+          <h3 className="text-lg font-semibold text-slate-800">Mentoring Experience</h3>
+          <p className="text-sm text-slate-600 mt-1">Add startups you have mentored or are currently mentoring</p>
+        </div>
+        <Card>
             <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit Mentoring' : 'Add Mentoring'}</h3>
           <form onSubmit={handleMentoringSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -748,14 +693,17 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
               </div>
             </Card>
           )}
-        </>
-          )}
+      </div>
+      )}
 
-
-      {/* Startup Experience Form */}
-      {activeSection === 'founded' && (
-        <>
-          <Card>
+      {/* Startup Experience Section */}
+      {(!showOnlySection || showOnlySection === 'founded') && (
+      <div className={`space-y-4 ${showOnlySection ? '' : 'pt-6 border-t border-slate-200'}`}>
+        <div className="border-b border-slate-200 pb-3">
+          <h3 className="text-lg font-semibold text-slate-800">Startup Experience</h3>
+          <p className="text-sm text-slate-600 mt-1">Add startups you have founded or co-founded</p>
+        </div>
+        <Card>
             <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit Startup Experience' : 'Add Startup Experience'}</h3>
           <form onSubmit={handleFoundedSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1293,7 +1241,7 @@ const MentorDataForm: React.FC<MentorDataFormProps> = ({ mentorId, startups, onU
               </div>
             </Card>
           )}
-        </>
+      </div>
       )}
     </div>
   );

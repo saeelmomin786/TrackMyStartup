@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, Search, Share2, Video, Menu, X } from 'lucide-react';
+import { ChevronDown, Search, Share2, Video, Menu, X, Eye } from 'lucide-react';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import LogoTMS from '../public/logoTMS.svg';
@@ -610,19 +610,35 @@ const GrantOpportunitiesPage: React.FC = () => {
                                     <span className="ml-2 inline-block px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-[10px] font-medium whitespace-nowrap">Closing today</span>
                                   )}
                                 </div>
-                                {canApply ? (
+                                <div className="flex gap-2">
                                   <Button 
                                     type="button" 
-                                    className="w-full" 
-                                    onClick={() => window.location.href = '/?page=register'}
+                                    variant="outline"
+                                    className="flex-1" 
+                                    onClick={() => {
+                                      const url = new URL(window.location.origin);
+                                      url.searchParams.set('view', 'program');
+                                      url.searchParams.set('opportunityId', opp.id);
+                                      window.location.href = url.toString();
+                                    }}
                                   >
-                                    Apply for Program
+                                    <Eye className="h-4 w-4 mr-2" />
+                                    View
                                   </Button>
-                                ) : (
-                                  <Button type="button" className="w-full" variant="secondary" disabled>
-                                    Application closed
-                                  </Button>
-                                )}
+                                  {canApply ? (
+                                    <Button 
+                                      type="button" 
+                                      className="flex-1" 
+                                      onClick={() => window.location.href = '/?page=register'}
+                                    >
+                                      Apply for Program
+                                    </Button>
+                                  ) : (
+                                    <Button type="button" className="flex-1" variant="secondary" disabled>
+                                      Application closed
+                                    </Button>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </Card>
@@ -681,11 +697,27 @@ const GrantOpportunitiesPage: React.FC = () => {
                               <p className="text-xs text-slate-500 mt-2">Deadline: <span className="font-semibold">{p.deadline}</span></p>
                             </div>
                             <div className="border-t pt-4 mt-4">
-                              <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="block">
-                                <Button className="w-full">
-                                  Apply
+                              <div className="flex gap-2">
+                                <Button 
+                                  type="button"
+                                  variant="outline"
+                                  className="flex-1"
+                                  onClick={() => {
+                                    const url = new URL(window.location.origin);
+                                    url.searchParams.set('view', 'admin-program');
+                                    url.searchParams.set('programId', p.id);
+                                    window.location.href = url.toString();
+                                  }}
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View
                                 </Button>
-                              </a>
+                                <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="flex-1">
+                                  <Button className="w-full">
+                                    Apply
+                                  </Button>
+                                </a>
+                              </div>
                             </div>
                           </div>
                         </Card>

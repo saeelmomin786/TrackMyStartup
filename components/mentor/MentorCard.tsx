@@ -50,6 +50,9 @@ interface MentorProfile {
   startupsMentoring?: number;
   startupsMentoredPreviously?: number;
   verifiedStartupsMentored?: number;
+  // Experience years (can be passed from parent or calculated)
+  startupExperienceYears?: number;
+  professionalExperienceYears?: number;
   user?: {
     name?: string;
     email?: string;
@@ -98,18 +101,22 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
   const [professionalExperiences, setProfessionalExperiences] = useState<ProfessionalExperience[]>([]);
   const [showProfessionalExp, setShowProfessionalExp] = useState(false);
   const [loadingExp, setLoadingExp] = useState(false);
+  const [professionalExpLoaded, setProfessionalExpLoaded] = useState(false);
   const [startupAssignments, setStartupAssignments] = useState<StartupAssignment[]>([]);
   const [showMentoringExp, setShowMentoringExp] = useState(false);
   const [loadingMentoringExp, setLoadingMentoringExp] = useState(false);
   const [foundedStartups, setFoundedStartups] = useState<FoundedStartup[]>([]);
   const [showStartupExp, setShowStartupExp] = useState(false);
   const [loadingStartupExp, setLoadingStartupExp] = useState(false);
+  const [foundedStartupsLoaded, setFoundedStartupsLoaded] = useState(false);
   const [metrics, setMetrics] = useState(() => ({
     startupsMentoring: mentor.startupsMentoring ?? 0,
     startupsMentoredPreviously: mentor.startupsMentoredPreviously ?? 0,
     verifiedStartupsMentored: mentor.verifiedStartupsMentored ?? 0,
   }));
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+  const [startupExperienceYears, setStartupExperienceYears] = useState(mentor.startupExperienceYears ?? 0);
+  const [professionalExperienceYears, setProfessionalExperienceYears] = useState(mentor.professionalExperienceYears ?? mentor.years_of_experience ?? 0);
 
   const handleShare = async () => {
     if (!mentor.user_id && !mentor.id) return;
@@ -216,9 +223,39 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
     }
   };
 
+  // Update experience years if provided in mentor prop (e.g., from public page)
+  useEffect(() => {
+    if (mentor.startupExperienceYears !== undefined) {
+      setStartupExperienceYears(mentor.startupExperienceYears);
+    }
+    if (mentor.professionalExperienceYears !== undefined) {
+      setProfessionalExperienceYears(mentor.professionalExperienceYears);
+    }
+  }, [mentor.startupExperienceYears, mentor.professionalExperienceYears]);
+
+  // Load professional experiences immediately to calculate professional experience years
+  // Only if not already provided in mentor prop
+  useEffect(() => {
+    if ((mentor.user_id || mentor.id) && mentor.professionalExperienceYears === undefined) {
+      loadProfessionalExperiences();
+    }
+  }, [mentor.user_id, mentor.id, mentor.professionalExperienceYears]);
+
+  // Load founded startups immediately to calculate startup experience years
+  // Only if not already provided in mentor prop
+  useEffect(() => {
+    if ((mentor.user_id || mentor.id) && mentor.startupExperienceYears === undefined) {
+      loadFoundedStartups();
+    }
+  }, [mentor.user_id, mentor.id, mentor.startupExperienceYears]);
+
   useEffect(() => {
     if (showProfessionalExp && (mentor.user_id || mentor.id)) {
-      loadProfessionalExperiences();
+      // Load data when dropdown is opened if not already loaded
+      if (professionalExperiences.length === 0 && !loadingExp) {
+        setProfessionalExpLoaded(false); // Reset flag to allow loading
+        loadProfessionalExperiences();
+      }
     }
   }, [showProfessionalExp, mentor.user_id, mentor.id]);
 
@@ -230,7 +267,11 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
 
   useEffect(() => {
     if (showStartupExp && (mentor.user_id || mentor.id)) {
-      loadFoundedStartups();
+      // Load data when dropdown is opened if not already loaded
+      if (foundedStartups.length === 0 && !loadingStartupExp) {
+        setFoundedStartupsLoaded(false); // Reset flag to allow loading
+        loadFoundedStartups();
+      }
     }
   }, [showStartupExp, mentor.user_id, mentor.id]);
 
@@ -256,7 +297,8 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
   };
 
   const loadProfessionalExperiences = async () => {
-    if (professionalExperiences.length > 0) return; // Already loaded
+    if (professionalExpLoaded || loadingExp) return; // Already loaded or loading
+    setProfessionalExpLoaded(true);
     
     let mentorUserId = mentor.user_id;
     if (!mentorUserId && mentor.id) {
@@ -281,6 +323,49 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
         console.error('Error loading professional experiences:', error);
       } else if (data) {
         setProfessionalExperiences(data);
+        
+        // Calculate professional experience years
+        const now = new Date();
+        const intervals: Array<{ start: Date; end: Date }> = [];
+        
+        data.forEach((exp: any) => {
+          if (exp.from_date) {
+            const startDate = new Date(exp.from_date);
+            const endDate = exp.currently_working || !exp.to_date 
+              ? now 
+              : new Date(exp.to_date);
+            intervals.push({ start: startDate, end: endDate });
+          }
+        });
+        
+        // Merge overlapping intervals and calculate total months
+        if (intervals.length > 0) {
+          intervals.sort((a, b) => a.start.getTime() - b.start.getTime());
+          const merged: Array<{ start: Date; end: Date }> = [];
+          let current = intervals[0];
+          
+          for (let i = 1; i < intervals.length; i++) {
+            if (intervals[i].start <= current.end) {
+              current.end = new Date(Math.max(current.end.getTime(), intervals[i].end.getTime()));
+            } else {
+              merged.push(current);
+              current = intervals[i];
+            }
+          }
+          merged.push(current);
+          
+          let totalMonths = 0;
+          merged.forEach(interval => {
+            const months = (interval.end.getFullYear() - interval.start.getFullYear()) * 12 +
+              (interval.end.getMonth() - interval.start.getMonth());
+            totalMonths += months;
+          });
+          
+          setProfessionalExperienceYears(Math.floor(totalMonths / 12));
+        } else {
+          // If no professional experiences, use years_of_experience from profile
+          setProfessionalExperienceYears(mentor.years_of_experience ?? 0);
+        }
       }
     } catch (error) {
       console.error('Error loading professional experiences:', error);
@@ -332,7 +417,8 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
   };
 
   const loadFoundedStartups = async () => {
-    if (foundedStartups.length > 0) return; // Already loaded
+    if (foundedStartupsLoaded || loadingStartupExp) return; // Already loaded or loading
+    setFoundedStartupsLoaded(true);
     
     let mentorUserId = mentor.user_id;
     if (!mentorUserId && mentor.id) {
@@ -364,9 +450,63 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
         console.error('Error loading founded startups:', error);
       } else if (data) {
         setFoundedStartups(data as FoundedStartup[]);
+        
+        // Calculate startup experience years from founded startups
+        const now = new Date();
+        const intervals: Array<{ start: Date; end: Date }> = [];
+        
+        data.forEach((startup: any) => {
+          if (startup.notes) {
+            try {
+              const notesData = JSON.parse(startup.notes);
+              if (notesData.from_date) {
+                const startDate = new Date(notesData.from_date);
+                const endDate = notesData.currently_in_position 
+                  ? now 
+                  : (notesData.to_date ? new Date(notesData.to_date) : now);
+                intervals.push({ start: startDate, end: endDate });
+              }
+            } catch (e) {
+              // Skip invalid notes
+            }
+          }
+        });
+        
+        // Merge overlapping intervals and calculate total months
+        if (intervals.length > 0) {
+          intervals.sort((a, b) => a.start.getTime() - b.start.getTime());
+          const merged: Array<{ start: Date; end: Date }> = [];
+          let current = intervals[0];
+          
+          for (let i = 1; i < intervals.length; i++) {
+            if (intervals[i].start <= current.end) {
+              current.end = new Date(Math.max(current.end.getTime(), intervals[i].end.getTime()));
+            } else {
+              merged.push(current);
+              current = intervals[i];
+            }
+          }
+          merged.push(current);
+          
+          let totalMonths = 0;
+          merged.forEach(interval => {
+            const months = (interval.end.getFullYear() - interval.start.getFullYear()) * 12 +
+              (interval.end.getMonth() - interval.start.getMonth());
+            totalMonths += months;
+          });
+          
+          setStartupExperienceYears(Math.floor(totalMonths / 12));
+        } else {
+          // No intervals found, set to 0
+          setStartupExperienceYears(0);
+        }
+      } else {
+        // No data returned, set to 0
+        setStartupExperienceYears(0);
       }
     } catch (error) {
       console.error('Error loading founded startups:', error);
+      setStartupExperienceYears(0);
     } finally {
       setLoadingStartupExp(false);
     }
@@ -375,7 +515,12 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Present';
     try {
+      // Handle both ISO timestamp strings and YYYY-MM-DD date strings
       const date = new Date(dateString);
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return dateString;
+      }
       return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
     } catch {
       return dateString;
@@ -565,16 +710,17 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
               <div>
                 <div className="text-base sm:text-lg font-bold text-slate-800">
-                  {metrics.startupsMentoring}
+                  {startupExperienceYears}
                 </div>
-                <div className="text-xs text-slate-600 mt-1">Startup Mentoring</div>
-                <div className="text-xs text-slate-500">(Active)</div>
+                <div className="text-xs text-slate-600 mt-1">Startup Experience</div>
+                <div className="text-xs text-slate-500">(years)</div>
               </div>
               <div>
                 <div className="text-base sm:text-lg font-bold text-slate-800">
-                  {metrics.startupsMentoredPreviously}
+                  {professionalExperienceYears}
                 </div>
-                <div className="text-xs text-slate-600 mt-1">Previously Mentored</div>
+                <div className="text-xs text-slate-600 mt-1">Professional Experience</div>
+                <div className="text-xs text-slate-500">(years)</div>
               </div>
               <div>
                 <div className="text-base sm:text-lg font-bold text-slate-800">
@@ -870,19 +1016,59 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
                 foundedStartups.map((startup) => {
                   // Get startup name from either startup object or notes
                   let startupName = 'Unknown Startup';
+                  let position = '';
+                  let sector = '';
+                  let fromDate = '';
+                  let toDate = '';
+                  let currentlyInPosition = false;
+                  
                   if (startup.startup?.name) {
                     startupName = startup.startup.name;
-                  } else if (startup.notes) {
+                  }
+                  
+                  if (startup.notes) {
                     try {
                       const notesData = JSON.parse(startup.notes);
                       startupName = notesData.startup_name || startupName;
+                      position = notesData.position || '';
+                      sector = notesData.sector || '';
+                      fromDate = notesData.from_date || '';
+                      // Handle to_date: it can be null, empty string, or a date string
+                      toDate = (notesData.to_date && notesData.to_date !== 'null') ? notesData.to_date : '';
+                      // Check currently_in_position - it should be explicitly true
+                      currentlyInPosition = notesData.currently_in_position === true;
                     } catch {
-                      // If notes is not JSON, use it as-is
-                      startupName = startup.notes;
+                      // If notes is not JSON, use it as-is for name
+                      if (!startup.startup?.name) {
+                        startupName = startup.notes;
+                      }
                     }
                   }
+                  
+                  // Fallback to startup object sector if not in notes
+                  if (!sector && startup.startup?.sector) {
+                    sector = startup.startup.sector;
+                  }
 
-                  const foundedDate = formatDate(startup.founded_at);
+                  // Format date range
+                  let dateRange = '';
+                  if (fromDate) {
+                    const fromDateFormatted = formatDate(fromDate);
+                    // If currently in position, show "Present"
+                    if (currentlyInPosition) {
+                      dateRange = `${fromDateFormatted} - Present`;
+                    } else if (toDate && toDate.trim() !== '') {
+                      // If to_date exists and is not empty, show the date range
+                      const toDateFormatted = formatDate(toDate);
+                      dateRange = `${fromDateFormatted} - ${toDateFormatted}`;
+                    } else {
+                      // If no to_date and not currently in position, just show from date
+                      dateRange = fromDateFormatted;
+                    }
+                  } else {
+                    // Fallback to founded_at if no from_date in notes
+                    dateRange = formatDate(startup.founded_at);
+                  }
 
                   return (
                     <div
@@ -892,12 +1078,15 @@ const MentorCard: React.FC<MentorCardProps> = ({ mentor, onView, onConnect, conn
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex-1">
                           <h4 className="font-semibold text-slate-800 text-sm">{startupName}</h4>
-                          {startup.startup?.sector && (
-                            <p className="text-xs text-slate-600 font-medium mt-1">{startup.startup.sector}</p>
+                          {position && (
+                            <p className="text-xs text-slate-600 font-medium mt-1">{position}</p>
+                          )}
+                          {sector && (
+                            <p className="text-xs text-slate-500 mt-0.5">{sector}</p>
                           )}
                         </div>
-                        <div className="text-xs text-slate-500 text-right">
-                          Founded: {foundedDate}
+                        <div className="text-xs text-slate-500 text-right ml-2">
+                          {dateRange}
                         </div>
                       </div>
                     </div>

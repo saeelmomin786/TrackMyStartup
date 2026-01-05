@@ -507,6 +507,80 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[SITEMAP ERROR] Exception fetching blogs:', err);
     }
 
+    // Fetch all grant opportunities (incubation opportunities) from incubation_opportunities table
+    try {
+      let { data: opportunities, error: opportunityError } = await supabase
+        .from('incubation_opportunities')
+        .select('id, program_name, created_at, updated_at')
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      
+      if (opportunityError) {
+        console.error('[SITEMAP ERROR] Failed to fetch grant opportunities:', opportunityError);
+      } else if (opportunities && opportunities.length > 0) {
+        console.log(`[SITEMAP] Found ${opportunities.length} grant opportunities`);
+        for (const opp of opportunities) {
+          if (opp.id && opp.program_name) {
+            const lastmod = (opp as any).updated_at 
+              ? new Date((opp as any).updated_at).toISOString().split('T')[0]
+              : ((opp as any).created_at 
+                  ? new Date((opp as any).created_at).toISOString().split('T')[0]
+                  : new Date().toISOString().split('T')[0]);
+            
+            // Grant opportunities are accessed via query parameters: /?view=program&opportunityId={id}
+            sitemap += `
+  <url>
+    <loc>${SITE_URL}/?view=program&amp;opportunityId=${opp.id}</loc>
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>`;
+          }
+        }
+      } else {
+        console.warn('[SITEMAP] No grant opportunities found');
+      }
+    } catch (err) {
+      console.error('[SITEMAP ERROR] Exception fetching grant opportunities:', err);
+    }
+
+    // Fetch all admin program posts (additional grant opportunities) from admin_program_posts table
+    try {
+      let { data: adminPosts, error: adminPostError } = await supabase
+        .from('admin_program_posts')
+        .select('id, program_name, created_at, updated_at')
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      
+      if (adminPostError) {
+        console.error('[SITEMAP ERROR] Failed to fetch admin program posts:', adminPostError);
+      } else if (adminPosts && adminPosts.length > 0) {
+        console.log(`[SITEMAP] Found ${adminPosts.length} admin program posts`);
+        for (const post of adminPosts) {
+          if (post.id && post.program_name) {
+            const lastmod = (post as any).updated_at 
+              ? new Date((post as any).updated_at).toISOString().split('T')[0]
+              : ((post as any).created_at 
+                  ? new Date((post as any).created_at).toISOString().split('T')[0]
+                  : new Date().toISOString().split('T')[0]);
+            
+            // Admin program posts are accessed via query parameters: /?view=admin-program&programId={id}
+            sitemap += `
+  <url>
+    <loc>${SITE_URL}/?view=admin-program&amp;programId=${post.id}</loc>
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>`;
+          }
+        }
+      } else {
+        console.warn('[SITEMAP] No admin program posts found');
+      }
+    } catch (err) {
+      console.error('[SITEMAP ERROR] Exception fetching admin program posts:', err);
+    }
+
     // Close sitemap
     sitemap += `
 </urlset>`;

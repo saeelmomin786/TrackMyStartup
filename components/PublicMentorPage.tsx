@@ -279,20 +279,129 @@ const PublicMentorPage: React.FC = () => {
           }
         }
 
-        setMentor(mentorData);
+        // Calculate experience years before setting mentor
+        let startupExperienceYears = 0;
+        let professionalExperienceYears = mentorData.years_of_experience || 0;
 
-        // Load professional experiences for SEO
         if (mentorData.user_id) {
+          // Load professional experiences for calculation and SEO
           try {
             const { data: expData } = await supabase
               .from('mentor_professional_experience')
-              .select('company, position')
+              .select('*')
               .eq('mentor_id', mentorData.user_id)
-              .order('from_date', { ascending: false })
-              .limit(5);
-            if (expData) setProfessionalExperiences(expData);
+              .order('from_date', { ascending: false });
+            
+            if (expData) {
+              setProfessionalExperiences(expData);
+              
+              // Calculate professional experience years
+              const now = new Date();
+              const intervals: Array<{ start: Date; end: Date }> = [];
+              
+              expData.forEach((exp: any) => {
+                if (exp.from_date) {
+                  const startDate = new Date(exp.from_date);
+                  const endDate = exp.currently_working || !exp.to_date 
+                    ? now 
+                    : new Date(exp.to_date);
+                  intervals.push({ start: startDate, end: endDate });
+                }
+              });
+              
+              // Merge overlapping intervals and calculate total months
+              if (intervals.length > 0) {
+                intervals.sort((a, b) => a.start.getTime() - b.start.getTime());
+                const merged: Array<{ start: Date; end: Date }> = [];
+                let current = intervals[0];
+                
+                for (let i = 1; i < intervals.length; i++) {
+                  if (intervals[i].start <= current.end) {
+                    current.end = new Date(Math.max(current.end.getTime(), intervals[i].end.getTime()));
+                  } else {
+                    merged.push(current);
+                    current = intervals[i];
+                  }
+                }
+                merged.push(current);
+                
+                let totalMonths = 0;
+                merged.forEach(interval => {
+                  const months = (interval.end.getFullYear() - interval.start.getFullYear()) * 12 +
+                    (interval.end.getMonth() - interval.start.getMonth());
+                  totalMonths += months;
+                });
+                
+                professionalExperienceYears = Math.floor(totalMonths / 12);
+              }
+            }
           } catch (err) {
-            console.warn('Could not load professional experiences for SEO:', err);
+            console.warn('Could not load professional experiences:', err);
+          }
+
+          // Load founded startups for calculation and SEO
+          try {
+            const { data: foundedData } = await supabase
+              .from('mentor_founded_startups')
+              .select('*')
+              .eq('mentor_id', mentorData.user_id)
+              .order('founded_at', { ascending: false });
+            
+            if (foundedData) {
+              const startupNames = foundedData
+                .map((f: any) => f.startups?.name || (f.notes ? JSON.parse(f.notes)?.startup_name : null))
+                .filter(Boolean);
+              setFoundedStartups(startupNames);
+              
+              // Calculate startup experience years
+              const now = new Date();
+              const intervals: Array<{ start: Date; end: Date }> = [];
+              
+              foundedData.forEach((startup: any) => {
+                if (startup.notes) {
+                  try {
+                    const notesData = JSON.parse(startup.notes);
+                    if (notesData.from_date) {
+                      const startDate = new Date(notesData.from_date);
+                      const endDate = notesData.currently_in_position 
+                        ? now 
+                        : (notesData.to_date ? new Date(notesData.to_date) : now);
+                      intervals.push({ start: startDate, end: endDate });
+                    }
+                  } catch (e) {
+                    // Skip invalid notes
+                  }
+                }
+              });
+              
+              // Merge overlapping intervals and calculate total months
+              if (intervals.length > 0) {
+                intervals.sort((a, b) => a.start.getTime() - b.start.getTime());
+                const merged: Array<{ start: Date; end: Date }> = [];
+                let current = intervals[0];
+                
+                for (let i = 1; i < intervals.length; i++) {
+                  if (intervals[i].start <= current.end) {
+                    current.end = new Date(Math.max(current.end.getTime(), intervals[i].end.getTime()));
+                  } else {
+                    merged.push(current);
+                    current = intervals[i];
+                  }
+                }
+                merged.push(current);
+                
+                let totalMonths = 0;
+                merged.forEach(interval => {
+                  const months = (interval.end.getFullYear() - interval.start.getFullYear()) * 12 +
+                    (interval.end.getMonth() - interval.start.getMonth());
+                  totalMonths += months;
+                });
+                
+                startupExperienceYears = Math.floor(totalMonths / 12);
+              }
+            }
+          } catch (err) {
+            console.warn('Could not load founded startups:', err);
           }
 
           // Load startup assignments for SEO
@@ -316,28 +425,13 @@ const PublicMentorPage: React.FC = () => {
           } catch (err) {
             console.warn('Could not load startup assignments for SEO:', err);
           }
-
-          // Load founded startups for SEO
-          try {
-            const { data: foundedData } = await supabase
-              .from('mentor_founded_startups')
-              .select(`
-                startups (
-                  name
-                )
-              `)
-              .eq('mentor_id', mentorData.user_id)
-              .limit(5);
-            if (foundedData) {
-              const startupNames = foundedData
-                .map((f: any) => f.startups?.name)
-                .filter(Boolean);
-              setFoundedStartups(startupNames);
-            }
-          } catch (err) {
-            console.warn('Could not load founded startups for SEO:', err);
-          }
         }
+
+        // Add calculated experience years to mentor data
+        (mentorData as any).startupExperienceYears = startupExperienceYears;
+        (mentorData as any).professionalExperienceYears = professionalExperienceYears;
+
+        setMentor(mentorData);
       } catch (err: any) {
         console.error('Error loading mentor profile', err);
         setError('Unable to load mentor profile.');

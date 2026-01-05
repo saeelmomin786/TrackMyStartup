@@ -330,7 +330,12 @@ const MentorCardWithDetails: React.FC<{
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Present';
     try {
+      // Handle both ISO timestamp strings and YYYY-MM-DD date strings
       const date = new Date(dateString);
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return dateString;
+      }
       return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
     } catch {
       return dateString;
@@ -766,19 +771,61 @@ const MentorCardWithDetails: React.FC<{
               ) : foundedStartups.length > 0 ? (
                 <div className="space-y-3">
                   {foundedStartups.map((startup) => {
+                    // Get startup name from either startup object or notes
                     let startupName = 'Unknown Startup';
+                    let position = '';
+                    let sector = '';
+                    let fromDate = '';
+                    let toDate = '';
+                    let currentlyInPosition = false;
+                    
                     if (startup.startup?.name) {
                       startupName = startup.startup.name;
-                    } else if (startup.notes) {
+                    }
+                    
+                    if (startup.notes) {
                       try {
                         const notesData = JSON.parse(startup.notes);
                         startupName = notesData.startup_name || startupName;
+                        position = notesData.position || '';
+                        sector = notesData.sector || '';
+                        fromDate = notesData.from_date || '';
+                        // Handle to_date: it can be null, empty string, or a date string
+                        toDate = (notesData.to_date && notesData.to_date !== 'null') ? notesData.to_date : '';
+                        // Check currently_in_position - it should be explicitly true
+                        currentlyInPosition = notesData.currently_in_position === true;
                       } catch {
-                        startupName = startup.notes;
+                        // If notes is not JSON, use it as-is for name
+                        if (!startup.startup?.name) {
+                          startupName = startup.notes;
+                        }
                       }
                     }
+                    
+                    // Fallback to startup object sector if not in notes
+                    if (!sector && startup.startup?.sector) {
+                      sector = startup.startup.sector;
+                    }
 
-                    const foundedDate = formatDate(startup.founded_at);
+                    // Format date range
+                    let dateRange = '';
+                    if (fromDate) {
+                      const fromDateFormatted = formatDate(fromDate);
+                      // If currently in position, show "Present"
+                      if (currentlyInPosition) {
+                        dateRange = `${fromDateFormatted} - Present`;
+                      } else if (toDate && toDate.trim() !== '') {
+                        // If to_date exists and is not empty, show the date range
+                        const toDateFormatted = formatDate(toDate);
+                        dateRange = `${fromDateFormatted} - ${toDateFormatted}`;
+                      } else {
+                        // If no to_date and not currently in position, just show from date
+                        dateRange = fromDateFormatted;
+                      }
+                    } else {
+                      // Fallback to founded_at if no from_date in notes
+                      dateRange = formatDate(startup.founded_at);
+                    }
 
                     return (
                       <div
@@ -788,12 +835,15 @@ const MentorCardWithDetails: React.FC<{
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex-1">
                             <h4 className="font-semibold text-slate-800 text-sm">{startupName}</h4>
-                            {startup.startup?.sector && (
-                              <p className="text-xs text-slate-600 font-medium mt-1">{startup.startup.sector}</p>
+                            {position && (
+                              <p className="text-xs text-slate-600 font-medium mt-1">{position}</p>
+                            )}
+                            {sector && (
+                              <p className="text-xs text-slate-500 mt-0.5">{sector}</p>
                             )}
                           </div>
-                          <div className="text-xs text-slate-500 text-right">
-                            Founded: {foundedDate}
+                          <div className="text-xs text-slate-500 text-right ml-2">
+                            {dateRange}
                           </div>
                         </div>
                       </div>

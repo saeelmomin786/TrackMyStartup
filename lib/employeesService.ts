@@ -485,10 +485,17 @@ class EmployeesService {
     return this.calculateEmployeesByDepartmentManually(startupId);
   }
 
-  async getMonthlySalaryData(startupId: number, year: number): Promise<MonthlySalaryData[]> {
-    // Temporarily use only manual calculation until RPC functions are fixed
-    console.log('🔍 Using manual calculation for monthly data (startup_id:', startupId, ', year:', year, ')');
-    return this.calculateMonthlySalaryDataManually(startupId, year);
+  async getMonthlySalaryData(startupId: number, year: number | null): Promise<MonthlySalaryData[]> {
+    // Use Employee Ledger as the data source for graphs
+    // year = null means "Till Date" (all years)
+    console.log('🔍 Loading monthly data from Employee Ledger (startup_id:', startupId, ', year:', year || 'all (Till Date)', ')');
+    try {
+      return await this.calculateMonthlySalaryDataFromLedger(startupId, year);
+    } catch (error) {
+      console.error('❌ Error loading from Employee Ledger, falling back to manual calculation:', error);
+      // For manual calculation, if year is null, use current year as fallback
+      return this.calculateMonthlySalaryDataManually(startupId, year || new Date().getFullYear());
+    }
   }
 
   // =====================================================
@@ -676,6 +683,119 @@ class EmployeesService {
   }
 
   // =====================================================
+  // MONTHLY SALARY DATA FROM LEDGER
+  // =====================================================
+
+  private async calculateMonthlySalaryDataFromLedger(startupId: number, year: number | null): Promise<MonthlySalaryData[]> {
+    // Query employee_ledger joined with employees to get data for this startup
+    // If year is null, get all data from registration date to current date
+    let query = supabase
+      .from('employee_ledger')
+      .select(`
+        ledger_date,
+        salary,
+        esop_allocated,
+        employees!inner(startup_id)
+      `)
+      .eq('employees.startup_id', startupId);
+    
+    if (year !== null) {
+      const yearStart = `${year}-01-01`;
+      const yearEnd = `${year}-12-31`;
+      query = query.gte('ledger_date', yearStart).lte('ledger_date', yearEnd);
+    } else {
+      // Get startup registration date for all-time data
+      const { data: startupData } = await supabase
+        .from('startups')
+        .select('registration_date')
+        .eq('id', startupId)
+        .single();
+      
+      if (startupData?.registration_date) {
+        const registrationDate = new Date(startupData.registration_date);
+        const yearStart = registrationDate.toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0];
+        query = query.gte('ledger_date', yearStart).lte('ledger_date', today);
+      }
+    }
+    
+    const { data, error } = await query.order('ledger_date', { ascending: true });
+
+    if (error) {
+      console.error('❌ Error querying employee_ledger:', error);
+      throw error;
+    }
+
+    console.log(`✅ Loaded ${data?.length || 0} ledger entries for startup ${startupId} ${year ? `in year ${year}` : 'all-time (Till Date)'}`);
+
+    // If year is null (all years), we need to aggregate by month across all years
+    // Create a map with year-month as key (e.g., "2024-Jan", "2024-Feb", "2023-Jan")
+    const monthlyMap = new Map<string, { salary: number; esop: number }>();
+
+    // Aggregate data by month (and year if all years)
+    if (data && data.length > 0) {
+      data.forEach((entry: any) => {
+        const ledgerDate = new Date(entry.ledger_date);
+        const entryYear = ledgerDate.getFullYear();
+        const monthIndex = ledgerDate.getMonth();
+        const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthName = monthOrder[monthIndex];
+        
+        // If year is null, use year-month as key; otherwise just month
+        const key = year === null ? `${entryYear}-${monthName}` : monthName;
+        
+        const existing = monthlyMap.get(key) || { salary: 0, esop: 0 };
+        monthlyMap.set(key, {
+          salary: existing.salary + (parseFloat(entry.salary) || 0),
+          esop: existing.esop + (parseFloat(entry.esop_allocated) || 0)
+        });
+      });
+    }
+
+    if (year === null) {
+      // For all years, return data sorted by date (year-month)
+      const sortedEntries = Array.from(monthlyMap.entries())
+        .sort((a, b) => {
+          // Parse "2024-Jan" format
+          const [yearA, monthA] = a[0].split('-');
+          const [yearB, monthB] = b[0].split('-');
+          const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const monthIndexA = monthOrder.indexOf(monthA);
+          const monthIndexB = monthOrder.indexOf(monthB);
+          
+          if (yearA !== yearB) {
+            return parseInt(yearA) - parseInt(yearB);
+          }
+          return monthIndexA - monthIndexB;
+        });
+      
+      // Convert ESOP to cumulative allocation over all time
+      let cumulativeEsop = 0;
+      return sortedEntries.map(([key, monthData]) => {
+        cumulativeEsop += monthData.esop;
+        return {
+          month_name: key, // e.g., "2024-Jan"
+          total_salary: monthData.salary,
+          total_esop: cumulativeEsop,
+        };
+      });
+    } else {
+      // For specific year, return 12 months (some may be empty)
+      const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      let cumulativeEsop = 0;
+      return monthOrder.map(label => {
+        const monthData = monthlyMap.get(label) || { salary: 0, esop: 0 };
+        cumulativeEsop += monthData.esop;
+        return {
+          month_name: label,
+          total_salary: monthData.salary,
+          total_esop: cumulativeEsop,
+        };
+      });
+    }
+  }
+
+  // =====================================================
   // MANUAL CALCULATION FALLBACKS
   // =====================================================
 
@@ -739,6 +859,7 @@ class EmployeesService {
     employees.forEach(emp => {
       const joiningDate = new Date(emp.joiningDate);
       const terminationDate = emp.terminationDate ? new Date(emp.terminationDate) : null;
+      console.log(`🔍 Processing employee ${emp.name}: joined ${joiningDate.toISOString().split('T')[0]}, year ${year}`);
       // Determine effective compensation for each month using increment history
       const increments = incrementsMap.get(emp.id) || [];
 
@@ -747,8 +868,26 @@ class EmployeesService {
         const monthStart = new Date(year, idx, 1);
         const monthEnd = new Date(year, idx + 1, 0); // last day of month
 
-        // Active if joined on/before the end of the month and not terminated before the start of the month
-        const activeThisMonth = (joiningDate <= monthEnd && joiningDate.getFullYear() <= year) && (!terminationDate || terminationDate >= monthStart);
+        // Active if:
+        // 1. Joined on/before the end of this month
+        // 2. If joined in the same year, must be from joining month onwards (joining month <= current month)
+        // 3. If joined in a previous year, include all months in requested year
+        // 4. Not terminated before the start of the month
+        const joiningYear = joiningDate.getFullYear();
+        const joiningMonth = joiningDate.getMonth();
+        const joinedInSameYear = joiningYear === year;
+        
+        // If joined in same year, only include from joining month onwards (idx is 0-based, same as getMonth())
+        // If joined in previous year, include all months (they joined before this year)
+        // If joined in future year, exclude (they haven't joined yet)
+        const isMonthAfterJoining = joinedInSameYear ? joiningMonth <= idx : (joiningYear < year);
+        const joinedBeforeOrInThisMonth = joiningDate <= monthEnd;
+        const activeThisMonth = joinedBeforeOrInThisMonth && isMonthAfterJoining && (!terminationDate || terminationDate >= monthStart);
+        
+        if (emp.name && idx === 0) {
+          console.log(`  📅 ${label} (idx=${idx}): joinedMonth=${joiningMonth}, joinedInSameYear=${joinedInSameYear}, isMonthAfterJoining=${isMonthAfterJoining}, joinedBeforeOrInThisMonth=${joinedBeforeOrInThisMonth}, activeThisMonth=${activeThisMonth}`);
+        }
+        
         if (activeThisMonth) {
           const existing = monthlyMap.get(label) || { salary: 0, esop: 0 };
           // pick best applicable record (base vs latest increment whose effective_date <= monthEnd)

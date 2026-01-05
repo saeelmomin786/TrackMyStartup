@@ -18,6 +18,7 @@ import c4 from '../public/c4.svg';
 import c5 from '../public/c5.svg';
 import c6 from '../public/c6.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const TMSVirtualConferenceDetailPage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -224,8 +225,32 @@ const TMSVirtualConferenceDetailPage: React.FC = () => {
     'Investor Relations and Pitch Best Practices'
   ];
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/events/tms-virtual-conference`;
+
   return (
     <>
+      <SEOHead
+        title="TMS Virtual Conference Details - TrackMyStartup | Event Information"
+        description="Detailed information about the TrackMyStartup Virtual Conference. Learn about speakers, sessions, networking opportunities, and how to participate."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Event',
+          name: 'TMS Virtual Conference',
+          description: 'Virtual conference connecting startups, investors, mentors, and advisors',
+          url: canonicalUrl,
+          organizer: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          },
+          eventAttendanceMode: 'https://schema.org/OnlineEventAttendanceMode',
+          eventStatus: 'https://schema.org/EventScheduled'
+        }}
+      />
       <style>{`
         @keyframes fadeUp {
           to {

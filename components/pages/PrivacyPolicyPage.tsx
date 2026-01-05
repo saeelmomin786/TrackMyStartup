@@ -1,13 +1,35 @@
 import React from 'react';
 import { ArrowLeft } from 'lucide-react';
+import SEOHead from '../SEOHead';
 
 const PrivacyPolicyPage: React.FC = () => {
   const handleBack = () => {
     window.history.back();
   };
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/privacy-policy`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Privacy Policy - TrackMyStartup | Data Protection & Privacy"
+        description="Read TrackMyStartup's Privacy Policy to understand how we collect, use, store, and protect your personal data when using our platform."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebPage',
+          '@id': canonicalUrl,
+          name: 'Privacy Policy',
+          description: 'TrackMyStartup Privacy Policy - Data protection and privacy information',
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup'
+          }
+        }}
+      />
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <button
           onClick={handleBack}

@@ -8,6 +8,7 @@ import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsS
 import { toDirectImageUrl } from '../../lib/imageUrl';
 import Footer from '../Footer';
 import Modal from '../ui/Modal';
+import SEOHead from '../SEOHead';
 
 interface OpportunityItem {
   id: string;
@@ -223,8 +224,30 @@ const GrantOpportunitiesPage: React.FC = () => {
     );
   });
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/grant-opportunities`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Grant Opportunities - TrackMyStartup | Funding Programs for Startups"
+        description="Discover grant opportunities, funding programs, and incubation opportunities for startups. Find grants, accelerators, and government funding programs."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebPage',
+          name: 'Grant Opportunities',
+          description: 'Grant opportunities, funding programs, and incubation opportunities for startups',
+          url: canonicalUrl,
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          }
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

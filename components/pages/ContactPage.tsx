@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import Card from '../ui/Card';
 import LogoTMS from '../public/logoTMS.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const ContactPage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -131,8 +132,33 @@ const ContactPage: React.FC = () => {
     }
   ];
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/contact`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Contact Us - TrackMyStartup | Get in Touch"
+        description="Get in touch with TrackMyStartup. Contact our team for support, partnerships, or inquiries about our startup tracking platform."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'ContactPage',
+          mainEntity: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl,
+            contactPoint: {
+              '@type': 'ContactPoint',
+              contactType: 'Customer Service',
+              email: 'support@trackmystartup.com',
+              url: canonicalUrl
+            }
+          }
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

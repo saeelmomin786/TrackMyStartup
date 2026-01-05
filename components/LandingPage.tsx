@@ -8,6 +8,7 @@ import Partner3 from './public/Partner3.svg';
 import Partner4 from './public/Partner4.svg';
 import Partner5 from './public/Partner5.svg';
 import Partner6 from './public/Partner6.svg';
+import SEOHead from './SEOHead';
 
 // Service route mapping
 const getServiceRoute = (roleName: string): string => {
@@ -105,8 +106,35 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
     };
   }, [servicesDropdownOpen, exploreDropdownOpen]);
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}${window.location.pathname}`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="TrackMyStartup - Comprehensive Startup Tracking Platform for Investors, Founders & Professionals"
+        description="Track your startup's growth journey with TrackMyStartup. Monitor compliance, track investments, manage your startup ecosystem. Connect startups, investors, mentors, and advisors in one unified platform."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Organization',
+          name: 'TrackMyStartup',
+          description: 'Comprehensive startup tracking platform for investors, founders, and professionals',
+          url: siteUrl,
+          logo: `${siteUrl}/Track.png`,
+          sameAs: [
+            'https://www.linkedin.com/company/trackmystartup',
+            'https://chat.whatsapp.com/CB32H4laIQ31DuuaF5kRWC'
+          ],
+          contactPoint: {
+            '@type': 'ContactPoint',
+            contactType: 'Customer Service',
+            url: `${siteUrl}/contact`
+          }
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

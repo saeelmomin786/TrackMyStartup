@@ -5,6 +5,7 @@ import Button from '../ui/Button';
 import LogoTMS from '../public/logoTMS.svg';
 import MentorIllustration from '../public/Mentor.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const MentorsServicePage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -90,8 +91,30 @@ const MentorsServicePage: React.FC = () => {
     };
   }, []);
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/services/mentors`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="For Mentors - Connect with Startups & Share Expertise | TrackMyStartup"
+        description="Platform for mentors to connect with startups, share expertise, track mentoring relationships, and build your mentoring portfolio."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Service',
+          serviceType: 'Mentorship Platform',
+          provider: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          },
+          areaServed: 'Worldwide',
+          description: 'Platform for mentors to connect with startups, share expertise, track mentoring relationships, and build your mentoring portfolio.'
+        }}
+      />
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex justify-between items-center">

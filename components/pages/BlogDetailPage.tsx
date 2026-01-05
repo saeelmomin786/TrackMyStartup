@@ -6,6 +6,7 @@ import LogoTMS from '../public/logoTMS.svg';
 import Footer from '../Footer';
 import { blogsService, BlogPost } from '../../lib/blogsService';
 import { toDirectImageUrl } from '../../lib/imageUrl';
+import SEOHead from '../SEOHead';
 
 const BlogDetailPage: React.FC = () => {
   const path = window.location.pathname;
@@ -90,8 +91,47 @@ const BlogDetailPage: React.FC = () => {
     return null; // Will redirect
   }
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/blogs/${blog.slug}`;
+  const blogImage = blog.image_url ? toDirectImageUrl(blog.image_url) : `${siteUrl}/Track.png`;
+  const publishDate = blog.publish_date ? new Date(blog.publish_date).toISOString() : new Date().toISOString();
+  const modifiedDate = blog.updated_at ? new Date(blog.updated_at).toISOString() : publishDate;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title={`${blog.title} | TrackMyStartup Blog`}
+        description={blog.excerpt || blog.content?.substring(0, 160) || 'Read the latest insights on startups, fundraising, mentorship, and ecosystem development.'}
+        canonicalUrl={canonicalUrl}
+        ogImage={blogImage}
+        ogType="article"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'BlogPosting',
+          headline: blog.title,
+          description: blog.excerpt || blog.content?.substring(0, 200),
+          image: blogImage,
+          datePublished: publishDate,
+          dateModified: modifiedDate,
+          author: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          },
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            logo: {
+              '@type': 'ImageObject',
+              url: `${siteUrl}/Track.png`
+            }
+          },
+          mainEntityOfPage: {
+            '@type': 'WebPage',
+            '@id': canonicalUrl
+          }
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

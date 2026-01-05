@@ -1,13 +1,35 @@
 import React from 'react';
 import { ArrowLeft } from 'lucide-react';
+import SEOHead from '../SEOHead';
 
 const RefundPolicyPage: React.FC = () => {
   const handleBack = () => {
     window.history.back();
   };
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/cancellation-refunds`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Cancellation & Refund Policy - TrackMyStartup | Subscription Terms"
+        description="Learn about TrackMyStartup's cancellation and refund policy. Understand subscription cancellation procedures and refund eligibility conditions."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebPage',
+          '@id': canonicalUrl,
+          name: 'Cancellation & Refund Policy',
+          description: 'TrackMyStartup cancellation and refund policy - Subscription terms and refund procedures',
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup'
+          }
+        }}
+      />
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <button
           onClick={handleBack}

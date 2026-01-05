@@ -3,6 +3,7 @@ import { ChevronDown, Calendar, Video, Users, MapPin, Clock } from 'lucide-react
 import Button from '../ui/Button';
 import LogoTMS from '../public/logoTMS.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const TMSVirtualConferencePage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -40,8 +41,32 @@ const TMSVirtualConferencePage: React.FC = () => {
     };
   }, [servicesDropdownOpen, exploreDropdownOpen]);
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/tms-virtual-conference`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="TMS Virtual Conference - TrackMyStartup | Startup Ecosystem Conference"
+        description="Join the TrackMyStartup Virtual Conference. Connect with startups, investors, mentors, and advisors. Learn, network, and discover opportunities in the startup ecosystem."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Event',
+          name: 'TMS Virtual Conference',
+          description: 'Virtual conference connecting startups, investors, mentors, and advisors',
+          url: canonicalUrl,
+          organizer: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          },
+          eventAttendanceMode: 'https://schema.org/OnlineEventAttendanceMode',
+          eventStatus: 'https://schema.org/EventScheduled'
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

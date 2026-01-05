@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import MentorGridCard from '../mentor/MentorGridCard';
 import Card from '../ui/Card';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const UnifiedMentorNetworkPage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -318,8 +319,30 @@ const UnifiedMentorNetworkPage: React.FC = () => {
     loadMentors();
   }, []);
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/unified-mentor-network`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Unified Mentor Network - TrackMyStartup | Connect with Expert Mentors"
+        description="Browse our unified network of expert mentors. Connect with experienced advisors, industry experts, and startup mentors to accelerate your growth journey."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebPage',
+          name: 'Unified Mentor Network',
+          description: 'Network of expert mentors, advisors, and industry experts for startups',
+          url: canonicalUrl,
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          }
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

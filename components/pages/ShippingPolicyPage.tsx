@@ -1,13 +1,35 @@
 import React from 'react';
 import { ArrowLeft } from 'lucide-react';
+import SEOHead from '../SEOHead';
 
 const ShippingPolicyPage: React.FC = () => {
   const handleBack = () => {
     window.history.back();
   };
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/shipping`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Shipping Policy - TrackMyStartup | Service Delivery Information"
+        description="Learn about TrackMyStartup's service delivery policy. As a SaaS platform, all services are delivered electronically with instant access upon subscription."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebPage',
+          '@id': canonicalUrl,
+          name: 'Shipping Policy',
+          description: 'TrackMyStartup shipping and service delivery policy - Electronic service delivery information',
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup'
+          }
+        }}
+      />
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <button
           onClick={handleBack}

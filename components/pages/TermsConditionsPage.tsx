@@ -1,13 +1,35 @@
 import React from 'react';
 import { ArrowLeft } from 'lucide-react';
+import SEOHead from '../SEOHead';
 
 const TermsConditionsPage: React.FC = () => {
   const handleBack = () => {
     window.history.back();
   };
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/terms-conditions`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Terms & Conditions - TrackMyStartup | Platform Terms of Service"
+        description="Read TrackMyStartup's Terms and Conditions. Understand the rules, regulations, and terms of service for using our startup tracking platform."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebPage',
+          '@id': canonicalUrl,
+          name: 'Terms & Conditions',
+          description: 'TrackMyStartup Terms and Conditions - Platform terms of service and usage rules',
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup'
+          }
+        }}
+      />
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <button
           onClick={handleBack}

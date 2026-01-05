@@ -5,6 +5,7 @@ import Button from '../ui/Button';
 import LogoTMS from '../public/logoTMS.svg';
 import IncubationIllustration from '../public/Incubation Center.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const IncubationCentersServicePage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -91,8 +92,30 @@ const IncubationCentersServicePage: React.FC = () => {
     };
   }, []);
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/services/incubation-centers`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="For Incubation Centers - Track Your Startup Portfolio | TrackMyStartup"
+        description="Comprehensive platform for incubation centers to manage startup portfolios, track compliance, monitor growth metrics, and connect with investors and mentors."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Service',
+          serviceType: 'Incubation Center Management Platform',
+          provider: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          },
+          areaServed: 'Worldwide',
+          description: 'Platform for incubation centers to manage startup portfolios, track compliance, monitor growth metrics, and connect with ecosystem partners.'
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

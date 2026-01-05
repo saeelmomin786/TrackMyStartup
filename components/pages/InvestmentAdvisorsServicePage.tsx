@@ -6,6 +6,7 @@ import LogoTMS from '../public/logoTMS.svg';
 // Using import with space - if this causes build issues, rename file to remove space
 import AdvisorIllustration from '../public/InvestmentAdvisor1.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const InvestmentAdvisorsServicePage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -91,8 +92,30 @@ const InvestmentAdvisorsServicePage: React.FC = () => {
     };
   }, []);
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/services/investment-advisors`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="For Investment Advisors - Manage Client Portfolios | TrackMyStartup"
+        description="Comprehensive platform for investment advisors to manage client portfolios, track startup investments, monitor compliance, and provide advisory services."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Service',
+          serviceType: 'Investment Advisory Platform',
+          provider: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          },
+          areaServed: 'Worldwide',
+          description: 'Platform for investment advisors to manage client portfolios, track startup investments, monitor compliance, and provide advisory services.'
+        }}
+      />
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex justify-between items-center">

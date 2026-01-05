@@ -5,6 +5,7 @@ import Button from '../ui/Button';
 import LogoTMS from '../public/logoTMS.svg';
 import InvestorIllustration from '../public/Investor1.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const InvestorsServicePage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -90,8 +91,30 @@ const InvestorsServicePage: React.FC = () => {
     };
   }, []);
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/services/investors`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="For Investors - Discover & Track Startup Investments | TrackMyStartup"
+        description="Powerful platform for investors to discover startups, track investments, manage portfolios, monitor compliance, and connect with founders and advisors."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Service',
+          serviceType: 'Investment Management Platform',
+          provider: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          },
+          areaServed: 'Worldwide',
+          description: 'Platform for investors to discover startups, track investments, manage portfolios, monitor compliance, and connect with ecosystem partners.'
+        }}
+      />
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex justify-between items-center">

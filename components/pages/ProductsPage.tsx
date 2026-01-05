@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowLeft, Package, DollarSign, CheckCircle } from 'lucide-react';
+import SEOHead from '../SEOHead';
 
 const ProductsPage: React.FC = () => {
   const handleBack = () => {
@@ -27,8 +28,30 @@ const ProductsPage: React.FC = () => {
     }
   ];
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/products`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Products - TrackMyStartup | Startup Management Solutions"
+        description="Explore TrackMyStartup's comprehensive suite of products for startup management, compliance tracking, investment management, and ecosystem collaboration."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebPage',
+          name: 'Products',
+          description: 'TrackMyStartup products and solutions for startup management',
+          url: canonicalUrl,
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          }
+        }}
+      />
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <button
           onClick={handleBack}

@@ -3,6 +3,7 @@ import { ChevronDown, Linkedin, CheckCircle, Users, Target, Lightbulb, Handshake
 import Button from '../ui/Button';
 import LogoTMS from '../public/logoTMS.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const AboutPage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -163,8 +164,33 @@ const AboutPage: React.FC = () => {
     // Example: { name: 'Partner Name', logo: '/path/to/logo.png' }
   ];
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/about`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="About Us - TrackMyStartup | Our Mission, Vision & Journey"
+        description="Learn about TrackMyStartup's mission to transform startup tracking and ecosystem collaboration. Discover our journey, core values, and commitment to empowering startups, investors, mentors, and advisors."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'AboutPage',
+          mainEntity: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            description: 'Comprehensive startup tracking platform for investors, founders, and professionals',
+            url: siteUrl,
+            foundingDate: '2025',
+            sameAs: [
+              'https://www.linkedin.com/company/trackmystartup',
+              'https://chat.whatsapp.com/CB32H4laIQ31DuuaF5kRWC'
+            ]
+          }
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

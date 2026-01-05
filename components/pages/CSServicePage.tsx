@@ -5,6 +5,7 @@ import Button from '../ui/Button';
 import LogoTMS from '../public/logoTMS.svg';
 import CSIllustration from '../public/CA1.svg';
 import Footer from '../Footer';
+import SEOHead from '../SEOHead';
 
 const CSServicePage: React.FC = () => {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
@@ -90,8 +91,30 @@ const CSServicePage: React.FC = () => {
     };
   }, []);
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/services/cs`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="For CS - Corporate Secretarial & Compliance Services | TrackMyStartup"
+        description="Comprehensive platform for Company Secretaries to manage corporate secretarial services, track compliance, handle regulatory filings, and provide governance advisory."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Service',
+          serviceType: 'Company Secretary Services Platform',
+          provider: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            url: siteUrl
+          },
+          areaServed: 'Worldwide',
+          description: 'Platform for Company Secretaries to manage corporate secretarial services, track compliance, handle regulatory filings, and provide governance advisory.'
+        }}
+      />
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex justify-between items-center">

@@ -6,6 +6,7 @@ import LogoTMS from '../public/logoTMS.svg';
 import Footer from '../Footer';
 import { blogsService, BlogPost } from '../../lib/blogsService';
 import { toDirectImageUrl } from '../../lib/imageUrl';
+import SEOHead from '../SEOHead';
 
 
 const BlogsPage: React.FC = () => {
@@ -108,8 +109,33 @@ const BlogsPage: React.FC = () => {
     setEmail('');
   };
 
+  const siteUrl = 'https://trackmystartup.com';
+  const canonicalUrl = `${siteUrl}/blogs`;
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <SEOHead
+        title="Blog - TrackMyStartup | Startup Insights, Fundraising Tips & Ecosystem News"
+        description="Read the latest insights on startups, fundraising, mentorship, compliance, and ecosystem development. Expert articles, guides, and news from TrackMyStartup."
+        canonicalUrl={canonicalUrl}
+        ogImage={`${siteUrl}/Track.png`}
+        ogType="website"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'Blog',
+          name: 'TrackMyStartup Blog',
+          description: 'Startup insights, fundraising tips, and ecosystem news',
+          url: canonicalUrl,
+          publisher: {
+            '@type': 'Organization',
+            name: 'TrackMyStartup',
+            logo: {
+              '@type': 'ImageObject',
+              url: `${siteUrl}/Track.png`
+            }
+          }
+        }}
+      />
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">

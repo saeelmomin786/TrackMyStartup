@@ -22,7 +22,73 @@
         {
           "type": "header",
           "key": "user-agent",
-          "value": "(?i).*(googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|sogou|exabot|facebot|ia_archiver|twitterbot|linkedinbot|applebot|facebookexternalhit|rogerbot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|megaindex|blexbot|crawler|spider|bot).*"
+          "value": "(?i)googlebot"
+        }
+      ],
+      "destination": "/api/prerender-direct?path=$1"
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i)bingbot"
+        }
+      ],
+      "destination": "/api/prerender-direct?path=$1"
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i)slurp"
+        }
+      ],
+      "destination": "/api/prerender-direct?path=$1"
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i)duckduckbot"
+        }
+      ],
+      "destination": "/api/prerender-direct?path=$1"
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i)facebookexternalhit"
+        }
+      ],
+      "destination": "/api/prerender-direct?path=$1"
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i)twitterbot"
+        }
+      ],
+      "destination": "/api/prerender-direct?path=$1"
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i)linkedinbot"
         }
       ],
       "destination": "/api/prerender-direct?path=$1"

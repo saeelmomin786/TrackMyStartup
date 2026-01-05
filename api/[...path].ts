@@ -87,6 +87,39 @@ async function generatePageHTML(pathname: string): Promise<string> {
   } else if (pathname === '/contact') {
     title = 'Contact Us - TrackMyStartup | Get in Touch';
     description = 'Get in touch with TrackMyStartup. Contact our team for support, partnerships, or inquiries.';
+  } else if (pathname === '/products') {
+    title = 'Products - TrackMyStartup | Startup Management Solutions';
+    description = 'Explore TrackMyStartup products and solutions for startup management, compliance tracking, and growth tools.';
+  } else if (pathname === '/diagnostic') {
+    title = 'Startup Diagnostic - TrackMyStartup | Assess Your Startup Health';
+    description = 'Use our startup diagnostic tool to assess your startup\'s health, compliance status, and growth potential.';
+  } else if (pathname === '/grant-opportunities') {
+    title = 'Grant Opportunities - TrackMyStartup | Funding & Grants for Startups';
+    description = 'Discover grant opportunities and funding programs for startups. Find grants, incubator programs, and investment opportunities.';
+  } else if (pathname === '/blogs') {
+    title = 'Blog - TrackMyStartup | Startup Insights & Resources';
+    description = 'Read the latest startup insights, resources, and articles from TrackMyStartup. Learn about startup growth, funding, and best practices.';
+  } else if (pathname === '/events') {
+    title = 'Events - TrackMyStartup | Startup Events & Conferences';
+    description = 'Discover startup events, conferences, and networking opportunities. Join TrackMyStartup events and connect with the startup community.';
+  } else if (pathname === '/tms-virtual-conference') {
+    title = 'TMS Virtual Conference - TrackMyStartup | Startup Conference';
+    description = 'Join the TrackMyStartup Virtual Conference. Connect with startups, investors, mentors, and industry experts.';
+  } else if (pathname === '/events/tms-virtual-conference') {
+    title = 'TMS Virtual Conference - TrackMyStartup | Startup Conference';
+    description = 'Join the TrackMyStartup Virtual Conference. Connect with startups, investors, mentors, and industry experts.';
+  } else if (pathname === '/privacy-policy') {
+    title = 'Privacy Policy - TrackMyStartup | Data Protection & Privacy';
+    description = 'Read TrackMyStartup\'s privacy policy. Learn how we protect your data and respect your privacy.';
+  } else if (pathname === '/cancellation-refunds') {
+    title = 'Cancellation & Refund Policy - TrackMyStartup';
+    description = 'TrackMyStartup cancellation and refund policy. Learn about our refund process and cancellation terms.';
+  } else if (pathname === '/shipping') {
+    title = 'Shipping Policy - TrackMyStartup';
+    description = 'TrackMyStartup shipping policy. Learn about our shipping terms and delivery information.';
+  } else if (pathname === '/terms-conditions') {
+    title = 'Terms & Conditions - TrackMyStartup | Terms of Service';
+    description = 'Read TrackMyStartup\'s terms and conditions. Understand our terms of service and usage policies.';
   } else if (pathname === '/unified-mentor-network') {
     title = 'Unified Mentor Network - TrackMyStartup | Connect with Expert Mentors';
     description = 'Browse our unified network of expert mentors. Connect with experienced advisors, industry experts, and startup mentors.';
@@ -229,6 +262,14 @@ async function generatePageHTML(pathname: string): Promise<string> {
       'incubation-centers': {
         title: 'Incubation Center Services - TrackMyStartup | Startup Incubation Platform',
         description: 'Incubation center services. Manage cohorts, track startup progress, and facilitate growth.'
+      },
+      'ca': {
+        title: 'CA Services - TrackMyStartup | Chartered Accountant Services',
+        description: 'Chartered Accountant services for startups. Get expert financial advice, tax planning, and compliance support.'
+      },
+      'cs': {
+        title: 'CS Services - TrackMyStartup | Company Secretary Services',
+        description: 'Company Secretary services for startups. Get expert corporate governance, compliance, and legal support.'
       }
     };
     
@@ -309,12 +350,39 @@ async function generatePageHTML(pathname: string): Promise<string> {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Get path from query params (catch-all route)
-    // When rewrite routes /about to /api/about, the path becomes ['about']
-    const pathArray = req.query.path as string[] || [];
-    let pathname = '/' + pathArray.join('/');
+    // When rewrite routes /about to /api/about, Vercel passes it as query param '...path': 'about'
+    // The '...path' is Vercel's way of handling catch-all routes
     
+    let pathname = '/';
+    
+    // Check for '...path' (Vercel's catch-all query param name)
+    const catchAllPath = req.query['...path'] || req.query.path;
+    
+    if (catchAllPath) {
+      // Handle array (multiple path segments like ['about', 'sub'])
+      if (Array.isArray(catchAllPath)) {
+        pathname = '/' + (catchAllPath as string[]).join('/');
+      } else {
+        // Handle string (single path segment like 'about')
+        pathname = '/' + (catchAllPath as string);
+      }
+    } else {
+      // Fallback: try to extract from URL pathname
+      // If rewrite routes /about to /api/about, the pathname is /api/about
+      const urlPath = req.url?.split('?')[0] || '';
+      if (urlPath.startsWith('/api/')) {
+        pathname = urlPath.replace('/api', '') || '/';
+      }
+    }
+    
+    // Ensure pathname starts with / and clean it up
+    if (!pathname.startsWith('/')) {
+      pathname = '/' + pathname;
+    }
+    // Remove double slashes
+    pathname = pathname.replace(/\/+/g, '/');
     // Handle root path
-    if (pathname === '/' || pathname === '//') {
+    if (pathname === '//' || pathname === '') {
       pathname = '/';
     }
     
@@ -327,7 +395,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Always log for debugging (helps diagnose issues)
     console.log('[CATCH-ALL] Request:', {
       pathname,
-      pathArray,
+      catchAllPath: req.query['...path'],
+      pathQuery: req.query.path,
+      pathQueryType: Array.isArray(req.query['...path']) ? 'array' : typeof req.query['...path'],
       originalQuery: req.query,
       userAgent: userAgent.substring(0, 100),
       isCrawler: isCrawlerRequest,

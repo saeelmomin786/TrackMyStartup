@@ -37,3 +37,4 @@ GRANT EXECUTE ON FUNCTION get_startup_financial_summary(INTEGER) TO anon;
 COMMENT ON FUNCTION get_startup_financial_summary(INTEGER) IS 
 'Returns financial summary for a startup. Available funds = Total Funding + Total Revenue - Total Expenditure';
 
+

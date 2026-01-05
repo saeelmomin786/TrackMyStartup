@@ -388,7 +388,8 @@ async function generatePageHTML(pathname: string): Promise<string> {
       <p class="loading-note">Loading full content...</p>
     </div>
   </div>
-  <script type="module" src="/index.tsx"></script>
+  <!-- Script tag removed for crawlers - they don't need JavaScript -->
+  <!-- Normal users will get the React app from the main index.html -->
   <noscript>
     <div class="prerender-content">
       <h1>TrackMyStartup</h1>
@@ -440,7 +441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <p>Please enable JavaScript to view this site.</p>
     </div>
   </div>
-  <script type="module" src="/index.tsx"></script>
+  <!-- Script tag removed for crawlers -->
 </body>
 </html>`;
     

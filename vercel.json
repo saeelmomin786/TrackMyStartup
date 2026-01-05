@@ -25,7 +25,7 @@
           "value": "(?i).*(googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|sogou|exabot|facebot|ia_archiver|twitterbot|linkedinbot|applebot|facebookexternalhit|rogerbot|semrushbot|ahrefsbot).*"
         }
       ],
-      "destination": "/api/prerender?path=/$1"
+      "destination": "https://service.prerender.io/https://trackmystartup.com/$1"
     }
   ]
 }

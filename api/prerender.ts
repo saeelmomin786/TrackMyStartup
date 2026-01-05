@@ -38,7 +38,7 @@ async function generatePageHTML(pathname: string): Promise<string> {
     };
   } else if (pathname === '/about') {
     title = 'About Us - TrackMyStartup | Our Mission, Vision & Journey';
-    description = 'Learn about TrackMyStartup\'s mission to transform startup tracking and ecosystem collaboration.';
+    description = 'Track My Startup is a comprehensive platform designed to support early-stage startups and mentor first-time founders. We bridge the gap between academia and industry through startup facilitation, research collaboration, student entrepreneurship, and professional training programs.';
   } else if (pathname === '/contact') {
     title = 'Contact Us - TrackMyStartup | Get in Touch';
     description = 'Get in touch with TrackMyStartup. Contact our team for support, partnerships, or inquiries.';
@@ -385,7 +385,9 @@ async function generatePageHTML(pathname: string): Promise<string> {
     <div class="prerender-content">
       <h1>${escapedTitle}</h1>
       <p>${escapedDescription}</p>
-      <p class="loading-note">Loading full content...</p>
+      <div style="margin-top: 2rem; padding: 1.5rem; background: white; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <p style="color: #64748b; font-size: 0.875rem;">This page contains comprehensive information about TrackMyStartup, including our mission, vision, values, and journey. The full interactive content is loading...</p>
+      </div>
     </div>
   </div>
   <!-- Script tag removed for crawlers - they don't need JavaScript -->
@@ -407,7 +409,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const pathname = req.query.path as string || '/';
     const userAgent = req.query.userAgent as string || req.headers['user-agent'] || '';
     
-    console.log('[PRERENDER] Generating HTML for:', pathname, 'User-Agent:', userAgent);
+    // Log for debugging
+    console.log('[PRERENDER] Request received:', {
+      pathname,
+      userAgent: userAgent.substring(0, 100), // Log first 100 chars
+      method: req.method,
+      query: req.query,
+      headers: {
+        'user-agent': req.headers['user-agent']?.substring(0, 100)
+      }
+    });
     
     // Generate HTML for the page
     const html = await generatePageHTML(pathname);
@@ -416,6 +427,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
     res.setHeader('X-Robots-Tag', 'index, follow');
+    res.setHeader('X-Prerender-Served', 'true'); // Debug header
     
     // Return HTML
     return res.status(200).send(html);

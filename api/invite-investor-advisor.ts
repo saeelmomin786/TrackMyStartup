@@ -140,7 +140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
         if (!listError && usersData?.users) {
-          existingUser = usersData.users.find(u => u.email?.toLowerCase() === contactEmail.toLowerCase());
+          existingUser = usersData.users.find((u: any) => u.email?.toLowerCase() === contactEmail.toLowerCase());
         }
       } catch (authError: any) {
         console.log('No existing user in auth (this is OK for new users):', authError.message);

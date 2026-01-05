@@ -264,7 +264,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.warn('[SITEMAP] startups_public view missing updated_at, trying without it');
         const viewRetry = await supabase
           .from('startups_public')
-          .select('id, name')
+          .select('id, name, updated_at')
           .limit(1000);
         startups = viewRetry.data;
         startupError = viewRetry.error;
@@ -438,7 +438,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .from('investment_advisor_profiles')
           .select('user_id, firm_name, advisor_name, updated_at')
           .limit(1000);
-        advisors = fallback.data;
+        // Map to expected format
+        advisors = fallback.data?.map(advisor => ({
+          user_id: advisor.user_id,
+          display_name: advisor.firm_name || advisor.advisor_name || 'Investment Advisor',
+          updated_at: advisor.updated_at
+        })) || [];
         advisorError = fallback.error;
       }
 

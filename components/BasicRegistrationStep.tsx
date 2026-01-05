@@ -41,6 +41,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
     firmName: '',
     investmentAdvisorCode: ''
   });
+  const [isAdvisorCodeAutoFilled, setIsAdvisorCodeAutoFilled] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -74,6 +75,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
         setFormData(prev => {
           // Only set if not already set
           if (!prev.investmentAdvisorCode) {
+            setIsAdvisorCodeAutoFilled(true); // Mark as auto-filled
             return { ...prev, investmentAdvisorCode: advisorCode };
           }
           return prev;
@@ -602,16 +604,32 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
 
         {/* Investment Advisor Code - Only show for Investor and Startup roles */}
         {(formData.role === 'Investor' || formData.role === 'Startup') && (
-          <Input
-            label="Investment Advisor Code (Optional)"
-            id="investmentAdvisorCode"
-            name="investmentAdvisorCode"
-            type="text"
-            placeholder="IA-XXXXXX"
-            value={formData.investmentAdvisorCode}
-            onChange={(e) => handleInputChange('investmentAdvisorCode', e.target.value)}
-            helpText="Enter your Investment Advisor's code if you have one"
-          />
+          <div>
+            <Input
+              label="Investment Advisor Code"
+              id="investmentAdvisorCode"
+              name="investmentAdvisorCode"
+              type="text"
+              placeholder="IA-XXXXXX"
+              value={formData.investmentAdvisorCode}
+              onChange={(e) => {
+                handleInputChange('investmentAdvisorCode', e.target.value);
+                setIsAdvisorCodeAutoFilled(false); // User is manually editing
+              }}
+              disabled={isAdvisorCodeAutoFilled}
+              className={isAdvisorCodeAutoFilled ? 'bg-slate-50 cursor-not-allowed' : ''}
+              helpText={
+                isAdvisorCodeAutoFilled 
+                  ? "This code was automatically set based on the domain you're registering from"
+                  : "Enter your Investment Advisor's code if you have one"
+              }
+            />
+            {isAdvisorCodeAutoFilled && (
+              <p className="mt-1 text-xs text-green-600">
+                ✓ Code automatically set from domain
+              </p>
+            )}
+          </div>
         )}
 
         {/* Startup Name - Only show if role is Startup */}

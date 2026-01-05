@@ -409,13 +409,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
     
-    // If not a crawler, return 404 so Vercel serves the React app normally
+    // If not a crawler, we shouldn't be here (rewrite should only route crawlers)
+    // But if we are, return 404 so Vercel serves the React app normally
     if (!isCrawlerRequest) {
-      console.log('[CATCH-ALL] Not a crawler, returning 404');
-      return res.status(404).json({ 
-        error: 'Not found',
-        message: 'This API route is only for crawlers. Regular users should access the site normally.'
-      });
+      console.log('[CATCH-ALL] Not a crawler, returning 404 - this should not happen if rewrite is working correctly');
+      return res.status(404).send('Not found');
     }
     
     console.log('[CATCH-ALL] Crawler detected, generating HTML for:', pathname);

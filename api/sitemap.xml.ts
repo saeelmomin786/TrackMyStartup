@@ -379,17 +379,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Fetch all investors from public table (secure and fast)
     try {
-      // Try new public table first
+      // Try main table first (investors_public_table might not exist)
       let { data: investors, error: investorError } = await supabase
-        .from('investors_public_table')
+        .from('investor_profiles')
         .select('user_id, investor_name, updated_at')
         .limit(1000);
       
-      // Fallback to main table if public table doesn't exist yet
+      // Try public table if main table fails
       if (investorError && investorError.message.includes('does not exist')) {
-        console.warn('[SITEMAP] investors_public_table not found, trying investor_profiles');
+        console.warn('[SITEMAP] investor_profiles not found, trying investors_public_table');
         const fallback = await supabase
-          .from('investor_profiles')
+          .from('investors_public_table')
           .select('user_id, investor_name, updated_at')
           .limit(1000);
         investors = fallback.data;
@@ -480,7 +480,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       let { data: blogs, error: blogError } = await supabase
         .from('blogs')
-        .select('slug, publish_date, updated_at')
+        .select('slug, publish_date, created_at')
         .order('publish_date', { ascending: false })
         .limit(1000);
       
@@ -490,8 +490,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.log(`[SITEMAP] Found ${blogs.length} blog posts`);
         for (const blog of blogs) {
           if (blog.slug) {
-            const lastmod = (blog as any).updated_at 
-              ? new Date((blog as any).updated_at).toISOString().split('T')[0]
+            // Use created_at instead of updated_at (updated_at doesn't exist)
+            const lastmod = (blog as any).created_at 
+              ? new Date((blog as any).created_at).toISOString().split('T')[0]
               : (blog.publish_date 
                   ? new Date(blog.publish_date).toISOString().split('T')[0]
                   : new Date().toISOString().split('T')[0]);
@@ -553,7 +554,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       let { data: adminPosts, error: adminPostError } = await supabase
         .from('admin_program_posts')
-        .select('id, program_name, created_at, updated_at')
+        .select('id, program_name, created_at')
         .order('created_at', { ascending: false })
         .limit(1000);
       
@@ -563,11 +564,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.log(`[SITEMAP] Found ${adminPosts.length} admin program posts`);
         for (const post of adminPosts) {
           if (post.id && post.program_name) {
-            const lastmod = (post as any).updated_at 
-              ? new Date((post as any).updated_at).toISOString().split('T')[0]
-              : ((post as any).created_at 
-                  ? new Date((post as any).created_at).toISOString().split('T')[0]
-                  : new Date().toISOString().split('T')[0]);
+            // Use created_at instead of updated_at (updated_at doesn't exist)
+            const lastmod = (post as any).created_at 
+              ? new Date((post as any).created_at).toISOString().split('T')[0]
+              : new Date().toISOString().split('T')[0];
             
             // Admin program posts are accessed via query parameters: /?view=admin-program&programId={id}
             sitemap += `

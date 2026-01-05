@@ -215,10 +215,23 @@ export default async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     
     // Extract pathname from URL
-    // When rewrite routes /about to /api/crawler-handler, we need to get the original path
+    // When rewrite routes /about to /api/crawler-handler?path=/about, we need to get the original path
     // Check if there's a query parameter with the path
-    const pathFromQuery = url.searchParams.get('path');
-    const pathname = pathFromQuery || url.pathname.replace('/api/crawler-handler', '') || '/';
+    let pathFromQuery = url.searchParams.get('path');
+    
+    // Ensure path starts with / and handle edge cases
+    if (pathFromQuery) {
+      // Remove leading slash if present (query param might have it)
+      pathFromQuery = pathFromQuery.startsWith('/') ? pathFromQuery : '/' + pathFromQuery;
+    }
+    
+    // Fallback: try to extract from pathname
+    let pathname = pathFromQuery || url.pathname.replace('/api/crawler-handler', '') || '/';
+    
+    // Ensure pathname starts with /
+    if (!pathname.startsWith('/')) {
+      pathname = '/' + pathname;
+    }
     
     // Get user agent
     const userAgent = req.headers.get('user-agent');
@@ -226,20 +239,21 @@ export default async function handler(req: Request): Promise<Response> {
     // Check if crawler
     const isCrawlerRequest = isCrawler(userAgent);
     
-    // Log for debugging (only in development)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[EDGE FUNCTION] Request:', {
-        pathname,
-        originalPath: url.pathname,
-        pathFromQuery,
-        userAgent: userAgent?.substring(0, 100),
-        isCrawler: isCrawlerRequest
-      });
-    }
+    // Always log for debugging (helps diagnose issues)
+    console.log('[EDGE FUNCTION] Request:', {
+      pathname,
+      originalPath: url.pathname,
+      pathFromQuery,
+      fullUrl: req.url,
+      userAgent: userAgent?.substring(0, 100),
+      isCrawler: isCrawlerRequest,
+      allHeaders: Object.fromEntries(req.headers.entries())
+    });
     
     // If not a crawler, return 404 so Vercel serves React app normally
     // This ensures regular users are NOT affected
     if (!isCrawlerRequest) {
+      console.log('[EDGE FUNCTION] Not a crawler, returning 404');
       return new Response('Not a crawler', { 
         status: 404,
         headers: {
@@ -247,6 +261,8 @@ export default async function handler(req: Request): Promise<Response> {
         }
       });
     }
+    
+    console.log('[EDGE FUNCTION] Crawler detected, generating HTML for:', pathname);
     
     // Generate HTML for crawlers
     const html = await generatePageHTML(pathname);

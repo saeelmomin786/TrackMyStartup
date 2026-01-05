@@ -311,7 +311,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Get path from query params (catch-all route)
     // When rewrite routes /about to /api/about, the path becomes ['about']
     const pathArray = req.query.path as string[] || [];
-    const pathname = '/' + pathArray.join('/');
+    let pathname = '/' + pathArray.join('/');
+    
+    // Handle root path
+    if (pathname === '/' || pathname === '//') {
+      pathname = '/';
+    }
     
     // Get user agent
     const userAgent = req.headers['user-agent'] || '';
@@ -319,22 +324,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Check if crawler
     const isCrawlerRequest = isCrawler(userAgent);
     
-    // Log for debugging
+    // Always log for debugging (helps diagnose issues)
     console.log('[CATCH-ALL] Request:', {
       pathname,
+      pathArray,
+      originalQuery: req.query,
       userAgent: userAgent.substring(0, 100),
       isCrawler: isCrawlerRequest,
       method: req.method,
-      query: req.query
+      url: req.url,
+      headers: {
+        'user-agent': req.headers['user-agent'],
+        'referer': req.headers['referer']
+      }
     });
     
     // If not a crawler, return 404 so Vercel serves the React app normally
     if (!isCrawlerRequest) {
+      console.log('[CATCH-ALL] Not a crawler, returning 404');
       return res.status(404).json({ 
         error: 'Not found',
         message: 'This API route is only for crawlers. Regular users should access the site normally.'
       });
     }
+    
+    console.log('[CATCH-ALL] Crawler detected, generating HTML for:', pathname);
     
     // Generate HTML for crawlers
     const html = await generatePageHTML(pathname);

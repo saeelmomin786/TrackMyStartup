@@ -101,18 +101,19 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Failed to generate Google Meet link' });
   }
 
-  if (response.data.id) {
-    try {
-      await calendar.events.delete({
-        calendarId: 'primary',
-        eventId: response.data.id
-      });
-    } catch (deleteError) {
-      console.warn('Failed to delete temporary event:', deleteError);
-    }
-  }
+  // IMPORTANT: Do NOT delete the temporary event!
+  // When a Google Calendar event is deleted, the associated Meet link becomes invalid.
+  // The Meet link is tied to the event, so we must keep the event for the link to work.
+  // The temporary event will be cleaned up later or can be manually removed.
+  // Alternatively, use the Meet link from the actual calendar event created in SchedulingModal.
+  
+  // Store event ID for potential cleanup (optional)
+  const eventId = response.data.id;
 
-  return res.status(200).json({ meetLink });
+  return res.status(200).json({ 
+    meetLink,
+    eventId: eventId // Return event ID in case we want to clean it up later
+  });
 }
 
 // Create Google Calendar Event

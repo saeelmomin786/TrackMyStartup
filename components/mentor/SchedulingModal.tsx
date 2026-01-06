@@ -83,16 +83,96 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
     setError(null);
 
     try {
-      // Generate Google Meet link first
-      let meetLink: string | undefined;
-      try {
-        meetLink = await googleCalendarService.generateGoogleMeetLink();
-      } catch (err) {
-        console.warn('Failed to generate Google Meet link, continuing without it:', err);
+      // Get mentor and startup emails for calendar event
+      const { data: mentorUser } = await supabase
+        .from('users')
+        .select('email')
+        .eq('id', mentorId)
+        .single();
+
+      const { data: startupData } = await supabase
+        .from('startups')
+        .select('user_id')
+        .eq('id', startupId)
+        .single();
+
+      let startupEmail: string | null = null;
+      if (startupData?.user_id) {
+        const { data: startupUser } = await supabase
+          .from('users')
+          .select('email')
+          .eq('id', startupData.user_id)
+          .single();
+        startupEmail = startupUser?.email || null;
       }
 
-      // Book the session
-      await mentorSchedulingService.bookSession(
+      // Build attendees list
+      const attendees: Array<{ email: string }> = [];
+      if (mentorUser?.email) {
+        attendees.push({ email: mentorUser.email });
+      }
+      if (startupEmail) {
+        attendees.push({ email: startupEmail });
+      }
+
+      // Create calendar event FIRST to get a valid Meet link
+      // This ensures the Meet link is tied to a permanent event, not a temporary one
+      let meetLink: string | undefined;
+      let calendarEventId: string | undefined;
+      
+      if (attendees.length > 0) {
+        try {
+          const startDateTime = new Date(`${selectedSlot.date}T${selectedSlot.time}`);
+          const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
+
+          const calendarResult = await googleCalendarService.createCalendarEventWithServiceAccount(
+            {
+              summary: 'Mentoring Session',
+              description: 'Mentoring session scheduled through Track My Startup',
+              start: {
+                dateTime: startDateTime.toISOString(),
+                timeZone: 'UTC'
+              },
+              end: {
+                dateTime: endDateTime.toISOString(),
+                timeZone: 'UTC'
+              }
+            },
+            attendees
+            // Don't pass meetLink - let calendar generate it
+          );
+
+          // Use the Meet link from the actual calendar event (this is the valid one)
+          meetLink = calendarResult.meetLink;
+          calendarEventId = calendarResult.eventId;
+          
+          // Validate Meet link format
+          if (meetLink && !googleCalendarService.isValidMeetLink(meetLink)) {
+            console.warn('⚠️ Calendar event Meet link has invalid format:', meetLink);
+            // Still use it, but log warning
+          }
+          
+          console.log('✅ Calendar event created with valid Meet link:', meetLink);
+        } catch (err) {
+          console.warn('Failed to create Google Calendar event, will try fallback:', err);
+          // Fallback: Try to generate Meet link separately
+          try {
+            meetLink = await googleCalendarService.generateGoogleMeetLink();
+          } catch (fallbackErr) {
+            console.warn('Failed to generate Google Meet link, continuing without it:', fallbackErr);
+          }
+        }
+      } else {
+        // No attendees, try to generate Meet link anyway
+        try {
+          meetLink = await googleCalendarService.generateGoogleMeetLink();
+        } catch (err) {
+          console.warn('Failed to generate Google Meet link, continuing without it:', err);
+        }
+      }
+
+      // Book the session with the valid Meet link from calendar event
+      const session = await mentorSchedulingService.bookSession(
         mentorId,
         startupId,
         assignmentId,
@@ -103,67 +183,16 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
         meetLink
       );
 
-      // Create calendar event in our centralized calendar with both mentor and startup as attendees
-      try {
-        // Get mentor and startup emails
-        const { data: mentorUser } = await supabase
-          .from('users')
-          .select('email')
-          .eq('id', mentorId)
-          .single();
-
-        const { data: startupData } = await supabase
-          .from('startups')
-          .select('user_id')
-          .eq('id', startupId)
-          .single();
-
-        let startupEmail: string | null = null;
-        if (startupData?.user_id) {
-          const { data: startupUser } = await supabase
-            .from('users')
-            .select('email')
-            .eq('id', startupData.user_id)
-            .single();
-          startupEmail = startupUser?.email || null;
+      // Update session with calendar event ID if we have it
+      if (calendarEventId && session.id) {
+        try {
+          await mentorSchedulingService.updateSession(session.id, {
+            google_calendar_event_id: calendarEventId,
+            google_calendar_synced: true
+          });
+        } catch (err) {
+          console.warn('Failed to update session with calendar event ID:', err);
         }
-
-        // Build attendees list
-        const attendees: Array<{ email: string }> = [];
-        if (mentorUser?.email) {
-          attendees.push({ email: mentorUser.email });
-        }
-        if (startupEmail) {
-          attendees.push({ email: startupEmail });
-        }
-
-        // Create event in centralized calendar using service account
-        if (attendees.length > 0 && meetLink) {
-          const startDateTime = new Date(`${selectedSlot.date}T${selectedSlot.time}`);
-          const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
-
-          await googleCalendarService.createCalendarEventWithServiceAccount(
-            {
-              summary: 'Mentoring Session',
-              description: `Mentoring session scheduled through Track My Startup\n\nGoogle Meet Link: ${meetLink}`,
-              start: {
-                dateTime: startDateTime.toISOString(),
-                timeZone: 'UTC'
-              },
-              end: {
-                dateTime: endDateTime.toISOString(),
-                timeZone: 'UTC'
-              }
-            },
-            attendees,
-            meetLink // Use the same Meet link from dashboard
-          );
-
-          console.log('✅ Calendar event created in centralized calendar with attendees:', attendees);
-        }
-      } catch (err) {
-        console.warn('Failed to create Google Calendar event, continuing:', err);
-        // Don't block booking if calendar creation fails
       }
 
       onSessionBooked();

@@ -107,6 +107,16 @@ class GoogleCalendarService {
     }
   }
 
+  // Validate Google Meet link format
+  isValidMeetLink(link: string | null | undefined): boolean {
+    if (!link) return false;
+    // Google Meet links should be in format: https://meet.google.com/xxx-xxxx-xxx
+    // or https://meet.google.com/xxx-yyyy-zzz
+    // Also accept links with query parameters: https://meet.google.com/xxx-xxxx-xxx?param=value
+    const meetLinkPattern = /^https:\/\/meet\.google\.com\/[a-z0-9-]+(\?.*)?$/i;
+    return meetLinkPattern.test(link);
+  }
+
   // Generate Google Meet link (using our API credentials)
   async generateGoogleMeetLink(): Promise<string> {
     try {
@@ -122,12 +132,19 @@ class GoogleCalendarService {
       }
 
       const data = await response.json();
-      return data.meetLink;
+      const meetLink = data.meetLink;
+      
+      // Validate the Meet link format
+      if (meetLink && this.isValidMeetLink(meetLink)) {
+        return meetLink;
+      } else {
+        console.warn('Generated Meet link has invalid format:', meetLink);
+        throw new Error('Invalid Meet link format received');
+      }
     } catch (error) {
       console.error('Error generating Google Meet link:', error);
-      // Fallback: Generate a basic meet link format
-      const randomId = Math.random().toString(36).substring(2, 15);
-      return `https://meet.google.com/${randomId}`;
+      // Don't return a fake link - throw error instead
+      throw new Error('Failed to generate valid Google Meet link. Please try again.');
     }
   }
 

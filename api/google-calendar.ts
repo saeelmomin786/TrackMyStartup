@@ -409,39 +409,31 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
       : (event.description || 'Mentoring session scheduled through Track My Startup'),
     start: event.start,
     end: event.end,
-    attendees: event.attendees || [],
-    // Always create Meet link in calendar event (for proper invites)
-    // The Meet link from calendar will be used, but we also include the original in description
-    conferenceData: {
-      createRequest: {
-        requestId: `meet-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-        conferenceSolutionKey: { type: 'hangoutsMeet' }
-      }
-    }
+    attendees: event.attendees || []
+    // Note: Service accounts cannot create Google Meet links directly
+    // We'll create the event without conferenceData first, then try to add Meet link if possible
+    // If meetLink is provided, include it in description
   };
 
   try {
+    // Service accounts cannot create Google Meet links directly
+    // Create event without conferenceData first
     const response = await calendar.events.insert({
       calendarId: calendarId,
-      conferenceDataVersion: 1,
       sendUpdates: 'all', // Send invites to all attendees
       requestBody: eventData
     });
 
-    // Get the Meet link from calendar event response
-    // This is the link that will be used in the calendar event
-    const hangoutLink = response.data.hangoutLink || 
-                       response.data.conferenceData?.entryPoints?.[0]?.uri;
-    
-    // If we have an existing Meet link and calendar generated a different one,
-    // we'll use the calendar-generated one for consistency (it's already in the event)
-    // The original link is preserved in the description
+    // Service accounts can't generate Meet links, so we return the event without Meet link
+    // If a meetLink was provided in the request, it's already in the description
+    // Users can connect their Google Calendar via OAuth to get Meet links automatically
 
     return res.status(200).json({
       eventId: response.data.id,
-      hangoutLink: hangoutLink || null,
-      meetLink: hangoutLink || meetLink || null,
-      calendarId: calendarId
+      hangoutLink: null, // Service accounts can't create Meet links
+      meetLink: meetLink || null, // Use provided meetLink if available
+      calendarId: calendarId,
+      note: 'Service accounts cannot create Google Meet links. Connect user calendars via OAuth for Meet link generation.'
     });
   } catch (error: any) {
     console.error('Error creating calendar event with service account:', error);

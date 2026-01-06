@@ -124,29 +124,71 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
           mentorEmail = mentorUser.email;
           console.log('✅ Found mentor email from users table:', mentorEmail);
         } else {
-          // Method 2: Try as profile_id - get auth_user_id from user_profiles
-          const { data: mentorProfile } = await supabase
+          // Method 2: Try user_profiles with auth_user_id (mentorId is likely auth_user_id)
+          const { data: mentorProfileByAuthId } = await supabase
             .from('user_profiles')
-            .select('auth_user_id, email')
-            .eq('id', mentorId)
+            .select('email')
+            .eq('auth_user_id', mentorId)
             .maybeSingle();
           
-          if (mentorProfile?.auth_user_id) {
-            // Get email from auth.users using auth_user_id
-            const { data: mentorAuthUser } = await supabase
-              .from('users')
-              .select('email')
-              .eq('id', mentorProfile.auth_user_id)
-              .maybeSingle();
-            mentorEmail = mentorAuthUser?.email || mentorProfile?.email || null;
-            console.log('✅ Found mentor email from user_profiles → users:', mentorEmail);
-          } else if (mentorProfile?.email) {
-            mentorEmail = mentorProfile.email;
-            console.log('✅ Found mentor email from user_profiles:', mentorEmail);
+          if (mentorProfileByAuthId?.email) {
+            mentorEmail = mentorProfileByAuthId.email;
+            console.log('✅ Found mentor email from user_profiles (by auth_user_id):', mentorEmail);
           } else {
-            // Method 3: Try to get from auth.users directly (if mentorId is auth_user_id but not in users table)
-            // This is a fallback - shouldn't happen but just in case
-            console.warn('⚠️ Mentor email not found in users or user_profiles for mentorId:', mentorId);
+            // Method 3: Try as profile_id - get auth_user_id from user_profiles
+            const { data: mentorProfile } = await supabase
+              .from('user_profiles')
+              .select('auth_user_id, email')
+              .eq('id', mentorId)
+              .maybeSingle();
+            
+            if (mentorProfile?.auth_user_id) {
+              // Try users table with auth_user_id
+              const { data: mentorAuthUser } = await supabase
+                .from('users')
+                .select('email')
+                .eq('id', mentorProfile.auth_user_id)
+                .maybeSingle();
+              mentorEmail = mentorAuthUser?.email || mentorProfile?.email || null;
+              console.log('✅ Found mentor email from user_profiles (by id) → users:', mentorEmail);
+            } else if (mentorProfile?.email) {
+              mentorEmail = mentorProfile.email;
+              console.log('✅ Found mentor email from user_profiles (by id):', mentorEmail);
+            } else {
+              // Method 4: Try to get from assignment data if available
+              if (assignmentId) {
+                const { data: assignment } = await supabase
+                  .from('mentor_startup_assignments')
+                  .select('mentor_id')
+                  .eq('id', assignmentId)
+                  .maybeSingle();
+                
+                if (assignment?.mentor_id && assignment.mentor_id !== mentorId) {
+                  // Try with assignment's mentor_id
+                  const { data: assignmentMentorProfile } = await supabase
+                    .from('user_profiles')
+                    .select('email')
+                    .eq('auth_user_id', assignment.mentor_id)
+                    .maybeSingle();
+                  
+                  if (assignmentMentorProfile?.email) {
+                    mentorEmail = assignmentMentorProfile.email;
+                    console.log('✅ Found mentor email from assignment → user_profiles:', mentorEmail);
+                  }
+                }
+              }
+              
+              if (!mentorEmail) {
+                // Method 5: Last resort - check if current user is the mentor
+                const { data: { user: currentUser } } = await supabase.auth.getUser();
+                if (currentUser && currentUser.id === mentorId && currentUser.email) {
+                  mentorEmail = currentUser.email;
+                  console.log('✅ Found mentor email from current auth session:', mentorEmail);
+                } else {
+                  console.warn('⚠️ Mentor email not found in users or user_profiles for mentorId:', mentorId);
+                }
+              }
+            }
           }
         }
       } catch (err) {

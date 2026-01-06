@@ -347,10 +347,16 @@ class MentorService {
           .from('users')
           .select('mentor_code')
           .eq('id', actualMentorId)
-          .single();
+          .maybeSingle();
 
         if (!mentorUserError && mentorUser?.mentor_code) {
           mentorCode = mentorUser.mentor_code;
+        } else if (mentorUserError) {
+          // Silently handle 406/404 errors - mentor_code might not exist in users table
+          // This is okay, we'll just skip it
+          if (mentorUserError.code !== 'PGRST116' && mentorUserError.status !== 406) {
+            console.warn('⚠️ Error fetching mentor_code from users table:', mentorUserError.message);
+          }
         }
       } catch (err) {
         console.warn('Error fetching mentor code:', err);

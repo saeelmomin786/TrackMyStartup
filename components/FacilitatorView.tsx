@@ -637,16 +637,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       
       if (startupIds.length > 0) {
         // 1. First, try to get data from opportunity_applications (most recent)
+        // Note: sector column doesn't exist in opportunity_applications, only domain
         const { data: applicationData, error: applicationError } = await supabase
           .from('opportunity_applications')
-          .select('startup_id, domain, stage, sector')
+          .select('startup_id, domain, stage')
           .in('startup_id', startupIds)
           .eq('status', 'accepted'); // Only get accepted applications
 
         if (!applicationError && applicationData) {
           applicationData.forEach(app => {
             tempDomainStageMap[app.startup_id] = {
-              domain: app.domain || app.sector || 'N/A',
+              domain: app.domain || 'N/A', // sector column was removed/renamed to domain
               stage: app.stage || 'N/A'
             };
           });

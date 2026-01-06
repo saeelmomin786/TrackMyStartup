@@ -297,18 +297,23 @@ export const startupService = {
       
       if (startupIds.length > 0) {
         // 1. First, try to get domain data from opportunity_applications (most recent)
+        // Note: sector column doesn't exist in opportunity_applications, only domain
         const { data: applicationData, error: applicationError } = await supabase
           .from('opportunity_applications')
-          .select('startup_id, domain, sector')
+          .select('startup_id, domain')
           .in('startup_id', startupIds)
           .eq('status', 'accepted'); // Only get accepted applications
 
+        // Silently handle errors - table might not exist or have RLS restrictions
+        if (applicationError) {
+          console.warn('⚠️ Could not fetch opportunity_applications (this is okay if table/RLS is restricted):', applicationError.message);
+        }
+
         if (!applicationError && applicationData) {
           applicationData.forEach(app => {
-            // Try domain field first, then fallback to sector field
-            const domainValue = app.domain || app.sector;
-            if (domainValue && !domainMap[app.startup_id]) {
-              domainMap[app.startup_id] = domainValue;
+            // Use domain field (sector column was removed/renamed to domain)
+            if (app.domain && !domainMap[app.startup_id]) {
+              domainMap[app.startup_id] = app.domain;
             }
           });
         }

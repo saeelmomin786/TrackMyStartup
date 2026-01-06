@@ -38,11 +38,19 @@ export interface ScheduledSession {
 }
 
 class MentorSchedulingService {
+  // Throttle cleanup operations to prevent excessive calls
+  private lastCleanupTime: number = 0;
+  private readonly CLEANUP_THROTTLE_MS = 60000; // Only run cleanup once per minute
+
   // Get mentor's availability slots
   async getAvailabilitySlots(mentorId: string): Promise<AvailabilitySlot[]> {
     try {
-      // Cleanup expired slots before fetching
-      await this.cleanupExpiredAvailabilitySlots();
+      // Throttle cleanup - only run once per minute
+      const now = Date.now();
+      if (now - this.lastCleanupTime > this.CLEANUP_THROTTLE_MS) {
+        await this.cleanupExpiredAvailabilitySlots();
+        this.lastCleanupTime = now;
+      }
 
       // CRITICAL FIX: mentor_availability_slots.mentor_id references auth.users(id), not profile_id
       // Get auth_user_id to ensure RLS policy allows the query
@@ -71,16 +79,16 @@ class MentorSchedulingService {
       }
 
       // Filter out expired slots in JavaScript (for one-time slots)
-      const now = new Date();
+      const currentDate = new Date();
       const filteredSlots = (data || []).filter(slot => {
         if (!slot.is_recurring && slot.specific_date) {
           const slotDateTime = new Date(`${slot.specific_date}T${slot.start_time}`);
-          return slotDateTime >= now; // Keep only future slots
+          return slotDateTime >= currentDate; // Keep only future slots
         }
         // For recurring slots, check valid_until if set
         if (slot.is_recurring && slot.valid_until) {
           const validUntil = new Date(slot.valid_until);
-          return validUntil >= now;
+          return validUntil >= currentDate;
         }
         return true; // Keep recurring slots without expiry
       });
@@ -239,8 +247,12 @@ class MentorSchedulingService {
         }
       }
       
-      // Cleanup old sessions before fetching slots
-      await this.cleanupPastScheduledSessions();
+      // Throttle cleanup - only run once per minute
+      const now = Date.now();
+      if (now - this.lastCleanupTime > this.CLEANUP_THROTTLE_MS) {
+        await this.cleanupPastScheduledSessions();
+        this.lastCleanupTime = now;
+      }
       
       // Debug: Check if we can query slots for this mentor
       console.log('🔍 Querying slots for mentor:', mentorId, 'Date range:', startDate, 'to', endDate);
@@ -507,9 +519,13 @@ class MentorSchedulingService {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       const authUserId = authUser?.id || mentorId;
       
-      // Cleanup old sessions before fetching
-      await this.cleanupOldSessions();
-      await this.cleanupPastScheduledSessions();
+      // Throttle cleanup - only run once per minute
+      const now = Date.now();
+      if (now - this.lastCleanupTime > this.CLEANUP_THROTTLE_MS) {
+        await this.cleanupOldSessions();
+        await this.cleanupPastScheduledSessions();
+        this.lastCleanupTime = now;
+      }
 
       let query = supabase
         .from('mentor_startup_sessions')
@@ -574,9 +590,13 @@ class MentorSchedulingService {
   // Get sessions for startup
   async getStartupSessions(startupId: number, status?: string): Promise<ScheduledSession[]> {
     try {
-      // Cleanup old sessions before fetching
-      await this.cleanupOldSessions();
-      await this.cleanupPastScheduledSessions();
+      // Throttle cleanup - only run once per minute
+      const now = Date.now();
+      if (now - this.lastCleanupTime > this.CLEANUP_THROTTLE_MS) {
+        await this.cleanupOldSessions();
+        await this.cleanupPastScheduledSessions();
+        this.lastCleanupTime = now;
+      }
 
       let query = supabase
         .from('mentor_startup_sessions')

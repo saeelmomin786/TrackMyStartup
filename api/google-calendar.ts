@@ -348,7 +348,37 @@ async function handleRefreshToken(req: VercelRequest, res: VercelResponse) {
   });
 }
 
-// Create Google Calendar Event using Service Account (Centralized Calendar)
+// Get App Account Access Token (using refresh token)
+async function getAppAccountAccessToken(): Promise<string> {
+  const refreshToken = process.env.GOOGLE_APP_ACCOUNT_REFRESH_TOKEN;
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!refreshToken) {
+    throw new Error('GOOGLE_APP_ACCOUNT_REFRESH_TOKEN not configured. Please set it in Vercel environment variables.');
+  }
+
+  if (!clientId || !clientSecret) {
+    throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured.');
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    clientId,
+    clientSecret,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+  const { credentials } = await oauth2Client.refreshAccessToken();
+
+  if (!credentials.access_token) {
+    throw new Error('Failed to get access token from refresh token');
+  }
+
+  return credentials.access_token;
+}
+
+// Create Google Calendar Event using App Account OAuth (with Meet Links!)
 async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -362,18 +392,86 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
       end: { dateTime: string; timeZone: string };
       attendees?: Array<{ email: string }>;
     };
-    meetLink?: string; // Use existing Meet link if provided
+    meetLink?: string; // Legacy - not used anymore, we generate Meet link automatically
   };
 
   if (!event) {
     return res.status(400).json({ error: 'Missing required field: event' });
   }
 
+  // Try to use App Account OAuth first (for Meet links)
+  const appAccountRefreshToken = process.env.GOOGLE_APP_ACCOUNT_REFRESH_TOKEN;
+  const useAppAccount = !!appAccountRefreshToken;
+
+  if (useAppAccount) {
+    try {
+      // Use App Account OAuth - this CAN create Meet links!
+      const accessToken = await getAppAccountAccessToken();
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        throw new Error('OAuth credentials not configured');
+      }
+
+      const oauth2Client = new google.auth.OAuth2(
+        clientId,
+        clientSecret,
+        process.env.GOOGLE_REDIRECT_URI
+      );
+
+      oauth2Client.setCredentials({ access_token: accessToken });
+      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+      const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
+
+      // Build event with Meet link generation
+      const eventData: any = {
+        summary: event.summary,
+        description: event.description || 'Mentoring session scheduled through Track My Startup',
+        start: event.start,
+        end: event.end,
+        attendees: event.attendees || [],
+        // This will generate a Meet link automatically!
+        conferenceData: {
+          createRequest: {
+            requestId: `meet-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            conferenceSolutionKey: { type: 'hangoutsMeet' }
+          }
+        }
+      };
+
+      const response = await calendar.events.insert({
+        calendarId: calendarId,
+        conferenceDataVersion: 1, // This enables Meet link generation
+        sendUpdates: 'all', // Send invites to all attendees
+        requestBody: eventData
+      });
+
+      // Extract Meet link from response
+      const hangoutLink = response.data.hangoutLink || 
+                         response.data.conferenceData?.entryPoints?.[0]?.uri;
+
+      return res.status(200).json({
+        eventId: response.data.id,
+        hangoutLink: hangoutLink || null,
+        meetLink: hangoutLink || null, // Meet link generated automatically!
+        calendarId: calendarId,
+        method: 'app_account_oauth' // Indicates we used OAuth
+      });
+    } catch (error: any) {
+      console.error('Error creating event with app account OAuth:', error);
+      // Fall through to service account fallback
+    }
+  }
+
+  // Fallback: Use Service Account (no Meet links, but events still created)
   const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   
   if (!serviceAccountKey) {
     return res.status(500).json({ 
-      error: 'Google service account not configured. Please set GOOGLE_SERVICE_ACCOUNT_KEY environment variable.' 
+      error: 'Neither GOOGLE_APP_ACCOUNT_REFRESH_TOKEN nor GOOGLE_SERVICE_ACCOUNT_KEY is configured. Please set at least one.',
+      hint: 'Set GOOGLE_APP_ACCOUNT_REFRESH_TOKEN for Meet link generation, or GOOGLE_SERVICE_ACCOUNT_KEY for basic event creation.'
     });
   }
 
@@ -394,46 +492,31 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
   });
 
   const calendar = google.calendar({ version: 'v3', auth });
-
-  // Use the calendar ID from service account or 'primary'
-  // You can set a specific calendar ID in env: GOOGLE_CALENDAR_ID
   const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
-  // Build event with attendees and Meet link
-  // Note: Google Calendar API will generate a new Meet link when conferenceData is included
-  // We'll include the existing Meet link in description and use the calendar-generated one
   const eventData: any = {
     summary: event.summary,
-    description: meetLink 
-      ? `${event.description || 'Mentoring session scheduled through Track My Startup'}\n\nGoogle Meet Link: ${meetLink}`
-      : (event.description || 'Mentoring session scheduled through Track My Startup'),
+    description: event.description || 'Mentoring session scheduled through Track My Startup',
     start: event.start,
     end: event.end,
     attendees: event.attendees || []
-    // Note: Service accounts cannot create Google Meet links directly
-    // We'll create the event without conferenceData first, then try to add Meet link if possible
-    // If meetLink is provided, include it in description
+    // No conferenceData - service accounts can't create Meet links
   };
 
   try {
-    // Service accounts cannot create Google Meet links directly
-    // Create event without conferenceData first
     const response = await calendar.events.insert({
       calendarId: calendarId,
-      sendUpdates: 'all', // Send invites to all attendees
+      sendUpdates: 'all',
       requestBody: eventData
     });
 
-    // Service accounts can't generate Meet links, so we return the event without Meet link
-    // If a meetLink was provided in the request, it's already in the description
-    // Users can connect their Google Calendar via OAuth to get Meet links automatically
-
     return res.status(200).json({
       eventId: response.data.id,
-      hangoutLink: null, // Service accounts can't create Meet links
-      meetLink: meetLink || null, // Use provided meetLink if available
+      hangoutLink: null,
+      meetLink: null,
       calendarId: calendarId,
-      note: 'Service accounts cannot create Google Meet links. Connect user calendars via OAuth for Meet link generation.'
+      method: 'service_account',
+      note: 'Service accounts cannot create Google Meet links. Set GOOGLE_APP_ACCOUNT_REFRESH_TOKEN to enable Meet link generation.'
     });
   } catch (error: any) {
     console.error('Error creating calendar event with service account:', error);

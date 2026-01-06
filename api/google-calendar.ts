@@ -436,38 +436,87 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
       const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
       // Build event with Meet link generation
+      // IMPORTANT: Get app account email to avoid adding it as attendee (it's the organizer)
+      const appAccountEmail = process.env.GOOGLE_APP_ACCOUNT_EMAIL;
+      
+      // Filter out app account email from attendees (it's the organizer, not an attendee)
+      const filteredAttendees = (event.attendees || []).filter((attendee: { email: string }) => {
+        return attendee.email !== appAccountEmail;
+      });
+      
+      console.log('📧 Calendar event attendees:', {
+        original: event.attendees?.length || 0,
+        filtered: filteredAttendees.length,
+        appAccountEmail: appAccountEmail,
+        attendees: filteredAttendees.map((a: { email: string }) => a.email)
+      });
+      
       const eventData: any = {
         summary: event.summary,
         description: event.description || 'Mentoring session scheduled through Track My Startup',
         start: event.start,
         end: event.end,
-        attendees: event.attendees || [],
+        attendees: filteredAttendees, // Use filtered attendees (exclude app account)
         // This will generate a Meet link automatically!
+        // Note: By default, Google Meet allows anyone with the link to join automatically
+        // The organizer's Google account settings may require admission, but the link itself
+        // allows direct joining. If the organizer has "Quick access" enabled, guests join automatically.
         conferenceData: {
           createRequest: {
             requestId: `meet-${Date.now()}-${Math.random().toString(36).substring(7)}`,
             conferenceSolutionKey: { type: 'hangoutsMeet' }
+            // Note: Google Meet settings (like requiring admission) are controlled by
+            // the organizer's Google account settings, not the API. The link itself
+            // allows joining - whether admission is required depends on account settings.
           }
         }
       };
 
+      console.log('📅 Creating calendar event with:', {
+        summary: eventData.summary,
+        attendeesCount: filteredAttendees.length,
+        hasConferenceData: !!eventData.conferenceData
+      });
+
       const response = await calendar.events.insert({
         calendarId: calendarId,
         conferenceDataVersion: 1, // This enables Meet link generation
-        sendUpdates: 'all', // Send invites to all attendees
+        sendUpdates: 'all', // Send invites to all attendees (mentor + startup)
         requestBody: eventData
+      });
+      
+      console.log('✅ Calendar event created:', {
+        eventId: response.data.id,
+        organizer: response.data.organizer?.email,
+        attendees: response.data.attendees?.map((a: any) => ({ email: a.email, responseStatus: a.responseStatus })),
+        hangoutLink: response.data.hangoutLink
       });
 
       // Extract Meet link from response
       const hangoutLink = response.data.hangoutLink || 
                          response.data.conferenceData?.entryPoints?.[0]?.uri;
 
+      // Log final event details for debugging
+      console.log('✅ Calendar event created successfully:', {
+        eventId: response.data.id,
+        organizer: response.data.organizer?.email,
+        attendeesCount: response.data.attendees?.length || 0,
+        attendees: response.data.attendees?.map((a: any) => ({
+          email: a.email,
+          responseStatus: a.responseStatus,
+          organizer: a.organizer
+        })),
+        hangoutLink: hangoutLink,
+        meetLink: hangoutLink
+      });
+
       return res.status(200).json({
         eventId: response.data.id,
         hangoutLink: hangoutLink || null,
         meetLink: hangoutLink || null, // Meet link generated automatically!
         calendarId: calendarId,
-        method: 'app_account_oauth' // Indicates we used OAuth
+        method: 'app_account_oauth', // Indicates we used OAuth
+        attendees: response.data.attendees || [] // Return attendees for debugging
       });
     } catch (error: any) {
       console.error('Error creating event with app account OAuth:', error);

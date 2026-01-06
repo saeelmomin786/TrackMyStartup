@@ -107,36 +107,110 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
 
     try {
       // Get mentor and startup emails for calendar event
-      const { data: mentorUser } = await supabase
-        .from('users')
-        .select('email')
-        .eq('id', mentorId)
-        .single();
+      // CRITICAL: mentorId might be profile_id, need to get auth_user_id first
+      let mentorEmail: string | null = null;
+      let startupEmail: string | null = null;
+      
+      // Try to get mentor email - handle both profile_id and auth_user_id
+      try {
+        // Method 1: Try as auth_user_id (direct lookup in users table)
+        const { data: mentorUser } = await supabase
+          .from('users')
+          .select('email')
+          .eq('id', mentorId)
+          .maybeSingle();
+        
+        if (mentorUser?.email) {
+          mentorEmail = mentorUser.email;
+          console.log('✅ Found mentor email from users table:', mentorEmail);
+        } else {
+          // Method 2: Try as profile_id - get auth_user_id from user_profiles
+          const { data: mentorProfile } = await supabase
+            .from('user_profiles')
+            .select('auth_user_id, email')
+            .eq('id', mentorId)
+            .maybeSingle();
+          
+          if (mentorProfile?.auth_user_id) {
+            // Get email from auth.users using auth_user_id
+            const { data: mentorAuthUser } = await supabase
+              .from('users')
+              .select('email')
+              .eq('id', mentorProfile.auth_user_id)
+              .maybeSingle();
+            mentorEmail = mentorAuthUser?.email || mentorProfile?.email || null;
+            console.log('✅ Found mentor email from user_profiles → users:', mentorEmail);
+          } else if (mentorProfile?.email) {
+            mentorEmail = mentorProfile.email;
+            console.log('✅ Found mentor email from user_profiles:', mentorEmail);
+          } else {
+            // Method 3: Try to get from auth.users directly (if mentorId is auth_user_id but not in users table)
+            // This is a fallback - shouldn't happen but just in case
+            console.warn('⚠️ Mentor email not found in users or user_profiles for mentorId:', mentorId);
+          }
+        }
+      } catch (err) {
+        console.error('❌ Error fetching mentor email:', err);
+      }
 
+      // Get startup email
       const { data: startupData } = await supabase
         .from('startups')
         .select('user_id')
         .eq('id', startupId)
         .single();
 
-      let startupEmail: string | null = null;
       if (startupData?.user_id) {
-        const { data: startupUser } = await supabase
-          .from('users')
-          .select('email')
-          .eq('id', startupData.user_id)
-          .single();
-        startupEmail = startupUser?.email || null;
+        try {
+          // Try as auth_user_id first
+          const { data: startupUser } = await supabase
+            .from('users')
+            .select('email')
+            .eq('id', startupData.user_id)
+            .maybeSingle();
+          
+          if (startupUser?.email) {
+            startupEmail = startupUser.email;
+          } else {
+            // Try as profile_id
+            const { data: startupProfile } = await supabase
+              .from('user_profiles')
+              .select('auth_user_id, email')
+              .eq('id', startupData.user_id)
+              .maybeSingle();
+            
+            if (startupProfile?.auth_user_id) {
+              const { data: startupAuthUser } = await supabase
+                .from('users')
+                .select('email')
+                .eq('id', startupProfile.auth_user_id)
+                .maybeSingle();
+              startupEmail = startupAuthUser?.email || startupProfile?.email || null;
+            } else if (startupProfile?.email) {
+              startupEmail = startupProfile.email;
+            }
+          }
+        } catch (err) {
+          console.error('Error fetching startup email:', err);
+        }
       }
 
-      // Build attendees list
+      // Build attendees list - ensure both emails are included
       const attendees: Array<{ email: string }> = [];
-      if (mentorUser?.email) {
-        attendees.push({ email: mentorUser.email });
+      if (mentorEmail) {
+        attendees.push({ email: mentorEmail });
+        console.log('✅ Added mentor email to attendees:', mentorEmail);
+      } else {
+        console.warn('⚠️ Mentor email not found for mentorId:', mentorId);
       }
       if (startupEmail) {
         attendees.push({ email: startupEmail });
+        console.log('✅ Added startup email to attendees:', startupEmail);
+      } else {
+        console.warn('⚠️ Startup email not found for startupId:', startupId);
       }
+      
+      console.log('📧 Total attendees:', attendees.length, attendees);
 
       // Create calendar event FIRST to get a valid Meet link
       // This ensures the Meet link is tied to a permanent event, not a temporary one

@@ -403,10 +403,20 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
   const appAccountRefreshToken = process.env.GOOGLE_APP_ACCOUNT_REFRESH_TOKEN;
   const useAppAccount = !!appAccountRefreshToken;
 
+  // Debug logging
+  console.log('Creating calendar event:', {
+    hasAppAccountToken: !!appAccountRefreshToken,
+    appAccountTokenLength: appAccountRefreshToken?.length || 0,
+    hasClientId: !!process.env.GOOGLE_CLIENT_ID,
+    hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET
+  });
+
   if (useAppAccount) {
     try {
+      console.log('Attempting to use app account OAuth for Meet link generation...');
       // Use App Account OAuth - this CAN create Meet links!
       const accessToken = await getAppAccountAccessToken();
+      console.log('Successfully got access token from app account');
       const clientId = process.env.GOOGLE_CLIENT_ID;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
@@ -461,8 +471,16 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
       });
     } catch (error: any) {
       console.error('Error creating event with app account OAuth:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        hasRefreshToken: !!appAccountRefreshToken,
+        refreshTokenStart: appAccountRefreshToken?.substring(0, 10)
+      });
       // Fall through to service account fallback
     }
+  } else {
+    console.log('App account refresh token not found, using service account fallback');
   }
 
   // Fallback: Use Service Account (no Meet links, but events still created)

@@ -317,23 +317,33 @@ class MentorSchedulingService {
       }
 
       // Get booked sessions to filter out conflicts
+      // IMPORTANT: Include ALL scheduled sessions, even if they're just created
       const { data: bookedSessions, error: sessionsError } = await supabase
         .from('mentor_startup_sessions')
-        .select('session_date, session_time, duration_minutes')
+        .select('session_date, session_time, duration_minutes, startup_id')
         .eq('mentor_id', mentorId)  // mentorId should be auth_user_id
         .eq('status', 'scheduled')
         .gte('session_date', startDate)
         .lte('session_date', endDate);
 
       if (sessionsError) {
-        console.error('Error fetching booked sessions:', sessionsError);
+        console.error('❌ Error fetching booked sessions:', sessionsError);
       }
+
+      console.log('📅 Booked sessions found:', (bookedSessions || []).length, bookedSessions?.map(s => ({
+        date: s.session_date,
+        time: s.session_time,
+        startup_id: s.startup_id
+      })));
 
       // Generate available time slots
       const availableSlots: Array<{ date: string; time: string; slotId: number }> = [];
+      // Create a Set of booked time slots (date + time)
       const bookedTimes = new Set(
         (bookedSessions || []).map(s => `${s.session_date}T${s.session_time}`)
       );
+      
+      console.log('📅 Booked time slots (Set):', Array.from(bookedTimes));
 
       // Process recurring slots
       console.log('📅 Processing recurring slots:', validRecurringSlots.length);

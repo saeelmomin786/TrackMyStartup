@@ -112,28 +112,58 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
     conferenceData: {
       createRequest: {
         requestId: `meet-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-        conferenceSolutionKey: { type: 'hangoutsMeet' }
+        conferenceSolutionKey: {
+          type: 'hangoutsMeet'
+        }
       }
     }
   };
 
-  const response = await calendar.events.insert({
-    calendarId: 'primary',
-    conferenceDataVersion: 1,
-    requestBody: event
-  });
+  try {
+    const response = await calendar.events.insert({
+      calendarId: 'primary',
+      conferenceDataVersion: 1,
+      requestBody: event
+    });
 
-  const meetLink = response.data.hangoutLink || 
-                   response.data.conferenceData?.entryPoints?.[0]?.uri;
+    const meetLink = response.data.hangoutLink || 
+                     response.data.conferenceData?.entryPoints?.[0]?.uri;
 
-  if (!meetLink) {
-    if (response.data.id) {
-      await calendar.events.delete({
-        calendarId: 'primary',
-        eventId: response.data.id
+    if (!meetLink) {
+      if (response.data.id) {
+        await calendar.events.delete({
+          calendarId: 'primary',
+          eventId: response.data.id
+        });
+      }
+      return res.status(500).json({ error: 'Failed to generate Google Meet link' });
+    }
+
+    // IMPORTANT: Do NOT delete the temporary event!
+    // When a Google Calendar event is deleted, the associated Meet link becomes invalid.
+    // The Meet link is tied to the event, so we must keep the event for the link to work.
+    // The temporary event will be cleaned up later or can be manually removed.
+    // Alternatively, use the Meet link from the actual calendar event created in SchedulingModal.
+    
+    // Store event ID for potential cleanup (optional)
+    const eventId = response.data.id;
+
+    return res.status(200).json({ 
+      meetLink,
+      eventId: eventId // Return event ID in case we want to clean it up later
+    });
+  } catch (error: any) {
+    // Handle specific Google API errors
+    if (error.message?.includes('Invalid conference type') || 
+        error.message?.includes('conference type value')) {
+      console.error('Google Meet link creation failed - service account may not support Meet links:', error);
+      return res.status(500).json({ 
+        error: 'Unable to generate Google Meet link with service account',
+        details: 'Service accounts may not have permission to create Google Meet links. Consider using OAuth 2.0 for user calendars instead.',
+        hint: 'Try using the create-event-service-account endpoint which creates events in a shared calendar, or enable Google Meet API separately'
       });
     }
-    return res.status(500).json({ error: 'Failed to generate Google Meet link' });
+    throw error; // Re-throw other errors
   }
 
   // IMPORTANT: Do NOT delete the temporary event!

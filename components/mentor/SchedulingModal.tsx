@@ -26,7 +26,7 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
   assignmentId,
   onSessionBooked
 }) => {
-  const [availableSlots, setAvailableSlots] = useState<Array<{ date: string; time: string; slotId: number }>>([]);
+  const [availableSlots, setAvailableSlots] = useState<Array<{ date: string; time: string; slotId: number; isBooked?: boolean; bookedByStartupId?: number }>>([]);
   const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null);
   const [duration, setDuration] = useState(60);
   const [isLoading, setIsLoading] = useState(false);
@@ -99,6 +99,17 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
   const handleBookSession = async () => {
     if (!selectedSlot) {
       setError('Please select a time slot');
+      return;
+    }
+
+    // Check if selected slot is booked
+    const selectedSlotData = availableSlots.find(
+      s => s.date === selectedSlot.date && s.time === selectedSlot.time
+    );
+    
+    if (selectedSlotData?.isBooked) {
+      setError('This slot is already booked by another startup. Please select a different time.');
+      setSelectedSlot(null);
       return;
     }
 
@@ -323,7 +334,7 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
     }
     acc[slot.date].push(slot);
     return acc;
-  }, {} as Record<string, Array<{ date: string; time: string; slotId: number }>>);
+  }, {} as Record<string, Array<{ date: string; time: string; slotId: number; isBooked?: boolean; bookedByStartupId?: number }>>);
 
   const sortedDates = Object.keys(slotsByDate).sort();
 
@@ -360,20 +371,38 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
                     </span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                    {slotsByDate[date].map((slot, index) => (
-                      <button
-                        key={index}
-                        type="button"
-                        onClick={() => setSelectedSlot({ date: slot.date, time: slot.time })}
-                        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                          selectedSlot?.date === slot.date && selectedSlot?.time === slot.time
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                        }`}
-                      >
-                        {formatTimeAMPM(slot.time)}
-                      </button>
-                    ))}
+                    {slotsByDate[date].map((slot, index) => {
+                      const isBooked = slot.isBooked === true;
+                      const isSelected = selectedSlot?.date === slot.date && selectedSlot?.time === slot.time;
+                      
+                      return (
+                        <button
+                          key={index}
+                          type="button"
+                          disabled={isBooked}
+                          onClick={() => {
+                            if (!isBooked) {
+                              setSelectedSlot({ date: slot.date, time: slot.time });
+                            }
+                          }}
+                          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors relative ${
+                            isBooked
+                              ? 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-60'
+                              : isSelected
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                          title={isBooked ? 'This slot is already booked' : `Select ${formatTimeAMPM(slot.time)}`}
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{formatTimeAMPM(slot.time)}</span>
+                            {isBooked && (
+                              <span className="text-xs font-normal">(Booked)</span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

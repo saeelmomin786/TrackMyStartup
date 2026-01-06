@@ -202,7 +202,7 @@ class MentorSchedulingService {
     endDate: string,
     startupId?: number,
     assignmentId?: number | null
-  ): Promise<Array<{ date: string; time: string; slotId: number }>> {
+  ): Promise<Array<{ date: string; time: string; slotId: number; isBooked?: boolean; bookedByStartupId?: number }>> {
     try {
       // IMPORTANT: mentorId parameter should be auth_user_id (not profile_id)
       // ShareSlotsModal now passes auth_user_id directly
@@ -248,10 +248,10 @@ class MentorSchedulingService {
       }
       
       // Throttle cleanup - only run once per minute
-      const now = Date.now();
-      if (now - this.lastCleanupTime > this.CLEANUP_THROTTLE_MS) {
+      const currentTime = Date.now();
+      if (currentTime - this.lastCleanupTime > this.CLEANUP_THROTTLE_MS) {
         await this.cleanupPastScheduledSessions();
-        this.lastCleanupTime = now;
+        this.lastCleanupTime = currentTime;
       }
       
       // Debug: Check if we can query slots for this mentor
@@ -317,10 +317,13 @@ class MentorSchedulingService {
       }
 
       // Get booked sessions to filter out conflicts
-      // IMPORTANT: Include ALL scheduled sessions, even if they're just created
+      // CRITICAL: Get ALL scheduled sessions for this mentor (regardless of which startup booked them)
+      // This ensures slots booked by ANY startup are hidden from ALL startups
+      console.log('🔍 Fetching booked sessions for mentor:', mentorId, 'Date range:', startDate, 'to', endDate);
+      
       const { data: bookedSessions, error: sessionsError } = await supabase
         .from('mentor_startup_sessions')
-        .select('session_date, session_time, duration_minutes, startup_id')
+        .select('session_date, session_time, duration_minutes, startup_id, id')
         .eq('mentor_id', mentorId)  // mentorId should be auth_user_id
         .eq('status', 'scheduled')
         .gte('session_date', startDate)
@@ -328,22 +331,59 @@ class MentorSchedulingService {
 
       if (sessionsError) {
         console.error('❌ Error fetching booked sessions:', sessionsError);
+        console.error('❌ Error details:', {
+          message: sessionsError.message,
+          code: sessionsError.code,
+          details: sessionsError.details,
+          hint: sessionsError.hint
+        });
       }
 
-      console.log('📅 Booked sessions found:', (bookedSessions || []).length, bookedSessions?.map(s => ({
-        date: s.session_date,
-        time: s.session_time,
-        startup_id: s.startup_id
-      })));
+      console.log('📅 Booked sessions found:', (bookedSessions || []).length);
+      if (bookedSessions && bookedSessions.length > 0) {
+        console.log('📅 Booked sessions details:', bookedSessions.map(s => ({
+          id: s.id,
+          date: s.session_date,
+          time: s.session_time,
+          normalized_time: s.session_time.substring(0, 5),
+          startup_id: s.startup_id,
+          timeKey: `${s.session_date}T${s.session_time.substring(0, 5)}`
+        })));
+      } else {
+        console.warn('⚠️ No booked sessions found - this might be correct if no slots are booked yet');
+        console.warn('⚠️ If slots are booked but not showing here, check RLS policies on mentor_startup_sessions table');
+      }
 
-      // Generate available time slots
-      const availableSlots: Array<{ date: string; time: string; slotId: number }> = [];
-      // Create a Set of booked time slots (date + time)
-      const bookedTimes = new Set(
-        (bookedSessions || []).map(s => `${s.session_date}T${s.session_time}`)
-      );
+      // Generate available time slots (including booked ones, marked as booked)
+      const availableSlots: Array<{ date: string; time: string; slotId: number; isBooked?: boolean; bookedByStartupId?: number }> = [];
       
-      console.log('📅 Booked time slots (Set):', Array.from(bookedTimes));
+      // Get current date/time for filtering out past slots
+      const now = new Date();
+      const currentDateStr = now.toISOString().split('T')[0];
+      const currentTimeStr = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM format
+      
+      // Create a Map of booked time slots (date + time) to track which startup booked it
+      // This allows us to show booked slots but mark them as unavailable
+      const bookedSlotsMap = new Map<string, number>(); // timeKey -> startup_id
+      
+      (bookedSessions || []).forEach(s => {
+        // Normalize session_time to HH:MM format (remove seconds if present)
+        const normalizedTime = s.session_time ? s.session_time.substring(0, 5) : '00:00';
+        const timeKey = `${s.session_date}T${normalizedTime}`;
+        bookedSlotsMap.set(timeKey, s.startup_id);
+        console.log('🔍 Creating booked time key:', {
+          session_id: s.id,
+          date: s.session_date,
+          time: s.session_time,
+          normalized_time: normalizedTime,
+          timeKey: timeKey,
+          startup_id: s.startup_id
+        });
+      });
+      
+      console.log('📅 Booked time slots (Map):', Array.from(bookedSlotsMap.entries()));
+      console.log('📅 Total booked slots:', bookedSlotsMap.size);
+      console.log('📅 Current date/time for filtering:', { currentDateStr, currentTimeStr });
 
       // Process recurring slots
       console.log('📅 Processing recurring slots:', validRecurringSlots.length);
@@ -356,14 +396,43 @@ class MentorSchedulingService {
           // Check if this day matches the slot's day of week
           if (slot.day_of_week === d.getDay()) {
             const dateStr = d.toISOString().split('T')[0];
-            const timeKey = `${dateStr}T${slot.start_time}`;
             
-            // Only add if not already booked
-            if (!bookedTimes.has(timeKey)) {
-              availableSlots.push({
+            // CRITICAL FIX: Filter out past slots (date + time)
+            const isPastDate = dateStr < currentDateStr;
+            const isToday = dateStr === currentDateStr;
+            
+            // Normalize slot time to HH:MM format
+            const normalizedSlotTime = slot.start_time.substring(0, 5); // HH:MM
+            const isPastTime = isToday && normalizedSlotTime < currentTimeStr;
+            
+            // Skip if slot is in the past
+            if (isPastDate || isPastTime) {
+              console.log('⏭️ Skipped past recurring slot:', dateStr, normalizedSlotTime, { isPastDate, isToday, isPastTime });
+              continue;
+            }
+            
+            const timeKey = `${dateStr}T${normalizedSlotTime}`;
+            
+            // Check if slot is booked
+            const isBooked = bookedSlotsMap.has(timeKey);
+            const bookedByStartupId = isBooked ? bookedSlotsMap.get(timeKey) : undefined;
+            
+            // Add slot (both available and booked slots are shown)
+            availableSlots.push({
+              date: dateStr,
+              time: normalizedSlotTime,
+              slotId: slot.id,
+              isBooked: isBooked,
+              bookedByStartupId: bookedByStartupId
+            });
+            
+            if (isBooked) {
+              console.log('📌 Added booked recurring slot (marked as booked):', {
                 date: dateStr,
-                time: slot.start_time,
-                slotId: slot.id
+                time: normalizedSlotTime,
+                timeKey: timeKey,
+                slotId: slot.id,
+                bookedByStartupId: bookedByStartupId
               });
             }
           }
@@ -383,16 +452,52 @@ class MentorSchedulingService {
           
           // Only include if slot date is within range
           if (slotDate >= rangeStart && slotDate <= rangeEnd) {
-            const timeKey = `${slot.specific_date}T${slot.start_time}`;
-            if (!bookedTimes.has(timeKey)) {
-              availableSlots.push({
-                date: slot.specific_date,
-                time: slot.start_time,
+            const dateStr = slot.specific_date;
+            
+            // CRITICAL FIX: Filter out past slots (date + time)
+            const isPastDate = dateStr < currentDateStr;
+            const isToday = dateStr === currentDateStr;
+            
+            // Normalize slot time to HH:MM format
+            const normalizedSlotTime = slot.start_time.substring(0, 5); // HH:MM
+            const isPastTime = isToday && normalizedSlotTime < currentTimeStr;
+            
+            // Skip if slot is in the past
+            if (isPastDate || isPastTime) {
+              console.log('⏭️ Skipped past one-time slot:', dateStr, normalizedSlotTime, { isPastDate, isToday, isPastTime });
+              return;
+            }
+            
+            const timeKey = `${dateStr}T${normalizedSlotTime}`;
+            
+            // Check if slot is booked
+            const isBooked = bookedSlotsMap.has(timeKey);
+            const bookedByStartupId = isBooked ? bookedSlotsMap.get(timeKey) : undefined;
+            
+            // Add slot (both available and booked slots are shown)
+            availableSlots.push({
+              date: dateStr,
+              time: normalizedSlotTime,
+              slotId: slot.id,
+              isBooked: isBooked,
+              bookedByStartupId: bookedByStartupId
+            });
+            
+            if (isBooked) {
+              console.log('📌 Added booked one-time slot (marked as booked):', {
+                date: dateStr,
+                time: normalizedSlotTime,
+                timeKey: timeKey,
+                slotId: slot.id,
+                bookedByStartupId: bookedByStartupId
+              });
+            } else {
+              console.log('✅ Added available one-time slot:', {
+                date: dateStr,
+                time: normalizedSlotTime,
+                timeKey: timeKey,
                 slotId: slot.id
               });
-              console.log('✅ Added one-time slot:', slot.specific_date, slot.start_time);
-            } else {
-              console.log('⏭️ Skipped booked one-time slot:', slot.specific_date, slot.start_time);
             }
           } else {
             console.log('⏭️ Skipped one-time slot outside range:', slot.specific_date, 'Range:', startDate, '-', endDate);

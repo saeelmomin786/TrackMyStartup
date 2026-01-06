@@ -174,3 +174,4 @@ if (integration && integration.calendar_sync_enabled) {
 - [ ] Update user documentation
 - [ ] Test full booking flow with OAuth
 
+

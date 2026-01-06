@@ -17,6 +17,17 @@
   ],
   "rewrites": [
     {
+      "source": "/",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|sogou|exabot|facebot|ia_archiver|twitterbot|linkedinbot|applebot|facebookexternalhit|rogerbot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|megaindex|blexbot|crawler|spider|bot).*"
+        }
+      ],
+      "destination": "/api/[...path]?path=/"
+    },
+    {
       "source": "/(.*)",
       "has": [
         {

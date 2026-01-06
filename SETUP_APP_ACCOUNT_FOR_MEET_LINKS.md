@@ -24,6 +24,32 @@ Set up a real Google account for your app that will:
 
 ## 📋 Step 2: Get OAuth Refresh Token
 
+### ⚠️ IMPORTANT: Setup Steps Before OAuth Playground
+
+**Before using OAuth Playground, you must do TWO things:**
+
+#### 1. Add OAuth Playground Redirect URI
+
+1. **Go to:** https://console.cloud.google.com/apis/credentials
+2. **Click edit (✏️)** on your OAuth client (e.g., "TMS")
+3. **Scroll to "Authorized redirect URIs"**
+4. **Click "ADD URI"**
+5. **Add:** `https://developers.google.com/oauthplayground`
+6. **Click "SAVE"**
+
+#### 2. Add Test Users to OAuth Consent Screen
+
+1. **Go to:** https://console.cloud.google.com/apis/credentials/consent
+2. **Scroll to "Test users" section**
+3. **Click "ADD USERS"**
+4. **Add your email:** `saeelmomin.tms@gmail.com` (or the email you'll use)
+5. **Add app account email:** `trackmystartup.app@gmail.com` (if different)
+6. **Click "ADD"** for each, then **"SAVE"**
+
+**Now you can use OAuth Playground!**
+
+---
+
 ### Option A: Using OAuth Playground (Easiest)
 
 1. **Go to:** https://developers.google.com/oauthplayground/
@@ -226,4 +252,5 @@ Once this is working:
 ---
 
 Ready to set up? Follow the steps above and let me know when you have the refresh token!
+
 

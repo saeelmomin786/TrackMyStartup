@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { mentorSchedulingService } from '../../lib/mentorSchedulingService';
+import { supabase } from '../../lib/supabase';
 import { Calendar, Clock, CheckCircle, Share2 } from 'lucide-react';
 import { formatDateWithWeekday, formatTimeAMPM } from '../../lib/dateTimeUtils';
 
@@ -28,7 +29,7 @@ const ShareSlotsModal: React.FC<ShareSlotsModalProps> = ({
   const [shared, setShared] = useState(false);
   const [startDate, setStartDate] = useState(() => {
     const date = new Date();
-    date.setDate(date.getDate() + 1); // Start from tomorrow
+    // Start from today to include today's one-time slots
     return date.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => {
@@ -48,9 +49,17 @@ const ShareSlotsModal: React.FC<ShareSlotsModalProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      console.log('🔍 Loading available slots to share:', { mentorId, startDate, endDate });
+      // CRITICAL FIX: Get auth_user_id since slots are stored with auth_user_id, not profile_id
+      // mentorId prop might be profile_id, but we need auth_user_id to query slots
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id;
+      
+      // Use auth_user_id if available (for mentors viewing own slots), otherwise use mentorId
+      const queryMentorId = authUserId || mentorId;
+      
+      console.log('🔍 Loading available slots to share:', { mentorId, authUserId, queryMentorId, startDate, endDate });
       const slots = await mentorSchedulingService.getAvailableSlotsForDateRange(
-        mentorId,
+        queryMentorId,
         startDate,
         endDate
       );

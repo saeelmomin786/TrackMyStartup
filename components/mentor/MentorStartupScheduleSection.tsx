@@ -4,7 +4,6 @@ import Button from '../ui/Button';
 import { mentorSchedulingService, ScheduledSession } from '../../lib/mentorSchedulingService';
 import { Calendar, Clock, CheckCircle, Star, MessageSquare, History } from 'lucide-react';
 import { formatDateDDMMYYYYWithDay, formatTimeAMPM } from '../../lib/dateTimeUtils';
-import ShareSlotsModal from './ShareSlotsModal';
 import FeedbackModal from './FeedbackModal';
 
 interface MentorStartupScheduleSectionProps {
@@ -22,13 +21,12 @@ const MentorStartupScheduleSection: React.FC<MentorStartupScheduleSectionProps> 
   startupName,
   onUpdate
 }) => {
-  const [shareSlotsModalOpen, setShareSlotsModalOpen] = useState(false);
   const [scheduledSessions, setScheduledSessions] = useState<ScheduledSession[]>([]);
   const [completedSessions, setCompletedSessions] = useState<ScheduledSession[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedSessionForFeedback, setSelectedSessionForFeedback] = useState<ScheduledSession | null>(null);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<'share' | 'booked' | 'completed' | 'history'>('share');
+  const [activeSection, setActiveSection] = useState<'booked' | 'completed' | 'history'>('booked');
 
   useEffect(() => {
     loadSessions();
@@ -76,17 +74,6 @@ const MentorStartupScheduleSection: React.FC<MentorStartupScheduleSectionProps> 
           <div className="border-b border-slate-200 mb-4">
             <nav className="-mb-px flex space-x-4" aria-label="Schedule Sections">
               <button
-                onClick={() => setActiveSection('share')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                  activeSection === 'share'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                }`}
-              >
-                <Calendar className="h-4 w-4 inline mr-1" />
-                Share Slots
-              </button>
-              <button
                 onClick={() => setActiveSection('booked')}
                 className={`py-2 px-1 border-b-2 font-medium text-sm ${
                   activeSection === 'booked'
@@ -123,24 +110,6 @@ const MentorStartupScheduleSection: React.FC<MentorStartupScheduleSectionProps> 
           </div>
         </div>
 
-        {/* Share Slots Section */}
-        {activeSection === 'share' && (
-          <div className="space-y-4">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-sm text-blue-800 mb-3">
-                Share your availability slots with <strong>{startupName}</strong>. They can then book sessions from your available slots.
-              </p>
-              <Button
-                onClick={() => setShareSlotsModalOpen(true)}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                <Calendar className="h-4 w-4 mr-2" />
-                Share Slots
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Booked Slots Section */}
         {activeSection === 'booked' && (
           <div className="space-y-4">
@@ -153,7 +122,7 @@ const MentorStartupScheduleSection: React.FC<MentorStartupScheduleSectionProps> 
               <div className="text-center py-8 text-slate-500">
                 <Clock className="h-12 w-12 mx-auto mb-3 text-slate-300" />
                 <p className="text-sm">No booked sessions yet.</p>
-                <p className="text-xs text-slate-400 mt-1">Share your slots to allow {startupName} to book sessions.</p>
+                <p className="text-xs text-slate-400 mt-1">{startupName} can book sessions from your available slots.</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -294,20 +263,6 @@ const MentorStartupScheduleSection: React.FC<MentorStartupScheduleSectionProps> 
           </div>
         )}
       </Card>
-
-      {/* Share Slots Modal */}
-      {shareSlotsModalOpen && (
-        <ShareSlotsModal
-          isOpen={shareSlotsModalOpen}
-          onClose={() => {
-            setShareSlotsModalOpen(false);
-            loadSessions();
-          }}
-          mentorId={mentorId}
-          startupId={startupId}
-          assignmentId={assignmentId}
-        />
-      )}
 
       {/* Feedback Modal */}
       {feedbackModalOpen && selectedSessionForFeedback && (

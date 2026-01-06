@@ -1209,7 +1209,7 @@ const MentorView: React.FC<MentorViewProps> = ({
                                           }
                                         }}
                                       >
-                                        <CheckCircle2 className="mr-1 h-3 w-3" /> Update
+                                        <CheckCircle2 className="mr-1 h-3 w-3" /> Terminate
                                       </Button>
                                       {/* Only show Delete button for manually entered startups (not TMS startups) */}
                                       {!assignment.startup && (

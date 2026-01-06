@@ -22,14 +22,27 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
   const [manageModalOpen, setManageModalOpen] = useState(false);
   const [editingSlot, setEditingSlot] = useState<AvailabilitySlot | null>(null);
 
+  // Load slots when mentorId changes or when modal closes
   useEffect(() => {
     if (mentorId) {
       loadSlots();
-      // Refresh every 30 seconds to update booked status
-      const interval = setInterval(loadSlots, 30000);
-      return () => clearInterval(interval);
     }
   }, [mentorId]);
+
+  // Auto-refresh interval - only when modal is CLOSED
+  useEffect(() => {
+    if (!mentorId || manageModalOpen) {
+      return; // Don't set up interval if modal is open
+    }
+
+    // Refresh every 30 seconds to update booked status
+    // This interval is automatically cleared when modal opens (dependency changes)
+    const interval = setInterval(() => {
+      loadSlots();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [mentorId, manageModalOpen]);
 
   const loadSlots = async () => {
     setIsLoading(true);

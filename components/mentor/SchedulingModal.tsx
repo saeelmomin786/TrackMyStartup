@@ -34,7 +34,7 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(() => {
     const date = new Date();
-    date.setDate(date.getDate() + 1); // Start from tomorrow
+    // Start from today so today's one-time slots (future times) are visible
     return date.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => {
@@ -53,16 +53,39 @@ const SchedulingModal: React.FC<SchedulingModalProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      console.log('🔍 Loading available slots:', { mentorId, startDate, endDate });
+      console.log('🔍 Loading available slots:', { mentorId, startupId, assignmentId, startDate, endDate });
       const slots = await mentorSchedulingService.getAvailableSlotsForDateRange(
         mentorId,
         startDate,
-        endDate
+        endDate,
+        startupId,
+        assignmentId
       );
       console.log('✅ Loaded slots:', slots.length, slots);
       setAvailableSlots(slots);
       
       if (slots.length === 0) {
+        // Check if assignment is terminated to show appropriate message
+        if (assignmentId) {
+          try {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (authUser?.id) {
+              const { data: assignment } = await supabase
+                .from('mentor_startup_assignments')
+                .select('status')
+                .eq('id', assignmentId)
+                .eq('mentor_id', mentorId)
+                .maybeSingle();
+              
+              if (assignment && assignment.status !== 'active') {
+                setError('This mentoring relationship has been terminated. You can no longer book sessions with this mentor.');
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn('Could not check assignment status:', err);
+          }
+        }
         console.warn('⚠️ No slots found. Check if mentor has created availability slots.');
       }
     } catch (err: any) {

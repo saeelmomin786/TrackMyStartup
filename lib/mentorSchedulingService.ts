@@ -191,16 +191,59 @@ class MentorSchedulingService {
   async getAvailableSlotsForDateRange(
     mentorId: string,
     startDate: string,
-    endDate: string
+    endDate: string,
+    startupId?: number,
+    assignmentId?: number | null
   ): Promise<Array<{ date: string; time: string; slotId: number }>> {
     try {
-      // IMPORTANT: mentorId parameter is the mentor's auth user ID
-      // We should use this directly, not the current user's auth ID
-      // This allows startups to view mentor slots
-      console.log('🔍 getAvailableSlotsForDateRange - mentorId:', mentorId, 'startDate:', startDate, 'endDate:', endDate);
+      // IMPORTANT: mentorId parameter should be auth_user_id (not profile_id)
+      // ShareSlotsModal now passes auth_user_id directly
+      // For startups viewing mentor slots, mentorId should already be auth_user_id
+      console.log('🔍 getAvailableSlotsForDateRange - mentorId:', mentorId, 'startupId:', startupId, 'assignmentId:', assignmentId, 'startDate:', startDate, 'endDate:', endDate);
+      
+      // CRITICAL: If startupId is provided, check if assignment is still active
+      // Terminated/completed assignments should not see mentor slots
+      if (startupId !== undefined) {
+        // Check assignment status if assignmentId is provided
+        if (assignmentId) {
+          const { data: assignment, error: assignmentError } = await supabase
+            .from('mentor_startup_assignments')
+            .select('status')
+            .eq('id', assignmentId)
+            .eq('mentor_id', mentorId)
+            .eq('startup_id', startupId)
+            .maybeSingle();
+
+          if (assignmentError) {
+            console.error('❌ Error checking assignment status:', assignmentError);
+          } else if (assignment && assignment.status !== 'active') {
+            console.log('⛔ Assignment is not active (status:', assignment.status, '), returning empty slots');
+            return []; // Return empty if assignment is completed/terminated/cancelled
+          }
+        } else {
+          // If no assignmentId but startupId provided, check for any active assignment
+          const { data: activeAssignment, error: checkError } = await supabase
+            .from('mentor_startup_assignments')
+            .select('id, status')
+            .eq('mentor_id', mentorId)
+            .eq('startup_id', startupId)
+            .eq('status', 'active')
+            .maybeSingle();
+
+          if (checkError) {
+            console.error('❌ Error checking for active assignment:', checkError);
+          } else if (!activeAssignment) {
+            console.log('⛔ No active assignment found between mentor and startup, returning empty slots');
+            return []; // Return empty if no active assignment
+          }
+        }
+      }
       
       // Cleanup old sessions before fetching slots
       await this.cleanupPastScheduledSessions();
+      
+      // Debug: Check if we can query slots for this mentor
+      console.log('🔍 Querying slots for mentor:', mentorId, 'Date range:', startDate, 'to', endDate);
       // Get recurring slots
       // For recurring slots, we need to check if they're valid for the date range
       // A slot is valid if:
@@ -209,7 +252,7 @@ class MentorSchedulingService {
       const { data: recurringSlots, error: recurringError } = await supabase
         .from('mentor_availability_slots')
         .select('*')
-        .eq('mentor_id', mentorId)  // Use the mentor's ID directly
+        .eq('mentor_id', mentorId)  // mentorId should be auth_user_id
         .eq('is_active', true)
         .eq('is_recurring', true);
 
@@ -234,26 +277,38 @@ class MentorSchedulingService {
       });
 
       // Get one-time slots for date range
+      // IMPORTANT: Also include slots that might be slightly in the past (within same day)
+      // to handle timezone issues, but filter them out later if they're truly past
       const { data: oneTimeSlots, error: oneTimeError } = await supabase
         .from('mentor_availability_slots')
         .select('*')
-        .eq('mentor_id', mentorId)  // Use the mentor's ID directly
+        .eq('mentor_id', mentorId)  // mentorId should be auth_user_id
         .eq('is_active', true)
         .eq('is_recurring', false)
+        .not('specific_date', 'is', null)  // Ensure specific_date is not null
         .gte('specific_date', startDate)
         .lte('specific_date', endDate);
 
       if (oneTimeError) {
-        console.error('Error fetching one-time slots:', oneTimeError);
+        console.error('❌ Error fetching one-time slots:', oneTimeError);
       }
       
       console.log('📅 Fetched one-time slots:', (oneTimeSlots || []).length, 'for mentor:', mentorId);
+      if (oneTimeSlots && oneTimeSlots.length > 0) {
+        console.log('📅 One-time slot details:', oneTimeSlots.map(s => ({
+          id: s.id,
+          specific_date: s.specific_date,
+          start_time: s.start_time,
+          is_active: s.is_active,
+          is_recurring: s.is_recurring
+        })));
+      }
 
       // Get booked sessions to filter out conflicts
       const { data: bookedSessions, error: sessionsError } = await supabase
         .from('mentor_startup_sessions')
         .select('session_date, session_time, duration_minutes')
-        .eq('mentor_id', mentorId)  // Use the mentor's ID directly
+        .eq('mentor_id', mentorId)  // mentorId should be auth_user_id
         .eq('status', 'scheduled')
         .gte('session_date', startDate)
         .lte('session_date', endDate);
@@ -298,15 +353,34 @@ class MentorSchedulingService {
       // Process one-time slots
       console.log('📅 Processing one-time slots:', (oneTimeSlots || []).length);
       (oneTimeSlots || []).forEach(slot => {
-        if (slot.specific_date) {
-          const timeKey = `${slot.specific_date}T${slot.start_time}`;
-          if (!bookedTimes.has(timeKey)) {
-            availableSlots.push({
-              date: slot.specific_date,
-              time: slot.start_time,
-              slotId: slot.id
-            });
+        if (slot.specific_date && slot.is_active) {
+          // Double-check the date is within range (handle timezone edge cases)
+          const slotDate = new Date(slot.specific_date);
+          const rangeStart = new Date(startDate);
+          const rangeEnd = new Date(endDate);
+          
+          // Only include if slot date is within range
+          if (slotDate >= rangeStart && slotDate <= rangeEnd) {
+            const timeKey = `${slot.specific_date}T${slot.start_time}`;
+            if (!bookedTimes.has(timeKey)) {
+              availableSlots.push({
+                date: slot.specific_date,
+                time: slot.start_time,
+                slotId: slot.id
+              });
+              console.log('✅ Added one-time slot:', slot.specific_date, slot.start_time);
+            } else {
+              console.log('⏭️ Skipped booked one-time slot:', slot.specific_date, slot.start_time);
+            }
+          } else {
+            console.log('⏭️ Skipped one-time slot outside range:', slot.specific_date, 'Range:', startDate, '-', endDate);
           }
+        } else {
+          console.log('⚠️ Skipped invalid one-time slot:', {
+            id: slot.id,
+            specific_date: slot.specific_date,
+            is_active: slot.is_active
+          });
         }
       });
       
@@ -348,6 +422,40 @@ class MentorSchedulingService {
       // - startup_id = startupId (the startup's ID)
       // RLS policy should allow startups to insert their own sessions
       console.log('🔍 bookSession - mentorId:', mentorId, 'startupId:', startupId, 'assignmentId:', assignmentId);
+      
+      // CRITICAL: Check if assignment is still active before allowing booking
+      if (assignmentId) {
+        const { data: assignment, error: assignmentError } = await supabase
+          .from('mentor_startup_assignments')
+          .select('status')
+          .eq('id', assignmentId)
+          .eq('mentor_id', mentorId)
+          .eq('startup_id', startupId)
+          .maybeSingle();
+
+        if (assignmentError) {
+          console.error('❌ Error checking assignment status:', assignmentError);
+          throw new Error('Unable to verify mentoring relationship. Please try again.');
+        } else if (assignment && assignment.status !== 'active') {
+          throw new Error('This mentoring relationship has been terminated. You can no longer book sessions with this mentor.');
+        }
+      } else {
+        // If no assignmentId, check for any active assignment
+        const { data: activeAssignment, error: checkError } = await supabase
+          .from('mentor_startup_assignments')
+          .select('id, status')
+          .eq('mentor_id', mentorId)
+          .eq('startup_id', startupId)
+          .eq('status', 'active')
+          .maybeSingle();
+
+        if (checkError) {
+          console.error('❌ Error checking for active assignment:', checkError);
+          throw new Error('Unable to verify mentoring relationship. Please try again.');
+        } else if (!activeAssignment) {
+          throw new Error('No active mentoring relationship found. You cannot book sessions with this mentor.');
+        }
+      }
       
       const sessionData: any = {
         mentor_id: mentorId,  // Use the mentor's ID directly

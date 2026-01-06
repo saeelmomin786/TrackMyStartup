@@ -2,18 +2,31 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { google } from 'googleapis';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    return res.status(200).end();
+  }
+
   // Handle action parameter - it can be a string or array
   const actionParam = req.query.action;
   const action = Array.isArray(actionParam) ? actionParam[0] : actionParam;
 
   // Log for debugging
-  console.log('Google Calendar API called with action:', action);
-  console.log('Query params:', req.query);
+  console.log('Google Calendar API called:', {
+    method: req.method,
+    action: action,
+    query: req.query
+  });
 
   if (!action) {
     return res.status(400).json({ 
       error: 'Missing action parameter. Use: generate-meet-link, create-event, create-event-service-account, check-conflicts, or refresh-token',
-      received: { action: actionParam, query: req.query }
+      received: { action: actionParam, query: req.query },
+      method: req.method,
+      hint: 'All actions require POST method'
     });
   }
 
@@ -32,7 +45,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       default:
         return res.status(400).json({ 
           error: 'Invalid action. Use: generate-meet-link, create-event, create-event-service-account, check-conflicts, or refresh-token',
-          received: action
+          received: action,
+          method: req.method
         });
     }
   } catch (error: any) {
@@ -47,7 +61,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // Generate Google Meet Link
 async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ 
+      error: 'Method not allowed',
+      received: req.method,
+      required: 'POST',
+      hint: 'Use: curl -X POST "https://your-domain.com/api/google-calendar?action=generate-meet-link" -H "Content-Type: application/json"'
+    });
   }
 
   const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;

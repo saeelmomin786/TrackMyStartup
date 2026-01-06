@@ -2,7 +2,20 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { google } from 'googleapis';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const { action } = req.query;
+  // Handle action parameter - it can be a string or array
+  const actionParam = req.query.action;
+  const action = Array.isArray(actionParam) ? actionParam[0] : actionParam;
+
+  // Log for debugging
+  console.log('Google Calendar API called with action:', action);
+  console.log('Query params:', req.query);
+
+  if (!action) {
+    return res.status(400).json({ 
+      error: 'Missing action parameter. Use: generate-meet-link, create-event, create-event-service-account, check-conflicts, or refresh-token',
+      received: { action: actionParam, query: req.query }
+    });
+  }
 
   try {
     switch (action) {
@@ -17,7 +30,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'create-event-service-account':
         return await handleCreateEventServiceAccount(req, res);
       default:
-        return res.status(400).json({ error: 'Invalid action. Use: generate-meet-link, create-event, create-event-service-account, check-conflicts, or refresh-token' });
+        return res.status(400).json({ 
+          error: 'Invalid action. Use: generate-meet-link, create-event, create-event-service-account, check-conflicts, or refresh-token',
+          received: action
+        });
     }
   } catch (error: any) {
     console.error('Error in google-calendar API:', error);

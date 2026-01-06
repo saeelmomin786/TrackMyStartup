@@ -26,15 +26,10 @@ const AvailabilitySlotsDisplay: React.FC<AvailabilitySlotsDisplayProps> = ({ men
     if (mentorId) {
       loadSlots();
       // Refresh every 30 seconds to update booked status
-      // BUT: Pause refresh when modal is open to avoid interrupting user
-      const interval = setInterval(() => {
-        if (!manageModalOpen) {
-          loadSlots();
-        }
-      }, 30000);
+      const interval = setInterval(loadSlots, 30000);
       return () => clearInterval(interval);
     }
-  }, [mentorId, manageModalOpen]);
+  }, [mentorId]);
 
   const loadSlots = async () => {
     setIsLoading(true);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -68,19 +68,15 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
       const isModalJustOpened = !prevIsOpenRef.current;
       
       // If modal is already open and user has manually shown the form, preserve it
-      // Don't reload slots if form is open - avoid interrupting user
       if (!isModalJustOpened && userManuallyOpenedFormRef.current) {
-        // Don't reload - user is working on the form
+        // Only reload slots, don't reset form state
+        loadSlots();
         return;
       }
       
       prevIsOpenRef.current = true;
       
-      // Only load slots when modal first opens, not on every render
-      if (isModalJustOpened) {
-        loadSlots();
-      }
-      
+      loadSlots();
       if (initialSlot) {
         setEditingSlot(initialSlot);
         setShowAddForm(true);
@@ -104,7 +100,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
       prevIsOpenRef.current = false;
       userManuallyOpenedFormRef.current = false;
     }
-  }, [isOpen, mentorId, loadSlots]); // Removed showAddForm to prevent circular dependency
+  }, [isOpen, mentorId, initialSlot]);
   
   // Separate effect for initialSlot to avoid dependency array issues
   useEffect(() => {
@@ -123,7 +119,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
     }
   }, [initialSlot, isOpen]);
 
-  const loadSlots = useCallback(async () => {
+  const loadSlots = async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -134,7 +130,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [mentorId]);
+  };
 
   const resetForm = () => {
     setSlotType('recurring');

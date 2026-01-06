@@ -69,7 +69,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
       
       // If modal is already open and user has manually shown the form, preserve it
       // Don't reload slots if form is open - avoid interrupting user
-      if (!isModalJustOpened && (userManuallyOpenedFormRef.current || showAddForm)) {
+      if (!isModalJustOpened && userManuallyOpenedFormRef.current) {
         // Don't reload - user is working on the form
         return;
       }
@@ -104,7 +104,7 @@ const ManageAvailabilityModal: React.FC<ManageAvailabilityModalProps> = ({
       prevIsOpenRef.current = false;
       userManuallyOpenedFormRef.current = false;
     }
-  }, [isOpen, mentorId, loadSlots, showAddForm]); // Added loadSlots and showAddForm to dependencies
+  }, [isOpen, mentorId, loadSlots]); // Removed showAddForm to prevent circular dependency
   
   // Separate effect for initialSlot to avoid dependency array issues
   useEffect(() => {

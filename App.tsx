@@ -2735,7 +2735,104 @@ const App: React.FC = () => {
         }
       }
       
+      // CRITICAL FIX: If wantsCoInvestment is true, create co-investment opportunity FIRST
+      // Then use its ID when creating the offer
+      let finalCoInvestmentOpportunityId = coInvestmentOpportunityId;
+      
+      if (wantsCoInvestment && !coInvestmentOpportunityId) {
+        const remainingAmount = opportunity.investmentValue - offerAmount;
+        // IMPORTANT: Always create co-investment opportunity when wantsCoInvestment is true
+        // Even if remainingAmount is 0 or negative, we should still create it
+        // The co-investment opportunity represents the full investment, and the lead investor's offer is part of it
+        try {
+          console.log('🔄 Creating co-investment opportunity BEFORE creating offer...');
+          console.log('🔍 Co-investment details:', {
+            offerAmount,
+            investmentValue: opportunity.investmentValue,
+            remainingAmount,
+            wantsCoInvestment
+          });
+          
+          // For co-investment, we need to find the corresponding startup_id
+          // Since opportunity.id is from new_investments, we need to map it to startups
+          const { data: startupData, error: startupError } = await supabase
+            .from('startups')
+            .select('id, name')
+            .eq('name', opportunity.name)
+            .single();
+          
+          if (startupError || !startupData) {
+            console.error('❌ Startup not found for co-investment:', opportunity.name, startupError);
+            // Notification removed - startup not found error logged silently
+            return;
+          }
+          
+          console.log('✅ Found startup for co-investment:', startupData);
+          
+          // CRITICAL FIX: listed_by_user_id expects auth_user_id, not profile_id
+          const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+          const authUserId = authUser?.id;
+          if (!authUserId) {
+            console.error('❌ No auth user found for co-investment opportunity');
+            return;
+          }
+          
+          // Calculate min/max co-investment amounts
+          // If remainingAmount is 0 or negative, set minimum to a small amount (1% of offer) and max to offer amount
+          // This allows the lead investor to still create the opportunity and potentially adjust later
+          const minCoInvestment = remainingAmount > 0 
+            ? Math.min(remainingAmount * 0.1, 10000) 
+            : Math.max(offerAmount * 0.01, 1000); // 1% of offer or 1000 minimum
+          const maxCoInvestment = remainingAmount > 0 
+            ? remainingAmount 
+            : offerAmount; // If no remaining, allow up to the offer amount
+          
+          console.log('🔍 Co-investment opportunity parameters:', {
+            startup_id: startupData.id,
+            listed_by_user_id: authUserId,
+            investment_amount: opportunity.investmentValue,
+            equity_percentage: opportunity.equityAllocation,
+            minimum_co_investment: minCoInvestment,
+            maximum_co_investment: maxCoInvestment
+          });
+          
+          const coInvestmentOpportunity = await investmentService.createCoInvestmentOpportunity({
+            startup_id: startupData.id,
+            listed_by_user_id: authUserId,  // Use auth_user_id, not profile ID!
+            listed_by_type: 'Investor',
+            investment_amount: opportunity.investmentValue,
+            equity_percentage: opportunity.equityAllocation,
+            minimum_co_investment: minCoInvestment,
+            maximum_co_investment: maxCoInvestment,
+            description: remainingAmount > 0
+              ? `Co-investment opportunity for ${opportunity.name}. Lead investor has committed ${currency || 'USD'} ${offerAmount.toLocaleString()} for ${equityPercentage}% equity. Remaining ${currency || 'USD'} ${remainingAmount.toLocaleString()} available for co-investors.`
+              : `Co-investment opportunity for ${opportunity.name}. Lead investor has committed ${currency || 'USD'} ${offerAmount.toLocaleString()} for ${equityPercentage}% equity.`
+          });
+          
+          if (coInvestmentOpportunity && coInvestmentOpportunity.id) {
+            finalCoInvestmentOpportunityId = coInvestmentOpportunity.id;
+            console.log('✅ Co-investment opportunity created successfully with ID:', finalCoInvestmentOpportunityId);
+          } else {
+            console.error('❌ Co-investment opportunity created but no ID returned');
+            console.error('❌ Returned data:', coInvestmentOpportunity);
+            return; // Don't create the offer if we don't have the opportunity ID
+          }
+          
+        } catch (coInvestmentError) {
+          console.error('❌ Error creating co-investment opportunity:', coInvestmentError);
+          console.error('❌ Error details:', {
+            message: coInvestmentError instanceof Error ? coInvestmentError.message : String(coInvestmentError),
+            stack: coInvestmentError instanceof Error ? coInvestmentError.stack : undefined
+          });
+          // Notification removed - co-investment error logged silently
+          return; // Don't create the offer if co-investment opportunity creation failed
+        }
+      }
+      
       // Use opportunity.id which is the new_investments.id
+      // IMPORTANT: If wantsCoInvestment is true, the lead investor's offer should be a REGULAR offer
+      // (not a co-investment offer). The co-investment opportunity is for OTHER investors to join.
+      // Only pass co_investment_opportunity_id if this is NOT the lead investor making the offer
       const createdOffer = await investmentService.createInvestmentOffer({
         investor_email: currentUserRef.current.email,
         startup_name: opportunity.name,
@@ -2743,12 +2840,15 @@ const App: React.FC = () => {
         offer_amount: offerAmount,
         equity_percentage: equityPercentage,
         currency: currency || 'USD',
-        co_investment_opportunity_id: coInvestmentOpportunityId // Track co-investment opportunity if this is a co-investment offer
+        // Don't pass co_investment_opportunity_id for lead investor's own offer
+        // The lead investor creates a regular offer, and the co-investment opportunity is for others
+        co_investment_opportunity_id: undefined // Lead investor's offer is always regular
       });
       
       // Format the offer to match the InvestmentOffer interface format (camelCase)
-      // This ensures it displays correctly in the UI, especially for co-investment offers
-      const isCoInvestment = !!coInvestmentOpportunityId || !!(createdOffer as any).co_investment_opportunity_id;
+      // IMPORTANT: Lead investor's offer is always a regular offer, even if they created a co-investment opportunity
+      // The co-investment opportunity is for OTHER investors to join
+      const isCoInvestment = false; // Lead investor's offer is never a co-investment offer
       
       const formattedNewOffer: any = {
         id: createdOffer.id,
@@ -2763,8 +2863,11 @@ const App: React.FC = () => {
         currency: createdOffer.currency || currency || 'USD',
         createdAt: createdOffer.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString(),
         // Co-investment fields
-        is_co_investment: isCoInvestment, // Flag to identify co-investment offers
-        co_investment_opportunity_id: createdOffer.co_investment_opportunity_id || coInvestmentOpportunityId || null,
+        // Note: Lead investor's offer is always a regular offer, even if they created a co-investment opportunity
+        is_co_investment: isCoInvestment, // Flag to identify co-investment offers (false for lead investor)
+        co_investment_opportunity_id: null, // Lead investor's offer doesn't have co_investment_opportunity_id
+        // Store the co-investment opportunity ID separately for reference (if created)
+        created_co_investment_opportunity_id: finalCoInvestmentOpportunityId || null,
         lead_investor_approval_status: (createdOffer as any).lead_investor_approval_status || 'not_required',
         lead_investor_approval_at: (createdOffer as any).lead_investor_approval_at,
         investor_advisor_approval_status: (createdOffer as any).investor_advisor_approval_status || 'not_required',
@@ -2779,67 +2882,14 @@ const App: React.FC = () => {
       // Update local state
       setInvestmentOffers(prev => [formattedNewOffer, ...prev]);
       
-      // Handle co-investment offer flow - different from creating new co-investment opportunity
-      if (coInvestmentOpportunityId) {
-        // This is an offer for an existing co-investment opportunity
-        // The approval flow is handled by the createInvestmentOffer function
-        // Flow: Investor Advisor → Lead Investor → Startup
-        console.log('✅ Co-investment offer created with opportunity ID:', coInvestmentOpportunityId);
-        console.log('📋 Formatted offer for state:', formattedNewOffer);
-        console.log('🔍 Co-investment opportunity ID in formatted offer:', formattedNewOffer.co_investment_opportunity_id);
-      }
-      
-      // Handle co-investment logic if requested (creating NEW co-investment opportunity)
-      if (wantsCoInvestment && !coInvestmentOpportunityId) {
-        const remainingAmount = opportunity.investmentValue - offerAmount;
-        if (remainingAmount > 0) {
-          try {
-            console.log('🔄 Creating co-investment opportunity...');
-            
-            // For co-investment, we need to find the corresponding startup_id
-            // Since opportunity.id is from new_investments, we need to map it to startups
-            const { data: startupData, error: startupError } = await supabase
-              .from('startups')
-              .select('id, name')
-              .eq('name', opportunity.name)
-              .single();
-            
-            if (startupError || !startupData) {
-              console.error('❌ Startup not found for co-investment:', opportunity.name);
-              // Notification removed - startup not found error logged silently
-              return;
-            }
-            
-            console.log('✅ Found startup for co-investment:', startupData);
-            
-            // CRITICAL FIX: listed_by_user_id expects auth_user_id, not profile_id
-            const { data: { user: authUser } } = await authService.supabase.auth.getUser();
-            const authUserId = authUser?.id;
-            if (!authUserId) {
-              console.error('❌ No auth user found for co-investment opportunity');
-              return;
-            }
-            
-            await investmentService.createCoInvestmentOpportunity({
-              startup_id: startupData.id,
-              listed_by_user_id: authUserId,  // Use auth_user_id, not profile ID!
-              listed_by_type: 'Investor',
-              investment_amount: opportunity.investmentValue,
-              equity_percentage: opportunity.equityAllocation,
-              minimum_co_investment: Math.min(remainingAmount * 0.1, 10000), // 10% of remaining or 10k minimum
-              maximum_co_investment: remainingAmount,
-              description: `Co-investment opportunity for ${opportunity.name}. Lead investor has committed ${currency || 'USD'} ${offerAmount.toLocaleString()} for ${equityPercentage}% equity. Remaining ${currency || 'USD'} ${remainingAmount.toLocaleString()} available for co-investors.`
-            });
-            
-            console.log('✅ Co-investment opportunity created successfully');
-            // Notification removed - co-investment created silently
-            
-          } catch (coInvestmentError) {
-            console.error('❌ Error creating co-investment opportunity:', coInvestmentError);
-            // Notification removed - co-investment error logged silently
-          }
-        }
-        // Notification removed - offer submitted silently
+      // Handle co-investment opportunity creation
+      if (finalCoInvestmentOpportunityId) {
+        // Lead investor created a co-investment opportunity
+        // Their own offer is a regular offer (not a co-investment offer)
+        // The co-investment opportunity is for OTHER investors to join
+        console.log('✅ Co-investment opportunity created with ID:', finalCoInvestmentOpportunityId);
+        console.log('✅ Lead investor\'s regular offer created (ID:', formattedNewOffer.id, ')');
+        console.log('📋 Note: Lead investor\'s offer is regular, co-investment opportunity is for other investors');
       }
     } catch (error) {
       console.error('Error submitting offer:', error);

@@ -7,6 +7,7 @@ import Badge from './ui/Badge';
 import { Users, Building2, HelpCircle, FileCheck2, LayoutGrid, Eye, Check, X, UserCheck, NotebookPen, BookUser, FileStack, Database, Shield, Settings, DollarSign, TrendingUp, AlertTriangle, BarChart3, UserPlus, Building, CreditCard, MessageSquare, Calendar, Globe, Target, Zap, Megaphone, FileText } from 'lucide-react';
 import AdminProgramsTab from './admin/AdminProgramsTab';
 import AdminBlogsTab from './admin/AdminBlogsTab';
+import InvestorListManager from './admin/InvestorListManager';
 import UserGrowthChart from './admin/UserGrowthChart';
 import UserRoleDistributionChart from './admin/UserRoleDistributionChart';
 import DataManager from './DataManager';
@@ -34,7 +35,7 @@ interface AdminViewProps {
   onViewStartup: (id: number) => void;
 }
 
-type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'financial' | 'analytics' | 'system' | 'programs' | 'blogs';
+type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'financial' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList';
 type TimeFilter = '30d' | '90d' | 'all';
 
 const SummaryCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -366,6 +367,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             case 'system': return <SystemTab />;
             case 'programs': return <AdminProgramsTab />;
             case 'blogs': return <AdminBlogsTab />;
+            case 'investorList': return <InvestorListManager />;
             default: return null;
         }
     }
@@ -408,6 +410,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
                     <TabButton id="system" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Settings />}>System</TabButton>
                     <TabButton id="programs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Megaphone />}>Programs</TabButton>
                     <TabButton id="blogs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<FileText />}>Blogs</TabButton>
+                    <TabButton id="investorList" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Building2 />}>Investor List</TabButton>
                 </nav>
             </div>
 

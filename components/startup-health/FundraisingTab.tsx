@@ -11,8 +11,9 @@ import { formatCurrency } from '../../lib/utils';
 import { messageService } from '../../lib/messageService';
 import { validationService } from '../../lib/validationService';
 import { generalDataService, GeneralDataItem } from '../../lib/generalDataService';
+import { investorListService, InvestorListItem } from '../../lib/investorListService';
 import { getVideoEmbedUrl, VideoSource } from '../../lib/videoUtils';
-import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe } from 'lucide-react';
+import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import FundraisingCRM from './FundraisingCRM';
@@ -117,6 +118,13 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   const [domainOptions, setDomainOptions] = useState<GeneralDataItem[]>([]);
   const [stageOptions, setStageOptions] = useState<GeneralDataItem[]>([]);
   const [roundTypeOptions, setRoundTypeOptions] = useState<GeneralDataItem[]>([]);
+  const [countryOptions, setCountryOptions] = useState<GeneralDataItem[]>([]);
+  
+  // Investor list state
+  const [investors, setInvestors] = useState<InvestorListItem[]>([]);
+  const [filteredInvestors, setFilteredInvestors] = useState<InvestorListItem[]>([]);
+  const [isLoadingInvestors, setIsLoadingInvestors] = useState(false);
+  const [showAIMatched, setShowAIMatched] = useState(false);
   
   // Validation status
   const [validationStatus, setValidationStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
@@ -128,15 +136,17 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       setError(null);
       try {
         // Load dropdown options from general_data table
-        const [domains, stages, roundTypes] = await Promise.all([
+        const [domains, stages, roundTypes, countries] = await Promise.all([
           generalDataService.getItemsByCategory('domain'),
           generalDataService.getItemsByCategory('stage'),
           generalDataService.getItemsByCategory('round_type'),
+          generalDataService.getItemsByCategory('country'),
         ]);
         
         setDomainOptions(domains);
         setStageOptions(stages);
         setRoundTypeOptions(roundTypes);
+        setCountryOptions(countries);
 
         const [rounds, validationRequest] = await Promise.all([
           capTableService.getFundraisingDetails(startup.id),
@@ -190,6 +200,105 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
     loadData();
   }, [startup?.id]);
+
+  // Load investors when investors tab is active
+  useEffect(() => {
+    const loadInvestors = async () => {
+      if (activeSubTab !== 'investors') return;
+      
+      setIsLoadingInvestors(true);
+      try {
+        const allInvestors = await investorListService.getAllActive();
+        setInvestors(allInvestors);
+        setFilteredInvestors(allInvestors);
+        setShowAIMatched(false);
+      } catch (e: any) {
+        console.error('Error loading investors:', e);
+        setError('Failed to load investors');
+      } finally {
+        setIsLoadingInvestors(false);
+      }
+    };
+
+    loadInvestors();
+  }, [activeSubTab]);
+
+  // AI Investor Matching function
+  const handleAIMatching = () => {
+    if (!startup || !fundraising) {
+      setError('Startup profile or fundraising details not available');
+      return;
+    }
+
+    // Get domain from fundraising or startup sector
+    const startupDomain: string[] = [];
+    if (fundraising.domain) {
+      // If domain is a single value, convert to array
+      startupDomain.push(fundraising.domain.toString());
+    } else if (startup.sector && startup.sector !== 'Unknown' && startup.sector !== 'Technology') {
+      startupDomain.push(startup.sector);
+    }
+    
+    const roundType = fundraising.type || '';
+    const country = fundraising.country || '';
+
+    // Filter investors based on matching criteria
+    const matched = investors.map(investor => {
+      let matchScore = 0;
+      const matchReasons: string[] = [];
+
+      // Check domain match
+      if (startupDomain.length > 0 && investor.domain && investor.domain.length > 0) {
+        const hasDomainMatch = startupDomain.some(sd => 
+          investor.domain?.some(id => 
+            id.toLowerCase() === sd.toLowerCase()
+          )
+        );
+        if (hasDomainMatch) {
+          matchScore += 40;
+          matchReasons.push('Domain Match');
+        }
+      }
+
+      // Check round type match
+      if (roundType && investor.round_type && investor.round_type.length > 0) {
+        const hasRoundMatch = investor.round_type.some(rt => 
+          rt.toLowerCase() === roundType.toLowerCase()
+        );
+        if (hasRoundMatch) {
+          matchScore += 40;
+          matchReasons.push('Round Type Match');
+        }
+      }
+
+      // Check country match
+      if (country && investor.country && investor.country.length > 0) {
+        const hasCountryMatch = investor.country.some(c => 
+          c.toLowerCase() === country.toLowerCase()
+        );
+        if (hasCountryMatch) {
+          matchScore += 20;
+          matchReasons.push('Country Match');
+        }
+      }
+
+      return {
+        ...investor,
+        matchScore,
+        matchReasons,
+      };
+    }).filter(investor => investor.matchScore > 0)
+      .sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+
+    setFilteredInvestors(matched);
+    setShowAIMatched(true);
+  };
+
+  // Reset to show all investors
+  const handleShowAllInvestors = () => {
+    setFilteredInvestors(investors);
+    setShowAIMatched(false);
+  };
 
   const handleChange = (field: keyof FundraisingDetails, value: any) => {
     setFundraising(prev => ({
@@ -2339,22 +2448,234 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         </div>
       )}
 
-      {/* Investor List placeholder */}
+      {/* Investor List */}
       {activeSubTab === 'investors' && !isLoading && (
-        <Card className="p-4 sm:p-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-2">
-            Investor List
-          </h2>
-          <p className="text-sm text-slate-600">
-            English: This section will track angels, VCs and other investors you are in touch with for this round.
-          </p>
-          <p className="text-sm text-slate-600 mt-1">
-            हिन्दी: यहाँ आप इस round के लिए जुड़े angels, VCs और बाकी investors की list और status track कर पाएँगे।
-          </p>
-          <p className="text-sm text-slate-600 mt-1">
-            मराठी: इथे या फेरीसाठी संपर्कात असलेल्या angels, VCs आणि इतर investors ची यादी आणि status तुम्ही track करू शकता.
-          </p>
-        </Card>
+        <div className="space-y-4">
+          <Card className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 mb-1">
+                  Investor List
+                </h2>
+                <p className="text-sm text-slate-600">
+                  Discover and connect with investors matching your startup profile
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {!showAIMatched ? (
+                  <Button
+                    onClick={handleAIMatching}
+                    className="flex items-center gap-2"
+                    variant="primary"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    AI Investor Matching
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleShowAllInvestors}
+                    variant="secondary"
+                  >
+                    Show All Investors
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {isLoadingInvestors ? (
+              <div className="text-center py-8">
+                <p className="text-slate-600">Loading investors...</p>
+              </div>
+            ) : filteredInvestors.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-600">
+                  {showAIMatched 
+                    ? 'No matching investors found. Try adjusting your startup profile or fundraising details.'
+                    : 'No investors available at the moment.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {showAIMatched && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4">
+                    <p className="text-sm text-emerald-800 text-center font-bold">
+                      <CheckCircle className="w-4 h-4 inline mr-1" />
+                      Showing {filteredInvestors.length} matching investor{filteredInvestors.length !== 1 ? 's' : ''} based on your startup profile
+                    </p>
+                  </div>
+                )}
+                
+                <div className="grid gap-4">
+                  {filteredInvestors.map((investor) => {
+                    const matchScore = (investor as any).matchScore;
+                    const matchReasons = (investor as any).matchReasons || [];
+                    
+                    return (
+                      <Card key={investor.id} className="p-4 sm:p-6 hover:shadow-md transition-shadow">
+                        <div className="flex flex-col sm:flex-row gap-4">
+                          {/* Investor Image */}
+                          <div className="flex-shrink-0">
+                            {investor.image_url ? (
+                              <img
+                                src={investor.image_url}
+                                alt={investor.name}
+                                className="w-24 h-24 sm:w-32 sm:h-32 object-cover rounded-lg border border-slate-200"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/128?text=Investor';
+                                }}
+                              />
+                            ) : (
+                              <div className="w-24 h-24 sm:w-32 sm:h-32 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center">
+                                <Building2 className="w-12 h-12 text-slate-400" />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Investor Details */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-3">
+                              <div>
+                                <h3 className="text-lg font-semibold text-slate-900 mb-1">
+                                  {investor.name}
+                                </h3>
+                                {matchScore !== undefined && (
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+                                      Match: {matchScore}%
+                                    </span>
+                                    {matchReasons.length > 0 && (
+                                      <span className="text-xs text-slate-600">
+                                        {matchReasons.join(' • ')}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex gap-2">
+                                {investor.website && (
+                                  <a
+                                    href={investor.website}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-slate-600 hover:text-slate-900"
+                                    title="Website"
+                                  >
+                                    <Globe className="w-5 h-5" />
+                                  </a>
+                                )}
+                                {investor.linkedin && (
+                                  <a
+                                    href={investor.linkedin}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-slate-600 hover:text-blue-600"
+                                    title="LinkedIn"
+                                  >
+                                    <Linkedin className="w-5 h-5" />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Badges */}
+                            <div className="space-y-2">
+                              {investor.fund_type && investor.fund_type.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="text-xs font-medium text-slate-600">Fund Type:</span>
+                                  {investor.fund_type.map((ft, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-800"
+                                    >
+                                      {ft}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {investor.domain && investor.domain.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="text-xs font-medium text-slate-600">Domain:</span>
+                                  {investor.domain.map((d, idx) => {
+                                    const startupDomainArray: string[] = [];
+                                    if (fundraising.domain) {
+                                      startupDomainArray.push(fundraising.domain.toString());
+                                    } else if (startup.sector && startup.sector !== 'Unknown' && startup.sector !== 'Technology') {
+                                      startupDomainArray.push(startup.sector);
+                                    }
+                                    const isMatched = showAIMatched && startupDomainArray.some(sd => 
+                                      sd.toLowerCase() === d.toLowerCase()
+                                    );
+                                    return (
+                                      <span
+                                        key={idx}
+                                        className={`px-2 py-1 text-xs font-medium rounded ${
+                                          isMatched 
+                                            ? 'bg-emerald-100 text-emerald-800' 
+                                            : 'bg-purple-100 text-purple-800'
+                                        }`}
+                                      >
+                                        {d} {isMatched && <CheckCircle className="w-3 h-3 inline ml-1" />}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {investor.round_type && investor.round_type.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="text-xs font-medium text-slate-600">Round Type:</span>
+                                  {investor.round_type.map((rt, idx) => {
+                                    const isMatched = showAIMatched && fundraising.type && 
+                                      rt.toLowerCase() === fundraising.type.toLowerCase();
+                                    return (
+                                      <span
+                                        key={idx}
+                                        className={`px-2 py-1 text-xs font-medium rounded ${
+                                          isMatched 
+                                            ? 'bg-emerald-100 text-emerald-800' 
+                                            : 'bg-orange-100 text-orange-800'
+                                        }`}
+                                      >
+                                        {rt} {isMatched && <CheckCircle className="w-3 h-3 inline ml-1" />}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {investor.country && investor.country.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="text-xs font-medium text-slate-600">Country:</span>
+                                  {investor.country.map((c, idx) => {
+                                    const isMatched = showAIMatched && fundraising.country && 
+                                      c.toLowerCase() === fundraising.country.toLowerCase();
+                                    return (
+                                      <span
+                                        key={idx}
+                                        className={`px-2 py-1 text-xs font-medium rounded ${
+                                          isMatched 
+                                            ? 'bg-emerald-100 text-emerald-800' 
+                                            : 'bg-indigo-100 text-indigo-800'
+                                        }`}
+                                      >
+                                        {c} {isMatched && <CheckCircle className="w-3 h-3 inline ml-1" />}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
       )}
 
       {/* CRM - Full Kanban Board */}

@@ -23,13 +23,16 @@ const GeneralDataManager: React.FC = () => {
     is_active: true
   });
 
+  // All categories supported by general_data table
   const categories: { value: GeneralDataCategory; label: string }[] = [
     { value: 'country', label: 'Countries' },
     { value: 'sector', label: 'Sectors' },
     { value: 'mentor_type', label: 'Mentor Types' },
-    { value: 'round_type', label: 'Round Types' },
-    { value: 'stage', label: 'Stages' },
-    { value: 'domain', label: 'Domains' }
+    { value: 'round_type', label: 'Round / Investment Types' },
+    { value: 'stage', label: 'Startup Stages' },
+    { value: 'domain', label: 'Domains / Sectors' },
+    { value: 'currency', label: 'Currencies' },
+    { value: 'firm_type', label: 'Investor Fund Types' }
   ];
 
   useEffect(() => {

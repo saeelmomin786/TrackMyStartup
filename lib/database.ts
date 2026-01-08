@@ -2323,7 +2323,9 @@ export const investmentService = {
           currency: offer.currency || 'USD',
           stage: offer.stage || 1,
           createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : new Date().toISOString(),
-          investorAdvisorCode: investorAdvisors[offer.investor_email] || null
+          investorAdvisorCode: investorAdvisors[offer.investor_email] || null,
+          investor_advisor_approval_status: offer.investor_advisor_approval_status,
+          startup_advisor_approval_status: offer.startup_advisor_approval_status
         };
         
         // Debug: Log mapped offer
@@ -2620,9 +2622,66 @@ export const investmentService = {
         // Don't throw - continue with regular offers if co-investment fetch fails
       }
 
+      // Get auth user ID to check for co-investment opportunities they created
+      // IMPORTANT: co_investment_opportunities.listed_by_user_id uses auth.uid(), not profile ID
+      let userId: string | null = null;
+      if (regularOffers && regularOffers.length > 0) {
+        try {
+          // Get auth user ID (same as auth.uid())
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          userId = authUser?.id || null;
+          
+          // Fallback: if auth user not found, try to get from users table by email
+          if (!userId) {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('id')
+              .eq('email', userEmail)
+              .single();
+            userId = userData?.id || null;
+          }
+        } catch (err) {
+          console.log('🔍 Could not fetch user ID for co-investment check:', err);
+        }
+      }
+
+      // Fetch co-investment opportunities created by this user (for lead investor offers)
+      let userCreatedOpportunities: { [startupId: number]: number } = {};
+      if (userId) {
+        try {
+          const { data: opportunities } = await supabase
+            .from('co_investment_opportunities')
+            .select('id, startup_id')
+            .eq('listed_by_user_id', userId)
+            .eq('status', 'active');
+          
+          if (opportunities) {
+            opportunities.forEach(opp => {
+              if (opp.startup_id) {
+                userCreatedOpportunities[opp.startup_id] = opp.id;
+              }
+            });
+            console.log('🔍 Found co-investment opportunities created by user:', userCreatedOpportunities);
+          }
+        } catch (err) {
+          console.log('🔍 Could not fetch co-investment opportunities:', err);
+        }
+      }
+
       // Combine both types of offers
+      // IMPORTANT: Mark regular offers as co-investment-related if user created a co-investment opportunity for that startup
       const data = [
-        ...(regularOffers || []).map(offer => ({ ...offer, is_co_investment: false })),
+        ...(regularOffers || []).map(offer => {
+          const startupId = (offer as any).startup_id || offer.startup?.id;
+          const hasCoInvestmentOpp = startupId && userCreatedOpportunities[startupId];
+          return {
+            ...offer,
+            is_co_investment: false, // Still a regular offer, but related to co-investment
+            created_co_investment_opportunity_id: hasCoInvestmentOpp ? userCreatedOpportunities[startupId] : null,
+            // Mark as co-investment-related for display purposes
+            is_co_investment_related: !!hasCoInvestmentOpp
+          };
+        }),
         ...(coInvestmentOffers || []).map(offer => ({ ...offer, is_co_investment: true }))
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -2749,6 +2808,9 @@ export const investmentService = {
         // Co-investment fields
         is_co_investment: offer.is_co_investment || false,
         co_investment_opportunity_id: offer.co_investment_opportunity_id || null,
+        // For lead investor: check if they created a co-investment opportunity for this startup
+        created_co_investment_opportunity_id: (offer as any).created_co_investment_opportunity_id || null,
+        is_co_investment_related: (offer as any).is_co_investment_related || false,
         // Approval fields for co-investment offers
         investor_advisor_approval_status: offer.investor_advisor_approval_status || 'not_required',
         investor_advisor_approval_at: offer.investor_advisor_approval_at,
@@ -2826,17 +2888,35 @@ export const investmentService = {
         throw new Error(`Startup with ID ${opportunityData.startup_id} not found`);
       }
 
-      // Check if user exists and get advisor info in one query
-      console.log('🔍 Checking lead investor user and advisor status...');
-      const { data: leadInvestorUser, error: userCheckError } = await supabase
-        .from('users')
-        .select('id, email, role, name, investment_advisor_code, investment_advisor_code_entered')
-        .eq('id', opportunityData.listed_by_user_id)
-        .single();
+      // Check if user exists and get advisor info from user_profiles table
+      // NOTE: The listed_by_user_id is the auth user ID (auth_user_id in user_profiles)
+      console.log('🔍 Checking lead investor user and advisor status from user_profiles...');
+      let leadInvestorAdvisorCode: string | null = null;
+      
+      try {
+        // Get user profile from user_profiles table using auth_user_id
+        const { data: leadInvestorProfile, error: profileCheckError } = await supabase
+          .from('user_profiles')
+          .select('auth_user_id, email, role, name, investment_advisor_code, investment_advisor_code_entered')
+          .eq('auth_user_id', opportunityData.listed_by_user_id)
+          .eq('role', 'Investor') // Ensure it's an investor profile
+          .order('created_at', { ascending: false }) // Get most recent profile
+          .limit(1)
+          .maybeSingle();
 
-      if (userCheckError || !leadInvestorUser) {
-        console.error('❌ User not found:', opportunityData.listed_by_user_id, userCheckError);
-        throw new Error(`User with ID ${opportunityData.listed_by_user_id} not found`);
+        if (!profileCheckError && leadInvestorProfile) {
+          // User profile found - get advisor code
+          const enteredCode = leadInvestorProfile.investment_advisor_code_entered?.trim();
+          const regularCode = leadInvestorProfile.investment_advisor_code?.trim();
+          leadInvestorAdvisorCode = (enteredCode && enteredCode !== '') ? enteredCode : ((regularCode && regularCode !== '') ? regularCode : null);
+          console.log('✅ User profile found in user_profiles table, advisor code:', leadInvestorAdvisorCode);
+        } else {
+          // User profile not found - use default values
+          console.log('⚠️ User profile not found in user_profiles table, using default values');
+        }
+      } catch (err) {
+        // Error fetching user profile - continue with default values
+        console.log('⚠️ Error fetching user profile, using default values:', err);
       }
 
       // Check if co-investment opportunity already exists
@@ -2853,19 +2933,9 @@ export const investmentService = {
         throw new Error('A co-investment opportunity already exists for this startup');
       }
 
-      // Check both fields - investors typically use investment_advisor_code_entered
-      // IMPORTANT: Treat empty strings as "no advisor"
-      const enteredCode = leadInvestorUser.investment_advisor_code_entered?.trim();
-      const regularCode = leadInvestorUser.investment_advisor_code?.trim();
-      const leadInvestorAdvisorCode = (enteredCode && enteredCode !== '') ? enteredCode : ((regularCode && regularCode !== '') ? regularCode : null);
-
+      // Use the advisor code we fetched (or null if not found)
       console.log('🔍 Lead investor advisor check:', {
         lead_investor_id: opportunityData.listed_by_user_id,
-        lead_investor_email: leadInvestorUser.email,
-        investment_advisor_code: leadInvestorUser.investment_advisor_code,
-        investment_advisor_code_entered: leadInvestorUser.investment_advisor_code_entered,
-        enteredCode_trimmed: enteredCode,
-        regularCode_trimmed: regularCode,
         final_advisor_code: leadInvestorAdvisorCode,
         has_advisor: !!leadInvestorAdvisorCode
       });

@@ -2394,8 +2394,38 @@ const InvestorView: React.FC<InvestorViewProps> = ({
     };
     
     const getStageStatusDisplay = (offer: any) => {
+        // IMPORTANT: Check for rejections first (before checking stages)
+        // Check advisor rejections first
+        if (offer.investor_advisor_approval_status === 'rejected') {
+            return {
+                color: 'bg-red-100 text-red-800',
+                text: '❌ Rejected by Investor Advisor',
+                icon: '❌'
+            };
+        }
+        if (offer.startup_advisor_approval_status === 'rejected') {
+            return {
+                color: 'bg-red-100 text-red-800',
+                text: '❌ Rejected by Startup Advisor',
+                icon: '❌'
+            };
+        }
+        // Check for startup rejection (status='rejected' at stage 3)
+        const offerStatus = offer.status || 'pending';
+        if (offerStatus === 'rejected' && (offer.stage === 3 || offer.stage === 4)) {
+            return {
+                color: 'bg-red-100 text-red-800',
+                text: '❌ Rejected by Startup',
+                icon: '❌'
+            };
+        }
+        
         // Check if this is a co-investment offer (either by flag or co_investment_opportunity_id)
-        const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+        // OR if the user created a co-investment opportunity for this startup (lead investor)
+        const isCoInvestmentOffer = !!(offer as any).is_co_investment || 
+                                   !!(offer as any).co_investment_opportunity_id ||
+                                   !!(offer as any).is_co_investment_related ||
+                                   !!(offer as any).created_co_investment_opportunity_id;
         
         if (isCoInvestmentOffer) {
             // Co-investment offer flow: Investor Advisor → Lead Investor → Startup
@@ -2506,22 +2536,6 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 color: 'bg-green-100 text-green-800',
                 text: '🎉 Stage 4: Accepted by Startup',
                 icon: '🎉'
-            };
-        }
-        
-        // Handle rejection cases
-        if (offer.investor_advisor_approval_status === 'rejected') {
-            return {
-                color: 'bg-red-100 text-red-800',
-                text: '❌ Rejected by Investor Advisor',
-                icon: '❌'
-            };
-        }
-        if (offer.startup_advisor_approval_status === 'rejected') {
-            return {
-                color: 'bg-red-100 text-red-800',
-                text: '❌ Rejected by Startup Advisor',
-                icon: '❌'
             };
         }
         
@@ -4717,7 +4731,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 investmentOffers.map(offer => {
                   // Debug logging
             // Check if this is a co-investment offer (either by flag or co_investment_opportunity_id)
-            const isCoInvestment = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+            // OR if the user created a co-investment opportunity for this startup (lead investor)
+            const isCoInvestment = !!(offer as any).is_co_investment || 
+                                   !!(offer as any).co_investment_opportunity_id ||
+                                   !!(offer as any).is_co_investment_related ||
+                                   !!(offer as any).created_co_investment_opportunity_id;
             console.log('🔍 Offer data:', {
               id: offer.id,
               offerAmount: offer.offerAmount,
@@ -4739,7 +4757,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         <div>
                           <div className="font-medium text-slate-900 truncate">
                             {(() => {
-                              const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                              const isCoInvestmentOffer = !!(offer as any).is_co_investment || 
+                                                          !!(offer as any).co_investment_opportunity_id ||
+                                                          !!(offer as any).is_co_investment_related ||
+                                                          !!(offer as any).created_co_investment_opportunity_id;
                               return isCoInvestmentOffer ? (
                                 <span className="flex items-center gap-1">
                                   <Users className="h-3 w-3 text-orange-600" />
@@ -4770,7 +4791,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           </div>
                           {/* Show status message for co-investment offers */}
                           {(() => {
-                            const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                            const isCoInvestmentOffer = !!(offer as any).is_co_investment || 
+                                                        !!(offer as any).co_investment_opportunity_id ||
+                                                        !!(offer as any).is_co_investment_related ||
+                                                        !!(offer as any).created_co_investment_opportunity_id;
                             if (isCoInvestmentOffer) {
                               const status = offer.status || 'pending';
                               if (status === 'pending_investor_advisor_approval') {
@@ -4805,7 +4829,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           {getStageStatusDisplay(offer).text}
                         </span>
                         {(() => {
-                          const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                          const isCoInvestmentOffer = !!(offer as any).is_co_investment || 
+                                                      !!(offer as any).co_investment_opportunity_id ||
+                                                      !!(offer as any).is_co_investment_related ||
+                                                      !!(offer as any).created_co_investment_opportunity_id;
                           const status = offer.status || 'pending';
                           const stage = (offer as any).stage || 1;
                           const investorAdvisorStatus = (offer as any).investor_advisor_approval_status || 'not_required';
@@ -4867,7 +4894,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                           return null;
                         })()}
                         {(() => {
-                          const isCoInvestmentOffer = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
+                          const isCoInvestmentOffer = !!(offer as any).is_co_investment || 
+                                                      !!(offer as any).co_investment_opportunity_id ||
+                                                      !!(offer as any).is_co_investment_related ||
+                                                      !!(offer as any).created_co_investment_opportunity_id;
                           const status = offer.status || 'pending';
                           const isAccepted = status === 'accepted' || ((offer as any).stage || 1) >= 4;
                           

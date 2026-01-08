@@ -27,6 +27,8 @@ import { formatDateDDMMYYYY } from '../lib/dateTimeUtils';
 import { mentorService } from '../lib/mentorService';
 import { createSlug, createProfileUrl } from '../lib/slugUtils';
 import Modal from './ui/Modal';
+import { capTableService } from '../lib/capTableService';
+import { StartupStage, StartupDomain } from '../types';
 
 const ArrowLeftIcon = ArrowLeft;
 
@@ -1102,6 +1104,20 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [mentors, setMentors] = useState<any[]>([]);
     const [loadingMentors, setLoadingMentors] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showMatchedMentors, setShowMatchedMentors] = useState(false);
+    const [matchedMentors, setMatchedMentors] = useState<any[]>([]);
+    const [fundraisingDetails, setFundraisingDetails] = useState<FundraisingDetails | null>(null);
+    const [showMatchingPreferencesModal, setShowMatchingPreferencesModal] = useState(false);
+    const [matchingPreferences, setMatchingPreferences] = useState({
+        preferredFeeType: [] as string[],
+        preferredAvailability: [] as string[],
+        preferredSectors: [] as string[],
+        preferredMentoringStages: [] as string[],
+        preferredMentorType: [] as string[],
+        preferredEngagement: [] as string[],
+        minExperience: 0,
+        preferredExpertise: [] as string[],
+    });
     
     // State for mentor connection
     const [connectModalOpen, setConnectModalOpen] = useState(false);
@@ -1428,6 +1444,162 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         } finally {
             setLoadingMentors(false);
         }
+    };
+
+    // Load fundraising details for matching
+    useEffect(() => {
+        const loadFundraisingDetails = async () => {
+            if (!currentStartup?.id) return;
+            try {
+                const fundraisingData = await capTableService.getFundraisingDetails(currentStartup.id);
+                if (fundraisingData && fundraisingData.length > 0) {
+                    // Get the active fundraising or the latest one
+                    const activeFundraising = fundraisingData.find(fd => fd.active) || fundraisingData[0];
+                    setFundraisingDetails(activeFundraising);
+                }
+            } catch (error) {
+                console.error('Error loading fundraising details:', error);
+            }
+        };
+        loadFundraisingDetails();
+    }, [currentStartup?.id]);
+
+    // Mentor matching function
+    const matchMentorsToPortfolio = () => {
+        // Open preferences modal first
+        setShowMatchingPreferencesModal(true);
+    };
+
+    // Apply matching with preferences
+    const applyMatchingWithPreferences = () => {
+        if (!currentStartup) return;
+        setShowMatchingPreferencesModal(false);
+
+        // Score each mentor based only on form preferences
+        const scoredMentors = mentors.map(mentor => {
+            let score = 0;
+            const matchReasons: string[] = [];
+
+            // 1. Sector match (30 points - only from preferences)
+            if (matchingPreferences.preferredSectors.length > 0 && mentor.sectors && Array.isArray(mentor.sectors)) {
+                const matchingSector = mentor.sectors.find((sector: string) =>
+                    matchingPreferences.preferredSectors.some(pref => 
+                        sector.toLowerCase() === pref.toLowerCase() ||
+                        sector.toLowerCase().includes(pref.toLowerCase()) ||
+                        pref.toLowerCase().includes(sector.toLowerCase())
+                    )
+                );
+                if (matchingSector) {
+                    score += 30;
+                    matchReasons.push(`Sector match: ${matchingSector}`);
+                }
+            }
+
+            // 2. Stage match (25 points - only from preferences)
+            if (matchingPreferences.preferredMentoringStages.length > 0 && mentor.mentoring_stages && Array.isArray(mentor.mentoring_stages)) {
+                const matchingStage = mentor.mentoring_stages.find((stage: string) =>
+                    matchingPreferences.preferredMentoringStages.some(pref => 
+                        stage.toLowerCase().includes(pref.toLowerCase()) ||
+                        pref.toLowerCase().includes(stage.toLowerCase())
+                    )
+                );
+                if (matchingStage) {
+                    score += 25;
+                    matchReasons.push(`Stage match: ${matchingStage}`);
+                }
+            }
+            
+            // 2b. Mentor Type match (15 points if preference set)
+            if (matchingPreferences.preferredMentorType.length > 0 && mentor.mentor_type) {
+                if (matchingPreferences.preferredMentorType.includes(mentor.mentor_type)) {
+                    score += 15;
+                    matchReasons.push(`Mentor type match: ${mentor.mentor_type}`);
+                }
+            }
+            
+            // 2c. Preferred Engagement match (10 points if preference set)
+            if (matchingPreferences.preferredEngagement.length > 0 && mentor.preferred_engagement) {
+                const engagementMatch = matchingPreferences.preferredEngagement.some(pref =>
+                    mentor.preferred_engagement?.toLowerCase().includes(pref.toLowerCase()) ||
+                    pref.toLowerCase().includes(mentor.preferred_engagement?.toLowerCase() || '')
+                );
+                if (engagementMatch) {
+                    score += 10;
+                    matchReasons.push(`Engagement match: ${mentor.preferred_engagement}`);
+                }
+            }
+
+            // 3. Fee type preference (25 points if matches preference)
+            if (matchingPreferences.preferredFeeType.length > 0) {
+                if (mentor.fee_type && matchingPreferences.preferredFeeType.includes(mentor.fee_type)) {
+                    score += 25;
+                    matchReasons.push(`Preferred fee type: ${mentor.fee_type}`);
+                }
+            }
+
+            // 4. Availability (20 points if matches preference)
+            if (matchingPreferences.preferredAvailability.length > 0 && mentor.availability) {
+                const mentorAvailability = mentor.availability.toLowerCase();
+                const hasMatchingAvailability = matchingPreferences.preferredAvailability.some(pref => {
+                    const prefLower = pref.toLowerCase();
+                    return mentorAvailability.includes(prefLower) || prefLower.includes(mentorAvailability);
+                });
+                
+                if (hasMatchingAvailability) {
+                    score += 20;
+                    matchReasons.push(`Preferred availability: ${mentor.availability}`);
+                }
+            }
+
+            // 5. Experience (15 points if meets minimum requirement)
+            if (matchingPreferences.minExperience > 0) {
+                const totalExperience = (mentor.startupsMentoring || 0) + (mentor.startupsMentoredPreviously || 0);
+                const experienceYears = mentor.startupExperienceYears || mentor.professionalExperienceYears || mentor.years_of_experience || 0;
+                
+                if (totalExperience >= matchingPreferences.minExperience || experienceYears >= matchingPreferences.minExperience) {
+                    score += 15;
+                    matchReasons.push(`Meets experience requirement (${totalExperience} startups, ${experienceYears} years)`);
+                }
+            }
+
+            // 5b. Expertise areas match (10 points if user has preferences)
+            if (matchingPreferences.preferredExpertise.length > 0 && mentor.expertise_areas && Array.isArray(mentor.expertise_areas)) {
+                const matchingExpertise = mentor.expertise_areas.filter((area: string) =>
+                    matchingPreferences.preferredExpertise.some(pref => 
+                        area.toLowerCase().includes(pref.toLowerCase()) ||
+                        pref.toLowerCase().includes(area.toLowerCase())
+                    )
+                );
+                if (matchingExpertise.length > 0) {
+                    score += 10;
+                    matchReasons.push(`Expertise match: ${matchingExpertise.join(', ')}`);
+                }
+            }
+
+            // 6. Verified startups mentored bonus (5 points)
+            if (mentor.verifiedStartupsMentored && mentor.verifiedStartupsMentored > 0) {
+                score += 5;
+                matchReasons.push(`${mentor.verifiedStartupsMentored} verified startups mentored`);
+            }
+
+            // Normalize score to 0-100 scale (max possible score: 30+25+25+20+15+10+15+5 = 145)
+            const maxScore = 145;
+            const normalizedScore = Math.min(100, Math.round((score / maxScore) * 100));
+
+            return {
+                ...mentor,
+                matchScore: normalizedScore,
+                matchReasons
+            };
+        });
+
+        // Sort by score (highest first) and filter out mentors with score 0
+        const sortedMatchedMentors = scoredMentors
+            .filter(m => m.matchScore > 0)
+            .sort((a, b) => b.matchScore - a.matchScore);
+
+        setMatchedMentors(sortedMatchedMentors);
+        setShowMatchedMentors(true);
     };
 
     const getYoutubeEmbedUrl = (url?: string): string | null => {
@@ -1776,24 +1948,53 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                           ) : selectedServiceType === 'Mentor' ? (
                             <div className="space-y-4">
                               {/* Back button and header */}
-                              <div className="flex items-center gap-4 mb-4">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSelectedServiceType(null);
-                                  }}
-                                >
-                                  <ArrowLeftIcon className="h-4 w-4 mr-2" />
-                                  Back
-                                </Button>
-                                <div>
-                                  <h3 className="text-lg font-semibold text-slate-900">
-                                    Explore Mentors
-                                  </h3>
-                                  <p className="text-sm text-slate-600">
-                                    Browse available mentors and connect with them.
-                                  </p>
+                              <div className="flex items-center justify-between gap-4 mb-4">
+                                <div className="flex items-center gap-4 flex-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelectedServiceType(null);
+                                      setShowMatchedMentors(false);
+                                      setSearchTerm('');
+                                    }}
+                                  >
+                                    <ArrowLeftIcon className="h-4 w-4 mr-2" />
+                                    Back
+                                  </Button>
+                                  <div>
+                                    <h3 className="text-lg font-semibold text-slate-900">
+                                      {showMatchedMentors ? 'Matched Mentors for Your Portfolio' : 'Explore Mentors'}
+                                    </h3>
+                                    <p className="text-sm text-slate-600">
+                                      {showMatchedMentors 
+                                        ? `Found ${matchedMentors.length} mentors best suited for your startup based on sector, stage, and preferences.`
+                                        : 'Browse available mentors and connect with them.'}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex-shrink-0">
+                                  {!showMatchedMentors ? (
+                                    <Button
+                                      onClick={matchMentorsToPortfolio}
+                                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                                    >
+                                      <Users className="h-4 w-4 mr-2" />
+                                      Match mentors to my portfolio type
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      onClick={() => {
+                                        setShowMatchedMentors(false);
+                                        setSearchTerm('');
+                                      }}
+                                      variant="outline"
+                                      className="border-slate-300 text-slate-700 hover:bg-slate-50"
+                                    >
+                                      <X className="h-4 w-4 mr-2" />
+                                      Show all mentors
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
 
@@ -1820,60 +2021,87 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                               {/* Mentors list */}
                               {!loadingMentors && (
                                 <>
-                                  {mentors.filter(mentor => {
-                                    if (!searchTerm.trim()) return true;
-                                    const search = searchTerm.toLowerCase();
-                                    return (
-                                      mentor.mentor_name?.toLowerCase().includes(search) ||
-                                      mentor.location?.toLowerCase().includes(search) ||
-                                      mentor.mentor_type?.toLowerCase().includes(search) ||
-                                      mentor.expertise_areas?.some((area: string) => area.toLowerCase().includes(search)) ||
-                                      mentor.sectors?.some((sector: string) => sector.toLowerCase().includes(search))
-                                    );
-                                  }).length === 0 ? (
-                                    <Card className="text-center py-12">
-                                      <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                                      <h3 className="text-lg font-semibold text-slate-800 mb-2">
-                                        {searchTerm ? 'No mentors found' : 'No mentors available'}
-                                      </h3>
-                                      <p className="text-slate-600">
-                                        {searchTerm 
-                                          ? 'Try adjusting your search terms.' 
-                                          : 'Check back later for available mentors.'}
-                                      </p>
-                                    </Card>
-                                  ) : (
-                                    <div className="space-y-6">
-                                      {mentors.filter(mentor => {
-                                        if (!searchTerm.trim()) return true;
-                                        const search = searchTerm.toLowerCase();
-                                        return (
-                                          mentor.mentor_name?.toLowerCase().includes(search) ||
-                                          mentor.location?.toLowerCase().includes(search) ||
-                                          mentor.mentor_type?.toLowerCase().includes(search) ||
-                                          mentor.expertise_areas?.some((area: string) => area.toLowerCase().includes(search)) ||
-                                          mentor.sectors?.some((sector: string) => sector.toLowerCase().includes(search))
-                                        );
-                                      }).map((mentor) => {
-                                        const videoEmbedUrl = mentor.media_type === 'video' && mentor.video_url 
-                                          ? getYoutubeEmbedUrl(mentor.video_url) 
-                                          : null;
+                                  {(() => {
+                                    // Determine which mentors to display
+                                    const mentorsToDisplay = showMatchedMentors ? matchedMentors : mentors;
+                                    
+                                    // Apply search filter
+                                    const filteredMentors = mentorsToDisplay.filter(mentor => {
+                                      if (!searchTerm.trim()) return true;
+                                      const search = searchTerm.toLowerCase();
+                                      return (
+                                        mentor.mentor_name?.toLowerCase().includes(search) ||
+                                        mentor.location?.toLowerCase().includes(search) ||
+                                        mentor.mentor_type?.toLowerCase().includes(search) ||
+                                        mentor.expertise_areas?.some((area: string) => area.toLowerCase().includes(search)) ||
+                                        mentor.sectors?.some((sector: string) => sector.toLowerCase().includes(search))
+                                      );
+                                    });
 
-                                        // Create a component for each mentor card with its own state
-                                        // Use a key that includes metrics to force re-render when metrics change
-                                        const mentorKey = `${mentor.id || mentor.user_id}-${mentor.startupsMentoring ?? 0}-${mentor.startupsMentoredPreviously ?? 0}-${mentor.verifiedStartupsMentored ?? 0}`;
-                                        return <MentorCardWithDetails 
-                                          key={mentorKey} 
-                                          mentor={mentor} 
-                                          videoEmbedUrl={videoEmbedUrl}
-                                          onConnect={() => {
-                                            setSelectedMentor(mentor);
-                                            setConnectModalOpen(true);
-                                          }}
-                                        />;
-                                      })}
-                                    </div>
-                                  )}
+                                    if (filteredMentors.length === 0) {
+                                      return (
+                                        <Card className="text-center py-12">
+                                          <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                                          <h3 className="text-lg font-semibold text-slate-800 mb-2">
+                                            {showMatchedMentors 
+                                              ? 'No matching mentors found' 
+                                              : searchTerm 
+                                                ? 'No mentors found' 
+                                                : 'No mentors available'}
+                                          </h3>
+                                          <p className="text-slate-600">
+                                            {showMatchedMentors
+                                              ? 'Try adjusting your search or click "Show all mentors" to browse all available mentors.'
+                                              : searchTerm 
+                                                ? 'Try adjusting your search terms.' 
+                                                : 'Check back later for available mentors.'}
+                                          </p>
+                                        </Card>
+                                      );
+                                    }
+
+                                    return (
+                                      <div className="space-y-6">
+                                        {filteredMentors.map((mentor) => {
+                                          const videoEmbedUrl = mentor.media_type === 'video' && mentor.video_url 
+                                            ? getYoutubeEmbedUrl(mentor.video_url) 
+                                            : null;
+
+                                          // Create a component for each mentor card with its own state
+                                          // Use a key that includes metrics to force re-render when metrics change
+                                          const mentorKey = `${mentor.id || mentor.user_id}-${mentor.startupsMentoring ?? 0}-${mentor.startupsMentoredPreviously ?? 0}-${mentor.verifiedStartupsMentored ?? 0}`;
+                                          
+                                          return (
+                                            <div key={mentorKey} className="relative">
+                                              {showMatchedMentors && mentor.matchScore !== undefined && (
+                                                <div className="mb-2 flex items-center gap-2 flex-wrap">
+                                                  <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-200 rounded-lg">
+                                                    <span className="text-sm font-semibold text-blue-700">
+                                                      Match Score: {Math.round(mentor.matchScore)}%
+                                                    </span>
+                                                  </div>
+                                                  {mentor.matchReasons && mentor.matchReasons.length > 0 && (
+                                                    <div className="flex-1 text-xs text-slate-600 min-w-0">
+                                                      {mentor.matchReasons.slice(0, 2).join(' • ')}
+                                                      {mentor.matchReasons.length > 2 && ` +${mentor.matchReasons.length - 2} more`}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              )}
+                                              <MentorCardWithDetails 
+                                                mentor={mentor} 
+                                                videoEmbedUrl={videoEmbedUrl}
+                                                onConnect={() => {
+                                                  setSelectedMentor(mentor);
+                                                  setConnectModalOpen(true);
+                                                }}
+                                              />
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })()}
                                 </>
                               )}
                             </div>
@@ -2222,6 +2450,295 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             await loadAcceptedMentorRequests();
           }}
         />
+      )}
+
+      {/* Mentor Matching Preferences Modal */}
+      {showMatchingPreferencesModal && (
+        <Modal
+          isOpen={showMatchingPreferencesModal}
+          onClose={() => setShowMatchingPreferencesModal(false)}
+          title="Set Matching Preferences"
+          size="lg"
+        >
+          <div className="space-y-6">
+            <p className="text-sm text-slate-600">
+              Select your preferences to find mentors that best match your startup's needs. The matching will be based on your selected preferences.
+            </p>
+
+            {/* Fee Type Preference */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Preferred Fee Type (Optional - Select multiple)
+              </label>
+              <div className="grid grid-cols-2 gap-2 p-2 border border-slate-200 rounded-lg">
+                {['Free', 'Fees', 'Stock Options', 'Hybrid'].map((feeType) => (
+                  <label key={feeType} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={matchingPreferences.preferredFeeType.includes(feeType)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredFeeType: [...matchingPreferences.preferredFeeType, feeType]
+                          });
+                        } else {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredFeeType: matchingPreferences.preferredFeeType.filter(f => f !== feeType)
+                          });
+                        }
+                      }}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{feeType}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Availability Preference */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Preferred Availability (Optional - Select multiple)
+              </label>
+              <div className="grid grid-cols-2 gap-2 p-2 border border-slate-200 rounded-lg">
+                {['Once per week', 'Once per month', 'Once per quarterly', 'Yearly', 'As per requirement'].map((availability) => (
+                  <label key={availability} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={matchingPreferences.preferredAvailability.includes(availability)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredAvailability: [...matchingPreferences.preferredAvailability, availability]
+                          });
+                        } else {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredAvailability: matchingPreferences.preferredAvailability.filter(a => a !== availability)
+                          });
+                        }
+                      }}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{availability}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Sectors Preference */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Preferred Sectors (Optional - Select multiple)
+              </label>
+              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 border border-slate-200 rounded-lg">
+                {['SaaS', 'E-commerce', 'FinTech', 'HealthTech', 'EdTech', 'AgriTech', 'AI/ML', 'Blockchain', 'Gaming', 'Media', 'Real Estate', 'Manufacturing', 'Other'].map((sector) => (
+                  <label key={sector} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={matchingPreferences.preferredSectors.includes(sector)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredSectors: [...matchingPreferences.preferredSectors, sector]
+                          });
+                        } else {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredSectors: matchingPreferences.preferredSectors.filter(s => s !== sector)
+                          });
+                        }
+                      }}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{sector}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Mentoring Stages Preference */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Preferred Mentoring Stages (Optional - Select multiple)
+              </label>
+              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 border border-slate-200 rounded-lg">
+                {['Ideation', 'Proof of Concept (PoC)', 'Prototype / MVP', 'Pilot Testing', 'Product–Market Fit (PMF)', 'Early Traction', 'Growth Stage', 'Scaling & Expansion', 'Maturity', 'Exit (IPO / Acquisition)'].map((stage) => (
+                  <label key={stage} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={matchingPreferences.preferredMentoringStages.includes(stage)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredMentoringStages: [...matchingPreferences.preferredMentoringStages, stage]
+                          });
+                        } else {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredMentoringStages: matchingPreferences.preferredMentoringStages.filter(s => s !== stage)
+                          });
+                        }
+                      }}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{stage}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Mentor Type Preference */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Preferred Mentor Type (Optional - Select multiple)
+              </label>
+              <div className="grid grid-cols-2 gap-2 p-2 border border-slate-200 rounded-lg">
+                {['Industry Expert', 'Entrepreneur', 'Corporate Executive', 'Academic', 'Investor', 'Other'].map((mentorType) => (
+                  <label key={mentorType} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={matchingPreferences.preferredMentorType.includes(mentorType)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredMentorType: [...matchingPreferences.preferredMentorType, mentorType]
+                          });
+                        } else {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredMentorType: matchingPreferences.preferredMentorType.filter(m => m !== mentorType)
+                          });
+                        }
+                      }}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{mentorType}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Preferred Engagement */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Preferred Engagement Type (Optional - Select multiple)
+              </label>
+              <div className="grid grid-cols-2 gap-2 p-2 border border-slate-200 rounded-lg">
+                {['1-on-1', 'Group Sessions', 'Workshops', 'Advisory Board', 'All of the above'].map((engagement) => (
+                  <label key={engagement} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={matchingPreferences.preferredEngagement.includes(engagement)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredEngagement: [...matchingPreferences.preferredEngagement, engagement]
+                          });
+                        } else {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredEngagement: matchingPreferences.preferredEngagement.filter(e => e !== engagement)
+                          });
+                        }
+                      }}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{engagement}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Minimum Experience */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Minimum Experience (Optional)
+              </label>
+              <div className="flex items-center gap-4">
+                <input
+                  type="number"
+                  min="0"
+                  value={matchingPreferences.minExperience}
+                  onChange={(e) => setMatchingPreferences({
+                    ...matchingPreferences,
+                    minExperience: parseInt(e.target.value) || 0
+                  })}
+                  placeholder="0"
+                  className="w-32 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-sm text-slate-600">years or startups mentored</span>
+              </div>
+            </div>
+
+            {/* Preferred Expertise Areas */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Preferred Expertise Areas (Optional)
+              </label>
+              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 border border-slate-200 rounded-lg">
+                {['Product Development', 'Marketing', 'Sales', 'Finance', 'Operations', 'HR', 'Technology', 'Strategy', 'Fundraising', 'Legal', 'Compliance', 'International Expansion'].map((expertise) => (
+                  <label key={expertise} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={matchingPreferences.preferredExpertise.includes(expertise)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredExpertise: [...matchingPreferences.preferredExpertise, expertise]
+                          });
+                        } else {
+                          setMatchingPreferences({
+                            ...matchingPreferences,
+                            preferredExpertise: matchingPreferences.preferredExpertise.filter(e => e !== expertise)
+                          });
+                        }
+                      }}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{expertise}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowMatchingPreferencesModal(false);
+                  setMatchingPreferences({
+                    preferredFeeType: [],
+                    preferredAvailability: [],
+                    preferredSectors: [],
+                    preferredMentoringStages: [],
+                    preferredMentorType: [],
+                    preferredEngagement: [],
+                    minExperience: 0,
+                    preferredExpertise: []
+                  });
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={applyMatchingWithPreferences}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Find Matching Mentors
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
 
     </div>

@@ -343,6 +343,7 @@ export interface FundraisingDetails {
     // newly added classification fields
     domain?: StartupDomain;
     stage?: StartupStage;
+    country?: string; // Country from general_data table
     validationRequested: boolean;
     pitchDeckUrl?: string;
     pitchVideoUrl?: string;

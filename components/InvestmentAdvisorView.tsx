@@ -2203,11 +2203,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     setLoadingOffersMade(true);
     try {
       
-      // First, fetch regular offers at stages 1, 2, and 4
+      // First, fetch regular offers at stages 1, 2, 3, and 4
+      // Stage 1: Waiting for investor advisor approval
+      // Stage 2: Waiting for startup advisor approval (investor advisor already approved)
+      // Stage 3: Ready for startup review (investor advisor already approved, startup has no advisor)
+      // Stage 4: Accepted by startup
       const { data: offersData, error: offersError } = await supabase
         .from('investment_offers')
         .select('*')
-        .in('stage', [1, 2, 4])
+        .in('stage', [1, 2, 3, 4])
         .order('created_at', { ascending: false });
 
       if (offersError) {
@@ -2489,8 +2493,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
         
         // Stage 2: Show if startup has this advisor (startup advisor approval needed)
-        if (offer.stage === 2 && startupHasThisAdvisor) {
+        // OR if investor has this advisor (investor advisor already approved, now at startup advisor)
+        if (offer.stage === 2 && (startupHasThisAdvisor || (investorHasThisAdvisor && offer.investor_advisor_approval_status === 'approved'))) {
           console.log('✅ Stage 2 offer included:', offer.id);
+          return true;
+        }
+        
+        // Stage 3: Show if investor has this advisor (investor advisor approved, ready for startup review)
+        // This happens when investor advisor approved and startup has no advisor
+        if (offer.stage === 3 && investorHasThisAdvisor && (offer.investor_advisor_approval_status === 'approved' || offer.investor_advisor_approval_status === 'not_required')) {
+          console.log('✅ Stage 3 offer included:', offer.id);
           return true;
         }
         
@@ -2525,8 +2537,17 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         is_co_investment: isCoInvestment, // Keep snake_case for consistency
         // Add flags to identify if this is an investor offer or startup offer
         // Co-investment offers: Always go to Investor Offers if investor has this advisor
-        // Regular offers: Stage 1 (investor advisor approval) or Stage 4 where investor has this advisor
-        isInvestorOffer: isInvestorOfferForCoInvestment || (investorHasThisAdvisor && (offer.stage === 1 || offer.stage === 4)),
+        // Regular offers: 
+        //   - Stage 1: Always show if investor has this advisor (waiting for approval)
+        //   - Stage 2: Show if investor has this advisor AND investor advisor approved (moved to startup advisor)
+        //   - Stage 3: Show if investor has this advisor AND investor advisor approved (ready for startup, no startup advisor)
+        //   - Stage 4: Show if investor has this advisor (accepted by startup)
+        isInvestorOffer: isInvestorOfferForCoInvestment || (investorHasThisAdvisor && (
+          offer.stage === 1 || // Waiting for investor advisor approval
+          (offer.stage === 2 && (offer.investor_advisor_approval_status === 'approved' || offer.investor_advisor_approval_status === 'not_required')) || // Investor advisor approved, now at startup advisor
+          (offer.stage === 3 && (offer.investor_advisor_approval_status === 'approved' || offer.investor_advisor_approval_status === 'not_required')) || // Investor advisor approved, ready for startup
+          offer.stage === 4 // Accepted by startup
+        )),
         // Startup offers: Stage 2 (startup advisor approval) or Stage 4 where startup has this advisor (only for regular offers)
         isStartupOffer: !isCoInvestment && startupHasThisAdvisor && (offer.stage === 2 || offer.stage === 4)
         };
@@ -5451,6 +5472,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                     </span>
                                   );
                                 }
+                                // IMPORTANT: Check if startup rejected the offer (status='rejected' at stage 3)
+                                if (offerStatus === 'rejected' && (offerStage === 3 || offerStage === 4)) {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                      ❌ Rejected by Startup
+                                    </span>
+                                  );
+                                }
                                 
                                 // Check stage-based status
                                 if (offerStage === 4 || offerStatus === 'accepted') {
@@ -6046,6 +6075,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                   return (
                                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
                                       ❌ Rejected by Startup Advisor
+                                    </span>
+                                  );
+                                }
+                                // IMPORTANT: Check if startup rejected the offer (status='rejected' at stage 3)
+                                if (offerStatus === 'rejected' && (offerStage === 3 || offerStage === 4)) {
+                                  return (
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                      ❌ Rejected by Startup
                                     </span>
                                   );
                                 }

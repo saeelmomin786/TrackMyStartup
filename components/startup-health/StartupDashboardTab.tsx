@@ -824,10 +824,22 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         const offerCurrency = (offer as any).currency || startupCurrency || 'USD';
         
         // Map stage to status
+        // IMPORTANT: Check status first before checking stage, as rejected offers can be at stage 3
         let mappedStatus: 'pending' | 'accepted' | 'rejected' = 'pending';
         const offerStage = (offer as any).stage || 1;
+        const offerStatus = offer.status as string || 'pending';
+        const investorAdvisorStatus = (offer as any).investor_advisor_approval_status;
+        const startupAdvisorStatus = (offer as any).startup_advisor_approval_status;
         
-        if (offerStage === 4) {
+        // Check if offer is rejected first (can happen at any stage)
+        // Check advisor rejections first
+        if (investorAdvisorStatus === 'rejected') {
+          mappedStatus = 'rejected';
+        } else if (startupAdvisorStatus === 'rejected') {
+          mappedStatus = 'rejected';
+        } else if (offerStatus === 'rejected') {
+          mappedStatus = 'rejected';
+        } else if (offerStage === 4) {
           mappedStatus = 'accepted';
         } else if (offerStage === 1 || offerStage === 2 || offerStage === 3) {
           mappedStatus = 'pending';

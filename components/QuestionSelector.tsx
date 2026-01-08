@@ -4,12 +4,16 @@ import { messageService } from '../lib/messageService';
 import Button from './ui/Button';
 import Input from './ui/Input';
 import Modal from './ui/Modal';
-import { Plus, X, Check, AlertCircle } from 'lucide-react';
+import { Plus, X, Check, AlertCircle, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
 
 interface QuestionSelectorProps {
   opportunityId: string | null; // null for new opportunity
   selectedQuestionIds: string[];
   onSelectionChange: (questionIds: string[]) => void;
+  questionRequiredMap?: Map<string, boolean>; // Map of questionId -> isRequired
+  onRequiredChange?: (questionId: string, isRequired: boolean) => void;
+  questionSelectionTypeMap?: Map<string, 'single' | 'multiple' | null>; // Map of questionId -> selectionType
+  onSelectionTypeChange?: (questionId: string, selectionType: 'single' | 'multiple' | null) => void;
 }
 
 interface CustomQuestionModalProps {
@@ -100,11 +104,11 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
         </div>
         {selectedQuestionType === 'other' && (
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Category (Optional)</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Custom Category (Optional)</label>
             <Input
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              placeholder="e.g., Company Info, Financial, Team"
+              placeholder="Enter a custom category name"
             />
           </div>
         )}
@@ -171,23 +175,20 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
 const QuestionSelector: React.FC<QuestionSelectorProps> = ({
   opportunityId,
   selectedQuestionIds,
-  onSelectionChange
+  onSelectionChange,
+  questionRequiredMap = new Map(),
+  onRequiredChange,
+  questionSelectionTypeMap = new Map(),
+  onSelectionTypeChange
 }) => {
   const [approvedQuestions, setApprovedQuestions] = useState<ApplicationQuestion[]>([]);
   const [facilitatorQuestions, setFacilitatorQuestions] = useState<ApplicationQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedQuestionType, setSelectedQuestionType] = useState<string>('general');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isCustomQuestionModalOpen, setIsCustomQuestionModalOpen] = useState(false);
   const [existingQuestions, setExistingQuestions] = useState<string[]>([]);
-
-  const QUESTION_TYPES = [
-    { value: 'general', label: 'General' },
-    { value: 'financial', label: 'Financial' },
-    { value: 'social', label: 'Social' },
-    { value: 'environmental', label: 'Environmental' },
-    { value: 'other', label: 'Other' }
-  ];
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
 
   useEffect(() => {
     loadQuestions();
@@ -203,6 +204,16 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
     try {
       setLoading(true);
       const { supabase } = await import('../lib/supabase');
+      
+      // Load categories from database
+      try {
+        const categories = await questionBankService.getPredefinedCategories();
+        setAvailableCategories(categories);
+      } catch (error) {
+        console.warn('Failed to load categories:', error);
+        // Fallback to empty array
+        setAvailableCategories([]);
+      }
       const { data: { user } } = await supabase.auth.getUser();
       
       const approved = await questionBankService.getApprovedQuestions();
@@ -233,6 +244,12 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
       setExistingQuestions(questions.map(q => q.questionId));
       // Set initial selection
       onSelectionChange(questions.map(q => q.questionId));
+      // Set initial required status map
+      if (onRequiredChange) {
+        questions.forEach(q => {
+          onRequiredChange(q.questionId, q.isRequired);
+        });
+      }
     } catch (error: any) {
       console.error('Failed to load existing questions:', error);
     }
@@ -240,8 +257,10 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
 
   const handleAddCustomQuestion = async (questionData: { questionText: string; category: string | null; questionType: string; options?: string[] }) => {
     try {
-      // Map question type to category
-      const category = selectedQuestionType !== 'other' ? selectedQuestionType : questionData.category || null;
+      // Use the selected category or custom category
+      const category = selectedCategory !== 'all' && selectedCategory !== 'other' 
+        ? selectedCategory 
+        : (selectedCategory === 'other' ? questionData.category : null);
       
       const question = await questionBankService.createQuestion({
         questionText: questionData.questionText,
@@ -254,7 +273,7 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
       // Add to facilitator questions list
       setFacilitatorQuestions(prev => [question, ...prev]);
       
-      // Auto-select the new question
+      // Auto-select the new question at the end of the list
       onSelectionChange([...selectedQuestionIds, question.id]);
       
       messageService.success('Question Added', 'Your custom question has been added and can be used immediately in your opportunities. Admin approval is only required to add it to the shared question bank.');
@@ -268,12 +287,16 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
       onSelectionChange(selectedQuestionIds.filter(id => id !== questionId));
     } else {
       onSelectionChange([...selectedQuestionIds, questionId]);
+      // Newly added questions default to required
+      if (onRequiredChange && !questionRequiredMap.has(questionId)) {
+        onRequiredChange(questionId, true);
+      }
     }
   };
 
-  // Filter questions by type and search term
+  // Filter questions by category and search term
   // Include both approved questions AND facilitator's own pending questions
-  const getQuestionsByType = (type: string) => {
+  const getQuestionsByCategory = (category: string) => {
     // Get facilitator's own pending questions
     const facilitatorPendingQuestions = facilitatorQuestions.filter(q => 
       q.status === 'pending' && 
@@ -288,20 +311,22 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
 
     return allQuestions.filter(q => {
       const matchesSearch = q.questionText.toLowerCase().includes(searchTerm.toLowerCase());
-      // Map category to question type
-      const questionType = q.category?.toLowerCase() || 'other';
-      const matchesType = 
-        type === 'general' ? (questionType === 'general' || questionType === 'company info' || questionType === 'product' || questionType === 'market' || questionType === 'team' || questionType === 'technology' || questionType === 'growth' || !q.category) :
-        type === 'financial' ? (questionType === 'financial' || questionType.includes('financial')) :
-        type === 'social' ? (questionType === 'social' || questionType.includes('social')) :
-        type === 'environmental' ? (questionType === 'environmental' || questionType.includes('environmental') || questionType.includes('climate')) :
-        type === 'other' ? (!['general', 'company info', 'product', 'market', 'team', 'technology', 'growth', 'financial', 'social', 'environmental', 'climate'].includes(questionType)) :
-        true;
-      return matchesSearch && matchesType;
+      
+      // Filter by category
+      if (category === 'all') {
+        return matchesSearch;
+      } else if (category === 'other') {
+        // Show questions with no category or category not in the predefined list
+        const hasCategory = q.category && availableCategories.includes(q.category);
+        return matchesSearch && !hasCategory;
+      } else {
+        // Show questions matching the selected category
+        return matchesSearch && q.category === category;
+      }
     });
   };
 
-  const filteredQuestions = getQuestionsByType(selectedQuestionType);
+  const filteredQuestions = getQuestionsByCategory(selectedCategory);
 
   return (
     <div className="space-y-4">
@@ -313,18 +338,20 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
         </p>
       </div>
 
-      {/* Question Type Selector and Add Button */}
+      {/* Category Filter and Add Button */}
       <div className="flex gap-2 items-end">
         <div className="flex-1">
-          <label className="block text-sm font-medium text-slate-700 mb-2">Question Type</label>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Category</label>
           <select
-            value={selectedQuestionType}
-            onChange={(e) => setSelectedQuestionType(e.target.value)}
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
             className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
           >
-            {QUESTION_TYPES.map(type => (
-              <option key={type.value} value={type.value}>{type.label}</option>
+            <option value="all">All Categories</option>
+            {availableCategories.map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
             ))}
+            <option value="other">Other (Uncategorized)</option>
           </select>
         </div>
         <Button
@@ -356,7 +383,9 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
           <div className="p-8 text-center text-slate-500">Loading questions...</div>
         ) : filteredQuestions.length === 0 ? (
           <div className="p-8 text-center text-slate-500">
-            {searchTerm ? `No ${QUESTION_TYPES.find(t => t.value === selectedQuestionType)?.label.toLowerCase()} questions match your search.` : `No ${QUESTION_TYPES.find(t => t.value === selectedQuestionType)?.label.toLowerCase()} questions available.`}
+            {searchTerm 
+              ? `No questions match your search${selectedCategory !== 'all' ? ` in "${selectedCategory === 'other' ? 'Other' : selectedCategory}" category` : ''}.` 
+              : `No questions available${selectedCategory !== 'all' ? ` in "${selectedCategory === 'other' ? 'Other' : selectedCategory}" category` : ''}.`}
           </div>
         ) : (
           <div className="divide-y divide-slate-200">
@@ -415,6 +444,26 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
                         </span>
                       )}
                     </div>
+                    {/* Show options for multiple choice and checkbox questions */}
+                    {(question.questionType === 'select' || question.questionType === 'multiselect') && 
+                     question.options && 
+                     question.options.length > 0 && (
+                      <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-md">
+                        <p className="text-xs font-medium text-slate-700 mb-1.5">
+                          {question.questionType === 'select' ? 'Options (Select One):' : 'Options (Select Multiple):'}
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {question.options.map((option, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center px-2 py-1 text-xs font-medium bg-white border border-slate-300 rounded-md text-slate-700"
+                            >
+                              {option}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </label>
               );
@@ -423,11 +472,156 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
         )}
       </div>
 
+      {/* Selected Questions with Ordering */}
       {selectedQuestionIds.length > 0 && (
-        <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
-          <p className="text-sm font-medium text-slate-700">
-            {selectedQuestionIds.length} question{selectedQuestionIds.length !== 1 ? 's' : ''} selected
-          </p>
+        <div className="bg-slate-50 border border-slate-200 rounded-md p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-medium text-slate-700">
+              Selected Questions ({selectedQuestionIds.length})
+            </p>
+            <p className="text-xs text-slate-500">Drag or use arrows to reorder</p>
+          </div>
+          <div className="space-y-2">
+            {selectedQuestionIds.map((questionId, index) => {
+              const question = [...approvedQuestions, ...facilitatorQuestions].find(q => q.id === questionId);
+              if (!question) return null;
+
+              const moveUp = () => {
+                if (index > 0) {
+                  const newOrder = [...selectedQuestionIds];
+                  [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
+                  onSelectionChange(newOrder);
+                }
+              };
+
+              const moveDown = () => {
+                if (index < selectedQuestionIds.length - 1) {
+                  const newOrder = [...selectedQuestionIds];
+                  [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
+                  onSelectionChange(newOrder);
+                }
+              };
+
+              const removeQuestion = () => {
+                onSelectionChange(selectedQuestionIds.filter(id => id !== questionId));
+              };
+
+              return (
+                <div
+                  key={questionId}
+                  className="bg-white border border-slate-300 rounded-md p-3 flex items-center gap-3 hover:shadow-sm transition-shadow"
+                >
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <GripVertical className="h-5 w-5 text-slate-400" />
+                    <span className="text-sm font-medium text-slate-600 w-6 text-center">
+                      {index + 1}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-900 font-medium">{question.questionText}</p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      {question.category && (
+                        <span className="text-xs text-slate-500">Category: {question.category}</span>
+                      )}
+                      <span className="text-xs text-slate-500">
+                        Type: {
+                          question.questionType === 'text' ? 'Short Answer' :
+                          question.questionType === 'textarea' ? 'Long Answer' :
+                          question.questionType === 'select' ? 'Multiple Choice' :
+                          question.questionType === 'multiselect' ? 'Checkbox' :
+                          question.questionType === 'number' ? 'Number' :
+                          question.questionType === 'date' ? 'Date' :
+                          question.questionType
+                        }
+                      </span>
+                    </div>
+                    {/* Show options for multiple choice and checkbox questions */}
+                    {(question.questionType === 'select' || question.questionType === 'multiselect') && 
+                     question.options && 
+                     question.options.length > 0 && (
+                      <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-md">
+                        <p className="text-xs font-medium text-slate-700 mb-1.5">
+                          {question.questionType === 'select' ? 'Options (Select One):' : 'Options (Select Multiple):'}
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {question.options.map((option, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center px-2 py-1 text-xs font-medium bg-white border border-slate-300 rounded-md text-slate-700"
+                            >
+                              {option}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Selection Type (for questions with options) */}
+                    {onSelectionTypeChange && question.options && question.options.length > 0 && 
+                     (question.questionType === 'select' || question.questionType === 'multiselect') && (
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-xs text-slate-600 whitespace-nowrap">Selection:</label>
+                        <select
+                          value={questionSelectionTypeMap.get(questionId) || (question.questionType === 'select' ? 'single' : 'multiple')}
+                          onChange={(e) => {
+                            const value = e.target.value === 'single' ? 'single' : e.target.value === 'multiple' ? 'multiple' : null;
+                            onSelectionTypeChange(questionId, value);
+                          }}
+                          className="text-xs px-2 py-1 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary"
+                        >
+                          <option value="single">Single</option>
+                          <option value="multiple">Multiple</option>
+                        </select>
+                      </div>
+                    )}
+                    {/* Required/Optional Toggle */}
+                    {onRequiredChange && (
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={questionRequiredMap.get(questionId) !== false} // Default to true
+                          onChange={(e) => onRequiredChange(questionId, e.target.checked)}
+                          className="h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+                        />
+                        <span className="text-xs text-slate-600 whitespace-nowrap">
+                          {questionRequiredMap.get(questionId) !== false ? 'Required' : 'Optional'}
+                        </span>
+                      </label>
+                    )}
+                    <div className="flex items-center gap-1 border-l border-slate-300 pl-2">
+                      <button
+                        type="button"
+                        onClick={moveUp}
+                        disabled={index === 0}
+                        className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title="Move up"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={moveDown}
+                        disabled={index === selectedQuestionIds.length - 1}
+                        className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title="Move down"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={removeQuestion}
+                        className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                        title="Remove question"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -435,7 +629,7 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
         isOpen={isCustomQuestionModalOpen}
         onClose={() => setIsCustomQuestionModalOpen(false)}
         onSave={handleAddCustomQuestion}
-        selectedQuestionType={selectedQuestionType}
+        selectedQuestionType={selectedCategory}
       />
     </div>
   );

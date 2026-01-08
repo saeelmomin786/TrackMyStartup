@@ -18,7 +18,7 @@ class IncubationProgramsService {
     return (data || []).map(program => ({
       id: program.id,
       programName: program.program_name,
-      programType: program.program_type as 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp',
+      programType: program.program_type as 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp' | 'Grant',
       startDate: program.start_date,
       endDate: program.end_date,
       status: program.status as 'Active' | 'Completed' | 'Dropped',
@@ -31,19 +31,27 @@ class IncubationProgramsService {
   }
 
   async addIncubationProgram(startupId: number, programData: AddIncubationProgramData): Promise<IncubationProgram> {
+    const insertData: any = {
+      startup_id: startupId,
+      program_name: programData.programName,
+      program_type: programData.programType,
+      description: programData.description,
+      mentor_name: programData.mentorName,
+      mentor_email: programData.mentorEmail,
+      program_url: programData.programUrl
+    };
+    
+    // Only include dates if provided
+    if (programData.startDate) {
+      insertData.start_date = programData.startDate;
+    }
+    if (programData.endDate) {
+      insertData.end_date = programData.endDate;
+    }
+    
     const { data, error } = await supabase
       .from('incubation_programs')
-      .insert({
-        startup_id: startupId,
-        program_name: programData.programName,
-        program_type: programData.programType,
-        start_date: programData.startDate,
-        end_date: programData.endDate,
-        description: programData.description,
-        mentor_name: programData.mentorName,
-        mentor_email: programData.mentorEmail,
-        program_url: programData.programUrl
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -52,7 +60,7 @@ class IncubationProgramsService {
     return {
       id: data.id,
       programName: data.program_name,
-      programType: data.program_type as 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp',
+      programType: data.program_type as 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp' | 'Grant',
       startDate: data.start_date,
       endDate: data.end_date,
       status: data.status as 'Active' | 'Completed' | 'Dropped',
@@ -89,7 +97,7 @@ class IncubationProgramsService {
     return {
       id: data.id,
       programName: data.program_name,
-      programType: data.program_type as 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp',
+      programType: data.program_type as 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp' | 'Grant',
       startDate: data.start_date,
       endDate: data.end_date,
       status: data.status as 'Active' | 'Completed' | 'Dropped',
@@ -115,7 +123,7 @@ class IncubationProgramsService {
   // =====================================================
 
   async getProgramTypes(): Promise<string[]> {
-    return ['Incubation', 'Acceleration', 'Mentorship', 'Bootcamp'];
+    return ['Grant', 'Incubation', 'Acceleration', 'Mentorship', 'Bootcamp'];
   }
 
   async getProgramStatuses(): Promise<string[]> {

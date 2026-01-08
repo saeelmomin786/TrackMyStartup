@@ -5,7 +5,7 @@ import Modal from '../ui/Modal';
 import Input from '../ui/Input';
 import { questionBankService, ApplicationQuestion } from '../../lib/questionBankService';
 import { messageService } from '../../lib/messageService';
-import { Check, X, AlertCircle, Clock, FileText, Plus } from 'lucide-react';
+import { Check, X, AlertCircle, Clock, FileText, Plus, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 const AdminQuestionBankTab: React.FC = () => {
@@ -25,6 +25,50 @@ const AdminQuestionBankTab: React.FC = () => {
     options: ''
   });
   const [isCreating, setIsCreating] = useState(false);
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [predefinedCategories, setPredefinedCategories] = useState<string[]>([]);
+  const [showCustomCategory, setShowCustomCategory] = useState(false);
+  const [customCategory, setCustomCategory] = useState('');
+
+  // Load available categories when component mounts
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  const loadCategories = async () => {
+    try {
+      // Load predefined categories from database
+      const predefined = await questionBankService.getPredefinedCategories();
+      setPredefinedCategories(predefined);
+      
+      // Load existing categories from questions (for custom categories)
+      const existing = await questionBankService.getCategories();
+      setAvailableCategories(existing);
+    } catch (error) {
+      console.error('Failed to load categories:', error);
+      // Fallback to hardcoded categories if database table doesn't exist
+      setPredefinedCategories([
+        'Company Info',
+        'Financial',
+        'Team',
+        'Product',
+        'Market',
+        'Technology',
+        'Social Impact',
+        'Environmental',
+        'Legal',
+        'Operations',
+        'Marketing',
+        'Sales',
+        'Customer',
+        'Competition',
+        'Growth',
+        'Funding',
+        'Partnerships',
+        'Other'
+      ]);
+    }
+  };
 
   // Reset form when modal opens
   const handleOpenCreateModal = () => {
@@ -34,7 +78,10 @@ const AdminQuestionBankTab: React.FC = () => {
       questionType: 'text',
       options: ''
     });
+    setShowCustomCategory(false);
+    setCustomCategory('');
     setShowCreateModal(true);
+    loadCategories(); // Refresh categories when opening modal
   };
 
   useEffect(() => {
@@ -167,6 +214,60 @@ const AdminQuestionBankTab: React.FC = () => {
     }
   };
 
+  const handleReorder = async (questionId: string, direction: 'up' | 'down') => {
+    const questions = activeSubTab === 'approved' ? approvedQuestions : 
+                     activeSubTab === 'pending' ? pendingQuestions : 
+                     rejectedQuestions;
+    
+    if (!questions || questions.length === 0) {
+      messageService.warning('No Questions', 'No questions available to reorder.');
+      return;
+    }
+    
+    const currentIndex = questions.findIndex(q => q.id === questionId);
+    if (currentIndex === -1) {
+      messageService.warning('Question Not Found', 'The question could not be found.');
+      return;
+    }
+
+    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (newIndex < 0 || newIndex >= questions.length) {
+      return; // Already at the edge
+    }
+
+    // Swap questions
+    const reordered = [...questions];
+    [reordered[currentIndex], reordered[newIndex]] = [reordered[newIndex], reordered[currentIndex]];
+
+    // Update display orders
+    const orderUpdates = reordered.map((q, index) => ({
+      questionId: q.id,
+      displayOrder: index
+    }));
+
+    try {
+      if (!orderUpdates || orderUpdates.length === 0) {
+        return;
+      }
+
+      await questionBankService.updateQuestionBankOrder(orderUpdates);
+      
+      // Update local state
+      if (activeSubTab === 'approved') {
+        setApprovedQuestions(reordered);
+      } else if (activeSubTab === 'pending') {
+        setPendingQuestions(reordered);
+      } else {
+        setRejectedQuestions(reordered);
+      }
+      
+      messageService.success('Order Updated', 'Question order has been updated successfully.');
+    } catch (error: any) {
+      console.error('Reorder error:', error);
+      messageService.error('Failed to Update Order', error.message || 'Please try again.');
+    }
+  };
+
   // Separate component for question card to properly use hooks
   const QuestionCard: React.FC<{
     question: ApplicationQuestion;
@@ -174,7 +275,11 @@ const AdminQuestionBankTab: React.FC = () => {
     onApprove: (id: string) => void;
     onRejectClick: (id: string) => void;
     processingId: string | null;
-  }> = ({ question, showActions, onApprove, onRejectClick, processingId }) => {
+    index: number;
+    totalQuestions: number;
+    canReorder: boolean;
+    onReorder: (id: string, direction: 'up' | 'down') => void;
+  }> = ({ question, showActions, onApprove, onRejectClick, processingId, index, totalQuestions, canReorder, onReorder }) => {
     const [creatorName, setCreatorName] = useState<string>('Loading...');
 
     useEffect(() => {
@@ -185,65 +290,97 @@ const AdminQuestionBankTab: React.FC = () => {
       <Card className="p-4">
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-slate-900 mb-1">{question.questionText}</p>
-              <div className="flex items-center gap-3 text-xs text-slate-500 mt-2 flex-wrap">
-                {question.category && (
-                  <span className="px-2 py-0.5 bg-slate-100 rounded">Category: {question.category}</span>
+            <div className="flex items-start gap-3 flex-1">
+              {canReorder && (
+                <div className="flex flex-col items-center gap-1 flex-shrink-0 pt-1">
+                  <GripVertical className="h-5 w-5 text-slate-400" />
+                  <span className="text-xs font-medium text-slate-600">{index + 1}</span>
+                </div>
+              )}
+              <div className="flex-1">
+                <p className="text-sm font-medium text-slate-900 mb-1">{question.questionText}</p>
+                <div className="flex items-center gap-3 text-xs text-slate-500 mt-2 flex-wrap">
+                  {question.category && (
+                    <span className="px-2 py-0.5 bg-slate-100 rounded">Category: {question.category}</span>
+                  )}
+                  <span>Type: {question.questionType === 'text' ? 'Short Text' :
+                               question.questionType === 'textarea' ? 'Long Text' :
+                               question.questionType === 'select' ? 'Multiple Choice' :
+                               question.questionType === 'multiselect' ? 'Checkbox' :
+                               question.questionType === 'number' ? 'Number' :
+                               question.questionType === 'date' ? 'Date' :
+                               question.questionType}</span>
+                  <span>Created by: {creatorName}</span>
+                  <span>Used: {question.usageCount} times</span>
+                </div>
+                {question.options && (
+                  <div className="mt-2 text-xs text-slate-600">
+                    <strong>Options:</strong> {Array.isArray(question.options) ? question.options.join(', ') : 'N/A'}
+                  </div>
                 )}
-                <span>Type: {question.questionType === 'text' ? 'Short Text' :
-                             question.questionType === 'textarea' ? 'Long Text' :
-                             question.questionType === 'select' ? 'Multiple Choice' :
-                             question.questionType === 'multiselect' ? 'Checkbox' :
-                             question.questionType === 'number' ? 'Number' :
-                             question.questionType === 'date' ? 'Date' :
-                             question.questionType}</span>
-                <span>Created by: {creatorName}</span>
-                <span>Used: {question.usageCount} times</span>
+                {question.rejectionReason && (
+                  <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">
+                    <strong>Rejection Reason:</strong> {question.rejectionReason}
+                  </div>
+                )}
               </div>
-              {question.options && (
-                <div className="mt-2 text-xs text-slate-600">
-                  <strong>Options:</strong> {Array.isArray(question.options) ? question.options.join(', ') : 'N/A'}
-                </div>
-              )}
-              {question.rejectionReason && (
-                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">
-                  <strong>Rejection Reason:</strong> {question.rejectionReason}
-                </div>
-              )}
             </div>
-            {showActions && (
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {question.status === 'pending' && (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onRejectClick(question.id)}
-                      disabled={processingId === question.id}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {canReorder && (
+                <div className="flex flex-col gap-1 mr-2">
+                  <button
+                    type="button"
+                    onClick={() => onReorder(question.id, 'up')}
+                    disabled={index === 0}
+                    className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    title="Move up"
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onReorder(question.id, 'down')}
+                    disabled={index === totalQuestions - 1}
+                    className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    title="Move down"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              {showActions && (
+                <>
+                  {question.status === 'pending' && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onRejectClick(question.id)}
+                        disabled={processingId === question.id}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => onApprove(question.id)}
+                        disabled={processingId === question.id}
+                      >
+                        {processingId === question.id ? 'Processing...' : <Check className="h-4 w-4" />}
+                      </Button>
+                    </>
+                  )}
+                  {question.status === 'rejected' && (
                     <Button
                       size="sm"
                       onClick={() => onApprove(question.id)}
                       disabled={processingId === question.id}
                     >
-                      {processingId === question.id ? 'Processing...' : <Check className="h-4 w-4" />}
+                      {processingId === question.id ? 'Processing...' : 'Re-approve'}
                     </Button>
-                  </>
-                )}
-                {question.status === 'rejected' && (
-                  <Button
-                    size="sm"
-                    onClick={() => onApprove(question.id)}
-                    disabled={processingId === question.id}
-                  >
-                    {processingId === question.id ? 'Processing...' : 'Re-approve'}
-                  </Button>
-                )}
-              </div>
-            )}
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </Card>
@@ -327,7 +464,7 @@ const AdminQuestionBankTab: React.FC = () => {
         </Card>
       ) : (
         <div className="space-y-4">
-          {currentQuestions.map(question => (
+          {currentQuestions.map((question, index) => (
             <QuestionCard
               key={question.id}
               question={question}
@@ -335,6 +472,10 @@ const AdminQuestionBankTab: React.FC = () => {
               onApprove={handleApprove}
               onRejectClick={setShowRejectionModal}
               processingId={processingId}
+              index={index}
+              totalQuestions={currentQuestions.length}
+              canReorder={true}
+              onReorder={handleReorder}
             />
           ))}
         </div>
@@ -342,7 +483,7 @@ const AdminQuestionBankTab: React.FC = () => {
 
       {/* Create Question Modal */}
       <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="Create New Question" size="large">
-        <form onSubmit={handleCreateQuestion} className="space-y-4 bg-white">
+        <form onSubmit={handleCreateQuestion} className="space-y-5">
           <div>
             <label className="block text-sm font-medium text-slate-900 mb-2">Question Text *</label>
             <textarea
@@ -357,12 +498,57 @@ const AdminQuestionBankTab: React.FC = () => {
 
           <div>
             <label className="block text-sm font-medium text-slate-900 mb-2">Category (Optional)</label>
-            <Input
-              value={newQuestion.category}
-              onChange={(e) => setNewQuestion(prev => ({ ...prev, category: e.target.value }))}
-              placeholder="e.g., Company Info, Financial, Team, Product, Market, Technology, Social, Environmental"
-            />
-            <p className="text-xs text-slate-600 mt-1">Categorize the question for better organization</p>
+            {!showCustomCategory ? (
+              <>
+                <select
+                  value={newQuestion.category}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === 'custom') {
+                      setShowCustomCategory(true);
+                      setNewQuestion(prev => ({ ...prev, category: '' }));
+                    } else {
+                      setNewQuestion(prev => ({ ...prev, category: value }));
+                    }
+                  }}
+                  className="block w-full px-3 py-2 bg-white border-2 border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm text-slate-900"
+                >
+                  <option value="">Select a category (optional)</option>
+                  {predefinedCategories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                  {availableCategories
+                    .filter(cat => !predefinedCategories.includes(cat))
+                    .map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  <option value="custom">+ Add Custom Category</option>
+                </select>
+                <p className="text-xs text-slate-600 mt-1">Categorize the question for better organization</p>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <Input
+                  value={customCategory}
+                  onChange={(e) => {
+                    setCustomCategory(e.target.value);
+                    setNewQuestion(prev => ({ ...prev, category: e.target.value }));
+                  }}
+                  placeholder="Enter custom category name"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCustomCategory(false);
+                    setCustomCategory('');
+                    setNewQuestion(prev => ({ ...prev, category: '' }));
+                  }}
+                  className="text-xs text-slate-600 hover:text-slate-900 underline"
+                >
+                  Use predefined category instead
+                </button>
+              </div>
+            )}
           </div>
 
           <div>

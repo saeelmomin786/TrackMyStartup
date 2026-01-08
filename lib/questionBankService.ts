@@ -45,6 +45,7 @@ export interface OpportunityQuestion {
   questionId: string;
   isRequired: boolean;
   displayOrder: number;
+  selectionType?: 'single' | 'multiple' | null; // Override for select/multiselect questions
   question?: ApplicationQuestion;
 }
 
@@ -253,6 +254,7 @@ class QuestionBankService {
       questionId: row.question_id,
       isRequired: row.is_required,
       displayOrder: row.display_order,
+      selectionType: row.selection_type || null,
       question: row.question ? this.mapQuestion(row.question) : undefined
     }));
   }
@@ -263,7 +265,8 @@ class QuestionBankService {
   async addQuestionsToOpportunity(
     opportunityId: string,
     questionIds: string[],
-    isRequired: boolean = true
+    questionRequiredMap?: Map<string, boolean> | boolean,
+    questionSelectionTypeMap?: Map<string, 'single' | 'multiple' | null>
   ): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
@@ -278,12 +281,26 @@ class QuestionBankService {
 
     let nextOrder = existing && existing.length > 0 ? existing[0].display_order + 1 : 0;
 
-    const inserts = questionIds.map((questionId, index) => ({
-      opportunity_id: opportunityId,
-      question_id: questionId,
-      is_required: isRequired,
-      display_order: nextOrder + index
-    }));
+    const inserts = questionIds.map((questionId, index) => {
+      // Determine is_required
+      let isRequired = true;
+      if (questionRequiredMap instanceof Map) {
+        isRequired = questionRequiredMap.get(questionId) !== false; // Default to true
+      } else if (typeof questionRequiredMap === 'boolean') {
+        isRequired = questionRequiredMap;
+      }
+
+      // Determine selection_type (only for questions with options)
+      const selectionType = questionSelectionTypeMap?.get(questionId) || null;
+
+      return {
+        opportunity_id: opportunityId,
+        question_id: questionId,
+        is_required: isRequired,
+        selection_type: selectionType,
+        display_order: nextOrder + index
+      };
+    });
 
     const { error } = await supabase
       .from(this.opportunityQuestionsTable)
@@ -523,6 +540,26 @@ class QuestionBankService {
     });
 
     return Array.from(categories).sort();
+  }
+
+  /**
+   * Get predefined question categories from database
+   */
+  async getPredefinedCategories(): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('question_categories')
+      .select('name')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (error) {
+      // If table doesn't exist yet, return empty array (graceful fallback)
+      console.warn('question_categories table may not exist:', error);
+      return [];
+    }
+
+    return (data || []).map((row: any) => row.name);
   }
 }
 

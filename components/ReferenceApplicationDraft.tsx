@@ -35,14 +35,15 @@ const ReferenceApplicationDraft: React.FC<ReferenceApplicationDraftProps> = ({
   const loadData = async () => {
     try {
       setLoading(true);
-      const [approvedQuestions, startupAnswers, categoriesList] = await Promise.all([
+      const [approvedQuestions, startupAnswers, predefinedCategories] = await Promise.all([
         questionBankService.getApprovedQuestions(),
         questionBankService.getStartupAnswers(startupId),
-        questionBankService.getCategories()
+        questionBankService.getPredefinedCategories()
       ]);
 
       setQuestions(approvedQuestions);
-      setCategories(categoriesList);
+      // Use predefined categories from database
+      setCategories(predefinedCategories);
 
       // Create a map of answers by question ID
       const answersMap = new Map<string, StartupAnswer>();
@@ -120,8 +121,18 @@ const ReferenceApplicationDraft: React.FC<ReferenceApplicationDraftProps> = ({
 
   const filteredQuestions = questions.filter(q => {
     const matchesSearch = q.questionText.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = !selectedCategory || q.category === selectedCategory;
-    return matchesSearch && matchesCategory;
+    
+    // Filter by category
+    if (!selectedCategory || selectedCategory === 'all') {
+      return matchesSearch;
+    } else if (selectedCategory === 'other') {
+      // Show questions with no category or category not in the predefined list
+      const hasCategory = q.category && categories.includes(q.category);
+      return matchesSearch && !hasCategory;
+    } else {
+      // Show questions matching the selected category
+      return matchesSearch && q.category === selectedCategory;
+    }
   });
 
   const answeredCount = Array.from(answers.keys()).length;
@@ -175,10 +186,11 @@ const ReferenceApplicationDraft: React.FC<ReferenceApplicationDraftProps> = ({
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
           >
-            <option value="">All Categories</option>
+            <option value="all">All Categories</option>
             {categories.map(cat => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
+            <option value="other">Other (Uncategorized)</option>
           </select>
         </div>
 
@@ -193,7 +205,9 @@ const ReferenceApplicationDraft: React.FC<ReferenceApplicationDraftProps> = ({
             <div className="p-8 text-center">
               <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
               <p className="text-slate-600">
-                {searchTerm || selectedCategory ? 'No questions match your filters.' : 'No questions available.'}
+                {searchTerm 
+                  ? `No questions match your search${selectedCategory && selectedCategory !== 'all' ? ` in "${selectedCategory === 'other' ? 'Other' : selectedCategory}" category` : ''}.` 
+                  : `No questions available${selectedCategory && selectedCategory !== 'all' ? ` in "${selectedCategory === 'other' ? 'Other' : selectedCategory}" category` : ''}.`}
               </p>
             </div>
           ) : (

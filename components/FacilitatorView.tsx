@@ -226,6 +226,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [shuffledPitches, setShuffledPitches] = useState<ActiveFundraisingStartup[]>([]);
   const [facilitatorId, setFacilitatorId] = useState<string | null>(null);
   const [myPostedOpportunities, setMyPostedOpportunities] = useState<IncubationOpportunity[]>([]);
+  const [opportunityApplicationCounts, setOpportunityApplicationCounts] = useState<Map<string, number>>(new Map());
   const [myReceivedApplications, setMyReceivedApplications] = useState<ReceivedApplication[]>([]);
   const [recognitionRecords, setRecognitionRecords] = useState<any[]>([]);
   const [isLoadingRecognition, setIsLoadingRecognition] = useState(false);
@@ -250,6 +251,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
   const [facilitatorCode, setFacilitatorCode] = useState<string>('');
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
+  const [questionRequiredMap, setQuestionRequiredMap] = useState<Map<string, boolean>>(new Map());
+  const [questionSelectionTypeMap, setQuestionSelectionTypeMap] = useState<Map<string, 'single' | 'multiple' | null>>(new Map());
   const [isApplicationResponsesModalOpen, setIsApplicationResponsesModalOpen] = useState(false);
   const [selectedApplicationForResponses, setSelectedApplicationForResponses] = useState<ReceivedApplication | null>(null);
   const [applicationResponses, setApplicationResponses] = useState<Array<{ question: ApplicationQuestion; answerText: string }>>([]);
@@ -875,6 +878,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               .in('opportunity_id', oppIds)
               .order('created_at', { ascending: false });
             
+            // Calculate application counts per opportunity
+            if (apps && !appsError) {
+              const countsMap = new Map<string, number>();
+              apps.forEach((app: any) => {
+                const oppId = app.opportunity_id;
+                countsMap.set(oppId, (countsMap.get(oppId) || 0) + 1);
+              });
+              setOpportunityApplicationCounts(countsMap);
+            } else {
+              // Initialize with zero counts for all opportunities
+              const countsMap = new Map<string, number>();
+              mapped.forEach(opp => {
+                countsMap.set(opp.id, 0);
+              });
+              setOpportunityApplicationCounts(countsMap);
+            }
+            
             if (appsError) {
                   console.error('❌ Error loading opportunity applications:', appsError);
                   // Try without the inner join
@@ -922,7 +942,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 createdAt: a.created_at,
                 diligenceUrls: a.diligence_urls || []
               }));
-              if (mounted) setMyReceivedApplications(appsMapped);
+              if (mounted) {
+                setMyReceivedApplications(appsMapped);
+                
+                // Calculate counts from apps
+                const appsCountsMap = new Map<string, number>();
+                appsMapped.forEach(app => {
+                  const oppId = app.opportunityId;
+                  appsCountsMap.set(oppId, (appsCountsMap.get(oppId) || 0) + 1);
+                });
+                setOpportunityApplicationCounts(appsCountsMap);
+              }
                 }
               } catch (appsErr) {
                 console.error('Error loading applications:', appsErr);
@@ -1072,6 +1102,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             ...prev
           ]);
           
+          // Update application count for this opportunity
+          setOpportunityApplicationCounts(prev => {
+            const newMap = new Map(prev);
+            const currentCount = (newMap.get(row.opportunity_id) as number) || 0;
+            newMap.set(row.opportunity_id, currentCount + 1);
+            return newMap;
+          });
+          
           // Show notification to facilitator
           console.log('📝 Application details:', row);
         } catch (e) {
@@ -1089,6 +1127,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             
             // Remove the deleted application from local state
             setMyReceivedApplications(prev => prev.filter(app => app.id !== row.id));
+            
+            // Update application count for this opportunity
+            setOpportunityApplicationCounts(prev => {
+              const newMap = new Map(prev);
+              const currentCount = (newMap.get(row.opportunity_id) as number) || 0;
+              newMap.set(row.opportunity_id, Math.max(0, currentCount - 1));
+              return newMap;
+            });
             
             console.log(`🗑️ Application deleted: ${row.id}`);
           } catch (e) {
@@ -1302,6 +1348,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     setNewOpportunity(initialNewOppState);
     setPosterPreview('');
     setSelectedQuestionIds([]);
+    setQuestionRequiredMap(new Map());
+    setQuestionSelectionTypeMap(new Map());
     setIsPostModalOpen(true);
   };
 
@@ -1324,12 +1372,27 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       try {
         const questions = await questionBankService.getOpportunityQuestions(opp.id);
         setSelectedQuestionIds(questions.map(q => q.questionId));
+        // Load required status map
+        const requiredMap = new Map<string, boolean>();
+        const selectionTypeMap = new Map<string, 'single' | 'multiple' | null>();
+        questions.forEach(q => {
+          requiredMap.set(q.questionId, q.isRequired);
+          if (q.selectionType !== undefined) {
+            selectionTypeMap.set(q.questionId, q.selectionType);
+          }
+        });
+        setQuestionRequiredMap(requiredMap);
+        setQuestionSelectionTypeMap(selectionTypeMap);
       } catch (error) {
         console.error('Failed to load questions:', error);
         setSelectedQuestionIds([]);
+        setQuestionRequiredMap(new Map());
+        setQuestionSelectionTypeMap(new Map());
       }
     } else {
       setSelectedQuestionIds([]);
+      setQuestionRequiredMap(new Map());
+      setQuestionSelectionTypeMap(new Map());
     }
     
     setIsPostModalOpen(true);
@@ -2286,8 +2349,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           for (const q of existingQuestions) {
             await questionBankService.removeQuestionFromOpportunity(updated.id, q.questionId);
           }
-          // Add new questions
-          await questionBankService.addQuestionsToOpportunity(updated.id, selectedQuestionIds);
+          // Add new questions with required status
+          await questionBankService.addQuestionsToOpportunity(updated.id, selectedQuestionIds, questionRequiredMap, questionSelectionTypeMap);
         }
       } else {
         const { data, error } = await supabase
@@ -2308,9 +2371,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         };
         setMyPostedOpportunities(prev => [inserted, ...prev]);
         
-        // Add questions for new opportunity
+        // Add questions for new opportunity with required status
         if (selectedQuestionIds.length > 0) {
-          await questionBankService.addQuestionsToOpportunity(inserted.id, selectedQuestionIds);
+          await questionBankService.addQuestionsToOpportunity(inserted.id, selectedQuestionIds, questionRequiredMap, questionSelectionTypeMap);
         }
       }
 
@@ -2318,6 +2381,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       setPosterPreview('');
       setNewOpportunity(initialNewOppState);
       setSelectedQuestionIds([]);
+      setQuestionRequiredMap(new Map());
+      setQuestionSelectionTypeMap(new Map());
     } catch (err) {
       console.error('Failed to save opportunity:', err);
       messageService.error(
@@ -2373,150 +2438,182 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               </div>
 
               {/* Applications Table */}
-                  <div className="overflow-x-auto max-h-96">
-                    <table className="w-full divide-y divide-slate-200 table-fixed">
-                      <thead className="bg-slate-50 sticky top-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full divide-y divide-slate-200">
+                      <thead className="bg-gradient-to-r from-slate-50 to-slate-100 sticky top-0">
                         <tr>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-slate-500 uppercase w-32">Startup</th>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-slate-500 uppercase w-24">Domain</th>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-slate-500 uppercase w-28">Stage</th>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-slate-500 uppercase w-40">Opportunity</th>
-                          <th className="px-3 py-3 text-center text-xs font-medium text-slate-500 uppercase w-48">Pitch Materials</th>
-                          <th className="px-3 py-3 text-center text-xs font-medium text-slate-500 uppercase w-32">Actions</th>
+                          <th className="px-4 py-4 text-left text-sm font-semibold text-slate-700">Startup</th>
+                          <th className="px-4 py-4 text-left text-sm font-semibold text-slate-700">Opportunity</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Pitch Materials</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Status</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-slate-200">
                     {filteredApplications.map(app => (
-                          <tr key={app.id}>
-                            <td className="px-3 py-4 text-sm font-medium text-slate-900 break-words">{app.startupName}</td>
-                        <td className="px-3 py-4 text-sm text-slate-500 break-words">{app.sector || '—'}</td>
-                        <td className="px-3 py-4 text-sm text-slate-500 break-words">{app.stage || '—'}</td>
-                            <td className="px-3 py-4 text-sm text-slate-500 break-words">{myPostedOpportunities.find(o => o.id === app.opportunityId)?.programName || '—'}</td>
-                            <td className="px-3 py-4 text-center">
-                              <div className="flex justify-center items-center gap-2 flex-wrap">
-                                {app.pitchDeckUrl ? (
-                                  <a href={app.pitchDeckUrl} target="_blank" rel="noopener noreferrer">
-                                    <Button size="sm" variant="outline" className="flex items-center gap-1">
-                                      <FileText className="h-4 w-4" />
-                                      Deck
-                                    </Button>
-                                  </a>
-                                ) : (
-                                  <Button size="sm" variant="outline" disabled className="flex items-center gap-1">
-                                    <FileText className="h-4 w-4" />
-                                    Deck
-                                  </Button>
+                          <tr key={app.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-4 py-4">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900">{app.startupName}</p>
+                                {app.sector && (
+                                  <p className="text-xs text-slate-500 mt-0.5">{app.sector}</p>
                                 )}
-                                {app.pitchVideoUrl ? (
-                                  <Button 
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleViewPitchVideo(app.pitchVideoUrl!)} 
-                                    className="flex items-center gap-1"
-                                  >
-                                    <Video className="h-4 w-4" />
-                                    Video
-                                  </Button>
-                                ) : (
-                                  <Button size="sm" variant="outline" disabled className="flex items-center gap-1">
-                                    <Video className="h-4 w-4" />
-                                    Video
-                                  </Button>
-                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4">
+                              <p className="text-sm text-slate-700 font-medium">{myPostedOpportunities.find(o => o.id === app.opportunityId)?.programName || '—'}</p>
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex justify-center items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    try {
+                                      // Check if startup has active fundraising
+                                      const { data: fundraisingData } = await supabase
+                                        .from('fundraising_details')
+                                        .select('active')
+                                        .eq('startup_id', app.startupId)
+                                        .eq('active', true)
+                                        .order('created_at', { ascending: false })
+                                        .limit(1)
+                                        .maybeSingle();
+                                      
+                                      if (fundraisingData && (fundraisingData as any).active) {
+                                        // Generate public fundraising card URL
+                                        const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+                                        const startupName = app.startupName || 'Startup';
+                                        const slug = createSlug(startupName);
+                                        const baseUrl = window.location.origin;
+                                        const fundraisingCardUrl = createProfileUrl(baseUrl, 'startup', slug, String(app.startupId));
+                                        
+                                        // Open public fundraising card in new page/tab
+                                        window.open(fundraisingCardUrl, '_blank', 'noopener,noreferrer');
+                                      } else {
+                                        // No active fundraising, open full startup view
+                                        const startupObj = await buildStartupForView({
+                                          id: app.startupId,
+                                          name: app.startupName,
+                                          sector: app.sector || 'Unknown',
+                                          investmentType: 'equity' as any,
+                                          investmentValue: 0,
+                                          equityAllocation: 0,
+                                          currentValuation: 0,
+                                          totalFunding: 0,
+                                          totalRevenue: 0,
+                                          registrationDate: new Date().toISOString().split('T')[0],
+                                          complianceStatus: ComplianceStatus.Pending,
+                                          founders: []
+                                        });
+                                        onViewStartup(startupObj);
+                                      }
+                                    } catch (error) {
+                                      console.error('Failed to open portfolio:', error);
+                                      // Fallback to full startup view
+                                      const startupObj = await buildStartupForView({
+                                        id: app.startupId,
+                                        name: app.startupName,
+                                        sector: app.sector || 'Unknown',
+                                        investmentType: 'equity' as any,
+                                        investmentValue: 0,
+                                        equityAllocation: 0,
+                                        currentValuation: 0,
+                                        totalFunding: 0,
+                                        totalRevenue: 0,
+                                        registrationDate: new Date().toISOString().split('T')[0],
+                                        complianceStatus: ComplianceStatus.Pending,
+                                        founders: []
+                                      });
+                                      onViewStartup(startupObj);
+                                    }
+                                  }}
+                                  className="flex items-center gap-1.5 hover:bg-slate-100"
+                                  title="View Public Fundraising Card (if available)"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  <span>Portfolio</span>
+                                </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleViewApplicationResponses(app)}
-                                  className="flex items-center gap-1"
+                                  className="flex items-center gap-1.5 hover:bg-slate-100"
                                   title="View Application Responses"
                                 >
                                   <FileQuestion className="h-4 w-4" />
-                                  Responses
+                                  <span>Responses</span>
                                 </Button>
                               </div>
                             </td>
-                            <td className="px-3 py-4 text-sm font-medium text-center">
-                              <div className="flex flex-col gap-2 items-center">
-                                {/* Status Actions */}
-                              {app.status === 'pending' && (
+                            <td className="px-4 py-4">
+                              <div className="flex justify-center">
+                                {app.status === 'pending' && (
+                                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
+                                    Pending
+                                  </span>
+                                )}
+                                {app.status === 'accepted' && (
+                                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                                    Approved
+                                  </span>
+                                )}
+                                {app.status === 'rejected' && (
+                                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+                                    Rejected
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex justify-center items-center gap-2 flex-wrap">
+                                {/* Status Actions - All in one line */}
+                                {app.status === 'pending' && (
                                   <>
-                                <Button 
-                                  size="sm" 
-                                  onClick={() => handleAcceptApplication(app)}
-                                  disabled={isProcessingAction}
-                                      className="w-full"
-                                >
-                                  Approve Application
-                                </Button>
+                                    <Button 
+                                      size="sm" 
+                                      onClick={() => handleAcceptApplication(app)}
+                                      disabled={isProcessingAction}
+                                      className="bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                      Approve
+                                    </Button>
                                     <Button 
                                       size="sm" 
                                       variant="outline"
                                       onClick={() => handleRejectApplication(app)}
                                       disabled={isProcessingAction}
-                                      className="w-full text-red-600 border-red-600 hover:bg-red-50"
+                                      className="text-red-600 border-red-600 hover:bg-red-50"
                                     >
-                                      Reject Application
+                                      Reject
                                     </Button>
+                                    {/* Diligence Actions */}
+                                    {(app.diligenceStatus === 'none' || app.diligenceStatus == null) && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleRequestDiligence(app)}
+                                        disabled={isProcessingAction}
+                                      >
+                                        Request Diligence
+                                      </Button>
+                                    )}
+                                    {app.diligenceStatus === 'requested' && (
+                                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                        Diligence Pending
+                                      </span>
+                                    )}
                                   </>
-                              )}
-                              {app.status === 'accepted' && (
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  disabled
-                                    className="w-full"
-                                >
-                                  Approved
-                                </Button>
-                              )}
-                                {app.status === 'rejected' && (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    disabled
-                                    className="w-full text-red-600 border-red-600"
-                                  >
-                                    Rejected
-                                  </Button>
                                 )}
-                                
-                                {/* Diligence Actions */}
-                              {(app.diligenceStatus === 'none' || app.diligenceStatus == null) && app.status === 'pending' && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleRequestDiligence(app)}
-                                  disabled={isProcessingAction}
-                                  className="w-full"
-                                >
-                                  Request Diligence
-                                </Button>
-                              )}
-                              {(app.diligenceStatus === 'none' || app.diligenceStatus == null) && app.status === 'accepted' && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled
-                                  title="Diligence can only be requested for pending applications"
-                                  className="w-full"
-                                >
-                                  Unavailable after approval
-                                </Button>
-                              )}
-                              {app.diligenceStatus === 'requested' && (
-                                <span className="inline-flex items-center justify-center w-full px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                  Request Pending
-                                </span>
-                              )}
-                              {app.diligenceStatus === 'approved' && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
+                                {app.diligenceStatus === 'approved' && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
                                     onClick={async () => {
                                       const startupObj = await buildStartupForView({
                                         id: app.startupId,
                                         name: app.startupName,
-                                        sector: 'Unknown',
+                                        sector: app.sector || 'Unknown',
                                         investmentType: 'equity' as any,
                                         investmentValue: 0,
                                         equityAllocation: 0,
@@ -2529,51 +2626,26 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                       });
                                       onViewStartup(startupObj);
                                     }}
-                                    className="w-full"
-                                >
-                                  View Startup
-                                </Button>
-                              )}
-                              {/* Diligence documents removed; only show View Startup after approval */}
-                            
-                            {/* Message Button - always available */}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleOpenMessaging(app)}
-                              className="w-full"
-                              title="Send message to startup"
-                            >
-                              <MessageCircle className="mr-2 h-4 w-4" />
-                              Message Startup
-                            </Button>
-
-
-                            {/* Contract Management Button removed per requirements */}
-                            
-                            {/* Delete Application Button - always available */}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDeleteApplication(app)}
-                              disabled={isProcessingAction}
-                              className="w-full text-red-600 border-red-600 hover:bg-red-50"
-                              title="Delete this application permanently"
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete Application
-                            </Button>
+                                  >
+                                    View Startup
+                                  </Button>
+                                )}
                               </div>
                             </td>
                           </tr>
                         ))}
                     {filteredApplications.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="text-center py-8 text-slate-500">
-                          {selectedOpportunityId 
-                            ? `No applications received for ${myPostedOpportunities.find(o => o.id === selectedOpportunityId)?.programName || 'this opportunity'} yet.`
-                            : 'No applications received yet.'
-                          }
+                        <td colSpan={5} className="text-center py-12">
+                          <div className="flex flex-col items-center">
+                            <FileText className="h-12 w-12 text-slate-300 mb-3" />
+                            <p className="text-slate-500 font-medium">
+                              {selectedOpportunityId 
+                                ? `No applications received for ${myPostedOpportunities.find(o => o.id === selectedOpportunityId)?.programName || 'this opportunity'} yet.`
+                                : 'No applications received yet.'
+                              }
+                            </p>
+                          </div>
                         </td>
                       </tr>
                         )}
@@ -3125,11 +3197,28 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </div>
                   <div className="overflow-x-auto max-h-96">
                     <ul className="divide-y divide-slate-200">
-                      {myPostedOpportunities.map((opp, idx) => (
-                        <li key={opp.id} className="py-3 flex justify-between items-center">
-                          <div>
-                            <p className="font-semibold text-slate-800">{opp.programName}</p>
-                            <p className="text-xs text-slate-500">Deadline: {opp.deadline || '—'}</p>
+                      {myPostedOpportunities.map((opp, idx) => {
+                        const appCount = opportunityApplicationCounts.get(opp.id) || 0;
+                        const postedDate = opp.createdAt ? new Date(opp.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+                        const deadlineDate = opp.deadline ? new Date(opp.deadline).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+                        
+                        return (
+                        <li key={opp.id} className="py-4 flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <p className="font-semibold text-slate-800 text-base">{opp.programName}</p>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-600">
+                              <div>
+                                <span className="font-medium text-slate-500">Posted:</span> <span className="text-slate-700">{postedDate}</span>
+                              </div>
+                              <div>
+                                <span className="font-medium text-slate-500">Deadline:</span> <span className="text-slate-700">{deadlineDate}</span>
+                              </div>
+                              <div>
+                                <span className="font-medium text-slate-500">Applications:</span> <span className="font-semibold text-brand-primary">{appCount}</span>
+                              </div>
+                            </div>
                           </div>
                           <div className="flex items-center gap-2">
                             <Button size="sm" variant="outline" onClick={() => {
@@ -3159,28 +3248,43 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             }} title="Share"><Share2 className="h-4 w-4"/></Button>
                             <Button size="sm" variant="outline" onClick={() => handleEditClick(idx)} title="Edit"><Edit className="h-4 w-4"/></Button>
                             <Button size="sm" variant="outline" onClick={async () => {
-                              if (!confirm('Delete this opportunity?')) return;
+                              if (!confirm('Are you sure you want to delete this opportunity? This will also delete all associated applications and questions. This action cannot be undone.')) return;
                               const target = myPostedOpportunities[idx];
-                              // Instead of deleting, close the opportunity to preserve data
-                              const { error } = await supabase
-                                .from('incubation_opportunities')
-                                .update({ 
-                                  opportunity_status: 'closed',
-                                  updated_at: new Date().toISOString()
-                                })
-                                .eq('id', target.id);
-                              if (!error) {
-                                setMyPostedOpportunities(prev => prev.filter((_, i) => i !== idx));
-                                messageService.success(
-                                  'Opportunity Closed',
-                                  'Opportunity has been closed. Applications and data are preserved.',
-                                  3000
+                              
+                              try {
+                                // Delete the opportunity (cascade will handle related records)
+                                const { error } = await supabase
+                                  .from('incubation_opportunities')
+                                  .delete()
+                                  .eq('id', target.id);
+                                
+                                if (error) {
+                                  console.error('Error deleting opportunity:', error);
+                                  messageService.error(
+                                    'Delete Failed',
+                                    error.message || 'Failed to delete opportunity. Please try again.'
+                                  );
+                                } else {
+                                  // Remove from local state
+                                  setMyPostedOpportunities(prev => prev.filter((_, i) => i !== idx));
+                                  messageService.success(
+                                    'Opportunity Deleted',
+                                    'Opportunity and all associated data have been deleted successfully.',
+                                    3000
+                                  );
+                                }
+                              } catch (err: any) {
+                                console.error('Error deleting opportunity:', err);
+                                messageService.error(
+                                  'Delete Failed',
+                                  err.message || 'An error occurred while deleting the opportunity. Please try again.'
                                 );
                               }
                             }} title="Delete">✕</Button>
             </div>
                         </li>
-          ))}
+                        );
+                      })}
                       {myPostedOpportunities.length === 0 && (
                         <li className="text-center py-6 text-slate-500">No opportunities posted.</li>
                       )}
@@ -3882,6 +3986,18 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 opportunityId={editingIndex !== null ? myPostedOpportunities[editingIndex]?.id : null}
                 selectedQuestionIds={selectedQuestionIds}
                 onSelectionChange={setSelectedQuestionIds}
+                questionRequiredMap={questionRequiredMap}
+                onRequiredChange={(questionId, isRequired) => {
+                  const newMap = new Map(questionRequiredMap);
+                  newMap.set(questionId, isRequired);
+                  setQuestionRequiredMap(newMap);
+                }}
+                questionSelectionTypeMap={questionSelectionTypeMap}
+                onSelectionTypeChange={(questionId, selectionType) => {
+                  const newMap = new Map(questionSelectionTypeMap);
+                  newMap.set(questionId, selectionType);
+                  setQuestionSelectionTypeMap(newMap);
+                }}
               />
             </div>
               </div>
@@ -3962,7 +4078,67 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+            <>
+              {/* Download Button */}
+              <div className="flex justify-end pb-2 border-b border-slate-200">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    // Create CSV content: Questions as column headers, answers in row below
+                    // Escape CSV values (handle quotes and commas)
+                    const escapeCSV = (value: string) => {
+                      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                        return `"${value.replace(/"/g, '""')}"`;
+                      }
+                      return value;
+                    };
+                    
+                    const startupName = selectedApplicationForResponses?.startupName || 'Unknown Startup';
+                    
+                    // First row: Column headers - "Startup Name" followed by all questions
+                    const headers: string[] = ['Startup Name'];
+                    const answers: string[] = [escapeCSV(startupName)];
+                    
+                    // Add questions as headers and answers in corresponding positions
+                    applicationResponses.forEach(response => {
+                      // Format answer - for multiselect, join with semicolon
+                      let answer = response.answerText;
+                      if (response.question.questionType === 'multiselect') {
+                        answer = response.answerText.split(',').filter(v => v.trim()).join('; ');
+                      }
+                      
+                      headers.push(escapeCSV(response.question.questionText));
+                      answers.push(escapeCSV(answer));
+                    });
+                    
+                    // Combine header row and answer row
+                    const csvContent = [
+                      headers.join(','),
+                      answers.join(',')
+                    ].join('\n');
+                    
+                    // Add BOM for Excel UTF-8 support
+                    const BOM = '\uFEFF';
+                    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `Application_Responses_${selectedApplicationForResponses?.startupName || 'Startup'}_${new Date().toISOString().split('T')[0]}.csv`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    
+                    messageService.success('Download Started', 'Application responses exported to Excel (CSV format).');
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <FileText className="h-4 w-4" />
+                  Download as Excel
+                </Button>
+              </div>
+              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
               {applicationResponses.map((response, index) => (
                 <Card key={index} className="p-4">
                   <div className="space-y-3">
@@ -4004,7 +4180,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </div>
                 </Card>
               ))}
-            </div>
+              </div>
+            </>
           )}
         </div>
       </Modal>

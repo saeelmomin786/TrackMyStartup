@@ -417,9 +417,9 @@ export interface InvestmentOffer {
 export interface IncubationProgram {
     id: string;
     programName: string;
-    programType: 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp';
-    startDate: string;
-    endDate: string;
+    programType: 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp' | 'Grant';
+    startDate?: string;
+    endDate?: string;
     status: 'Active' | 'Completed' | 'Dropped';
     description?: string;
     mentorName?: string;
@@ -430,9 +430,9 @@ export interface IncubationProgram {
 
 export interface AddIncubationProgramData {
     programName: string;
-    programType: 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp';
-    startDate: string;
-    endDate: string;
+    programType: 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp' | 'Grant';
+    startDate?: string;
+    endDate?: string;
     description?: string;
     mentorName?: string;
     mentorEmail?: string;

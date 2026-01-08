@@ -11,6 +11,7 @@ import { getQueryParam, setQueryParam } from '../../lib/urlState';
 import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsService';
 import { toDirectImageUrl } from '../../lib/imageUrl';
 import ReferenceApplicationDraft from '../ReferenceApplicationDraft';
+import DraftAnswersView from '../DraftAnswersView';
 import { questionBankService, OpportunityQuestion, StartupAnswer } from '../../lib/questionBankService';
 
 interface StartupRef {
@@ -83,21 +84,21 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     // Per-application apply modal state
     const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
     const [applyingOppId, setApplyingOppId] = useState<string | null>(null);
-    const [applyPitchVideoUrl, setApplyPitchVideoUrl] = useState('');
-    const [applyPitchDeckFile, setApplyPitchDeckFile] = useState<File | null>(null);
-    const [applySector, setApplySector] = useState('');
-     const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
-     const [applyStage, setApplyStage] = useState('');
+    const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
     // Image modal state
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
     const [selectedImageUrl, setSelectedImageUrl] = useState<string>('');
     const [selectedImageAlt, setSelectedImageAlt] = useState<string>('');
     // Reference Application Draft modal state
     const [isReferenceDraftModalOpen, setIsReferenceDraftModalOpen] = useState(false);
+    // Draft Answers modal state
+    const [isDraftAnswersModalOpen, setIsDraftAnswersModalOpen] = useState(false);
     // Application questions state
     const [opportunityQuestions, setOpportunityQuestions] = useState<OpportunityQuestion[]>([]);
     const [questionAnswers, setQuestionAnswers] = useState<Map<string, string>>(new Map());
     const [loadingQuestions, setLoadingQuestions] = useState(false);
+    const [portfolioUrl, setPortfolioUrl] = useState('');
+    const [startupWebsiteUrl, setStartupWebsiteUrl] = useState<string | null>(null);
     
 
     useEffect(() => {
@@ -177,12 +178,40 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     const openApplyModal = async (opportunityId: string) => {
         if (appliedIds.has(opportunityId)) return;
         setApplyingOppId(opportunityId);
-        setApplyPitchDeckFile(null);
-        setApplyPitchVideoUrl('');
-        setApplySector('');
-        setApplyStage('');
         setQuestionAnswers(new Map());
+        setPortfolioUrl('');
         setIsApplyModalOpen(true);
+        
+        // Generate public fundraising card URL (if startup has active fundraising)
+        try {
+            const { data: fundraisingData } = await supabase
+                .from('fundraising_details')
+                .select('active')
+                .eq('startup_id', startup.id)
+                .eq('active', true)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            
+            if (fundraisingData?.active) {
+                // Generate public fundraising card URL
+                const { createSlug, createProfileUrl } = await import('../../lib/slugUtils');
+                const startupName = startup.name || 'Startup';
+                const slug = createSlug(startupName);
+                const baseUrl = window.location.origin;
+                const fundraisingCardUrl = createProfileUrl(baseUrl, 'startup', slug, String(startup.id));
+                
+                setStartupWebsiteUrl(fundraisingCardUrl);
+                setPortfolioUrl(fundraisingCardUrl);
+            } else {
+                setStartupWebsiteUrl(null);
+                setPortfolioUrl('');
+            }
+        } catch (error) {
+            console.error('Failed to generate fundraising card URL:', error);
+            setStartupWebsiteUrl(null);
+            setPortfolioUrl('');
+        }
         
         // Load questions for this opportunity
         try {
@@ -190,7 +219,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             const questions = await questionBankService.getOpportunityQuestions(opportunityId);
             setOpportunityQuestions(questions);
             
-            // Auto-fill answers from saved answers
+            // Auto-fill answers from saved answers (draft)
             if (questions.length > 0) {
                 const answersMap = new Map<string, string>();
                 for (const q of questions) {
@@ -205,6 +234,21 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                         }
                     }
                 }
+                
+                // If portfolio URL is available and there's a matching question, auto-fill it
+                if (portfolioUrl && portfolioUrl.trim()) {
+                    const portfolioQuestion = questions.find(q => 
+                        q.question?.questionText.toLowerCase().includes('portfolio') ||
+                        q.question?.questionText.toLowerCase().includes('website') ||
+                        q.question?.questionText.toLowerCase().includes('url') ||
+                        q.question?.questionText.toLowerCase().includes('link')
+                    );
+                    
+                    if (portfolioQuestion && !answersMap.has(portfolioQuestion.questionId)) {
+                        answersMap.set(portfolioQuestion.questionId, portfolioUrl);
+                    }
+                }
+                
                 setQuestionAnswers(answersMap);
             }
         } catch (error: any) {
@@ -295,85 +339,49 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
         setIsImageModalOpen(true);
     };
 
-    const handleApplyDeckChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            if (file.type !== 'application/pdf') {
-                messageService.warning(
-                  'Invalid File Type',
-                  'Please upload a PDF file for the pitch deck.'
-                );
-                return;
-            }
-            if (file.size > 10 * 1024 * 1024) {
-                messageService.warning(
-                  'File Too Large',
-                  'File size must be less than 10MB.'
-                );
-                return;
-            }
-            setApplyPitchDeckFile(file);
-        }
-    };
 
     const submitApplication = async () => {
         if (!applyingOppId) return;
-        if (!applyPitchDeckFile && !applyPitchVideoUrl.trim()) {
+
+        // Validate required questions
+        const requiredQuestions = opportunityQuestions.filter(q => q.isRequired);
+        const missingRequired = requiredQuestions.filter(q => {
+            const answer = questionAnswers.get(q.questionId);
+            return !answer || answer.trim() === '';
+        });
+
+        if (missingRequired.length > 0) {
             messageService.warning(
-              'Content Required',
-              'Please provide either a pitch deck file or a pitch video URL.'
+                'Required Questions',
+                `Please answer all required questions (${missingRequired.length} missing).`
             );
             return;
         }
-         if (!applySector.trim()) {
-             messageService.warning(
-               'Domain Required',
-               'Please select a domain for your startup.'
-             );
-             return;
-         }
-         if (!applyStage.trim()) {
-             messageService.warning(
-              'Stage Required',
-              'Please select your startup stage.'
+
+        // Check if there are any questions at all
+        if (opportunityQuestions.length === 0) {
+            messageService.warning(
+                'No Questions',
+                'This opportunity has no application questions. Please contact the facilitator.'
             );
             return;
         }
 
         setIsSubmittingApplication(true);
         try {
-            let pitchDeckUrl: string | null = null;
-            const pitchVideo = applyPitchVideoUrl.trim() || null;
-
-            if (applyPitchDeckFile) {
-                const safeName = applyPitchDeckFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-                const fileName = `pitch-decks/${startup.id}/${applyingOppId}/${Date.now()}-${safeName}`;
-                const { error: uploadError } = await supabase.storage
-                    .from('startup-documents')
-                    .upload(fileName, applyPitchDeckFile);
-                if (uploadError) throw uploadError;
-                const { data: urlData } = supabase.storage
-                    .from('startup-documents')
-                    .getPublicUrl(fileName);
-                pitchDeckUrl = urlData.publicUrl;
-            }
-
+            // Create application record (minimal - questions will be saved separately)
             const { data, error } = await supabase
                 .from('opportunity_applications')
                 .insert({
                     startup_id: startup.id,
                     opportunity_id: applyingOppId,
-                    status: 'pending',
-                    pitch_deck_url: pitchDeckUrl,
-                     pitch_video_url: pitchVideo,
-                    domain: applySector.trim(),
-                    stage: applyStage.trim()
+                    status: 'pending'
                 })
                 .select()
                 .single();
             if (error) throw error;
 
-            // Save question responses if there are questions
+            // Save all question responses
             if (opportunityQuestions.length > 0 && questionAnswers.size > 0) {
                 const responses = opportunityQuestions
                     .filter(q => questionAnswers.has(q.questionId))
@@ -384,7 +392,39 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     .filter(r => r.answerText.trim() !== '');
                 
                 if (responses.length > 0) {
+                    // Save to application responses (for this specific application)
                     await questionBankService.saveApplicationResponses(data.id, responses);
+                    
+                    // Also save to startup_application_answers (draft) for future use
+                    // This updates the draft with new questions/answers
+                    await Promise.allSettled(
+                        responses.map(response => 
+                            questionBankService.saveStartupAnswer(startup.id, response.questionId, response.answerText)
+                        )
+                    );
+                }
+            }
+
+            // Save portfolio URL as a draft answer if it was provided
+            // This will be available for future applications
+            if (portfolioUrl.trim()) {
+                // Try to find a portfolio/website question in the opportunity
+                const portfolioQuestion = opportunityQuestions.find(q => 
+                    q.question?.questionText.toLowerCase().includes('portfolio') ||
+                    q.question?.questionText.toLowerCase().includes('website') ||
+                    q.question?.questionText.toLowerCase().includes('url') ||
+                    q.question?.questionText.toLowerCase().includes('link')
+                );
+                
+                if (portfolioQuestion && !questionAnswers.has(portfolioQuestion.questionId)) {
+                    // If there's a portfolio question and user hasn't answered it, save the portfolio URL
+                    await questionBankService.saveStartupAnswer(startup.id, portfolioQuestion.questionId, portfolioUrl.trim());
+                    
+                    // Also add it to application responses
+                    await questionBankService.saveApplicationResponses(data.id, [{
+                        questionId: portfolioQuestion.questionId,
+                        answerText: portfolioUrl.trim()
+                    }]);
                 }
             }
 
@@ -401,6 +441,8 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             setApplyingOppId(null);
             setOpportunityQuestions([]);
             setQuestionAnswers(new Map());
+            setPortfolioUrl('');
+            setStartupWebsiteUrl(null);
 
             const successMessage = document.createElement('div');
             successMessage.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
@@ -432,9 +474,32 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
 
     return (
         <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-slate-800">Programs</h2>
-            <p className="text-slate-600">Explore accelerator programs and other programs posted by our network of facilitation centers.</p>
-            
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h2 className="text-2xl font-bold text-slate-800">Programs</h2>
+                    <p className="text-slate-600">Explore accelerator programs and other programs posted by our network of facilitation centers.</p>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsDraftAnswersModalOpen(true)}
+                    >
+                        <FileText className="h-4 w-4 mr-2" />
+                        Draft
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsReferenceDraftModalOpen(true)}
+                    >
+                        <FileText className="h-4 w-4 mr-2" />
+                        Reference Application Draft
+                    </Button>
+                </div>
+            </div>
 
             {/* One-time Pitch Materials Section removed - per-application modal handles uploads */}
 
@@ -610,18 +675,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
 
             {/* Other Program subsection (Admin posted programs as cards) */}
             <div className="space-y-3 sm:space-y-4">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-slate-700">Other Program</h3>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsReferenceDraftModalOpen(true)}
-                    >
-                        <FileText className="h-4 w-4 mr-2" />
-                        Reference Application Draft
-                    </Button>
-                </div>
+                <h3 className="text-lg font-semibold text-slate-700">Other Program</h3>
                 {adminPosts.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {adminPosts.map(p => (
@@ -695,75 +749,35 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             
             
             {/* Apply Modal */}
-            <Modal isOpen={isApplyModalOpen} onClose={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null);} }} title="Submit Application">
+            <Modal isOpen={isApplyModalOpen} onClose={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null); setPortfolioUrl(''); setStartupWebsiteUrl(null);} }} title="Submit Application">
                 <div className="space-y-4">
-                     <div>
-                         <label className="block text-sm font-medium text-slate-700 mb-2">Startup Domain *</label>
-                        <select
-                            value={applySector}
-                            onChange={(e) => setApplySector(e.target.value)}
-                            className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
-                            required
-                        >
-                            <option value="">Select your startup domain</option>
-                            {SECTOR_OPTIONS.map(sector => (
-                                <option key={sector} value={sector}>{sector}</option>
-                            ))}
-                        </select>
-                        <p className="text-xs text-slate-500 mt-1">Required field</p>
-                    </div>
-                     <div>
-                         <label className="block text-sm font-medium text-slate-700 mb-2">Startup Stage *</label>
-                         <select
-                             value={applyStage}
-                             onChange={(e) => setApplyStage(e.target.value)}
-                             className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
-                             required
-                         >
-                             <option value="">Select your startup stage</option>
-                             {STAGE_OPTIONS.map(stage => (
-                                 <option key={stage} value={stage}>{stage}</option>
-                             ))}
-                         </select>
-                         <p className="text-xs text-slate-500 mt-1">Required field</p>
-                     </div>
+                    {/* Portfolio URL - Auto-filled from startup's fundraising card URL */}
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (PDF)</label>
-                        <CloudDriveInput
-                            value=""
-                            onChange={(url) => {
-                                const hiddenInput = document.getElementById('apply-deck-url') as HTMLInputElement;
-                                if (hiddenInput) hiddenInput.value = url;
-                            }}
-                            onFileSelect={(file) => handleApplyDeckChange({ target: { files: [file] } } as any)}
-                            placeholder="Paste your cloud drive link here..."
-                            label=""
-                            accept=".pdf"
-                            maxSize={10}
-                            documentType="pitch deck"
-                            showPrivacyMessage={false}
-                        />
-                        <input type="hidden" id="apply-deck-url" name="apply-deck-url" />
-                        <p className="text-xs text-slate-500 mt-1">Max 10MB</p>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Video URL</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Portfolio/Website URL</label>
                         <Input
                             type="url"
-                            placeholder="https://youtube.com/watch?v=..."
-                            value={applyPitchVideoUrl}
-                            onChange={(e) => setApplyPitchVideoUrl(e.target.value)}
+                            placeholder="https://yourstartup.com"
+                            value={portfolioUrl}
+                            onChange={(e) => setPortfolioUrl(e.target.value)}
                             className="w-full"
                         />
-                        <p className="text-xs text-slate-500 mt-1">Provide either a deck or a video URL (or both).</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                            {startupWebsiteUrl 
+                                ? 'Auto-filled from your fundraising card URL. You can edit if needed.'
+                                : 'Your fundraising card URL (if you have active fundraising). Leave blank if you don\'t have one.'}
+                        </p>
                     </div>
                     
-                    {/* Application Questions */}
+                    {/* Application Questions - Only questions from the opportunity */}
                     {loadingQuestions ? (
                         <div className="border-t pt-4">
                             <p className="text-sm text-slate-500 text-center">Loading questions...</p>
                         </div>
-                    ) : opportunityQuestions.length > 0 && (
+                    ) : opportunityQuestions.length === 0 ? (
+                        <div className="border-t pt-4">
+                            <p className="text-sm text-slate-500 text-center">This opportunity has no application questions.</p>
+                        </div>
+                    ) : (
                         <div className="border-t pt-4 space-y-4">
                             <h4 className="text-md font-semibold text-slate-700">Application Questions</h4>
                             <p className="text-xs text-slate-500">
@@ -793,7 +807,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                                 rows={4}
                                                 required={oq.isRequired}
                                             />
-                                        ) : question.questionType === 'select' ? (
+                                        ) : (question.questionType === 'select' || question.questionType === 'multiselect') && (!oq.selectionType || oq.selectionType === 'single') ? (
                                             <select
                                                 value={answer}
                                                 onChange={(e) => {
@@ -809,7 +823,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                                     <option key={idx} value={option}>{option}</option>
                                                 ))}
                                             </select>
-                                        ) : question.questionType === 'multiselect' ? (
+                                        ) : (question.questionType === 'select' || question.questionType === 'multiselect') && oq.selectionType === 'multiple' ? (
                                             <div className="space-y-2">
                                                 {question.options?.map((option, idx) => {
                                                     const selectedOptions = answer ? answer.split(',').filter(v => v.trim()) : [];
@@ -881,7 +895,15 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     
                     <div className="flex justify-end gap-3 pt-2">
                         <Button variant="secondary" type="button" onClick={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null);} }} disabled={isSubmittingApplication}>Cancel</Button>
-                         <Button type="button" onClick={submitApplication} disabled={isSubmittingApplication || (!applyPitchDeckFile && !applyPitchVideoUrl.trim()) || !applySector.trim() || !applyStage.trim()}>
+                         <Button 
+                            type="button" 
+                            onClick={submitApplication} 
+                            disabled={
+                                isSubmittingApplication || 
+                                opportunityQuestions.length === 0 ||
+                                (opportunityQuestions.some(q => q.isRequired && (!questionAnswers.get(q.questionId) || questionAnswers.get(q.questionId)?.trim() === '')))
+                            }
+                        >
                             {isSubmittingApplication ? 'Submitting...' : 'Submit Application'}
                         </Button>
                     </div>
@@ -902,6 +924,13 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
             <ReferenceApplicationDraft
                 isOpen={isReferenceDraftModalOpen}
                 onClose={() => setIsReferenceDraftModalOpen(false)}
+                startupId={startup.id}
+            />
+            
+            {/* Draft Answers Modal */}
+            <DraftAnswersView
+                isOpen={isDraftAnswersModalOpen}
+                onClose={() => setIsDraftAnswersModalOpen(false)}
                 startupId={startup.id}
             />
             

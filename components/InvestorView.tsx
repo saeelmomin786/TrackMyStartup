@@ -3748,7 +3748,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               }
               
               return filteredPitches.map(inv => {
-                const videoUrl = investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
+                const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
+                const embedUrl = videoEmbedInfo?.embedUrl || null;
+                const videoSource = videoEmbedInfo?.source || null;
                 const isFavorited = favoritedPitches.has(inv.id);
                 const hasDueDiligence = dueDiligenceStartups.has(inv.id);
                 const isApprovedDueDiligence = approvedDueDiligenceStartups.has(inv.id);
@@ -3758,16 +3760,26 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     <div className="flex flex-col md:flex-row gap-6">
                       {/* Video/Logo Section */}
                       <div className="md:w-1/3">
-                        {videoUrl ? (
+                        {embedUrl ? (
                           <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black">
-                            <iframe
-                              src={videoUrl}
-                              title={`Pitch video for ${inv.name}`}
-                              frameBorder="0"
-                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                              allowFullScreen
-                              className="absolute top-0 left-0 w-full h-full"
-                            />
+                            {videoSource === 'direct' ? (
+                              <video
+                                src={embedUrl}
+                                controls
+                                className="absolute top-0 left-0 w-full h-full object-cover"
+                              >
+                                Your browser does not support the video tag.
+                              </video>
+                            ) : (
+                              <iframe
+                                src={embedUrl}
+                                title={`Pitch video for ${inv.name}`}
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                                className="absolute top-0 left-0 w-full h-full"
+                              />
+                            )}
                           </div>
                         ) : inv.logoUrl && inv.logoUrl !== '#' ? (
                           <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white flex items-center justify-center">
@@ -4159,7 +4171,9 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     )}
                   </div>
                   {filteredStartups.map((startup) => {
-                    const videoUrl = investorService.getYoutubeEmbedUrl(startup.pitchVideoUrl);
+                    const videoEmbedInfo = startup.pitchVideoUrl ? getVideoEmbedUrl(startup.pitchVideoUrl, false) : null;
+                    const embedUrl = videoEmbedInfo?.embedUrl || null;
+                    const videoSource = videoEmbedInfo?.source || null;
                     const isFavorited = favoritedPitches.has(startup.id);
                     const hasDueDiligence = dueDiligenceStartups.has(startup.id);
                     const isApprovedDueDiligence = approvedDueDiligenceStartups.has(startup.id);
@@ -4169,16 +4183,26 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                         <div className="flex flex-col md:flex-row gap-6">
                           {/* Video/Logo Section */}
                           <div className="md:w-1/3">
-                            {videoUrl ? (
+                            {embedUrl ? (
                               <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black">
-                                <iframe
-                                  src={videoUrl}
-                                  title={`Pitch video for ${startup.name}`}
-                                  frameBorder="0"
-                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                  allowFullScreen
-                                  className="absolute top-0 left-0 w-full h-full"
-                                />
+                                {videoSource === 'direct' ? (
+                                  <video
+                                    src={embedUrl}
+                                    controls
+                                    className="absolute top-0 left-0 w-full h-full object-cover"
+                                  >
+                                    Your browser does not support the video tag.
+                                  </video>
+                                ) : (
+                                  <iframe
+                                    src={embedUrl}
+                                    title={`Pitch video for ${startup.name}`}
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                    className="absolute top-0 left-0 w-full h-full"
+                                  />
+                                )}
                               </div>
                             ) : startup.logoUrl && startup.logoUrl !== '#' ? (
                               <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-white flex items-center justify-center">

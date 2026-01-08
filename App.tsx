@@ -1613,7 +1613,7 @@ const App: React.FC = () => {
         // This handles cases where startup name might differ slightly
         let query = authService.supabase
           .from('startups')
-          .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
+          .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation, currency')
           .eq('user_id', authUserId);  // Use auth_user_id, not profile ID!
         
         const { data: startupsByUserId, error: queryErr } = await query;
@@ -1635,7 +1635,7 @@ const App: React.FC = () => {
           console.log('🔍 No startup found by user_id, trying by name:', cu.startup_name);
           const { data: startupByName, error: nameErr } = await authService.supabase
             .from('startups')
-            .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation')
+            .select('id, name, user_id, sector, current_valuation, total_funding, total_revenue, compliance_status, registration_date, investment_type, investment_value, equity_allocation, currency')
             .eq('name', cu.startup_name)
             .maybeSingle();
           
@@ -1647,8 +1647,47 @@ const App: React.FC = () => {
         
         if (row) {
           console.log('✅ Setting startup:', row.name);
-          setStartups([row] as any);
-          setSelectedStartup(row as any);
+          // Map database fields to Startup interface format
+          const mappedStartup: Startup = {
+            id: row.id,
+            name: row.name,
+            investmentType: row.investment_type || 'Unknown',
+            investmentValue: Number(row.investment_value) || 0,
+            equityAllocation: Number(row.equity_allocation) || 0,
+            currentValuation: Number(row.current_valuation) || 0,
+            complianceStatus: row.compliance_status || 'Pending',
+            sector: row.sector || 'Unknown',
+            totalFunding: Number(row.total_funding) || 0,
+            totalRevenue: Number(row.total_revenue) || 0,
+            registrationDate: row.registration_date || '', // Map registration_date to registrationDate
+            currency: row.currency || undefined, // Will be set from profile if not in startup table
+            founders: []
+          } as any;
+          // Load profile data to ensure currency and other profile fields are available
+          try {
+            const { profileService } = await import('./lib/profileService');
+            const profileData = await profileService.getStartupProfile(row.id);
+            if (profileData) {
+              // Update startup with profile data including currency
+              mappedStartup.profile = profileData;
+              // Priority: startup.currency > profile.currency > USD
+              if (!mappedStartup.currency) {
+                mappedStartup.currency = profileData.currency || 'USD';
+                console.log('💰 Currency set from profile:', mappedStartup.currency);
+              } else {
+                console.log('💰 Currency from startup table:', mappedStartup.currency);
+              }
+            }
+          } catch (profileError) {
+            console.warn('⚠️ Could not load profile data on initial startup fetch:', profileError);
+            // Fallback to USD if profile load fails
+            if (!mappedStartup.currency) {
+              mappedStartup.currency = 'USD';
+            }
+          }
+          
+          setStartups([mappedStartup]);
+          setSelectedStartup(mappedStartup);
           setIsLoading(false);
           setView('startupHealth');
           // Load other data in background without blocking

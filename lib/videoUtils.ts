@@ -75,23 +75,60 @@ export function getVideoEmbedUrl(url?: string | null, autoplay: boolean = false)
     if (urlObj.hostname.includes('drive.google.com')) {
       let fileId: string | null = null;
       
+      // If URL already contains /preview, it might already be an embed URL
+      // Check if it's already in the correct format
+      if (urlObj.pathname.includes('/preview')) {
+        const pathParts = urlObj.pathname.split('/').filter(p => p);
+        const dIndex = pathParts.indexOf('d');
+        if (dIndex >= 0 && dIndex + 1 < pathParts.length) {
+          fileId = pathParts[dIndex + 1].split('?')[0].split('#')[0].trim();
+        }
+        // If we found a fileId and URL already has preview, return as-is (with autoplay if needed)
+        if (fileId) {
+          const autoplayParam = autoplay ? (url.includes('?') ? '&autoplay=1' : '?autoplay=1') : '';
+          const embedUrl = url + autoplayParam;
+          return {
+            embedUrl,
+            source: 'google_drive',
+            videoId: fileId
+          };
+        }
+      }
+      
       // Pattern: drive.google.com/file/d/FILE_ID/view
-      const pathParts = urlObj.pathname.split('/');
+      // Pattern: drive.google.com/file/d/FILE_ID/view?usp=sharing
+      const pathParts = urlObj.pathname.split('/').filter(p => p);
       const dIndex = pathParts.indexOf('d');
-      if (dIndex >= 0 && pathParts[dIndex + 1]) {
+      if (dIndex >= 0 && dIndex + 1 < pathParts.length) {
         fileId = pathParts[dIndex + 1];
+        // Remove any query parameters or fragments from fileId
+        if (fileId) {
+          fileId = fileId.split('?')[0].split('#')[0].trim();
+        }
       }
       
       // Pattern: drive.google.com/open?id=FILE_ID
       if (!fileId) {
         fileId = urlObj.searchParams.get('id');
+        if (fileId) {
+          fileId = fileId.split('?')[0].split('#')[0].trim();
+        }
       }
       
-      if (fileId) {
-        // Google Drive video embed URL
+      // Pattern: drive.google.com/uc?id=FILE_ID
+      if (!fileId && urlObj.pathname.includes('/uc')) {
+        fileId = urlObj.searchParams.get('id');
+        if (fileId) {
+          fileId = fileId.split('?')[0].split('#')[0].trim();
+        }
+      }
+      
+      if (fileId && fileId.length > 0) {
+        // Google Drive video embed URL - use preview endpoint
         const autoplayParam = autoplay ? '&autoplay=1' : '';
+        const embedUrl = `https://drive.google.com/file/d/${fileId}/preview?usp=sharing${autoplayParam}`;
         return {
-          embedUrl: `https://drive.google.com/file/d/${fileId}/preview?usp=sharing${autoplayParam}`,
+          embedUrl,
           source: 'google_drive',
           videoId: fileId
         };

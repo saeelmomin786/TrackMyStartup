@@ -4764,8 +4764,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
       const startupName = startup.name || 'Startup';
       const slug = createSlug(startupName);
-      const baseUrl = window.location.origin + window.location.pathname;
-      const shareUrl = createProfileUrl(baseUrl, 'startup', 'startupId', String(startup.id), slug);
+      const baseUrl = window.location.origin;
+      const shareUrl = createProfileUrl(baseUrl, 'startup', slug, String(startup.id));
       const shareData = {
         title: `${startup.name} - Investment Opportunity`,
         text: `Check out this startup: ${startup.name} in ${startup.sector}\n\nView startup: ${shareUrl}`,
@@ -6716,24 +6716,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 return (
                   <div key={inv.id} className="bg-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 overflow-hidden">
                     <div className="flex flex-col md:flex-row md:items-stretch gap-0">
-                      {/* Logo/Video Section - Left Side - Show logo first if available */}
+                      {/* Logo/Video Section - Left Side - Show video first if available, then logo */}
                       <div className="md:w-2/5 lg:w-1/3 relative aspect-[16/9] md:aspect-auto md:min-h-full bg-white">
-                      {/* Priority 1: Show logo if available (always show logo if it exists) */}
-                      {inv.logoUrl && inv.logoUrl !== '#' && inv.logoUrl.trim() !== '' ? (
-                          <div className="w-full h-full flex items-center justify-center bg-white p-4 sm:p-6">
-                          <img 
-                            src={inv.logoUrl} 
-                            alt={`${inv.name} Logo`} 
-                            className="object-contain w-full h-full max-w-full max-h-full" 
-                            onError={(e) => {
-                              // If image fails to load, hide it
-                              const target = e.target as HTMLImageElement;
-                              target.style.display = 'none';
-                            }}
-                          />
-                        </div>
-                      ) : embedUrl ? (
-                        // Priority 2: Show video if available
+                      {/* Priority 1: Show video if available */}
+                      {embedUrl ? (
                         playingVideoId === inv.id ? (
                           <div className="relative w-full h-full">
                             {videoSource === 'direct' ? (
@@ -6782,6 +6768,20 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </div>
                           </div>
                         )
+                      ) : inv.logoUrl && inv.logoUrl !== '#' && inv.logoUrl.trim() !== '' ? (
+                        // Priority 2: Show logo if no video
+                        <div className="w-full h-full flex items-center justify-center bg-white p-4 sm:p-6">
+                          <img 
+                            src={inv.logoUrl} 
+                            alt={`${inv.name} Logo`} 
+                            className="object-contain w-full h-full max-w-full max-h-full" 
+                            onError={(e) => {
+                              // If image fails to load, hide it
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                            }}
+                          />
+                        </div>
                       ) : (
                         // Only show placeholder if no logo and no video
                         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-800">
@@ -9665,7 +9665,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   </div>
                   {filteredStartups.map((startup) => {
                     const videoEmbedInfo = startup.pitchVideoUrl ? getVideoEmbedUrl(startup.pitchVideoUrl, false) : null;
-                    const embedUrl = videoEmbedInfo?.embedUrl || investorService.getYoutubeEmbedUrl(startup.pitchVideoUrl || '');
+                    const embedUrl = videoEmbedInfo?.embedUrl || null;
                     const videoSource = videoEmbedInfo?.source || null;
                     const isFavorited = favoritedPitches.has(startup.id);
 

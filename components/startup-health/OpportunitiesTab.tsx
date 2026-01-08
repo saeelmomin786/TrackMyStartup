@@ -10,6 +10,8 @@ import Modal from '../ui/Modal';
 import { getQueryParam, setQueryParam } from '../../lib/urlState';
 import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsService';
 import { toDirectImageUrl } from '../../lib/imageUrl';
+import ReferenceApplicationDraft from '../ReferenceApplicationDraft';
+import { questionBankService, OpportunityQuestion, StartupAnswer } from '../../lib/questionBankService';
 
 interface StartupRef {
     id: number;
@@ -90,6 +92,12 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
     const [selectedImageUrl, setSelectedImageUrl] = useState<string>('');
     const [selectedImageAlt, setSelectedImageAlt] = useState<string>('');
+    // Reference Application Draft modal state
+    const [isReferenceDraftModalOpen, setIsReferenceDraftModalOpen] = useState(false);
+    // Application questions state
+    const [opportunityQuestions, setOpportunityQuestions] = useState<OpportunityQuestion[]>([]);
+    const [questionAnswers, setQuestionAnswers] = useState<Map<string, string>>(new Map());
+    const [loadingQuestions, setLoadingQuestions] = useState(false);
     
 
     useEffect(() => {
@@ -166,14 +174,45 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
 
     // One-time pitch materials functions removed
 
-    const openApplyModal = (opportunityId: string) => {
+    const openApplyModal = async (opportunityId: string) => {
         if (appliedIds.has(opportunityId)) return;
         setApplyingOppId(opportunityId);
         setApplyPitchDeckFile(null);
         setApplyPitchVideoUrl('');
-         setApplySector('');
-         setApplyStage('');
+        setApplySector('');
+        setApplyStage('');
+        setQuestionAnswers(new Map());
         setIsApplyModalOpen(true);
+        
+        // Load questions for this opportunity
+        try {
+            setLoadingQuestions(true);
+            const questions = await questionBankService.getOpportunityQuestions(opportunityId);
+            setOpportunityQuestions(questions);
+            
+            // Auto-fill answers from saved answers
+            if (questions.length > 0) {
+                const answersMap = new Map<string, string>();
+                for (const q of questions) {
+                    if (q.questionId) {
+                        try {
+                            const savedAnswer = await questionBankService.getStartupAnswer(startup.id, q.questionId);
+                            if (savedAnswer) {
+                                answersMap.set(q.questionId, savedAnswer.answerText);
+                            }
+                        } catch (error) {
+                            // Answer doesn't exist, skip
+                        }
+                    }
+                }
+                setQuestionAnswers(answersMap);
+            }
+        } catch (error: any) {
+            console.error('Failed to load questions:', error);
+            // Don't show error, just continue without questions
+        } finally {
+            setLoadingQuestions(false);
+        }
     };
 
     // Sync selected opportunity with URL (?opportunityId=...)
@@ -334,6 +373,21 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                 .single();
             if (error) throw error;
 
+            // Save question responses if there are questions
+            if (opportunityQuestions.length > 0 && questionAnswers.size > 0) {
+                const responses = opportunityQuestions
+                    .filter(q => questionAnswers.has(q.questionId))
+                    .map(q => ({
+                        questionId: q.questionId,
+                        answerText: questionAnswers.get(q.questionId) || ''
+                    }))
+                    .filter(r => r.answerText.trim() !== '');
+                
+                if (responses.length > 0) {
+                    await questionBankService.saveApplicationResponses(data.id, responses);
+                }
+            }
+
             setApplications(prev => [...prev, {
                 id: data.id,
                 startupId: startup.id,
@@ -345,6 +399,8 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
 
             setIsApplyModalOpen(false);
             setApplyingOppId(null);
+            setOpportunityQuestions([]);
+            setQuestionAnswers(new Map());
 
             const successMessage = document.createElement('div');
             successMessage.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
@@ -554,7 +610,18 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
 
             {/* Other Program subsection (Admin posted programs as cards) */}
             <div className="space-y-3 sm:space-y-4">
-                <h3 className="text-lg font-semibold text-slate-700">Other Program</h3>
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-slate-700">Other Program</h3>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsReferenceDraftModalOpen(true)}
+                    >
+                        <FileText className="h-4 w-4 mr-2" />
+                        Reference Application Draft
+                    </Button>
+                </div>
                 {adminPosts.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {adminPosts.map(p => (
@@ -690,6 +757,128 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                         />
                         <p className="text-xs text-slate-500 mt-1">Provide either a deck or a video URL (or both).</p>
                     </div>
+                    
+                    {/* Application Questions */}
+                    {loadingQuestions ? (
+                        <div className="border-t pt-4">
+                            <p className="text-sm text-slate-500 text-center">Loading questions...</p>
+                        </div>
+                    ) : opportunityQuestions.length > 0 && (
+                        <div className="border-t pt-4 space-y-4">
+                            <h4 className="text-md font-semibold text-slate-700">Application Questions</h4>
+                            <p className="text-xs text-slate-500">
+                                Your saved answers have been auto-filled. You can edit them before submitting.
+                            </p>
+                            {opportunityQuestions.map((oq) => {
+                                const question = oq.question;
+                                if (!question) return null;
+                                
+                                const answer = questionAnswers.get(oq.questionId) || '';
+                                
+                                return (
+                                    <div key={oq.questionId} className="space-y-2">
+                                        <label className="block text-sm font-medium text-slate-700">
+                                            {question.questionText}
+                                            {oq.isRequired && <span className="text-red-500 ml-1">*</span>}
+                                        </label>
+                                        {question.questionType === 'textarea' ? (
+                                            <textarea
+                                                value={answer}
+                                                onChange={(e) => {
+                                                    const newMap = new Map(questionAnswers);
+                                                    newMap.set(oq.questionId, e.target.value);
+                                                    setQuestionAnswers(newMap);
+                                                }}
+                                                className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
+                                                rows={4}
+                                                required={oq.isRequired}
+                                            />
+                                        ) : question.questionType === 'select' ? (
+                                            <select
+                                                value={answer}
+                                                onChange={(e) => {
+                                                    const newMap = new Map(questionAnswers);
+                                                    newMap.set(oq.questionId, e.target.value);
+                                                    setQuestionAnswers(newMap);
+                                                }}
+                                                className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
+                                                required={oq.isRequired}
+                                            >
+                                                <option value="">Select an option</option>
+                                                {question.options?.map((option, idx) => (
+                                                    <option key={idx} value={option}>{option}</option>
+                                                ))}
+                                            </select>
+                                        ) : question.questionType === 'multiselect' ? (
+                                            <div className="space-y-2">
+                                                {question.options?.map((option, idx) => {
+                                                    const selectedOptions = answer ? answer.split(',').filter(v => v.trim()) : [];
+                                                    const isChecked = selectedOptions.includes(option);
+                                                    return (
+                                                        <label key={idx} className="flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isChecked}
+                                                                onChange={(e) => {
+                                                                    const newMap = new Map(questionAnswers);
+                                                                    let selected = answer ? answer.split(',').filter(v => v.trim()) : [];
+                                                                    if (e.target.checked) {
+                                                                        if (!selected.includes(option)) {
+                                                                            selected.push(option);
+                                                                        }
+                                                                    } else {
+                                                                        selected = selected.filter(v => v !== option);
+                                                                    }
+                                                                    newMap.set(oq.questionId, selected.join(','));
+                                                                    setQuestionAnswers(newMap);
+                                                                }}
+                                                                className="h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+                                                            />
+                                                            <span className="text-sm text-slate-700">{option}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : question.questionType === 'number' ? (
+                                            <Input
+                                                type="number"
+                                                value={answer}
+                                                onChange={(e) => {
+                                                    const newMap = new Map(questionAnswers);
+                                                    newMap.set(oq.questionId, e.target.value);
+                                                    setQuestionAnswers(newMap);
+                                                }}
+                                                required={oq.isRequired}
+                                            />
+                                        ) : question.questionType === 'date' ? (
+                                            <Input
+                                                type="date"
+                                                value={answer}
+                                                onChange={(e) => {
+                                                    const newMap = new Map(questionAnswers);
+                                                    newMap.set(oq.questionId, e.target.value);
+                                                    setQuestionAnswers(newMap);
+                                                }}
+                                                required={oq.isRequired}
+                                            />
+                                        ) : (
+                                            <Input
+                                                type="text"
+                                                value={answer}
+                                                onChange={(e) => {
+                                                    const newMap = new Map(questionAnswers);
+                                                    newMap.set(oq.questionId, e.target.value);
+                                                    setQuestionAnswers(newMap);
+                                                }}
+                                                required={oq.isRequired}
+                                            />
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                    
                     <div className="flex justify-end gap-3 pt-2">
                         <Button variant="secondary" type="button" onClick={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null);} }} disabled={isSubmittingApplication}>Cancel</Button>
                          <Button type="button" onClick={submitApplication} disabled={isSubmittingApplication || (!applyPitchDeckFile && !applyPitchVideoUrl.trim()) || !applySector.trim() || !applyStage.trim()}>
@@ -708,6 +897,13 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                     />
                 </div>
             </Modal>
+            
+            {/* Reference Application Draft Modal */}
+            <ReferenceApplicationDraft
+                isOpen={isReferenceDraftModalOpen}
+                onClose={() => setIsReferenceDraftModalOpen(false)}
+                startupId={startup.id}
+            />
             
         </div>
     );

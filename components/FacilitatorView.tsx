@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
@@ -28,6 +28,9 @@ import EditStartupModal from './EditStartupModal';
 import { startupInvitationService, StartupInvitation } from '../lib/startupInvitationService';
 import { messageService } from '../lib/messageService';
 import MessageContainer from './MessageContainer';
+import QuestionSelector from './QuestionSelector';
+import { questionBankService, ApplicationQuestion } from '../lib/questionBankService';
+import { getVideoEmbedUrl } from '../lib/videoUtils';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -246,6 +249,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [startupInvitations, setStartupInvitations] = useState<StartupInvitation[]>([]);
   const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
   const [facilitatorCode, setFacilitatorCode] = useState<string>('');
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
+  const [isApplicationResponsesModalOpen, setIsApplicationResponsesModalOpen] = useState(false);
+  const [selectedApplicationForResponses, setSelectedApplicationForResponses] = useState<ReceivedApplication | null>(null);
+  const [applicationResponses, setApplicationResponses] = useState<Array<{ question: ApplicationQuestion; answerText: string }>>([]);
+  const [loadingResponses, setLoadingResponses] = useState(false);
   
   // State for edit startup functionality
   const [isEditStartupModalOpen, setIsEditStartupModalOpen] = useState(false);
@@ -1293,10 +1301,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     setEditingIndex(null);
     setNewOpportunity(initialNewOppState);
     setPosterPreview('');
+    setSelectedQuestionIds([]);
     setIsPostModalOpen(true);
   };
 
-  const handleEditClick = (index: number) => {
+  const handleEditClick = async (index: number) => {
     setEditingIndex(index);
     const opp = myPostedOpportunities[index];
     setNewOpportunity({
@@ -1309,6 +1318,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       facilitatorWebsite: '',
     });
     setPosterPreview('');
+    
+    // Load existing questions for this opportunity
+    if (opp?.id) {
+      try {
+        const questions = await questionBankService.getOpportunityQuestions(opp.id);
+        setSelectedQuestionIds(questions.map(q => q.questionId));
+      } catch (error) {
+        console.error('Failed to load questions:', error);
+        setSelectedQuestionIds([]);
+      }
+    } else {
+      setSelectedQuestionIds([]);
+    }
+    
     setIsPostModalOpen(true);
   };
 
@@ -1325,6 +1348,30 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const handleViewPitchVideo = (videoUrl: string) => {
     setSelectedPitchVideo(videoUrl);
     setIsPitchVideoModalOpen(true);
+  };
+
+  const handleViewApplicationResponses = async (app: ReceivedApplication) => {
+    setSelectedApplicationForResponses(app);
+    setIsApplicationResponsesModalOpen(true);
+    setLoadingResponses(true);
+    
+    try {
+      const responses = await questionBankService.getApplicationResponses(app.id);
+      // Map responses to include question details
+      const responsesWithQuestions = responses
+        .filter(response => response.question) // Only include responses with questions
+        .map(response => ({
+          question: response.question as ApplicationQuestion,
+          answerText: response.answerText
+        }));
+      setApplicationResponses(responsesWithQuestions);
+    } catch (error: any) {
+      console.error('Failed to load application responses:', error);
+      messageService.error('Failed to Load Responses', error.message || 'Please try again.');
+      setApplicationResponses([]);
+    } finally {
+      setLoadingResponses(false);
+    }
   };
 
   const getEmbeddableVideoUrl = (url: string): string => {
@@ -2231,6 +2278,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           createdAt: data.created_at
         };
         setMyPostedOpportunities(prev => prev.map((op, i) => i === editingIndex ? updated : op));
+        
+        // Update questions for existing opportunity
+        if (selectedQuestionIds.length > 0) {
+          // Remove all existing questions
+          const existingQuestions = await questionBankService.getOpportunityQuestions(updated.id);
+          for (const q of existingQuestions) {
+            await questionBankService.removeQuestionFromOpportunity(updated.id, q.questionId);
+          }
+          // Add new questions
+          await questionBankService.addQuestionsToOpportunity(updated.id, selectedQuestionIds);
+        }
       } else {
         const { data, error } = await supabase
           .from('incubation_opportunities')
@@ -2249,11 +2307,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           createdAt: data.created_at
         };
         setMyPostedOpportunities(prev => [inserted, ...prev]);
+        
+        // Add questions for new opportunity
+        if (selectedQuestionIds.length > 0) {
+          await questionBankService.addQuestionsToOpportunity(inserted.id, selectedQuestionIds);
+        }
       }
 
       setIsPostModalOpen(false);
       setPosterPreview('');
       setNewOpportunity(initialNewOppState);
+      setSelectedQuestionIds([]);
     } catch (err) {
       console.error('Failed to save opportunity:', err);
       messageService.error(
@@ -2310,51 +2374,68 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
               {/* Applications Table */}
                   <div className="overflow-x-auto max-h-96">
-                    <table className="min-w-full divide-y divide-slate-200">
+                    <table className="w-full divide-y divide-slate-200 table-fixed">
                       <thead className="bg-slate-50 sticky top-0">
                         <tr>
-                                                              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Startup</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Domain</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Stage</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Opportunity</th>
-                                    <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Pitch Materials</th>
-                          <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Actions</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-slate-500 uppercase w-32">Startup</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-slate-500 uppercase w-24">Domain</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-slate-500 uppercase w-28">Stage</th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-slate-500 uppercase w-40">Opportunity</th>
+                          <th className="px-3 py-3 text-center text-xs font-medium text-slate-500 uppercase w-48">Pitch Materials</th>
+                          <th className="px-3 py-3 text-center text-xs font-medium text-slate-500 uppercase w-32">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-slate-200">
                     {filteredApplications.map(app => (
                           <tr key={app.id}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{app.startupName}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{app.sector || '—'}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{app.stage || '—'}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{myPostedOpportunities.find(o => o.id === app.opportunityId)?.programName || '—'}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-center">
-                              <div className="flex justify-center items-center gap-3">
+                            <td className="px-3 py-4 text-sm font-medium text-slate-900 break-words">{app.startupName}</td>
+                        <td className="px-3 py-4 text-sm text-slate-500 break-words">{app.sector || '—'}</td>
+                        <td className="px-3 py-4 text-sm text-slate-500 break-words">{app.stage || '—'}</td>
+                            <td className="px-3 py-4 text-sm text-slate-500 break-words">{myPostedOpportunities.find(o => o.id === app.opportunityId)?.programName || '—'}</td>
+                            <td className="px-3 py-4 text-center">
+                              <div className="flex justify-center items-center gap-2 flex-wrap">
                                 {app.pitchDeckUrl ? (
-                                  <a href={app.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-brand-primary transition-colors" title="View Pitch Deck">
-                                    <FileText className="h-5 w-5" />
+                                  <a href={app.pitchDeckUrl} target="_blank" rel="noopener noreferrer">
+                                    <Button size="sm" variant="outline" className="flex items-center gap-1">
+                                      <FileText className="h-4 w-4" />
+                                      Deck
+                                    </Button>
                                   </a>
                                 ) : (
-                                  <span className="text-slate-300 cursor-not-allowed" title="No Pitch Deck">
-                                    <FileText className="h-5 w-5" />
-                                  </span>
+                                  <Button size="sm" variant="outline" disabled className="flex items-center gap-1">
+                                    <FileText className="h-4 w-4" />
+                                    Deck
+                                  </Button>
                                 )}
                                 {app.pitchVideoUrl ? (
-                              <button 
-                                onClick={() => handleViewPitchVideo(app.pitchVideoUrl!)} 
-                                className="text-slate-500 hover:text-brand-primary transition-colors" 
-                                title="View Pitch Video"
-                              >
-                                    <Video className="h-5 w-5" />
-                              </button>
+                                  <Button 
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleViewPitchVideo(app.pitchVideoUrl!)} 
+                                    className="flex items-center gap-1"
+                                  >
+                                    <Video className="h-4 w-4" />
+                                    Video
+                                  </Button>
                                 ) : (
-                                  <span className="text-slate-300 cursor-not-allowed" title="No Pitch Video">
-                                    <Video className="h-5 w-5" />
-                                  </span>
+                                  <Button size="sm" variant="outline" disabled className="flex items-center gap-1">
+                                    <Video className="h-4 w-4" />
+                                    Video
+                                  </Button>
                                 )}
-        </div>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleViewApplicationResponses(app)}
+                                  className="flex items-center gap-1"
+                                  title="View Application Responses"
+                                >
+                                  <FileQuestion className="h-4 w-4" />
+                                  Responses
+                                </Button>
+                              </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-center">
+                            <td className="px-3 py-4 text-sm font-medium text-center">
                               <div className="flex flex-col gap-2 items-center">
                                 {/* Status Actions */}
                               {app.status === 'pending' && (
@@ -2488,7 +2569,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         ))}
                     {filteredApplications.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="text-center py-8 text-slate-500">
+                        <td colSpan={6} className="text-center py-8 text-slate-500">
                           {selectedOpportunityId 
                             ? `No applications received for ${myPostedOpportunities.find(o => o.id === selectedOpportunityId)?.programName || 'this opportunity'} yet.`
                             : 'No applications received yet.'
@@ -3215,7 +3296,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             ) : (
               <div className="space-y-8">
                 {list.map(inv => {
-                  const embedUrl = investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
+                  const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
+                  const embedUrl = videoEmbedInfo?.embedUrl || null;
+                  const videoSource = videoEmbedInfo?.source || null;
                   return (
                     <Card key={inv.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white">
                       {/* Video section */}
@@ -3223,14 +3306,27 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         {embedUrl ? (
                           playingVideoId === inv.id ? (
                             <div className="relative w-full h-full">
-                              <iframe
-                                src={embedUrl}
-                                title={`Pitch video for ${inv.name}`}
-                                frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                                className="absolute top-0 left-0 w-full h-full"
-                              ></iframe>
+                              {videoSource === 'direct' ? (
+                                <video
+                                  src={embedUrl}
+                                  controls
+                                  autoPlay
+                                  muted
+                                  playsInline
+                                  className="absolute top-0 left-0 w-full h-full object-cover"
+                                >
+                                  Your browser does not support the video tag.
+                                </video>
+                              ) : (
+                                <iframe
+                                  src={embedUrl}
+                                  title={`Pitch video for ${inv.name}`}
+                                  frameBorder="0"
+                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                  allowFullScreen
+                                  className="absolute top-0 left-0 w-full h-full"
+                                ></iframe>
+                              )}
                               <button
                                 onClick={() => setPlayingVideoId(null)}
                                 className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"
@@ -3779,6 +3875,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               </div>
               <Input label="Organization Website" id="facilitatorWebsite" name="facilitatorWebsite" type="url" placeholder="https://..." value={newOpportunity.facilitatorWebsite} onChange={handleInputChange} />
                 </div>
+                
+            {/* Question Selector */}
+            <div className="border-t pt-4 mt-2">
+              <QuestionSelector
+                opportunityId={editingIndex !== null ? myPostedOpportunities[editingIndex]?.id : null}
+                selectedQuestionIds={selectedQuestionIds}
+                onSelectionChange={setSelectedQuestionIds}
+              />
+            </div>
               </div>
           <div className="flex justify-end gap-3 pt-4 border-t mt-4">
             <Button type="button" variant="secondary" onClick={() => setIsPostModalOpen(false)}>Cancel</Button>
@@ -3829,6 +3934,79 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Application Responses Modal */}
+      <Modal 
+        isOpen={isApplicationResponsesModalOpen} 
+        onClose={() => {
+          setIsApplicationResponsesModalOpen(false);
+          setSelectedApplicationForResponses(null);
+          setApplicationResponses([]);
+        }} 
+        title={`Application Responses - ${selectedApplicationForResponses?.startupName || ''}`} 
+        size="3xl"
+      >
+        <div className="space-y-4">
+          {loadingResponses ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary mx-auto mb-4"></div>
+              <p className="text-slate-600">Loading responses...</p>
+            </div>
+          ) : applicationResponses.length === 0 ? (
+            <div className="text-center py-8">
+              <FileQuestion className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+              <p className="text-slate-600">No application responses found for this application.</p>
+              <p className="text-sm text-slate-500 mt-2">
+                This application may not have included question responses, or the questions may have been removed.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+              {applicationResponses.map((response, index) => (
+                <Card key={index} className="p-4">
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <h4 className="text-sm font-semibold text-slate-900 mb-2">{response.question.questionText}</h4>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {response.question.category && (
+                            <span className="inline-block px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700 rounded">
+                              {response.question.category}
+                            </span>
+                          )}
+                          <span className="text-xs text-slate-500">
+                            {response.question.questionType === 'text' ? 'Short Answer' :
+                             response.question.questionType === 'textarea' ? 'Long Answer' :
+                             response.question.questionType === 'select' ? 'Multiple Choice' :
+                             response.question.questionType === 'multiselect' ? 'Checkbox' :
+                             response.question.questionType === 'number' ? 'Number' :
+                             response.question.questionType === 'date' ? 'Date' :
+                             response.question.questionType}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
+                      {response.question.questionType === 'multiselect' ? (
+                        <div className="space-y-1">
+                          {response.answerText.split(',').filter(v => v.trim()).map((option, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <Check className="h-4 w-4 text-green-600" />
+                              <span className="text-sm text-slate-700">{option.trim()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-700 whitespace-pre-wrap">{response.answerText}</p>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
       </Modal>
 
       {/* Pitch Video Modal */}

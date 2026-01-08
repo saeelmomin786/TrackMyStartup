@@ -3,6 +3,7 @@ import { Startup, ComplianceStatus, FinancialRecord } from '../types';
 import { csService, CSStartup, CSStats, CSAssignmentRequest } from '../lib/csService';
 import { supabase } from '../lib/supabase';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
+import { getVideoEmbedUrl } from '../lib/videoUtils';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import ProfilePage from './ProfilePage';
@@ -48,8 +49,13 @@ const CSView: React.FC<CSViewProps> = ({ startups, onUpdateCompliance, onViewSta
   const handleShare = async (startup: ActiveFundraisingStartup) => {
     console.log('Share button clicked for startup:', startup.name);
     console.log('Startup object:', startup);
-    const videoUrl = startup.pitchVideoUrl || 'Video not available';
-    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: $${(startup.currentValuation || 0).toLocaleString()}\n\nPitch Video: ${videoUrl}`;
+    // Create clean public shareable link
+    const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+    const startupName = startup.name || 'Startup';
+    const slug = createSlug(startupName);
+    const baseUrl = window.location.origin;
+    const shareUrl = createProfileUrl(baseUrl, 'startup', slug, String(startup.id));
+    const details = `Startup: ${startup.name || 'N/A'}\nSector: ${startup.sector || 'N/A'}\nAsk: $${(startup.investmentValue || 0).toLocaleString()} for ${startup.equityAllocation || 0}% equity\nValuation: $${(startup.currentValuation || 0).toLocaleString()}\n\nView startup: ${shareUrl}`;
     console.log('Share details:', details);
         try {
             if (navigator.share) {
@@ -57,23 +63,23 @@ const CSView: React.FC<CSViewProps> = ({ startups, onUpdateCompliance, onViewSta
                 const shareData = {
                     title: startup.name || 'Startup Pitch',
                     text: details,
-                    url: videoUrl !== 'Video not available' ? videoUrl : undefined
+                    url: shareUrl
                 };
                 await navigator.share(shareData);
             } else if (navigator.clipboard && navigator.clipboard.writeText) {
         console.log('Using clipboard API');
-        await navigator.clipboard.writeText(details);
-        alert('Startup details copied to clipboard');
+        await navigator.clipboard.writeText(shareUrl);
+        alert('Startup link copied to clipboard');
       } else {
         console.log('Using fallback copy method');
         // Fallback: hidden textarea copy
         const textarea = document.createElement('textarea');
-        textarea.value = details;
+        textarea.value = shareUrl;
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        alert('Startup details copied to clipboard');
+        alert('Startup link copied to clipboard');
       }
     } catch (err) {
       console.error('Share failed', err);
@@ -818,7 +824,9 @@ const CSView: React.FC<CSViewProps> = ({ startups, onUpdateCompliance, onViewSta
               
               return filteredPitches;
             })().map(inv => {
-              const embedUrl = investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
+              const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
+              const embedUrl = videoEmbedInfo?.embedUrl || null;
+              const videoSource = videoEmbedInfo?.source || null;
               return (
                 <Card key={inv.fundraisingId} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white">
                   {/* Enhanced Video Section */}
@@ -826,14 +834,27 @@ const CSView: React.FC<CSViewProps> = ({ startups, onUpdateCompliance, onViewSta
                     {embedUrl ? (
                       playingVideoId === inv.id ? (
                         <div className="relative w-full h-full">
-                          <iframe
-                            src={embedUrl}
-                            title={`Pitch video for ${inv.name}`}
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                            className="absolute top-0 left-0 w-full h-full"
-                          ></iframe>
+                          {videoSource === 'direct' ? (
+                            <video
+                              src={embedUrl}
+                              controls
+                              autoPlay
+                              muted
+                              playsInline
+                              className="absolute top-0 left-0 w-full h-full object-cover"
+                            >
+                              Your browser does not support the video tag.
+                            </video>
+                          ) : (
+                            <iframe
+                              src={embedUrl}
+                              title={`Pitch video for ${inv.name}`}
+                              frameBorder="0"
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                              className="absolute top-0 left-0 w-full h-full"
+                            ></iframe>
+                          )}
                           <button
                             onClick={() => setPlayingVideoId(null)}
                             className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"

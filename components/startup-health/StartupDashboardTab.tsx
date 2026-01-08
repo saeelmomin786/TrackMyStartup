@@ -82,11 +82,11 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [fundUsageData, setFundUsageData] = useState<any[]>([]);
   
   // Enhanced dashboard state
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState<number | 'all'>('all');
   const [selectedMonth, setSelectedMonth] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'monthly' | 'daily'>('monthly');
+  const [viewMode, setViewMode] = useState<'year' | 'monthly'>('year');
   const [dailyData, setDailyData] = useState<any[]>([]);
-  const [availableYears, setAvailableYears] = useState<number[]>([]);
+  const [availableYears, setAvailableYears] = useState<(number | 'all')[]>([]);
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [adminProgramPosts, setAdminProgramPosts] = useState<AdminProgramPost[]>([]);
 
@@ -230,15 +230,49 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         setMetrics(calculatedMetrics);
         
         // Generate available years based on company registration date
-        const registrationYear = new Date(startup.registrationDate).getFullYear();
+        // Try to get registration date from multiple sources
+        const registrationDateValue = startup.registrationDate || startup.profile?.registrationDate || (startup as any).registration_date;
+        let registrationYear: number;
+        
+        if (registrationDateValue) {
+          registrationYear = new Date(registrationDateValue).getFullYear();
+        } else {
+          // Fallback: use earliest financial record date
+          try {
+            const allRecords = await financialsService.getFinancialRecords(startup.id, {});
+            if (allRecords.length > 0) {
+              const earliestRecord = allRecords.reduce((earliest, record) => {
+                const recordDate = new Date(record.date);
+                const earliestDate = new Date(earliest.date);
+                return recordDate < earliestDate ? record : earliest;
+              });
+              registrationYear = new Date(earliestRecord.date).getFullYear();
+              console.log('📅 Dashboard: No registration date found, using earliest financial record year:', registrationYear);
+            } else {
+              registrationYear = new Date().getFullYear();
+              console.log('📅 Dashboard: No registration date or financial records, using current year:', registrationYear);
+            }
+          } catch (error) {
+            console.error('Error fetching financial records for year generation:', error);
+            registrationYear = new Date().getFullYear();
+          }
+        }
+        
         const currentYear = new Date().getFullYear();
         
-        // Create array of years from registration year to current year
-        const years = [];
+        // Create array of years from registration year to current year, with 'all' as first option
+        const years: (number | 'all')[] = ['all'];
         for (let year = currentYear; year >= registrationYear; year--) {
           years.push(year);
         }
         setAvailableYears(years);
+        
+        console.log('📅 Dashboard: Generated years from', registrationYear, 'to', currentYear, ':', years);
+        
+        // Ensure selectedYear is within available years (default to 'all')
+        if (selectedYear !== 'all' && !years.includes(selectedYear)) {
+          setSelectedYear('all');
+        }
         
         // Load data for selected year
         await loadFinancialDataForYear(selectedYear);
@@ -327,7 +361,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
 
     loadDashboardData();
     loadOffersReceived();
-  }, [startup, selectedYear]);
+  }, [startup.id]); // Only depend on startup.id, not selectedYear to avoid double loading
 
   // Refresh offers when offers prop changes
   useEffect(() => {
@@ -378,9 +412,24 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     }
   }, [offers, startup?.id]);
 
-  const loadFinancialDataForYear = async (year: number) => {
+  const loadFinancialDataForYear = async (year: number | 'all') => {
     try {
-      const allRecords = await financialsService.getFinancialRecords(startup.id, { year });
+      console.log('🔄 Dashboard: Loading financial data for year:', year, 'startup:', startup.id);
+      // When 'all' is selected, don't pass year filter to get all records
+      const filters = year === 'all' ? {} : { year };
+      const allRecords = await financialsService.getFinancialRecords(startup.id, filters);
+      console.log('📊 Dashboard: Records loaded for year', year, ':', allRecords.length, 'records');
+      
+      if (allRecords.length === 0) {
+        console.warn('⚠️ Dashboard: No financial records found for year', year);
+      } else {
+        console.log('📊 Dashboard: Sample records:', allRecords.slice(0, 3).map(r => ({
+          date: r.date,
+          type: r.record_type,
+          amount: r.amount,
+          year: new Date(r.date).getFullYear()
+        })));
+      }
       
       // Generate monthly revenue vs expenses data
       const monthlyData: { [key: string]: { revenue: number; expenses: number } } = {};
@@ -438,8 +487,16 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     }
   };
 
-  const loadDailyDataForMonth = async (year: number, month: string) => {
+  const loadDailyDataForMonth = async (year: number | 'all', month: string) => {
     try {
+      // Daily view requires a specific year, not 'all'
+      if (year === 'all') {
+        console.warn('⚠️ Dashboard: Daily view not available for "All Years", switching to monthly view');
+        setViewMode('monthly');
+        setSelectedMonth('');
+        return;
+      }
+      
       const monthIndex = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].indexOf(month);
       const allRecords = await financialsService.getFinancialRecords(startup.id, { year });
       
@@ -2115,24 +2172,33 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                 <Calendar className="h-4 w-4 text-slate-500" />
                 <label className="text-sm font-medium text-slate-700">Year:</label>
                 <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                  value={selectedYear === 'all' ? 'all' : selectedYear}
+                  onChange={async (e) => {
+                    const value = e.target.value;
+                    const newYear = value === 'all' ? 'all' : parseInt(value);
+                    console.log('📅 Dashboard: Year changed to:', newYear);
+                    setSelectedYear(newYear);
+                    // Immediately load data for the selected year
+                    await loadFinancialDataForYear(newYear);
+                  }}
                   className="px-3 py-1 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {availableYears.map(year => (
-                    <option key={year} value={year}>{year}</option>
+                    <option key={year} value={year === 'all' ? 'all' : year}>
+                      {year === 'all' ? 'All Years (Till Date)' : year}
+                    </option>
                   ))}
                 </select>
               </div>
               
-              {viewMode === 'daily' && (
+              {viewMode === 'monthly' && selectedYear !== 'all' && (
                 <div className="flex items-center gap-2">
                   <label className="text-sm font-medium text-slate-700">Month:</label>
                   <select
                     value={selectedMonth}
                     onChange={(e) => {
                       setSelectedMonth(e.target.value);
-                      if (e.target.value) {
+                      if (e.target.value && selectedYear !== 'all') {
                         loadDailyDataForMonth(selectedYear, e.target.value);
                       }
                     }}
@@ -2150,22 +2216,29 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             <div className="flex gap-2">
               <Button
                 size="sm"
-                variant={viewMode === 'monthly' ? 'default' : 'outline'}
+                variant={viewMode === 'year' ? 'default' : 'outline'}
                 onClick={() => {
-                  setViewMode('monthly');
+                  setViewMode('year');
                   setSelectedMonth('');
                 }}
                 className="text-xs"
               >
-                Monthly View
+                Year
               </Button>
               <Button
                 size="sm"
-                variant={viewMode === 'daily' ? 'default' : 'outline'}
-                onClick={() => setViewMode('daily')}
+                variant={viewMode === 'monthly' ? 'default' : 'outline'}
+                onClick={() => {
+                  if (selectedYear === 'all') {
+                    console.warn('⚠️ Dashboard: Monthly view not available for "All Years"');
+                    return;
+                  }
+                  setViewMode('monthly');
+                }}
+                disabled={selectedYear === 'all'}
                 className="text-xs"
               >
-                Daily View
+                Monthly
               </Button>
             </div>
           </div>
@@ -2176,11 +2249,11 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           {/* Revenue vs Expenses Chart */}
           <Card padding="md">
             <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-slate-700">
-              {viewMode === 'monthly' ? 'Revenue vs Expenses (Monthly)' : `Revenue vs Expenses (Daily) - ${selectedMonth || 'Select Month'}`}
+              {viewMode === 'year' ? `Revenue vs Expenses (${selectedYear === 'all' ? 'All Years' : selectedYear})` : `Revenue vs Expenses (Monthly) - ${selectedMonth || 'Select Month'}`}
             </h3>
             <div className="w-full h-64 sm:h-80">
               <ResponsiveContainer width="100%" height="100%">
-                {viewMode === 'monthly' ? (
+                {viewMode === 'year' ? (
                   <BarChart data={revenueData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" fontSize={12} />

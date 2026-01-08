@@ -457,9 +457,12 @@ const MentorView: React.FC<MentorViewProps> = ({
 
   const handleShare = async (pitch: ActiveFundraisingStartup) => {
     try {
+      // Create clean public shareable link
+      const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
+      const startupName = pitch.name || 'Startup';
+      const slug = createSlug(startupName);
       const baseUrl = window.location.origin;
-      // Use startupId parameter (App.tsx expects startupId or id, not startup)
-      const url = `${baseUrl}/?view=startup&startupId=${pitch.id}`;
+      const shareUrl = createProfileUrl(baseUrl, 'startup', slug, String(pitch.id));
       
       // Try Web Share API first (works on mobile and some desktop browsers)
       if (navigator.share) {
@@ -467,7 +470,7 @@ const MentorView: React.FC<MentorViewProps> = ({
           await navigator.share({
             title: `Check out ${pitch.name}`,
             text: `${pitch.name} - ${pitch.sector}`,
-            url: url
+            url: shareUrl
           });
           return; // Successfully shared
         } catch (shareError: any) {
@@ -480,17 +483,17 @@ const MentorView: React.FC<MentorViewProps> = ({
       
       // Fallback to clipboard
       try {
-        await navigator.clipboard.writeText(url);
-        alert(`Link copied to clipboard!\n\n${url}`);
+        await navigator.clipboard.writeText(shareUrl);
+        alert(`Link copied to clipboard!\n\n${shareUrl}`);
       } catch (clipboardError) {
         // Clipboard API failed, show URL in prompt
         const userConfirmed = confirm(
-          `Share this startup pitch:\n\n${pitch.name}\n\nCopy this link:\n${url}\n\nClick OK to copy, or Cancel to close.`
+          `Share this startup pitch:\n\n${pitch.name}\n\nCopy this link:\n${shareUrl}\n\nClick OK to copy, or Cancel to close.`
         );
         if (userConfirmed) {
           // Create a temporary textarea to select and copy
           const textarea = document.createElement('textarea');
-          textarea.value = url;
+          textarea.value = shareUrl;
           textarea.style.position = 'fixed';
           textarea.style.opacity = '0';
           document.body.appendChild(textarea);
@@ -499,14 +502,14 @@ const MentorView: React.FC<MentorViewProps> = ({
             document.execCommand('copy');
             alert('Link copied to clipboard!');
           } catch (err) {
-            alert(`Please copy this link manually:\n\n${url}`);
+            alert(`Please copy this link manually:\n\n${shareUrl}`);
           }
           document.body.removeChild(textarea);
         }
       }
     } catch (error: any) {
       console.error('Error sharing:', error);
-      alert(`Failed to share. Please copy this link manually:\n\n${window.location.origin}/?view=startup&startupId=${pitch.id}`);
+      alert(`Failed to share. Please copy this link manually:\n\n${window.location.origin}/startup/${pitch.id}`);
     }
   };
 
@@ -1649,7 +1652,7 @@ const MentorView: React.FC<MentorViewProps> = ({
               ) : (
                 filteredPitches.map(inv => {
                   const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
-                  const embedUrl = videoEmbedInfo?.embedUrl || investorService.getYoutubeEmbedUrl(inv.pitchVideoUrl);
+                  const embedUrl = videoEmbedInfo?.embedUrl || null;
                   const videoSource = videoEmbedInfo?.source || null;
                   const isFavorited = favoritedPitches.has(inv.id);
 

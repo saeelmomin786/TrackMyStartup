@@ -248,14 +248,52 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       setVerticals(verticalsData);
       
       // Generate years from account creation to current year
-      const accountCreationYear = new Date(startup.registrationDate).getFullYear();
+      // If registration date is missing, use earliest financial record date as fallback
+      let accountCreationYear: number;
+      let registrationDate: Date;
+      
+      // Try to get registration date from startup object or profile
+      const registrationDateValue = startup.registrationDate || startup.profile?.registrationDate || (startup as any).registration_date;
+      
+      if (registrationDateValue) {
+        registrationDate = new Date(registrationDateValue);
+        accountCreationYear = registrationDate.getFullYear();
+      } else {
+        // Fallback: use earliest financial record date
+        if (allRecords.length > 0) {
+          const earliestRecord = allRecords.reduce((earliest, record) => {
+            const recordDate = new Date(record.date);
+            const earliestDate = new Date(earliest.date);
+            return recordDate < earliestDate ? record : earliest;
+          });
+          registrationDate = new Date(earliestRecord.date);
+          accountCreationYear = registrationDate.getFullYear();
+          console.log('📅 No registration date found, using earliest financial record:', earliestRecord.date, 'Year:', accountCreationYear);
+        } else {
+          // Last resort: use current year
+          registrationDate = new Date();
+          accountCreationYear = registrationDate.getFullYear();
+          console.log('📅 No registration date or financial records, using current year:', accountCreationYear);
+        }
+      }
+      
       const currentYear = new Date().getFullYear();
       const yearOptions: (number | 'all')[] = ['all'];
       
-      for (let year = currentYear; year >= accountCreationYear; year--) {
-        yearOptions.push(year);
+      console.log('📅 Generating years - Registration date:', startup.registrationDate || 'not found', 'Registration year:', accountCreationYear, 'Current year:', currentYear);
+      
+      // Ensure we have valid years
+      if (accountCreationYear && !isNaN(accountCreationYear) && currentYear && !isNaN(currentYear)) {
+        // Generate years from current year down to registration year
+        for (let year = currentYear; year >= accountCreationYear; year--) {
+          yearOptions.push(year);
+        }
+      } else {
+        // Fallback: just show current year if registration date is invalid
+        yearOptions.push(currentYear);
       }
       
+      console.log('📅 Generated year options:', yearOptions, 'Count:', yearOptions.length);
       setAvailableYears(yearOptions);
 
       console.log('✅ State updated with:', {
@@ -615,7 +653,10 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
     revenuesCount: revenues.length,
     summary: summary,
     isLoading,
-    error
+    error,
+    availableYears: availableYears,
+    availableYearsCount: availableYears.length,
+    currentYearFilter: filters.year
   });
 
   return (
@@ -694,11 +735,15 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
             }}
             containerClassName="flex-1 min-w-[100px]"
           >
-            {availableYears.map(year => (
-              <option key={year} value={year}>
-                {year === 'all' ? 'All Years' : year}
-              </option>
-            ))}
+            {availableYears.length > 0 ? (
+              availableYears.map(year => (
+                <option key={year} value={year}>
+                  {year === 'all' ? 'All Years' : year}
+                </option>
+              ))
+            ) : (
+              <option value="all">All Years</option>
+            )}
           </Select>
         </div>
       </Card>

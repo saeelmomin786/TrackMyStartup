@@ -8,6 +8,7 @@ import { Users, Building2, HelpCircle, FileCheck2, LayoutGrid, Eye, Check, X, Us
 import AdminProgramsTab from './admin/AdminProgramsTab';
 import AdminBlogsTab from './admin/AdminBlogsTab';
 import InvestorListManager from './admin/InvestorListManager';
+import AdminQuestionBankTab from './admin/AdminQuestionBankTab';
 import UserGrowthChart from './admin/UserGrowthChart';
 import UserRoleDistributionChart from './admin/UserRoleDistributionChart';
 import DataManager from './DataManager';
@@ -35,7 +36,7 @@ interface AdminViewProps {
   onViewStartup: (id: number) => void;
 }
 
-type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'financial' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList';
+type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'financial' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList' | 'questionBank';
 type TimeFilter = '30d' | '90d' | 'all';
 
 const SummaryCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -368,6 +369,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             case 'programs': return <AdminProgramsTab />;
             case 'blogs': return <AdminBlogsTab />;
             case 'investorList': return <InvestorListManager />;
+            case 'questionBank': return <AdminQuestionBankTab />;
             default: return null;
         }
     }
@@ -411,6 +413,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
                     <TabButton id="programs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Megaphone />}>Programs</TabButton>
                     <TabButton id="blogs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<FileText />}>Blogs</TabButton>
                     <TabButton id="investorList" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Building2 />}>Investor List</TabButton>
+                    <TabButton id="questionBank" activeTab={activeTab} setActiveTab={setActiveTab} icon={<FileText />}>Question Bank</TabButton>
                 </nav>
             </div>
 

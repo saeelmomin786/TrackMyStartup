@@ -20,11 +20,11 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-50 z-[9999] flex justify-center items-start sm:items-center p-3 sm:p-4 pt-20 sm:pt-24 overflow-y-auto"
+      className="fixed inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div 
-        className={`bg-white rounded-xl shadow-2xl p-4 sm:p-6 w-full ${sizeClasses[size]} max-h-[calc(100vh-4rem)] sm:max-h-[85vh] my-4 sm:my-8 overflow-y-auto relative animate-fade-in-up`}
+        className={`bg-white rounded-xl shadow-2xl p-4 sm:p-6 w-full ${sizeClasses[size]} max-h-[90vh] overflow-y-auto relative animate-fade-in-up border border-slate-200`}
         onClick={e => e.stopPropagation()} // Prevent closing when clicking inside modal
       >
         <div className="flex justify-between items-center mb-3 border-b pb-2">

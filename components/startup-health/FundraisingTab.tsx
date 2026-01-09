@@ -13,7 +13,7 @@ import { validationService } from '../../lib/validationService';
 import { generalDataService, GeneralDataItem } from '../../lib/generalDataService';
 import { investorListService, InvestorListItem } from '../../lib/investorListService';
 import { getVideoEmbedUrl, VideoSource } from '../../lib/videoUtils';
-import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles } from 'lucide-react';
+import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import FundraisingCRM from './FundraisingCRM';
@@ -28,6 +28,41 @@ interface FundraisingTabProps {
 }
 
 type FundraisingSubTab = 'portfolio' | 'programs' | 'investors' | 'crm';
+
+// Component to handle investor image with error fallback
+const InvestorImage: React.FC<{ imageUrl?: string; name: string }> = ({ imageUrl, name }) => {
+  const [imageError, setImageError] = useState(false);
+  
+  // Reset error state when imageUrl changes
+  React.useEffect(() => {
+    setImageError(false);
+  }, [imageUrl]);
+  
+  // Don't try to load invalid URLs
+  const isValidUrl = imageUrl && 
+    !imageUrl.includes('via.placeholder') && 
+    !imageUrl.includes('placeholder.com') &&
+    imageUrl.trim() !== '' &&
+    (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('/'));
+  
+  if (!isValidUrl || imageError) {
+    return (
+      <div className="w-24 h-24 sm:w-32 sm:h-32 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center">
+        <Building2 className="w-12 h-12 text-slate-400" />
+      </div>
+    );
+  }
+  
+  return (
+    <img
+      src={imageUrl}
+      alt={name}
+      className="w-24 h-24 sm:w-32 sm:h-32 object-cover rounded-lg border border-slate-200"
+      onError={() => setImageError(true)}
+      loading="lazy"
+    />
+  );
+};
 
 const FundraisingTab: React.FC<FundraisingTabProps> = ({
   startup,
@@ -128,6 +163,12 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   
   // Validation status
   const [validationStatus, setValidationStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
+  
+  // CRM ref to add investors
+  const crmRef = useRef<{ 
+    addInvestorToCRM: (investorData: { name: string; email?: string; website?: string; linkedin?: string }) => void;
+    addProgramToCRM: (programData: { programName: string; programType?: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp'; description?: string; programUrl?: string; facilitatorName?: string }) => void;
+  } | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -2444,7 +2485,11 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       {/* Grant / Incubation Programs: reuse existing Programs/Opportunities UI */}
       {activeSubTab === 'programs' && !isLoading && (
         <div className="space-y-4">
-          <OpportunitiesTab startup={{ id: startup.id, name: startup.name }} />
+          <OpportunitiesTab 
+            startup={{ id: startup.id, name: startup.name }} 
+            crmRef={crmRef}
+            onProgramAddedToCRM={() => setActiveSubTab('crm')}
+          />
         </div>
       )}
 
@@ -2515,20 +2560,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                         <div className="flex flex-col sm:flex-row gap-4">
                           {/* Investor Image */}
                           <div className="flex-shrink-0">
-                            {investor.image_url ? (
-                              <img
-                                src={investor.image_url}
-                                alt={investor.name}
-                                className="w-24 h-24 sm:w-32 sm:h-32 object-cover rounded-lg border border-slate-200"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/128?text=Investor';
-                                }}
-                              />
-                            ) : (
-                              <div className="w-24 h-24 sm:w-32 sm:h-32 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center">
-                                <Building2 className="w-12 h-12 text-slate-400" />
-                              </div>
-                            )}
+                            <InvestorImage imageUrl={investor.image_url} name={investor.name} />
                           </div>
 
                           {/* Investor Details */}
@@ -2552,6 +2584,43 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                                 )}
                               </div>
                               <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  className="bg-slate-900 hover:bg-slate-800 text-white"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (crmRef.current) {
+                                      crmRef.current.addInvestorToCRM({
+                                        name: investor.name,
+                                        email: undefined, // Investor list doesn't have email
+                                        website: investor.website,
+                                        linkedin: investor.linkedin,
+                                      });
+                                      // Switch to CRM tab to show the added investor
+                                      setActiveSubTab('crm');
+                                    } else {
+                                      // If ref is not ready, switch to CRM tab first, then try again
+                                      setActiveSubTab('crm');
+                                      setTimeout(() => {
+                                        if (crmRef.current) {
+                                          crmRef.current.addInvestorToCRM({
+                                            name: investor.name,
+                                            email: undefined,
+                                            website: investor.website,
+                                            linkedin: investor.linkedin,
+                                          });
+                                        } else {
+                                          messageService.warning('CRM Not Ready', 'Please wait a moment and try again.', 2000);
+                                        }
+                                      }, 200);
+                                    }
+                                  }}
+                                  title="Add to CRM"
+                                >
+                                  <Plus className="w-4 h-4 mr-1" />
+                                  Add to CRM
+                                </Button>
                                 {investor.website && (
                                   <a
                                     href={investor.website}
@@ -2679,8 +2748,18 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       )}
 
       {/* CRM - Full Kanban Board */}
-      {activeSubTab === 'crm' && !isLoading && (
-        <FundraisingCRM startupId={startup.id} />
+      {/* Always render CRM component (hidden when not active) so ref is always available */}
+      {!isLoading && (
+        <div className={activeSubTab === 'crm' ? '' : 'hidden'}>
+          <FundraisingCRM 
+            ref={crmRef}
+            startupId={startup.id} 
+            onInvestorAdded={(investor) => {
+              // Refresh investor list to show updated status
+              loadInvestors();
+            }}
+          />
+        </div>
       )}
     </div>
   );

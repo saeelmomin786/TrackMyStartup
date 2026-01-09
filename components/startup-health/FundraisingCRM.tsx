@@ -12,7 +12,7 @@ import { AddIncubationProgramData } from '../../types';
 interface InvestorCRM {
   id: string;
   name: string;
-  email: string;
+  email?: string; // Optional
   status: 'to_be_contacted' | 'reached_out' | 'in_progress' | 'committed' | 'not_happening';
   amount?: string;
   priority: 'low' | 'medium' | 'high';
@@ -49,6 +49,14 @@ type CRMItem = InvestorCRM | ProgramCRM;
 
 interface FundraisingCRMProps {
   startupId: number;
+  onInvestorAdded?: (investor: InvestorCRM) => void;
+  // Expose method to add investor from outside
+  addInvestorToCRM?: (investorData: {
+    name: string;
+    email?: string;
+    website?: string;
+    linkedin?: string;
+  }) => void;
 }
 
 const STATUS_COLUMNS = [
@@ -65,7 +73,10 @@ const PRIORITY_COLORS = {
   high: 'bg-red-100 text-red-700',
 };
 
-const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
+const FundraisingCRM = React.forwardRef<{ 
+  addInvestorToCRM: (investorData: { name: string; email?: string; website?: string; linkedin?: string }) => void;
+  addProgramToCRM: (programData: { programName: string; programType?: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp'; description?: string; programUrl?: string; facilitatorName?: string }) => void;
+}, FundraisingCRMProps>(({ startupId, onInvestorAdded }, ref) => {
   const [crmItems, setCrmItems] = useState<CRMItem[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -113,6 +124,75 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
   useEffect(() => {
     loadCRMItems();
   }, [startupId]);
+
+  // Handler to add program from external source (like OpportunitiesTab)
+  const handleAddProgramFromExternal = async (programData: {
+    programName: string;
+    programType?: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp';
+    description?: string;
+    programUrl?: string;
+    facilitatorName?: string;
+  }) => {
+    try {
+      // Determine program type - default to Grant if not specified
+      const programType = programData.programType || 'Grant';
+      
+      // Save to database
+      const addProgramData: AddIncubationProgramData = {
+        programName: programData.programName,
+        programType: programType,
+        description: programData.description || undefined,
+        programUrl: programData.programUrl || undefined,
+        mentorName: programData.facilitatorName || undefined,
+      };
+      
+      const savedProgram = await incubationProgramsService.addIncubationProgram(startupId, addProgramData);
+      
+      // Create CRM item for the program
+      const programCRMItem: ProgramCRM = {
+        id: `program_${savedProgram.id}`,
+        programName: savedProgram.programName,
+        programType: savedProgram.programType,
+        status: 'to_be_contacted',
+        priority: 'medium',
+        approach: undefined,
+        firstContact: undefined,
+        notes: programData.description || undefined,
+        startDate: savedProgram.startDate,
+        endDate: savedProgram.endDate,
+        description: savedProgram.description,
+        mentorName: savedProgram.mentorName,
+        mentorEmail: savedProgram.mentorEmail,
+        programUrl: savedProgram.programUrl,
+        tags: undefined,
+        createdAt: savedProgram.createdAt,
+        type: 'program',
+      };
+      
+      // Save CRM metadata
+      await saveProgramsMetadata(programCRMItem.id, {
+        status: 'to_be_contacted',
+        priority: 'medium',
+      });
+      
+      // Add to CRM items
+      setCrmItems(prev => [...prev, programCRMItem]);
+      messageService.success('Program Added', `${programData.programName} has been added to CRM.`, 3000);
+    } catch (error) {
+      console.error('Error adding program to CRM:', error);
+      messageService.error('Failed', 'Could not add program to CRM. Please try again.', 3000);
+    }
+  };
+
+  // Expose methods via ref
+  React.useImperativeHandle(ref, () => ({
+    addInvestorToCRM: (investorData: { name: string; email?: string; website?: string; linkedin?: string }) => {
+      handleAddInvestor(investorData);
+    },
+    addProgramToCRM: (programData: { programName: string; programType?: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp'; description?: string; programUrl?: string; facilitatorName?: string }) => {
+      handleAddProgramFromExternal(programData);
+    }
+  }), [investors, startupId]);
 
   const loadCRMItems = async () => {
     try {
@@ -192,7 +272,7 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
       if (item.type === 'investor') {
         return (
           item.name.toLowerCase().includes(query) ||
-          item.email.toLowerCase().includes(query) ||
+          item.email?.toLowerCase().includes(query) ||
           item.notes?.toLowerCase().includes(query) ||
           item.tags?.some(tag => tag.toLowerCase().includes(query))
         );
@@ -225,16 +305,51 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
     return grouped;
   }, [filteredCRMItems]);
 
-  const handleAddInvestor = () => {
-    if (!formData.name.trim() || !formData.email.trim()) {
-      messageService.warning('Required Fields', 'Please fill in investor name and email.', 3000);
+  const handleAddInvestor = (investorData?: {
+    name: string;
+    email?: string;
+    website?: string;
+    linkedin?: string;
+  }) => {
+    // If investorData is provided, auto-add to CRM
+    if (investorData) {
+      const newInvestor: InvestorCRM = {
+        id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name: investorData.name.trim(),
+        email: investorData.email || undefined, // Optional - no auto-generation
+        status: 'to_be_contacted',
+        amount: undefined,
+        priority: 'medium',
+        pitchDeckUrl: undefined,
+        notes: investorData.website || investorData.linkedin ? `Website: ${investorData.website || ''}\nLinkedIn: ${investorData.linkedin || ''}` : undefined,
+        approach: undefined,
+        firstContact: undefined,
+        tags: undefined,
+        createdAt: new Date().toISOString(),
+        type: 'investor',
+      };
+
+      const updated = [...investors, newInvestor];
+      saveInvestors(updated);
+      messageService.success('Investor Added', `${newInvestor.name} has been added to your CRM.`, 3000);
+      
+      // Call callback if provided
+      if (onInvestorAdded) {
+        onInvestorAdded(newInvestor);
+      }
+      return;
+    }
+
+    // Normal form submission
+    if (!formData.name.trim()) {
+      messageService.warning('Required Fields', 'Please fill in investor name.', 3000);
       return;
     }
 
     const newInvestor: InvestorCRM = {
       id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
-      email: formData.email.trim(),
+      email: formData.email?.trim() || undefined,
       status: formData.status,
       amount: formData.amount || undefined,
       priority: formData.priority,
@@ -252,28 +367,33 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
     setIsAddModalOpen(false);
     resetForm();
     messageService.success('Investor Added', `${newInvestor.name} has been added to your CRM.`, 3000);
+    
+    // Call callback if provided
+    if (onInvestorAdded) {
+      onInvestorAdded(newInvestor);
+    }
   };
 
   const handleUpdateInvestor = () => {
     if (!selectedItem || selectedItem.type !== 'investor') return;
 
-    const updated = investors.map(inv =>
-      inv.id === selectedItem.id
-        ? {
-            ...inv,
-            name: formData.name.trim(),
-            email: formData.email.trim(),
-            status: formData.status,
-            amount: formData.amount || undefined,
-            priority: formData.priority,
-            pitchDeckUrl: formData.pitchDeckUrl || undefined,
-            notes: formData.notes || undefined,
-            approach: formData.approach || undefined,
-            firstContact: formData.firstContact || undefined,
-            tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
-          }
-        : inv
-    );
+      const updated = investors.map(inv =>
+        inv.id === selectedItem.id
+          ? {
+              ...inv,
+              name: formData.name.trim(),
+              email: formData.email?.trim() || undefined,
+              status: formData.status,
+              amount: formData.amount || undefined,
+              priority: formData.priority,
+              pitchDeckUrl: formData.pitchDeckUrl || undefined,
+              notes: formData.notes || undefined,
+              approach: formData.approach || undefined,
+              firstContact: formData.firstContact || undefined,
+              tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+            }
+          : inv
+      );
 
     saveInvestors(updated);
     setIsEditModalOpen(false);
@@ -322,7 +442,7 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
     if (item.type === 'investor') {
       setFormData({
         name: item.name,
-        email: item.email,
+        email: item.email || '',
         status: item.status,
         amount: item.amount || '',
         priority: item.priority,
@@ -618,7 +738,7 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
                             {item.type === 'investor' ? item.name : item.programName}
                           </h4>
                           <p className="text-xs text-slate-500 truncate">
-                            {item.type === 'investor' ? item.email : `${item.programType} Program`}
+                            {item.type === 'investor' ? (item.email || 'No email') : `${item.programType} Program`}
                           </p>
                         </div>
                       </div>
@@ -720,7 +840,7 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Contact email *</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Contact email (Optional)</label>
             <Input
               type="email"
               placeholder="investor@example.com"
@@ -850,7 +970,7 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Contact email *</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Contact email (Optional)</label>
             <Input
               type="email"
               value={formData.email}
@@ -1156,7 +1276,10 @@ const FundraisingCRM: React.FC<FundraisingCRMProps> = ({ startupId }) => {
       </Modal>
     </div>
   );
-};
+});
+
+// Expose addInvestorToCRM method via ref
+FundraisingCRM.displayName = 'FundraisingCRM';
 
 export default FundraisingCRM;
 

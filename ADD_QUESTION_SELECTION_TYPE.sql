@@ -17,3 +17,4 @@ ADD COLUMN IF NOT EXISTS selection_type TEXT CHECK (selection_type IN ('single',
 COMMENT ON COLUMN public.incubation_opportunity_questions.selection_type IS 
 'Override selection type for multiple choice questions: single (select one) or multiple (select multiple). NULL uses question default.';
 
+

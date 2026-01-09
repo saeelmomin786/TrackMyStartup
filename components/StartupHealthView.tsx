@@ -1098,6 +1098,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [showNotifications, setShowNotifications] = useState(false);
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
     const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>('explore');
+    const [userInvestmentAdvisorCode, setUserInvestmentAdvisorCode] = useState<string | null | undefined>((user as any)?.investment_advisor_code_entered);
     
     // State for service exploration
     const [selectedServiceType, setSelectedServiceType] = useState<string | null>(null);
@@ -1138,12 +1139,64 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         setCurrentStartup(startup);
     }, [startup]);
     
-    // Update currentStartup when startup prop changes (important for facilitator access)
+    // Update userInvestmentAdvisorCode when user prop changes
     useEffect(() => {
-        console.log('🔄 StartupHealthView: Startup prop changed, updating currentStartup');
-        console.log('📊 New startup data:', startup);
-        setCurrentStartup(startup);
-    }, [startup]);
+        setUserInvestmentAdvisorCode((user as any)?.investment_advisor_code_entered);
+    }, [user]);
+    
+    // Refresh startup and user data when services tab is opened to ensure investment_advisor_code is up-to-date
+    useEffect(() => {
+        if (activeTab === 'services' && servicesSubTab === 'explore' && currentStartup?.id && user?.id) {
+            const refreshData = async () => {
+                try {
+                    // Fetch latest startup data
+                    const { data: startupData, error: startupError } = await supabase
+                        .from('startups')
+                        .select('id, investment_advisor_code')
+                        .eq('id', currentStartup.id)
+                        .single();
+                    
+                    if (!startupError && startupData) {
+                        // Update only the investment_advisor_code field to avoid losing other state
+                        setCurrentStartup(prev => ({
+                            ...prev,
+                            investment_advisor_code: startupData.investment_advisor_code
+                        }));
+                    }
+                    
+                    // Also fetch latest user profile data to check investment_advisor_code_entered
+                    // Try user_profiles first (new registrations)
+                    const { data: profileData } = await supabase
+                        .from('user_profiles')
+                        .select('investment_advisor_code_entered')
+                        .eq('auth_user_id', user.id)
+                        .eq('role', 'Startup')
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+                    
+                    // If not found in user_profiles, try users table (old registrations)
+                    if (!profileData) {
+                        const { data: userData } = await supabase
+                            .from('users')
+                            .select('investment_advisor_code_entered')
+                            .eq('id', user.id)
+                            .maybeSingle();
+                        
+                        if (userData) {
+                            setUserInvestmentAdvisorCode(userData.investment_advisor_code_entered);
+                        }
+                    } else {
+                        setUserInvestmentAdvisorCode(profileData.investment_advisor_code_entered);
+                    }
+                } catch (error) {
+                    console.error('Error refreshing startup/user data:', error);
+                }
+            };
+            
+            refreshData();
+        }
+    }, [activeTab, servicesSubTab, currentStartup?.id, user?.id]);
 
     const viewLabels = useMemo(() => {
         const name = currentStartup?.name || startup?.name || 'Startup';
@@ -1904,8 +1957,15 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                 ]
                                 .filter((profileType) => {
                                   // Hide Investment Advisor if startup already has an investment advisor
-                                  if (profileType.role === 'Investment Advisor' && currentStartup?.investment_advisor_code) {
-                                    return false;
+                                  // Check both startup.investment_advisor_code and user.investment_advisor_code_entered
+                                  if (profileType.role === 'Investment Advisor') {
+                                    const hasAdvisorInStartup = currentStartup?.investment_advisor_code && currentStartup.investment_advisor_code.trim() !== '';
+                                    const hasAdvisorInUser = userInvestmentAdvisorCode && userInvestmentAdvisorCode.trim() !== '';
+                                    const hasAdvisorInUserProp = (user as any)?.investment_advisor_code_entered && (user as any).investment_advisor_code_entered.trim() !== '';
+                                    
+                                    if (hasAdvisorInStartup || hasAdvisorInUser || hasAdvisorInUserProp) {
+                                      return false;
+                                    }
                                   }
                                   return true;
                                 })

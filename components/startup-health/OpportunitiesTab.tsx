@@ -3,7 +3,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import CloudDriveInput from '../ui/CloudDriveInput';
-import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText, Share2, Eye } from 'lucide-react';
+import { Zap, Check, Video, MessageCircle, CreditCard, Download, FileText, Share2, Eye, Plus } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { messageService } from '../../lib/messageService';
 import Modal from '../ui/Modal';
@@ -40,6 +40,10 @@ interface ApplicationItem {
 
 interface OpportunitiesTabProps {
     startup: StartupRef;
+    crmRef?: React.RefObject<{ 
+      addProgramToCRM: (programData: { programName: string; programType?: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp'; description?: string; programUrl?: string; facilitatorName?: string }) => void;
+    }>;
+    onProgramAddedToCRM?: () => void;
 }
 
  const SECTOR_OPTIONS = [
@@ -76,7 +80,7 @@ interface OpportunitiesTabProps {
      'Scaling'
  ];
 
-const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
+const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, onProgramAddedToCRM }) => {
     const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
     const [applications, setApplications] = useState<ApplicationItem[]>([]);
     const [selectedOpportunity, setSelectedOpportunity] = useState<OpportunityItem | null>(null);
@@ -624,37 +628,85 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                                 <span className="ml-2 inline-block px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-[10px] font-medium whitespace-nowrap">Applications closing today</span>
                                             )}
                                         </div>
-                                        <div className="flex gap-2 mt-3">
-                                            <Button 
-                                                type="button" 
-                                                variant="outline"
-                                                className="flex-1" 
-                                                onClick={() => {
-                                                    const url = new URL(window.location.origin);
-                                                    url.searchParams.set('view', 'program');
-                                                    url.searchParams.set('opportunityId', opp.id);
-                                                    window.location.href = url.toString();
-                                                }}
-                                            >
-                                                <Eye className="h-4 w-4 mr-2" />
-                                                View
-                                            </Button>
+                                        <div className="flex flex-col gap-2 mt-3">
+                                            <div className="flex gap-2">
+                                                <Button 
+                                                    type="button" 
+                                                    variant="outline"
+                                                    className="flex-1" 
+                                                    onClick={() => {
+                                                        const url = new URL(window.location.origin);
+                                                        url.searchParams.set('view', 'program');
+                                                        url.searchParams.set('opportunityId', opp.id);
+                                                        window.location.href = url.toString();
+                                                    }}
+                                                >
+                                                    <Eye className="h-4 w-4 mr-2" />
+                                                    View
+                                                </Button>
+                                                {crmRef && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (crmRef.current) {
+                                                                // Determine program type from facilitator name or default to Grant
+                                                                let programType: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp' = 'Grant';
+                                                                const facilitatorLower = (opp.facilitatorName || '').toLowerCase();
+                                                                if (facilitatorLower.includes('incubation') || facilitatorLower.includes('incubator')) {
+                                                                    programType = 'Incubation';
+                                                                } else if (facilitatorLower.includes('accelerat')) {
+                                                                    programType = 'Acceleration';
+                                                                } else if (facilitatorLower.includes('mentor')) {
+                                                                    programType = 'Mentorship';
+                                                                } else if (facilitatorLower.includes('bootcamp')) {
+                                                                    programType = 'Bootcamp';
+                                                                }
+                                                                
+                                                                // Construct view URL for the opportunity
+                                                                const viewUrl = new URL(window.location.origin);
+                                                                viewUrl.searchParams.set('view', 'program');
+                                                                viewUrl.searchParams.set('opportunityId', opp.id);
+                                                                
+                                                                crmRef.current.addProgramToCRM({
+                                                                    programName: opp.programName,
+                                                                    programType: programType,
+                                                                    description: opp.description,
+                                                                    facilitatorName: opp.facilitatorName,
+                                                                    programUrl: viewUrl.toString(),
+                                                                });
+                                                                if (onProgramAddedToCRM) {
+                                                                    onProgramAddedToCRM();
+                                                                }
+                                                            } else {
+                                                                messageService.warning('CRM Not Ready', 'Please wait a moment and try again.', 2000);
+                                                            }
+                                                        }}
+                                                        title="Add to CRM"
+                                                    >
+                                                        <Plus className="h-4 w-4 mr-2" />
+                                                        Add to CRM
+                                                    </Button>
+                                                )}
+                                            </div>
                                             {!hasApplied ? (
                                                 canApply ? (
                                                     <Button 
                                                         type="button" 
-                                                        className="flex-1" 
+                                                        className="w-full" 
                                                         onClick={() => openApplyModal(opp.id)}
                                                     >
                                                         <Zap className="h-4 w-4 mr-2" /> Apply
                                                     </Button>
                                                 ) : (
-                                                    <Button type="button" className="flex-1" variant="secondary" disabled>
+                                                    <Button type="button" className="w-full" variant="secondary" disabled>
                                                         Closed
                                                     </Button>
                                                 )
                                             ) : (
-                                                <Button type="button" className="flex-1" variant="secondary" disabled>
+                                                <Button type="button" className="w-full" variant="secondary" disabled>
                                                     <Check className="h-4 w-4 mr-2" /> Applied
                                                 </Button>
                                             )}
@@ -714,23 +766,67 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup }) => {
                                         <p className="text-xs text-slate-500 mt-2">Deadline: <span className="font-semibold">{p.deadline}</span></p>
                                     </div>
                                     <div className="border-t pt-4 mt-4">
-                                        <div className="flex gap-2">
-                                            <Button 
-                                                type="button"
-                                                variant="outline"
-                                                className="flex-1"
-                                                onClick={() => {
-                                                    const url = new URL(window.location.origin);
-                                                    url.searchParams.set('view', 'admin-program');
-                                                    url.searchParams.set('programId', p.id);
-                                                    window.location.href = url.toString();
-                                                }}
-                                            >
-                                                <Eye className="h-4 w-4 mr-2" />
-                                                View
-                                            </Button>
-                                            <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="flex-1">
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex gap-2">
+                                                <Button 
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="flex-1"
+                                                    onClick={() => {
+                                                        const url = new URL(window.location.origin);
+                                                        url.searchParams.set('view', 'admin-program');
+                                                        url.searchParams.set('programId', p.id);
+                                                        window.location.href = url.toString();
+                                                    }}
+                                                >
+                                                    <Eye className="h-4 w-4 mr-2" />
+                                                    View
+                                                </Button>
+                                                {crmRef && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (crmRef.current) {
+                                                                // Determine program type from incubation center name or default to Grant
+                                                                let programType: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp' = 'Grant';
+                                                                const centerLower = (p.incubationCenter || '').toLowerCase();
+                                                                if (centerLower.includes('incubation') || centerLower.includes('incubator')) {
+                                                                    programType = 'Incubation';
+                                                                } else if (centerLower.includes('accelerat')) {
+                                                                    programType = 'Acceleration';
+                                                                } else if (centerLower.includes('mentor')) {
+                                                                    programType = 'Mentorship';
+                                                                } else if (centerLower.includes('bootcamp')) {
+                                                                    programType = 'Bootcamp';
+                                                                }
+                                                                
+                                                                crmRef.current.addProgramToCRM({
+                                                                    programName: p.programName,
+                                                                    programType: programType,
+                                                                    description: p.description,
+                                                                    facilitatorName: p.incubationCenter,
+                                                                    programUrl: p.applicationLink, // Use application link as program URL
+                                                                });
+                                                                if (onProgramAddedToCRM) {
+                                                                    onProgramAddedToCRM();
+                                                                }
+                                                            } else {
+                                                                messageService.warning('CRM Not Ready', 'Please wait a moment and try again.', 2000);
+                                                            }
+                                                        }}
+                                                        title="Add to CRM"
+                                                    >
+                                                        <Plus className="h-4 w-4 mr-2" />
+                                                        Add to CRM
+                                                    </Button>
+                                                )}
+                                            </div>
+                                            <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="w-full">
                                                 <Button className="w-full">
+                                                    <Zap className="h-4 w-4 mr-2" />
                                                     Apply
                                                 </Button>
                                             </a>

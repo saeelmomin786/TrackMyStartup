@@ -2465,9 +2465,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex justify-center items-center gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
+                                  <Button 
+                                    size="sm"
+                                    variant="outline"
                                   onClick={async () => {
                                     try {
                                       // Check if startup has active fundraising
@@ -2533,7 +2533,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 >
                                   <Eye className="h-4 w-4" />
                                   <span>Portfolio</span>
-                                </Button>
+                                  </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -2568,16 +2568,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             <td className="px-4 py-4">
                               <div className="flex justify-center items-center gap-2 flex-wrap">
                                 {/* Status Actions - All in one line */}
-                                {app.status === 'pending' && (
+                              {app.status === 'pending' && (
                                   <>
-                                    <Button 
-                                      size="sm" 
-                                      onClick={() => handleAcceptApplication(app)}
-                                      disabled={isProcessingAction}
+                                <Button 
+                                  size="sm" 
+                                  onClick={() => handleAcceptApplication(app)}
+                                  disabled={isProcessingAction}
                                       className="bg-green-600 hover:bg-green-700 text-white"
-                                    >
+                                >
                                       Approve
-                                    </Button>
+                                </Button>
                                     <Button 
                                       size="sm" 
                                       variant="outline"
@@ -2587,28 +2587,28 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                     >
                                       Reject
                                     </Button>
-                                    {/* Diligence Actions */}
+                                {/* Diligence Actions */}
                                     {(app.diligenceStatus === 'none' || app.diligenceStatus == null) && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => handleRequestDiligence(app)}
-                                        disabled={isProcessingAction}
-                                      >
-                                        Request Diligence
-                                      </Button>
-                                    )}
-                                    {app.diligenceStatus === 'requested' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleRequestDiligence(app)}
+                                  disabled={isProcessingAction}
+                                >
+                                  Request Diligence
+                                </Button>
+                              )}
+                              {app.diligenceStatus === 'requested' && (
                                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                                         Diligence Pending
-                                      </span>
+                                </span>
                                     )}
                                   </>
-                                )}
-                                {app.diligenceStatus === 'approved' && (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
+                              )}
+                              {app.diligenceStatus === 'approved' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
                                     onClick={async () => {
                                       const startupObj = await buildStartupForView({
                                         id: app.startupId,
@@ -2626,10 +2626,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                       });
                                       onViewStartup(startupObj);
                                     }}
-                                  >
-                                    View Startup
-                                  </Button>
-                                )}
+                                >
+                                  View Startup
+                                </Button>
+                              )}
                               </div>
                             </td>
                           </tr>
@@ -2640,10 +2640,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <div className="flex flex-col items-center">
                             <FileText className="h-12 w-12 text-slate-300 mb-3" />
                             <p className="text-slate-500 font-medium">
-                              {selectedOpportunityId 
-                                ? `No applications received for ${myPostedOpportunities.find(o => o.id === selectedOpportunityId)?.programName || 'this opportunity'} yet.`
-                                : 'No applications received yet.'
-                              }
+                          {selectedOpportunityId 
+                            ? `No applications received for ${myPostedOpportunities.find(o => o.id === selectedOpportunityId)?.programName || 'this opportunity'} yet.`
+                            : 'No applications received yet.'
+                          }
                             </p>
                           </div>
                         </td>
@@ -3209,7 +3209,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               <p className="font-semibold text-slate-800 text-base">{opp.programName}</p>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-600">
-                              <div>
+                          <div>
                                 <span className="font-medium text-slate-500">Posted:</span> <span className="text-slate-700">{postedDate}</span>
                               </div>
                               <div>
@@ -3253,10 +3253,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               
                               try {
                                 // Delete the opportunity (cascade will handle related records)
-                                const { error } = await supabase
-                                  .from('incubation_opportunities')
+                              const { error } = await supabase
+                                .from('incubation_opportunities')
                                   .delete()
-                                  .eq('id', target.id);
+                                .eq('id', target.id);
                                 
                                 if (error) {
                                   console.error('Error deleting opportunity:', error);
@@ -3266,8 +3266,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   );
                                 } else {
                                   // Remove from local state
-                                  setMyPostedOpportunities(prev => prev.filter((_, i) => i !== idx));
-                                  messageService.success(
+                                setMyPostedOpportunities(prev => prev.filter((_, i) => i !== idx));
+                                messageService.success(
                                     'Opportunity Deleted',
                                     'Opportunity and all associated data have been deleted successfully.',
                                     3000
@@ -3422,14 +3422,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   Your browser does not support the video tag.
                                 </video>
                               ) : (
-                                <iframe
-                                  src={embedUrl}
-                                  title={`Pitch video for ${inv.name}`}
-                                  frameBorder="0"
-                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                  allowFullScreen
-                                  className="absolute top-0 left-0 w-full h-full"
-                                ></iframe>
+                              <iframe
+                                src={embedUrl}
+                                title={`Pitch video for ${inv.name}`}
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                                className="absolute top-0 left-0 w-full h-full"
+                              ></iframe>
                               )}
                               <button
                                 onClick={() => setPlayingVideoId(null)}
@@ -4138,7 +4138,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   Download as Excel
                 </Button>
               </div>
-              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
               {applicationResponses.map((response, index) => (
                 <Card key={index} className="p-4">
                   <div className="space-y-3">
@@ -4180,7 +4180,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </div>
                 </Card>
               ))}
-              </div>
+            </div>
             </>
           )}
         </div>

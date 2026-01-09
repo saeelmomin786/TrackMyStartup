@@ -845,14 +845,14 @@ const CAView: React.FC<CAViewProps> = ({ startups, onUpdateCompliance, onViewSta
                               Your browser does not support the video tag.
                             </video>
                           ) : (
-                            <iframe
-                              src={embedUrl}
-                              title={`Pitch video for ${inv.name}`}
-                              frameBorder="0"
-                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                              allowFullScreen
-                              className="absolute top-0 left-0 w-full h-full"
-                            ></iframe>
+                          <iframe
+                            src={embedUrl}
+                            title={`Pitch video for ${inv.name}`}
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                            className="absolute top-0 left-0 w-full h-full"
+                          ></iframe>
                           )}
                           <button
                             onClick={() => setPlayingVideoId(null)}

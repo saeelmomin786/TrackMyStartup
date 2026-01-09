@@ -177,32 +177,73 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
         revenuesCount: revenuesData.length
       });
 
-      // Generate comprehensive monthly data for all 12 months
+      // Generate comprehensive monthly data
+      // If year is 'all' (Till Date), use year-month combinations to avoid overlapping months
       const monthlyData: { [key: string]: { revenue: number; expenses: number } } = {};
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       
-      // Initialize all months
-      months.forEach(month => {
-        monthlyData[month] = { revenue: 0, expenses: 0 };
-      });
-      
-      // Aggregate data by month (when 'all' is selected, this aggregates across all years)
-      allRecords.forEach(record => {
-        const monthIndex = new Date(record.date).getMonth();
-        const monthName = months[monthIndex];
+      if (filters.year === 'all') {
+        // For "Till Date", aggregate by year-month (e.g., "2024-Jan", "2025-Nov", "2026-Nov")
+        allRecords.forEach(record => {
+          const recordDate = new Date(record.date);
+          const recordYear = recordDate.getFullYear();
+          const monthIndex = recordDate.getMonth();
+          const monthName = months[monthIndex];
+          const key = `${recordYear}-${monthName}`;
+          
+          if (!monthlyData[key]) {
+            monthlyData[key] = { revenue: 0, expenses: 0 };
+          }
+          
+          if (record.record_type === 'revenue') {
+            monthlyData[key].revenue += record.amount;
+          } else {
+            monthlyData[key].expenses += record.amount;
+          }
+        });
         
-        if (record.record_type === 'revenue') {
-          monthlyData[monthName].revenue += record.amount;
-        } else {
-          monthlyData[monthName].expenses += record.amount;
-        }
-      });
-      
-      const finalMonthlyData = months.map(month => ({
-        month_name: month,
-        revenue: monthlyData[month].revenue,
-        expenses: monthlyData[month].expenses
-      }));
+        // Sort by date (year-month)
+        const sortedEntries = Object.entries(monthlyData).sort((a, b) => {
+          const [yearA, monthA] = a[0].split('-');
+          const [yearB, monthB] = b[0].split('-');
+          const monthIndexA = months.indexOf(monthA);
+          const monthIndexB = months.indexOf(monthB);
+          
+          if (yearA !== yearB) {
+            return parseInt(yearA) - parseInt(yearB);
+          }
+          return monthIndexA - monthIndexB;
+        });
+        
+        setMonthlyData(sortedEntries.map(([key, data]) => ({
+          month_name: key, // e.g., "2024-Jan", "2025-Nov"
+          revenue: data.revenue,
+          expenses: data.expenses
+        })));
+      } else {
+        // For specific year, use just month names
+        months.forEach(month => {
+          monthlyData[month] = { revenue: 0, expenses: 0 };
+        });
+        
+        // Aggregate data by month
+        allRecords.forEach(record => {
+          const monthIndex = new Date(record.date).getMonth();
+          const monthName = months[monthIndex];
+          
+          if (record.record_type === 'revenue') {
+            monthlyData[monthName].revenue += record.amount;
+          } else {
+            monthlyData[monthName].expenses += record.amount;
+          }
+        });
+        
+        setMonthlyData(months.map(month => ({
+          month_name: month,
+          revenue: monthlyData[month].revenue,
+          expenses: monthlyData[month].expenses
+        })));
+      }
       
       // Calculate vertical data from all records when 'all' is selected
       let finalRevenueByVertical = revenueVertical || [];
@@ -233,12 +274,9 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       }
 
       console.log('📊 Final chart data:', {
-        monthlyData: finalMonthlyData,
         revenueByVertical: finalRevenueByVertical,
         expensesByVertical: finalExpensesByVertical
       });
-
-      setMonthlyData(finalMonthlyData);
       setRevenueByVertical(finalRevenueByVertical);
       setExpensesByVertical(finalExpensesByVertical);
       setExpenses(expensesData);
@@ -558,31 +596,73 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       
       console.log('🔍 All records for chart calculation:', allRecords);
       
-      // Calculate monthly data (aggregate across all years when 'all' is selected)
+      // Calculate monthly data
+      // If year is 'all' (Till Date), use year-month combinations to avoid overlapping months
       const monthlyData: { [key: string]: { revenue: number; expenses: number } } = {};
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       
-      // Initialize all months
-      months.forEach(month => {
-        monthlyData[month] = { revenue: 0, expenses: 0 };
-      });
-      
-      allRecords.forEach(record => {
-        const monthIndex = new Date(record.date).getMonth();
-        const monthName = months[monthIndex];
-        const amt = typeof record.amount === 'string' ? parseFloat(record.amount) || 0 : record.amount || 0;
-        if (record.record_type === 'revenue') {
-          monthlyData[monthName].revenue += amt;
-        } else {
-          monthlyData[monthName].expenses += amt;
-        }
-      });
-      
-      const finalMonthlyData = Object.entries(monthlyData).map(([month_name, data]) => ({
-        month_name,
-        revenue: data.revenue,
-        expenses: data.expenses
-      }));
+      if (filters.year === 'all') {
+        // For "Till Date", aggregate by year-month (e.g., "2024-Jan", "2025-Nov", "2026-Nov")
+        allRecords.forEach(record => {
+          const recordDate = new Date(record.date);
+          const recordYear = recordDate.getFullYear();
+          const monthIndex = recordDate.getMonth();
+          const monthName = months[monthIndex];
+          const key = `${recordYear}-${monthName}`;
+          const amt = typeof record.amount === 'string' ? parseFloat(record.amount) || 0 : record.amount || 0;
+          
+          if (!monthlyData[key]) {
+            monthlyData[key] = { revenue: 0, expenses: 0 };
+          }
+          
+          if (record.record_type === 'revenue') {
+            monthlyData[key].revenue += amt;
+          } else {
+            monthlyData[key].expenses += amt;
+          }
+        });
+        
+        // Sort by date (year-month)
+        const sortedEntries = Object.entries(monthlyData).sort((a, b) => {
+          const [yearA, monthA] = a[0].split('-');
+          const [yearB, monthB] = b[0].split('-');
+          const monthIndexA = months.indexOf(monthA);
+          const monthIndexB = months.indexOf(monthB);
+          
+          if (yearA !== yearB) {
+            return parseInt(yearA) - parseInt(yearB);
+          }
+          return monthIndexA - monthIndexB;
+        });
+        
+        var finalMonthlyData = sortedEntries.map(([key, data]) => ({
+          month_name: key, // e.g., "2024-Jan", "2025-Nov"
+          revenue: data.revenue,
+          expenses: data.expenses
+        }));
+      } else {
+        // For specific year, use just month names
+        months.forEach(month => {
+          monthlyData[month] = { revenue: 0, expenses: 0 };
+        });
+        
+        allRecords.forEach(record => {
+          const monthIndex = new Date(record.date).getMonth();
+          const monthName = months[monthIndex];
+          const amt = typeof record.amount === 'string' ? parseFloat(record.amount) || 0 : record.amount || 0;
+          if (record.record_type === 'revenue') {
+            monthlyData[monthName].revenue += amt;
+          } else {
+            monthlyData[monthName].expenses += amt;
+          }
+        });
+        
+        var finalMonthlyData = months.map(month => ({
+          month_name: month,
+          revenue: monthlyData[month].revenue,
+          expenses: monthlyData[month].expenses
+        }));
+      }
       
       // Calculate vertical data
       const revenueByVertical: { [key: string]: number } = {};

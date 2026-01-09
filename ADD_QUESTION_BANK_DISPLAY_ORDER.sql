@@ -31,3 +31,4 @@ WHERE table_name = 'application_question_bank'
 AND column_name = 'display_order';
 
 
+

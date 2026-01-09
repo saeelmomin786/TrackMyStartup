@@ -432,31 +432,76 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       }
       
       // Generate monthly revenue vs expenses data
+      // If year is 'all' (Till Date), use year-month combinations to avoid overlapping months
       const monthlyData: { [key: string]: { revenue: number; expenses: number } } = {};
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       
-      // Initialize all months
-      months.forEach(month => {
-        monthlyData[month] = { revenue: 0, expenses: 0 };
-      });
-      
-      // Aggregate data by month
-      allRecords.forEach(record => {
-        const monthIndex = new Date(record.date).getMonth();
-        const monthName = months[monthIndex];
+      if (year === 'all') {
+        // For "Till Date", aggregate by year-month (e.g., "2024-Jan", "2025-Nov", "2026-Nov")
+        allRecords.forEach(record => {
+          const recordDate = new Date(record.date);
+          const recordYear = recordDate.getFullYear();
+          const monthIndex = recordDate.getMonth();
+          const monthName = months[monthIndex];
+          const key = `${recordYear}-${monthName}`;
+          
+          if (!monthlyData[key]) {
+            monthlyData[key] = { revenue: 0, expenses: 0 };
+          }
+          
+          if (record.record_type === 'revenue') {
+            monthlyData[key].revenue += record.amount;
+          } else {
+            monthlyData[key].expenses += record.amount;
+          }
+        });
         
-        if (record.record_type === 'revenue') {
-          monthlyData[monthName].revenue += record.amount;
-        } else {
-          monthlyData[monthName].expenses += record.amount;
-        }
-      });
-      
-      const finalRevenueData = months.map(month => ({
-        name: month,
-        revenue: monthlyData[month].revenue,
-        expenses: monthlyData[month].expenses
-      }));
+        // Sort by date (year-month)
+        const sortedEntries = Object.entries(monthlyData).sort((a, b) => {
+          const [yearA, monthA] = a[0].split('-');
+          const [yearB, monthB] = b[0].split('-');
+          const monthIndexA = months.indexOf(monthA);
+          const monthIndexB = months.indexOf(monthB);
+          
+          if (yearA !== yearB) {
+            return parseInt(yearA) - parseInt(yearB);
+          }
+          return monthIndexA - monthIndexB;
+        });
+        
+        const finalRevenueData = sortedEntries.map(([key, data]) => ({
+          name: key, // e.g., "2024-Jan", "2025-Nov"
+          revenue: data.revenue,
+          expenses: data.expenses
+        }));
+        
+        setRevenueData(finalRevenueData);
+      } else {
+        // For specific year, use just month names
+        months.forEach(month => {
+          monthlyData[month] = { revenue: 0, expenses: 0 };
+        });
+        
+        // Aggregate data by month
+        allRecords.forEach(record => {
+          const monthIndex = new Date(record.date).getMonth();
+          const monthName = months[monthIndex];
+          
+          if (record.record_type === 'revenue') {
+            monthlyData[monthName].revenue += record.amount;
+          } else {
+            monthlyData[monthName].expenses += record.amount;
+          }
+        });
+        
+        const finalRevenueData = months.map(month => ({
+          name: month,
+          revenue: monthlyData[month].revenue,
+          expenses: monthlyData[month].expenses
+        }));
+        
+        setRevenueData(finalRevenueData);
+      }
       
       setRevenueData(finalRevenueData);
       

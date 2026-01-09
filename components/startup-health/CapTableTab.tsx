@@ -1309,6 +1309,73 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 });
             }
             
+            // Automatically add startup to mentor's portfolio if founder has mentor code
+            const foundersWithMentorCode = finalFounders.filter(f => f.mentorCode && f.mentorCode.trim() !== '');
+            if (foundersWithMentorCode.length > 0) {
+                console.log('🔍 Found founders with mentor codes:', foundersWithMentorCode.map(f => ({ name: f.name, mentorCode: f.mentorCode })));
+                
+                for (const founder of foundersWithMentorCode) {
+                    try {
+                        if (!founder.mentorCode) continue;
+                        
+                        // Find mentor by mentor code
+                        const { data: mentorUser, error: mentorError } = await supabase
+                            .from('users')
+                            .select('id, mentor_code, name, role')
+                            .eq('mentor_code', founder.mentorCode.trim())
+                            .eq('role', 'Mentor')
+                            .single();
+                        
+                        if (mentorError || !mentorUser) {
+                            console.warn(`⚠️ Mentor not found with code: ${founder.mentorCode}`, mentorError);
+                            continue;
+                        }
+                        
+                        console.log(`✅ Found mentor: ${mentorUser.name} (${mentorUser.id}) for code: ${founder.mentorCode}`);
+                        
+                        // Check if assignment already exists
+                        const { data: existingAssignment, error: checkError } = await supabase
+                            .from('mentor_startup_assignments')
+                            .select('id')
+                            .eq('mentor_id', mentorUser.id)
+                            .eq('startup_id', startup.id)
+                            .single();
+                        
+                        if (existingAssignment) {
+                            console.log(`ℹ️ Startup already in mentor's portfolio: ${mentorUser.name}`);
+                            continue;
+                        }
+                        
+                        // Add startup to mentor's portfolio
+                        const { data: assignmentData, error: assignmentError } = await supabase
+                            .from('mentor_startup_assignments')
+                            .insert({
+                                mentor_id: mentorUser.id,
+                                startup_id: startup.id,
+                                status: 'active',
+                                assigned_at: new Date().toISOString()
+                            })
+                            .select()
+                            .single();
+                        
+                        if (assignmentError) {
+                            console.error(`❌ Error adding startup to mentor portfolio (${mentorUser.name}):`, assignmentError);
+                            // Don't throw - continue with other mentors
+                        } else {
+                            console.log(`✅ Successfully added startup to mentor portfolio: ${mentorUser.name}`, assignmentData);
+                            messageService.success(
+                                'Mentor Portfolio Updated',
+                                `Startup automatically added to ${mentorUser.name}'s portfolio.`,
+                                3000
+                            );
+                        }
+                    } catch (err) {
+                        console.error(`❌ Error processing mentor code for founder ${founder.name}:`, err);
+                        // Continue with other founders
+                    }
+                }
+            }
+            
             onUpdateFounders(startup.id, finalFounders);
             setIsFounderModalOpen(false);
             setError(null); // Clear any previous errors
@@ -2076,6 +2143,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             
             console.log('✅ Mentor record added successfully to backend');
             console.log('📋 New record:', newMentorRecord);
+            
+            // Reload ALL data to ensure shares, valuation, and charts are updated
+            console.log('🔄 Reloading data after adding mentor...');
+            await loadCapTableData();
         } catch (err) {
             console.error('❌ Error adding mentor record:', err);
             setError(err instanceof Error ? err.message : 'Failed to add mentor record. Please try again.');
@@ -2178,6 +2249,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             messageService.success('Mentor Record Updated', 'The mentor record has been successfully updated.', 3000);
             console.log('✅ Mentor record updated successfully');
             console.log('📋 Updated record:', updatedMentorRecord);
+            
+            // Reload ALL data to ensure shares, valuation, and charts are updated
+            console.log('🔄 Reloading data after updating mentor...');
+            await loadCapTableData();
         } catch (err) {
             console.error('❌ Error updating mentor record:', err);
             if (err instanceof Error) {
@@ -2211,6 +2286,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setMentorToDelete(null);
             
             messageService.success('Mentor Record Deleted', 'The mentor record has been successfully deleted.', 3000);
+            
+            // Reload ALL data to ensure shares, valuation, and charts are updated
+            console.log('🔄 Reloading data after deleting mentor...');
+            await loadCapTableData();
         } catch (error) {
             console.error('Error deleting mentor record:', error);
             setError('Failed to delete mentor record. Please try again.');
@@ -2485,15 +2564,15 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
              investment: Number(inv.amount) || 0
          })).filter(item => item.valuation > 0 || item.investment > 0) : [];
 
-     // Calculate equity distribution from investment records, founders, and ESOP
+     // Calculate equity distribution from investment records, founders, ESOP, recognition, and mentors
      const equityData = (() => {
          const distribution: { name: string; value: number }[] = [];
          
-         // Calculate total allocated shares (this is now the total shares)
-         const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
-         const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-         const esopReservedShares = startup.esopReservedShares || 0;
-         const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares;
+         // Use the comprehensive calculateTotalShares function that includes all sources
+         const calculatedTotalShares = calculateTotalShares();
+         
+         // Get ESOP reserved shares for the distribution calculation
+         const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
          
          // No normalization needed since total shares = total allocated shares
          
@@ -2586,6 +2665,22 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                  distribution.push({
                      name: 'Recognition & Incubation',
                      value: recognitionPercentage
+                 });
+             }
+         }
+         
+         // Add Mentor equity from shares
+         const totalMentorShares = mentorRecords
+             .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
+             .reduce((sum, rec) => sum + (rec.shares || 0), 0);
+             
+         if (totalMentorShares > 0 && calculatedTotalShares > 0) {
+             const mentorPercentage = (totalMentorShares / calculatedTotalShares) * 100;
+             
+             if (mentorPercentage > 0) {
+                 distribution.push({
+                     name: 'Mentors',
+                     value: mentorPercentage
                  });
              }
          }
@@ -2733,6 +2828,9 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                          const totalRecognitionShares = recognitionRecords
                              .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
                              .reduce((sum, rec) => sum + (rec.shares || 0), 0);
+                         const totalMentorShares = mentorRecords
+                             .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
+                             .reduce((sum, rec) => sum + (rec.shares || 0), 0);
                          
                          // Get ESOP reserved shares from the correct source
                          // Use startup object as fallback since esopData state is not updating properly
@@ -2747,8 +2845,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                              esopReservedSharesType: typeof esopReservedShares
                          });
                          
-                         // Calculate total shares
-                         const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares;
+                         // Calculate total shares using comprehensive function
+                         const calculatedTotalShares = calculateTotalShares();
                          
                          // CRITICAL DEBUG: Check if esopData is null
                          console.log('🚨 CRITICAL DEBUG - esopData Status:', {
@@ -2796,6 +2894,17 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                                  </div>
                                                  <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-sm font-medium">
                                                      {totalRecognitionShares.toLocaleString()} shares
+                                                 </div>
+                                             </div>
+                                         )}
+                                         {totalMentorShares > 0 && (
+                                             <div className="flex justify-between items-center">
+                                                 <div className="flex items-center space-x-2">
+                                                     <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                                                     <span className="text-slate-500 font-medium">Mentors</span>
+                                                 </div>
+                                                 <div className="bg-purple-50 text-purple-700 px-3 py-1 rounded-lg text-sm font-medium">
+                                                     {totalMentorShares.toLocaleString()} shares
                                                  </div>
                                              </div>
                                          )}
@@ -3067,182 +3176,6 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 <p className="text-sm text-slate-500">No founder information available.</p>
                             )}
                         </div>
-                    </Card>
-                                         <Card>
-                         <div className="flex justify-between items-center mb-4">
-                             <div className="flex items-center gap-2">
-                                 <h3 className="text-lg font-semibold text-slate-700">Fundraising</h3>
-                                 {fundraising.active && (
-                                     <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
-                                         Active
-                                     </span>
-                                 )}
-                             </div>
-                             {!isEditingFundraising ? (
-                                 <Button variant="outline" size="sm" onClick={() => {
-                                     setIsEditingFundraising(true);
-                                     setPitchDeckFile(null); // Reset file when entering edit mode
-                                 }} disabled={!canEdit}>
-                                     <Edit3 className="h-4 w-4 mr-2" />Edit
-                                 </Button>
-                             ) : (
-                                 <div className="flex gap-2">
-                                     <Button variant="secondary" size="sm" onClick={() => {
-                                         setIsEditingFundraising(false);
-                                         setPitchDeckFile(null); // Clear file when cancelling edit
-                                     }}>
-                                         <X className="h-4 w-4"/>
-                                     </Button>
-                                     <Button size="sm" onClick={handleFundraisingSave} disabled={isLoading}>
-                                         {isLoading ? (
-                                             <>
-                                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                                                 Saving...
-                                             </>
-                                         ) : (
-                                             <>
-                                                 <Save className="h-4 w-4 mr-2"/>Save
-                                             </>
-                                         )}
-                                     </Button>
-                                 </div>
-                             )}
-                         </div>
-                                                 {!isEditingFundraising ? (
-                             // Display mode - show current fundraising details
-                             <div className="space-y-4">
-                                 {fundraisingDetails.length > 0 ? (
-                                     <>
-                                         <div className="grid grid-cols-2 gap-4 text-sm">
-                                             <div>
-                                                 <p className="font-medium text-slate-700">Round Type</p>
-                                                 <p className="text-slate-600">{fundraising.type}</p>
-                                             </div>
-                                             <div>
-                                                 <p className="font-medium text-slate-700">Target Value</p>
-                                                 <p className="text-slate-600">{formatCurrency(fundraising.value, startupCurrency)}</p>
-                                             </div>
-                                             <div>
-                                                 <p className="font-medium text-slate-700">Equity Offered</p>
-                                                 <p className="text-slate-600">{fundraising.equity}%</p>
-                                             </div>
-                                             <div>
-                                                 <p className="font-medium text-slate-700">Status</p>
-                                                 <p className="text-slate-600">
-                                                     {fundraising.active ? 'Active' : 'Inactive'}
-                                                 </p>
-                                             </div>
-                                         </div>
-                                         
-                                         {fundraising.pitchDeckUrl && (
-                                             <div>
-                                                 <p className="font-medium text-slate-700 mb-2">Pitch Deck</p>
-                                                 <Button 
-                                                     size="sm" 
-                                                     variant="outline" 
-                                                     onClick={() => window.open(fundraising.pitchDeckUrl, '_blank')}
-                                                 >
-                                                     <Download className="h-4 w-4 mr-2" />
-                                                     View Pitch Deck
-                                                 </Button>
-                                             </div>
-                                         )}
-                                         
-                                         {fundraising.pitchVideoUrl && (
-                                             <div>
-                                                 <p className="font-medium text-slate-700 mb-2">Pitch Video</p>
-                                                 <Button 
-                                                     size="sm" 
-                                                     variant="outline" 
-                                                     onClick={() => window.open(fundraising.pitchVideoUrl, '_blank')}
-                                                 >
-                                                     <Download className="h-4 w-4 mr-2" />
-                                                     Watch Video
-                                                 </Button>
-                                             </div>
-                                         )}
-                                         
-                                         {fundraising.validationRequested && (
-                                             <div className="p-3 bg-blue-50 border-l-4 border-brand-accent text-sm text-slate-600">
-                                                 <p className="font-medium">Startup Nation Validation Requested</p>
-                                                 <p>3% of fund raised or 4% of total equity raised as fees for validation, documentation and connection.</p>
-                                             </div>
-                                         )}
-                                     </>
-                                 ) : (
-                                     <div className="text-center py-6">
-                                         <p className="text-slate-500 mb-2">No fundraising details configured</p>
-                                         <p className="text-sm text-slate-400">Click Edit to set up your fundraising round</p>
-                                     </div>
-                                 )}
-                             </div>
-                         ) : (
-                             // Edit mode - show form
-                             <fieldset disabled={!isEditingFundraising}>
-                                 <div className="space-y-4">
-                                     <div className="flex items-center">
-                                         <input 
-                                             type="checkbox" 
-                                             id="fundraising-active" 
-                                             className="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary" 
-                                             checked={fundraising.active} 
-                                             onChange={(e) => setFundraising({...fundraising, active: e.target.checked})} 
-                                         />
-                                         <label htmlFor="fundraising-active" className="ml-2 block text-sm text-gray-900">Activate Fundraising Round</label>
-                                     </div>
-                                                         <Select label="Type" id="fr-type" value={fundraising.type} onChange={e => setFundraising({...fundraising, type: e.target.value as InvestmentType})}>
-                        {Object.values(InvestmentType).map(t => <option key={t} value={t}>{t}</option>)}
-                    </Select>
-                                    <Input label="Value" id="fr-value" type="number" value={fundraising.value} onChange={e => setFundraising({...fundraising, value: Number(e.target.value)})} />
-                                    <Input label="Equity" id="fr-equity" type="number" value={fundraising.equity} onChange={e => setFundraising({...fundraising, equity: Number(e.target.value)})} />
-                                    {/* New dropdowns for Domain and Stage */}
-                                    <Select label="Domain" id="fr-domain" value={(fundraising as any).domain || ''} onChange={e => setFundraising({ ...fundraising, domain: e.target.value as any })}>
-                                        <option value="">Select your startup sector</option>
-                                        {Object.values(StartupDomain).map(d => <option key={d} value={d}>{d}</option>)}
-                                    </Select>
-                                    <Select label="Stage" id="fr-stage" value={(fundraising as any).stage || ''} onChange={e => setFundraising({ ...fundraising, stage: e.target.value as any })}>
-                                        {Object.values(StartupStage).map(s => <option key={s} value={s}>{s}</option>)}
-                                    </Select>
-                                     <CloudDriveInput
-                                         value={fundraising.pitchDeckUrl || ''}
-                                         onChange={(url) => {
-                                             // If URL is provided, clear the file and update URL
-                                             setPitchDeckFile(null);
-                                             setFundraising({...fundraising, pitchDeckUrl: url});
-                                         }}
-                                         onFileSelect={(file) => {
-                                             console.log('📥 Pitch deck file selected:', file?.name);
-                                             if (file) {
-                                                 setPitchDeckFile(file);
-                                                 // Clear URL when file is selected
-                                                 setFundraising({...fundraising, pitchDeckUrl: ''});
-                                             }
-                                         }}
-                                         placeholder="Paste your cloud drive link here..."
-                                         label="Pitch Deck"
-                                         accept=".pdf"
-                                         maxSize={10}
-                                         documentType="pitch deck"
-                                         showPrivacyMessage={false}
-                                     />
-                                     {pitchDeckFile && (
-                                         <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
-                                             📄 File selected: {pitchDeckFile.name} ({(pitchDeckFile.size / 1024 / 1024).toFixed(2)} MB)
-                                         </div>
-                                     )}
-                                     <input type="hidden" id="pitch-deck-url" name="pitch-deck-url" />
-                                     <Input 
-                                         label="Pitch Video (YouTube Link)" 
-                                         id="fr-video" 
-                                         type="url" 
-                                         placeholder="https://www.youtube.com/watch?v=..."
-                                         value={fundraising.pitchVideoUrl || ''}
-                                         onChange={e => setFundraising({...fundraising, pitchVideoUrl: e.target.value})}
-                                     />
-                                    {/* Startup Nation validation removed as per requirement */}
-                                 </div>
-                             </fieldset>
-                         )}
                     </Card>
                 </div>
             </div>

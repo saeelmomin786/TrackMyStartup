@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { FundraisingDetails, InvestmentType, Startup, StartupDomain, StartupStage, UserRole } from '../../types';
 import { capTableService } from '../../lib/capTableService';
 import { AuthUser } from '../../lib/auth';
@@ -7,12 +7,15 @@ import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import CloudDriveInput from '../ui/CloudDriveInput';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, formatCurrencyCompact } from '../../lib/utils';
 import { messageService } from '../../lib/messageService';
 import { validationService } from '../../lib/validationService';
 import { generalDataService, GeneralDataItem } from '../../lib/generalDataService';
 import { investorListService, InvestorListItem } from '../../lib/investorListService';
 import { getVideoEmbedUrl, VideoSource } from '../../lib/videoUtils';
+import { financialsService } from '../../lib/financialsService';
+import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -164,11 +167,162 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   // Validation status
   const [validationStatus, setValidationStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
   
+  // Financial data for traction graph
+  const startupCurrency = useStartupCurrency(startup);
+  const [tractionGraphData, setTractionGraphData] = useState<any[]>([]);
+  const [isLoadingTractionData, setIsLoadingTractionData] = useState(false);
+  const [tractionGraphSize, setTractionGraphSize] = useState<'small' | 'medium' | 'large'>('medium');
+  const [tractionGraphCustomHeight, setTractionGraphCustomHeight] = useState<number | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartY = useRef<number>(0);
+  const resizeStartHeight = useRef<number>(0);
+  const isResizingRef = useRef<boolean>(false);
+  
+  // Graph size configurations
+  const graphSizes = {
+    small: { height: 'h-20', heightPx: 80 },
+    medium: { height: 'h-24', heightPx: 96 },
+    large: { height: 'h-32', heightPx: 128 }
+  };
+  
+  // Get current graph height (custom or preset)
+  const getCurrentGraphHeight = () => {
+    if (tractionGraphCustomHeight !== null) {
+      return tractionGraphCustomHeight;
+    }
+    return graphSizes[tractionGraphSize].heightPx;
+  };
+  
+  // Handle resize move - using ref to avoid closure issues
+  const handleResizeMoveRef = useRef<((e: MouseEvent) => void) | null>(null);
+  const handleResizeEndRef = useRef<(() => void) | null>(null);
+  
+  // Initialize resize handlers
+  useEffect(() => {
+    // Handle resize move
+    handleResizeMoveRef.current = (e: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      e.preventDefault();
+      const deltaY = e.clientY - resizeStartY.current;
+      const newHeight = Math.max(60, Math.min(200, resizeStartHeight.current + deltaY));
+      setTractionGraphCustomHeight(newHeight);
+    };
+    
+    // Handle resize end
+    handleResizeEndRef.current = () => {
+      isResizingRef.current = false;
+      setIsResizing(false);
+      if (handleResizeMoveRef.current) {
+        document.removeEventListener('mousemove', handleResizeMoveRef.current);
+      }
+      if (handleResizeEndRef.current) {
+        document.removeEventListener('mouseup', handleResizeEndRef.current);
+      }
+    };
+  }, []);
+  
+  // Handle resize start
+  const handleResizeStart = (e: React.MouseEvent) => {
+    if (!canEdit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    isResizingRef.current = true;
+    setIsResizing(true);
+    resizeStartY.current = e.clientY;
+    resizeStartHeight.current = getCurrentGraphHeight();
+    
+    if (handleResizeMoveRef.current) {
+      document.addEventListener('mousemove', handleResizeMoveRef.current);
+    }
+    if (handleResizeEndRef.current) {
+      document.addEventListener('mouseup', handleResizeEndRef.current);
+    }
+  };
+  
+  // Cleanup event listeners on unmount
+  useEffect(() => {
+    return () => {
+      if (handleResizeMoveRef.current) {
+        document.removeEventListener('mousemove', handleResizeMoveRef.current);
+      }
+      if (handleResizeEndRef.current) {
+        document.removeEventListener('mouseup', handleResizeEndRef.current);
+      }
+    };
+  }, []);
+  
+  // Reset to preset size
+  const resetToPresetSize = (size: 'small' | 'medium' | 'large') => {
+    setTractionGraphSize(size);
+    setTractionGraphCustomHeight(null);
+  };
+  
   // CRM ref to add investors
   const crmRef = useRef<{ 
     addInvestorToCRM: (investorData: { name: string; email?: string; website?: string; linkedin?: string }) => void;
     addProgramToCRM: (programData: { programName: string; programType?: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp'; description?: string; programUrl?: string; facilitatorName?: string }) => void;
   } | null>(null);
+
+  // Load financial data for traction graph
+  const loadTractionGraphData = async () => {
+    if (!startup?.id) return;
+    setIsLoadingTractionData(true);
+    try {
+      // Load all financial records (Till Date)
+      const allRecords = await financialsService.getFinancialRecords(startup.id, {});
+      
+      // Generate monthly revenue vs expenses data
+      const monthlyData: { [key: string]: { revenue: number; expenses: number } } = {};
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      // For one-pager, show last 12 months or all if less than 12 months
+      allRecords.forEach(record => {
+        const recordDate = new Date(record.date);
+        const recordYear = recordDate.getFullYear();
+        const monthIndex = recordDate.getMonth();
+        const monthName = months[monthIndex];
+        const key = `${recordYear}-${monthName}`;
+        
+        if (!monthlyData[key]) {
+          monthlyData[key] = { revenue: 0, expenses: 0 };
+        }
+        
+        if (record.record_type === 'revenue') {
+          monthlyData[key].revenue += record.amount;
+        } else {
+          monthlyData[key].expenses += record.amount;
+        }
+      });
+      
+      // Sort by date (year-month) and take last 12 months
+      const sortedEntries = Object.entries(monthlyData).sort((a, b) => {
+        const [yearA, monthA] = a[0].split('-');
+        const [yearB, monthB] = b[0].split('-');
+        const monthIndexA = months.indexOf(monthA);
+        const monthIndexB = months.indexOf(monthB);
+        
+        if (yearA !== yearB) {
+          return parseInt(yearA) - parseInt(yearB);
+        }
+        return monthIndexA - monthIndexB;
+      });
+      
+      // Take last 12 months for the graph
+      const last12Months = sortedEntries.slice(-12);
+      
+      const graphData = last12Months.map(([key, data]) => ({
+        name: key.split('-')[1], // Just show month name for compact display
+        revenue: data.revenue,
+        expenses: data.expenses
+      }));
+      
+      setTractionGraphData(graphData);
+    } catch (error) {
+      console.error('Error loading traction graph data:', error);
+    } finally {
+      setIsLoadingTractionData(false);
+    }
+  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -195,6 +349,9 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         ]);
         
         setExistingRounds(rounds);
+        
+        // Load traction graph data
+        loadTractionGraphData();
         
         // Set validation status
         if (validationRequest) {
@@ -2077,17 +2234,132 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   </div>
 
                   <div className="border border-slate-300 rounded-[3px] p-1 flex-shrink-0" style={{ minHeight: 0 }}>
-                    <p className="font-bold text-[11px] text-blue-800 mb-0.5">TRACTION (GRAPH)</p>
-                    <p className="text-[10px] text-slate-600 mb-0.5">
-                      Summarise your key metrics and growth trend.
-                    </p>
-                    <pre className="whitespace-pre-wrap text-[10px] text-slate-900 leading-tight" style={{ margin: 0, marginBottom: '4px' }}>
-                      {limitText(
-                        onePager.traction,
-                        420,
-                        'Revenue / users / GMV over last 12–24 months.\n(E.g., simple month-on-month growth summary)',
+                    <div className="flex items-center justify-between mb-0.5">
+                      <p className="font-bold text-[11px] text-blue-800">TRACTION (GRAPH)</p>
+                      {canEdit && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => resetToPresetSize('small')}
+                            className={`px-1.5 py-0.5 text-[8px] rounded border ${
+                              tractionGraphSize === 'small' && tractionGraphCustomHeight === null
+                                ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                            }`}
+                            title="Small"
+                          >
+                            S
+                          </button>
+                          <button
+                            onClick={() => resetToPresetSize('medium')}
+                            className={`px-1.5 py-0.5 text-[8px] rounded border ${
+                              tractionGraphSize === 'medium' && tractionGraphCustomHeight === null
+                                ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                            }`}
+                            title="Medium"
+                          >
+                            M
+                          </button>
+                          <button
+                            onClick={() => resetToPresetSize('large')}
+                            className={`px-1.5 py-0.5 text-[8px] rounded border ${
+                              tractionGraphSize === 'large' && tractionGraphCustomHeight === null
+                                ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                            }`}
+                            title="Large"
+                          >
+                            L
+                          </button>
+                        </div>
                       )}
-                    </pre>
+                    </div>
+                    <p className="text-[10px] text-slate-600 mb-0.5">
+                      Revenue vs Expenses (Last 12 Months)
+                      {canEdit && (
+                        <span className="ml-1 text-[9px] text-slate-400">(Drag bottom edge to resize)</span>
+                      )}
+                    </p>
+                    {isLoadingTractionData ? (
+                      <div 
+                        className="flex items-center justify-center text-[10px] text-slate-500 relative"
+                        style={{ height: `${getCurrentGraphHeight()}px` }}
+                      >
+                        Loading graph...
+                      </div>
+                    ) : tractionGraphData.length > 0 ? (
+                      <div 
+                        className="w-full relative"
+                        style={{ height: `${getCurrentGraphHeight()}px` }}
+                      >
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={tractionGraphData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                            <XAxis 
+                              dataKey="name" 
+                              fontSize={8} 
+                              tick={{ fill: '#64748b' }}
+                              interval="preserveStartEnd"
+                            />
+                            <YAxis 
+                              fontSize={8} 
+                              tick={{ fill: '#64748b' }}
+                              tickFormatter={(val) => formatCurrencyCompact(val, startupCurrency)}
+                              width={35}
+                            />
+                            <Tooltip 
+                              formatter={(value: number) => formatCurrency(value, startupCurrency)}
+                              contentStyle={{ fontSize: '10px', padding: '4px' }}
+                            />
+                            <Legend 
+                              wrapperStyle={{ fontSize: '9px', paddingTop: '4px' }}
+                              iconSize={8}
+                            />
+                            <Bar dataKey="revenue" fill="#16a34a" name="Revenue" radius={[2, 2, 0, 0]} />
+                            <Bar dataKey="expenses" fill="#dc2626" name="Expenses" radius={[2, 2, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                        {canEdit && (
+                          <div
+                            onMouseDown={handleResizeStart}
+                            className={`absolute bottom-0 left-0 right-0 h-4 cursor-ns-resize transition-colors ${
+                              isResizing ? 'bg-blue-400' : 'bg-blue-100/50 hover:bg-blue-200'
+                            }`}
+                            style={{ zIndex: 10, userSelect: 'none' }}
+                            title="Drag to resize graph"
+                            onDragStart={(e) => e.preventDefault()}
+                          >
+                            <div className="absolute bottom-1.5 left-1/2 transform -translate-x-1/2 w-20 h-1 bg-slate-600 rounded-full"></div>
+                            <div className="absolute bottom-0.5 left-1/2 transform -translate-x-1/2 text-[8px] text-slate-600 font-medium">
+                              ⋮⋮
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div 
+                        className="flex items-center justify-center text-[10px] text-slate-500 border border-slate-200 rounded relative"
+                        style={{ height: `${getCurrentGraphHeight()}px` }}
+                      >
+                        No financial data available
+                        {canEdit && (
+                          <div
+                            onMouseDown={handleResizeStart}
+                            className={`absolute bottom-0 left-0 right-0 h-4 cursor-ns-resize transition-colors ${
+                              isResizing ? 'bg-blue-400' : 'bg-blue-100/50 hover:bg-blue-200'
+                            }`}
+                            style={{ zIndex: 10, userSelect: 'none' }}
+                            title="Drag to resize graph"
+                            onDragStart={(e) => e.preventDefault()}
+                          >
+                            <div className="absolute bottom-1.5 left-1/2 transform -translate-x-1/2 w-20 h-1 bg-slate-600 rounded-full"></div>
+                            <div className="absolute bottom-0.5 left-1/2 transform -translate-x-1/2 text-[8px] text-slate-600 font-medium">
+                              ⋮⋮
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="mt-2 grid grid-cols-3 gap-1.5 text-[9px]">
                       <div className="border border-slate-300 rounded-[3px] p-1 text-center">
                         <p className="font-semibold text-[8px] text-blue-800 mb-0.5">REVENUE (TILL DATE)</p>
@@ -2347,7 +2619,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   border: '1px solid #d1d5db',
                   borderRadius: 4,
                   padding: 6,
-                  minHeight: 80,
+                  minHeight: getCurrentGraphHeight(),
                 }}
               >
                 <div
@@ -2367,15 +2639,47 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     marginBottom: 4,
                   }}
                 >
-                  Summarise your key metrics and growth trend.
+                  Revenue vs Expenses (Last 12 Months)
                 </div>
-                <div style={{ whiteSpace: 'pre-wrap', fontSize: 11, color: '#1f2937', marginBottom: 4, lineHeight: 1.5 }}>
-                  {limitText(
-                    onePager.traction,
-                    420,
-                    'Revenue / users / GMV over last 12–24 months.\n(E.g., simple month-on-month growth summary)',
-                  )}
-                </div>
+                {isLoadingTractionData ? (
+                  <div style={{ height: getCurrentGraphHeight() - 40, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#6b7280' }}>
+                    Loading graph...
+                  </div>
+                ) : tractionGraphData.length > 0 ? (
+                  <div style={{ height: getCurrentGraphHeight() - 40, width: '100%' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={tractionGraphData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis 
+                          dataKey="name" 
+                          fontSize={8} 
+                          tick={{ fill: '#64748b' }}
+                          interval="preserveStartEnd"
+                        />
+                        <YAxis 
+                          fontSize={8} 
+                          tick={{ fill: '#64748b' }}
+                          tickFormatter={(val) => formatCurrencyCompact(val, startupCurrency)}
+                          width={35}
+                        />
+                        <Tooltip 
+                          formatter={(value: number) => formatCurrency(value, startupCurrency)}
+                          contentStyle={{ fontSize: '10px', padding: '4px' }}
+                        />
+                        <Legend 
+                          wrapperStyle={{ fontSize: '9px', paddingTop: '4px' }}
+                          iconSize={8}
+                        />
+                        <Bar dataKey="revenue" fill="#16a34a" name="Revenue" radius={[2, 2, 0, 0]} />
+                        <Bar dataKey="expenses" fill="#dc2626" name="Expenses" radius={[2, 2, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div style={{ height: getCurrentGraphHeight() - 40, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 4 }}>
+                    No financial data available
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
                   {[
                     {

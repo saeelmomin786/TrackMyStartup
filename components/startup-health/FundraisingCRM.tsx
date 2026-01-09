@@ -720,11 +720,30 @@ const FundraisingCRM = React.forwardRef<{
                 {columnItems.map(item => (
                   <Card
                     key={item.id}
-                    className="p-3 hover:shadow-md transition-shadow"
+                    className="p-3 hover:shadow-md transition-shadow relative"
                     draggable
                     onDragStart={e => handleDragStart(e, item.id)}
                   >
-                    <div className="flex items-start justify-between mb-2">
+                    {/* Type Tag */}
+                    <div className="absolute top-2 right-2 z-10">
+                      {item.type === 'investor' ? (
+                        <span className="px-2 py-0.5 bg-slate-600 text-white text-[10px] font-medium rounded-full">
+                          Investor
+                        </span>
+                      ) : (
+                        <span className={`px-2 py-0.5 text-white text-[10px] font-medium rounded-full ${
+                          item.programType === 'Incubation' ? 'bg-blue-600' :
+                          item.programType === 'Grant' ? 'bg-green-600' :
+                          item.programType === 'Acceleration' ? 'bg-purple-600' :
+                          item.programType === 'Mentorship' ? 'bg-orange-600' :
+                          'bg-indigo-600'
+                        }`}>
+                          {item.programType}
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-start justify-between mb-2 pr-16">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
                         <div className={`rounded-full p-1.5 flex-shrink-0 ${item.type === 'investor' ? 'bg-slate-200' : 'bg-blue-200'}`}>
                           {item.type === 'investor' ? (

@@ -297,16 +297,24 @@ class ComplianceService {
             }
 
             const tasks = data || [];
-            const totalTasks = tasks.length;
-            const completedTasks = tasks.filter(task => 
+            
+            // IMPORTANT: Only count tasks where toggle is ON (is_applicable !== false)
+            // Tasks with toggle OFF should not affect compliance summary
+            // Default to true if is_applicable is null/undefined (backward compatibility)
+            const applicableTasks = tasks.filter(task => 
+                task.is_applicable !== false && task.is_applicable !== null
+            );
+            
+            const totalTasks = applicableTasks.length;
+            const completedTasks = applicableTasks.filter(task => 
                 task.ca_status === ComplianceStatus.Verified && 
                 task.cs_status === ComplianceStatus.Verified
             ).length;
-            const pendingTasks = tasks.filter(task => 
+            const pendingTasks = applicableTasks.filter(task => 
                 task.ca_status === ComplianceStatus.Pending || 
                 task.cs_status === ComplianceStatus.Pending
             ).length;
-            const overdueTasks = tasks.filter(task => {
+            const overdueTasks = applicableTasks.filter(task => {
                 const currentYear = new Date().getFullYear();
                 return task.year < currentYear && 
                     (task.ca_status === ComplianceStatus.Pending || 

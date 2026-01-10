@@ -149,10 +149,13 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     try {
       const complianceTasks = await complianceRulesIntegrationService.getComplianceTasksForStartup(startup.id);
       
-      const totalTasks = complianceTasks.length;
+      // Filter to only include applicable tasks
+      const applicableTasks = complianceTasks.filter(task => task.isApplicable !== false);
+      
+      const totalTasks = applicableTasks.length;
       
       // Calculate completed tasks (both CA and CS are Verified)
-      const completedTasks = complianceTasks.filter(task => {
+      const completedTasks = applicableTasks.filter(task => {
         const caVerified = !task.caRequired || task.caStatus === 'Verified';
         const csVerified = !task.csRequired || task.csStatus === 'Verified';
         return caVerified && csVerified;
@@ -160,7 +163,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       
       // Calculate submitted tasks (at least one required status is Submitted or Verified)
       // A task is considered submitted if at least one required verification (CA or CS) has status "Submitted" or "Verified"
-      const submittedTasks = complianceTasks.filter(task => {
+      const submittedTasks = applicableTasks.filter(task => {
         const caSubmitted = task.caRequired && (task.caStatus === 'Submitted' || task.caStatus === 'Verified');
         const csSubmitted = task.csRequired && (task.csStatus === 'Submitted' || task.csStatus === 'Verified');
         // If task requires both, at least one must be submitted; if only one is required, that one must be submitted
@@ -177,7 +180,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       
       // Calculate verified tasks (at least one required status is Verified)
       // A task is considered verified if at least one required verification (CA or CS) has status "Verified"
-      const verifiedTasks = complianceTasks.filter(task => {
+      const verifiedTasks = applicableTasks.filter(task => {
         const caVerified = task.caRequired && task.caStatus === 'Verified';
         const csVerified = task.csRequired && task.csStatus === 'Verified';
         // If task requires both, at least one must be verified; if only one is required, that one must be verified

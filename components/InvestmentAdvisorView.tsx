@@ -6,7 +6,7 @@ import { formatCurrency, formatCurrencyCompact, getCurrencySymbol } from '../lib
 import { useInvestmentAdvisorCurrency } from '../lib/hooks/useInvestmentAdvisorCurrency';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { AuthUser, authService } from '../lib/auth';
-import { Eye, Users, FileText, Globe, ExternalLink, Linkedin, HelpCircle, Heart, Share2, CheckCircle, Video, Star } from 'lucide-react';
+import { Eye, Users, FileText, Globe, ExternalLink, Linkedin, HelpCircle, Heart, Share2, CheckCircle, Video, Star, Briefcase, Shield, Building2, Search } from 'lucide-react';
 import ProfilePage from './ProfilePage';
 import InvestorView from './InvestorView';
 import StartupHealthView from './StartupHealthView';
@@ -27,7 +27,7 @@ import { generalDataService } from '../lib/generalDataService';
 import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../lib/advisorConnectionRequestService';
 import { advisorMandateService, AdvisorMandate, CreateAdvisorMandate } from '../lib/advisorMandateService';
 import { investorMandateService, InvestorMandate } from '../lib/investorMandateService';
-import { PlusCircle, Edit, Trash2, Filter, X } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, Filter, X, Clock } from 'lucide-react';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
 
 interface InvestmentAdvisorViewProps {
@@ -121,7 +121,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     domain: [],
     service_types: []
   });
-  const [collaborationSubTab, setCollaborationSubTab] = useState<'myCollaborators' | 'collaboratorRequests'>('myCollaborators');
+  const [collaborationSubTab, setCollaborationSubTab] = useState<'explore-collaborators' | 'myCollaborators' | 'collaboratorRequests'>('explore-collaborators');
   
   // Collaboration requests state
   const [collaborationRequests, setCollaborationRequests] = useState<AdvisorConnectionRequest[]>([]);
@@ -190,6 +190,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [advisorAddedStartups, setAdvisorAddedStartups] = useState<AdvisorAddedStartup[]>([]);
   const [loadingAddedStartups, setLoadingAddedStartups] = useState(false);
   const [showAddStartupModal, setShowAddStartupModal] = useState(false);
+  
+  // State for Launching Soon modal
+  const [showLaunchingSoonModal, setShowLaunchingSoonModal] = useState(false);
   const [editingAddedStartup, setEditingAddedStartup] = useState<AdvisorAddedStartup | null>(null);
   const [addStartupFormData, setAddStartupFormData] = useState<CreateAdvisorAddedStartup>({
     advisor_id: currentUser?.id || '',
@@ -8133,6 +8136,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
             <div className="border-b border-slate-200 mb-4 flex flex-wrap gap-4">
               <button
+                onClick={() => setCollaborationSubTab('explore-collaborators')}
+                className={`pb-2 text-sm font-medium ${
+                  collaborationSubTab === 'explore-collaborators'
+                    ? 'text-blue-600 border-b-2 border-blue-600'
+                    : 'text-slate-600 hover:text-slate-800 border-b-2 border-transparent'
+                }`}
+              >
+                Explore Collaborators
+              </button>
+              <button
                 onClick={() => setCollaborationSubTab('myCollaborators')}
                 className={`pb-2 text-sm font-medium ${
                   collaborationSubTab === 'myCollaborators'
@@ -8154,11 +8167,60 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               </button>
             </div>
 
-            {collaborationSubTab === 'myCollaborators' && (
+            {loadingCollaborationRequests && collaborationSubTab !== 'explore-collaborators' ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-slate-600">Loading collaboration data...</p>
+              </div>
+            ) : collaborationSubTab === 'explore-collaborators' ? (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900 mb-4">Explore by Profile Type</h3>
+                  <p className="text-sm text-slate-600 mb-6">Browse and connect with different types of collaborators</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {[
+                    { role: 'Investment Advisor', icon: Briefcase, color: 'bg-purple-100 text-purple-700 hover:bg-purple-200', description: 'Connect with investment advisors' },
+                    { role: 'Mentor', icon: Users, color: 'bg-green-100 text-green-700 hover:bg-green-200', description: 'Connect with mentors' },
+                    { role: 'CA', icon: FileText, color: 'bg-orange-100 text-orange-700 hover:bg-orange-200', description: 'Connect with Chartered Accountants' },
+                    { role: 'CS', icon: Shield, color: 'bg-pink-100 text-pink-700 hover:bg-pink-200', description: 'Connect with Company Secretaries' },
+                    { role: 'Incubation', icon: Building2, color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200', description: 'Connect with incubation centers' },
+                  ].map((profileType) => {
+                    const IconComponent = profileType.icon;
+                    return (
+                      <Card
+                        key={profileType.role}
+                        className="p-6 hover:shadow-lg transition-all duration-200 border border-slate-200 text-center"
+                      >
+                        <div className="flex flex-col items-center">
+                          <div className={`w-16 h-16 rounded-full ${profileType.color} flex items-center justify-center mb-4 transition-colors`}>
+                            <IconComponent className="h-8 w-8" />
+                          </div>
+                          <h4 className="text-lg font-semibold text-slate-900 mb-2">
+                            {profileType.role}
+                          </h4>
+                          <p className="text-sm text-slate-600 mb-4">
+                            {profileType.description}
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => setShowLaunchingSoonModal(true)}
+                            disabled={true}
+                          >
+                            <Eye className="h-3 w-3 mr-2" />
+                            Explore
+                          </Button>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : collaborationSubTab === 'myCollaborators' ? (
               <div>
-                {loadingCollaborationRequests ? (
-                  <div className="text-center py-8 text-slate-600">Loading collaborators...</div>
-                ) : acceptedCollaborators.length === 0 ? (
+                {acceptedCollaborators.length === 0 ? (
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
                     <p className="font-medium text-slate-800 mb-1">No collaborators yet</p>
                     <p className="text-slate-600">Accepted collaborators will appear here.</p>
@@ -8672,13 +8734,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   </div>
                 )}
               </div>
-            )}
-
-            {collaborationSubTab === 'collaboratorRequests' && (
+            ) : collaborationSubTab === 'collaboratorRequests' ? (
               <div>
-                {loadingCollaborationRequests ? (
-                  <div className="text-center py-8 text-slate-600">Loading requests...</div>
-                ) : collaborationRequests.length === 0 ? (
+                {collaborationRequests.length === 0 ? (
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
                     <p className="font-medium text-slate-800 mb-1">No collaborator requests</p>
                     <p className="text-slate-600">Incoming requests will be listed here.</p>
@@ -9206,11 +9264,43 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       )}
 
+      {/* Launching Soon Modal */}
+      {showLaunchingSoonModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowLaunchingSoonModal(false)}>
+          <Card className="bg-white border-2 border-blue-300 shadow-xl w-full max-w-md mx-auto relative" onClick={(e) => e.stopPropagation()}>
+            <div className="py-8 sm:py-10 px-6 text-center relative">
+              <button
+                onClick={() => setShowLaunchingSoonModal(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors z-10"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 mb-4">
+                <Clock className="h-8 w-8 text-blue-600" />
+              </div>
+              <h3 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
+                Launching Soon
+              </h3>
+              <p className="text-base sm:text-lg text-slate-600 max-w-md mx-auto mb-6">
+                This feature is coming soon! Stay tuned for exciting collaboration tools.
+              </p>
+              <Button
+                variant="primary"
+                onClick={() => setShowLaunchingSoonModal(false)}
+                className="w-full sm:w-auto"
+              >
+                Got it
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* Investor Dashboard Modal */}
       {viewingInvestorDashboard && selectedInvestor && (

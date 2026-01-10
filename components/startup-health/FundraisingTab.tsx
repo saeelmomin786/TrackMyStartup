@@ -28,6 +28,7 @@ interface FundraisingTabProps {
   user?: AuthUser;
   isViewOnly?: boolean;
   onActivateFundraising?: (details: FundraisingDetails, startup: Startup) => void;
+  isDueDiligenceView?: boolean;
 }
 
 type FundraisingSubTab = 'portfolio' | 'programs' | 'investors' | 'crm';
@@ -73,10 +74,18 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   user,
   isViewOnly = false,
   onActivateFundraising,
+  isDueDiligenceView = false,
 }) => {
   const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
 
   const [activeSubTab, setActiveSubTab] = useState<FundraisingSubTab>('portfolio');
+  
+  // In due diligence view, only show portfolio sub-tab, hide programs, investors, and crm
+  useEffect(() => {
+    if (isDueDiligenceView && activeSubTab !== 'portfolio') {
+      setActiveSubTab('portfolio');
+    }
+  }, [isDueDiligenceView, activeSubTab]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [existingRounds, setExistingRounds] = useState<FundraisingDetails[]>([]);
@@ -1243,39 +1252,43 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
           >
             Portfolio
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('programs')}
-            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeSubTab === 'programs'
-                ? 'border-brand-primary text-brand-primary'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            Grant / Incubation Programs
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('investors')}
-            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeSubTab === 'investors'
-                ? 'border-brand-primary text-brand-primary'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            Investor List
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('crm')}
-            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeSubTab === 'crm'
-                ? 'border-brand-primary text-brand-primary'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            CRM
-          </button>
+          {!isDueDiligenceView && (
+            <>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('programs')}
+                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeSubTab === 'programs'
+                    ? 'border-brand-primary text-brand-primary'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                Grant / Incubation Programs
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('investors')}
+                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeSubTab === 'investors'
+                    ? 'border-brand-primary text-brand-primary'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                Investor List
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('crm')}
+                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeSubTab === 'crm'
+                    ? 'border-brand-primary text-brand-primary'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                CRM
+              </button>
+            </>
+          )}
         </nav>
       </div>
 
@@ -1289,8 +1302,9 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       {activeSubTab === 'portfolio' && !isLoading && (
       <>
       {/* Current Fundraising + Preview side by side */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 xl:gap-6 items-stretch">
-        {/* Left: Current Fundraising Round */}
+      <div className={`grid grid-cols-1 ${isDueDiligenceView ? '' : 'xl:grid-cols-2'} gap-4 xl:gap-6 items-stretch`}>
+        {/* Left: Current Fundraising Round - Hidden in due diligence view */}
+        {!isDueDiligenceView && (
         <Card className="p-4 sm:p-6 h-full">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
@@ -1539,9 +1553,10 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
           )}
 
         </Card>
+        )}
 
         {/* Right: Fundraising Card Display - Same design as Discover page */}
-        <div className="flex flex-col h-full max-w-xl w-full mx-auto xl:mx-0">
+        <div className={`flex flex-col h-full ${isDueDiligenceView ? 'max-w-4xl w-full' : 'max-w-xl'} mx-auto xl:mx-0`}>
           <div className="mb-3">
             <h3 className="text-lg font-semibold text-slate-900">Your Fundraising Card</h3>
             <p className="text-xs text-slate-500">
@@ -1787,7 +1802,8 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         </div>
       </div>
 
-      {/* Auto-generated One-Pager (Questionnaire based) */}
+      {/* Auto-generated One-Pager (Questionnaire based) - Hidden in due diligence view */}
+      {!isDueDiligenceView && (
       <Card className="p-4 sm:p-6">
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Left: Questionnaire */}
@@ -2644,7 +2660,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 {isLoadingTractionData ? (
                   <div style={{ height: getCurrentGraphHeight() - 40, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#6b7280' }}>
                     Loading graph...
-                  </div>
+                </div>
                 ) : tractionGraphData.length > 0 ? (
                   <div style={{ height: getCurrentGraphHeight() - 40, width: '100%' }}>
                     <ResponsiveContainer width="100%" height="100%">
@@ -2783,11 +2799,12 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
           </div>
         </div>
       </Card>
+      )}
       </>
       )}
 
       {/* Grant / Incubation Programs: reuse existing Programs/Opportunities UI */}
-      {activeSubTab === 'programs' && !isLoading && (
+      {activeSubTab === 'programs' && !isDueDiligenceView && !isLoading && (
         <div className="space-y-4">
           <OpportunitiesTab 
             startup={{ id: startup.id, name: startup.name }} 
@@ -2798,7 +2815,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       )}
 
       {/* Investor List */}
-      {activeSubTab === 'investors' && !isLoading && (
+      {activeSubTab === 'investors' && !isDueDiligenceView && !isLoading && (
         <div className="space-y-4">
           <Card className="p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
@@ -3054,7 +3071,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       {/* CRM - Full Kanban Board */}
       {/* Always render CRM component (hidden when not active) so ref is always available */}
       {!isLoading && (
-        <div className={activeSubTab === 'crm' ? '' : 'hidden'}>
+        <div className={activeSubTab === 'crm' && !isDueDiligenceView ? '' : 'hidden'}>
           <FundraisingCRM 
             ref={crmRef}
             startupId={startup.id} 

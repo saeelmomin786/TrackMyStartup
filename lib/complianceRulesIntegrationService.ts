@@ -10,6 +10,7 @@ export interface IntegratedComplianceTask extends ComplianceTask {
   complianceDescription?: string;
   caType?: string;
   csType?: string;
+  isApplicable?: boolean; // Whether this compliance task is applicable to the startup
 }
 
 class ComplianceRulesIntegrationService {
@@ -183,27 +184,33 @@ class ComplianceRulesIntegrationService {
           const taskIds = dbTasks.map((t: any) => t.task_id);
           const { data: statusData, error: statusError } = await supabase
             .from('compliance_checks')
-            .select('task_id, ca_status, cs_status')
+            .select('task_id, ca_status, cs_status, is_applicable')
             .eq('startup_id', startupId)
             .in('task_id', taskIds);
 
           console.log('🔍 Status data from compliance_checks:', statusData, 'Error:', statusError);
           
-          // Create a map of task_id -> status for quick lookup
-          const statusMap = new Map<string, { ca_status?: string; cs_status?: string }>();
+          // Create a map of task_id -> status and is_applicable for quick lookup
+          const statusMap = new Map<string, { ca_status?: string; cs_status?: string; is_applicable?: boolean }>();
           if (statusData) {
             statusData.forEach((item: any) => {
+              // Preserve false values explicitly - don't default to true if is_applicable is false
+              const isApplicableValue = item.is_applicable !== null && item.is_applicable !== undefined 
+                ? item.is_applicable 
+                : true; // Only default to true if null or undefined
               statusMap.set(item.task_id, {
                 ca_status: item.ca_status,
-                cs_status: item.cs_status
+                cs_status: item.cs_status,
+                is_applicable: isApplicableValue
               });
+              console.log('🔍 Mapped task_id:', item.task_id, 'is_applicable:', item.is_applicable, '-> mapped value:', isApplicableValue);
             });
           }
 
           // Transform database tasks to IntegratedComplianceTask format
           const integratedTasks: IntegratedComplianceTask[] = dbTasks.map((task: any) => {
             // Get status from the map, fallback to 'Pending'
-            const statusInfo = statusMap.get(task.task_id) || {};
+            const statusInfo = statusMap.get(task.task_id);
             // Normalize frequency coming from DB
             const rawType = (task.task_type || '').toString();
             const normalizedFrequency: 'first-year' | 'annual' | 'monthly' | 'quarterly' =
@@ -213,7 +220,25 @@ class ComplianceRulesIntegrationService {
                 ? (rawType as any)
                 : 'annual';
 
-            return {
+            // Determine isApplicable value - explicitly check if statusInfo exists and has is_applicable property
+            let isApplicableValue: boolean;
+            if (statusInfo && 'is_applicable' in statusInfo && statusInfo.is_applicable !== null && statusInfo.is_applicable !== undefined) {
+              // statusInfo exists and has is_applicable property - use it (even if false)
+              isApplicableValue = statusInfo.is_applicable;
+            } else {
+              // No statusInfo or is_applicable is null/undefined - default to true
+              isApplicableValue = true;
+            }
+
+            // Debug logging for tasks with undefined isApplicable
+            if (task.task_id.includes('2022') || task.task_id.includes('2023') || task.task_id.includes('2024') || task.task_id.includes('2025') || task.task_id.includes('2026')) {
+              console.log('🔍 Transforming task:', task.task_id, 'statusInfo:', statusInfo, 'has is_applicable:', statusInfo ? 'is_applicable' in statusInfo : false, 'is_applicable value:', statusInfo?.is_applicable, 'final isApplicable:', isApplicableValue);
+            }
+
+            // Ensure isApplicable is always a boolean (never undefined)
+            const finalIsApplicable: boolean = typeof isApplicableValue === 'boolean' ? isApplicableValue : true;
+            
+            const integratedTask: IntegratedComplianceTask = {
               taskId: task.task_id,
               entityIdentifier: task.entity_identifier,
               entityDisplayName: task.entity_display_name,
@@ -222,8 +247,10 @@ class ComplianceRulesIntegrationService {
               caRequired: !!task.ca_required,
               csRequired: !!task.cs_required,
               // Read actual status from compliance_checks table, default to 'Pending' if not set
-              caStatus: (statusInfo.ca_status || 'Pending') as ComplianceStatus,
-              csStatus: (statusInfo.cs_status || 'Pending') as ComplianceStatus,
+              caStatus: (statusInfo?.ca_status || 'Pending') as ComplianceStatus,
+              csStatus: (statusInfo?.cs_status || 'Pending') as ComplianceStatus,
+              // Always set isApplicable to a boolean value (never undefined)
+              isApplicable: finalIsApplicable,
               uploads: existingUploads[task.task_id] || [],
               complianceRule: {
                 id: task.task_id,
@@ -236,11 +263,43 @@ class ComplianceRulesIntegrationService {
               },
               frequency: normalizedFrequency,
               complianceDescription: task.description || ''
-            } as IntegratedComplianceTask;
+            };
+            
+            // Verify isApplicable is set
+            if (integratedTask.isApplicable === undefined) {
+              console.error('❌ ERROR: isApplicable is undefined for task:', task.task_id, 'Setting to true');
+              integratedTask.isApplicable = true;
+            }
+            
+            return integratedTask;
           });
 
-          console.log('🔍 Transformed integrated tasks:', integratedTasks);
-          return integratedTasks;
+          // Final pass: Ensure all tasks have isApplicable set (defensive check)
+          const finalTasks = integratedTasks.map(task => {
+            // Explicitly ensure isApplicable is always a boolean
+            let isApplicableValue: boolean;
+            if (task.isApplicable === undefined || task.isApplicable === null) {
+              console.warn('⚠️ Task missing isApplicable, setting to true:', task.taskId);
+              isApplicableValue = true;
+            } else {
+              isApplicableValue = task.isApplicable === true;
+            }
+            
+            // Always return a new object with explicit boolean value
+            return {
+              ...task,
+              isApplicable: isApplicableValue
+            };
+          });
+
+          // Verify all tasks have isApplicable set
+          const tasksWithIssues = finalTasks.filter(t => t.isApplicable === undefined || t.isApplicable === null || typeof t.isApplicable !== 'boolean');
+          if (tasksWithIssues.length > 0) {
+            console.error('❌ ERROR: Tasks still have invalid isApplicable after final pass:', tasksWithIssues.map(t => ({ taskId: t.taskId, isApplicable: t.isApplicable, type: typeof t.isApplicable })));
+          }
+
+          console.log('🔍 Transformed integrated tasks (sample):', finalTasks.slice(0, 3).map(t => ({ taskId: t.taskId, isApplicable: t.isApplicable, type: typeof t.isApplicable })));
+          return finalTasks;
         } else if (!dbError && dbTasks && dbTasks.length === 0) {
           console.log('🔍 Database function returned empty results, falling back to comprehensive rules');
         } else if (dbError) {
@@ -329,6 +388,26 @@ class ComplianceRulesIntegrationService {
       const existingTasks = await complianceService.getComplianceTasksWithRealtime(startupId);
       const existingUploads = await complianceService.getAllComplianceUploads(startupId);
 
+      // Fetch is_applicable values from compliance_checks table for all existing tasks
+      const existingTaskIds = existingTasks.map(t => t.taskId);
+      const isApplicableMap = new Map<string, boolean>();
+      
+      if (existingTaskIds.length > 0) {
+        const { data: existingStatusData } = await supabase
+          .from('compliance_checks')
+          .select('task_id, is_applicable')
+          .eq('startup_id', startupId)
+          .in('task_id', existingTaskIds);
+
+        // Create a map of task_id -> is_applicable
+        if (existingStatusData) {
+          existingStatusData.forEach((item: any) => {
+            // Default to true if null/undefined, preserve false values
+            isApplicableMap.set(item.task_id, item.is_applicable !== null && item.is_applicable !== undefined ? item.is_applicable : true);
+          });
+        }
+      }
+
       // Create integrated tasks by combining comprehensive rules with existing tasks
       const integratedTasks: IntegratedComplianceTask[] = [];
 
@@ -371,6 +450,11 @@ class ComplianceRulesIntegrationService {
           }
           
           if (existingTask) {
+            // Get is_applicable from database, default to true if not set
+            const isApplicableValue = isApplicableMap.has(existingTask.taskId) 
+              ? isApplicableMap.get(existingTask.taskId)! 
+              : (existingTask.isApplicable !== undefined ? existingTask.isApplicable : true);
+            
             // Use existing task but ensure it has the correct year and comprehensive rule data
             const taskWithUploads = {
               ...existingTask,
@@ -381,7 +465,8 @@ class ComplianceRulesIntegrationService {
               frequency: rule.frequency,
               complianceDescription: rule.compliance_description,
               caType: rule.ca_type,
-              csType: rule.cs_type
+              csType: rule.cs_type,
+              isApplicable: isApplicableValue // Ensure isApplicable is always set
             };
             integratedTasks.push(taskWithUploads);
           } else {
@@ -396,6 +481,7 @@ class ComplianceRulesIntegrationService {
               csRequired: rule.verification_required === 'CS' || rule.verification_required === 'both',
               caStatus: ComplianceStatus.Pending,
               csStatus: ComplianceStatus.Pending,
+              isApplicable: true, // Default to applicable
               uploads: [],
               complianceRule: rule,
               frequency: rule.frequency,
@@ -414,9 +500,15 @@ class ComplianceRulesIntegrationService {
       for (const existingTask of existingTasks) {
         const hasComprehensiveRule = integratedTasks.some(task => task.taskId === existingTask.taskId);
         if (!hasComprehensiveRule) {
+          // Get is_applicable from database, default to true if not set
+          const isApplicableValue = isApplicableMap.has(existingTask.taskId) 
+            ? isApplicableMap.get(existingTask.taskId)! 
+            : (existingTask.isApplicable !== undefined ? existingTask.isApplicable : true);
+          
           const taskWithUploads = {
             ...existingTask,
-            uploads: existingUploads[existingTask.taskId] || []
+            uploads: existingUploads[existingTask.taskId] || [],
+            isApplicable: isApplicableValue // Ensure isApplicable is always set
           };
           integratedTasks.push(taskWithUploads);
         }
@@ -444,7 +536,31 @@ class ComplianceRulesIntegrationService {
         return a.task.localeCompare(b.task);
       });
 
-      return integratedTasks;
+      // Final pass: Ensure all tasks have isApplicable set (defensive check)
+      const finalTasks = integratedTasks.map(task => {
+        // Explicitly ensure isApplicable is always a boolean
+        let isApplicableValue: boolean;
+        if (task.isApplicable === undefined || task.isApplicable === null) {
+          console.warn('⚠️ Task missing isApplicable in fallback path, setting to true:', task.taskId);
+          isApplicableValue = true;
+        } else {
+          isApplicableValue = task.isApplicable === true;
+        }
+        
+        // Always return a new object with explicit boolean value
+        return {
+          ...task,
+          isApplicable: isApplicableValue
+        };
+      });
+
+      // Verify all tasks have isApplicable set
+      const tasksWithIssues = finalTasks.filter(t => t.isApplicable === undefined || t.isApplicable === null || typeof t.isApplicable !== 'boolean');
+      if (tasksWithIssues.length > 0) {
+        console.error('❌ ERROR: Tasks still have invalid isApplicable after final pass (fallback):', tasksWithIssues.map(t => ({ taskId: t.taskId, isApplicable: t.isApplicable, type: typeof t.isApplicable })));
+      }
+
+      return finalTasks;
     } catch (error) {
       console.error('Error getting integrated compliance tasks:', error);
       return [];
@@ -1033,14 +1149,18 @@ class ComplianceRulesIntegrationService {
     try {
       const tasks = await this.getComplianceTasksForStartup(startupId);
       
+      // IMPORTANT: Only count tasks where toggle is ON (isApplicable !== false)
+      // Tasks with toggle OFF should not affect compliance statistics
+      const applicableTasks = tasks.filter(task => task.isApplicable !== false);
+      
       const stats = {
-        total: tasks.length,
+        total: applicableTasks.length,
         pending: 0,
         compliant: 0,
         nonCompliant: 0
       };
 
-      for (const task of tasks) {
+      for (const task of applicableTasks) {
         if (task.caStatus === ComplianceStatus.Compliant && task.csStatus === ComplianceStatus.Compliant) {
           stats.compliant++;
         } else if (task.caStatus === ComplianceStatus.NonCompliant || task.csStatus === ComplianceStatus.NonCompliant) {

@@ -96,6 +96,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [esopData, setEsopData] = useState<{esopReservedShares: number, totalShares: number, pricePerShare: number} | null>(null);
+    const [currentValuation, setCurrentValuation] = useState<number>(startup.currentValuation || 0);
     
     // Debug startup object - FORCE VISIBLE
     // Component initialized successfully
@@ -724,8 +725,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setPricePerShare(0);
             return;
         }
-        // Use latest post-money valuation if available; fallback to startup.currentValuation
-        let latestValuation = startup.currentValuation || 0;
+        // Use latest post-money valuation if available; fallback to currentValuation state
+        let latestValuation = currentValuation > 0 ? currentValuation : (startup.currentValuation || 0);
         if (investmentRecords && investmentRecords.length > 0) {
             const latest = [...investmentRecords]
                 .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
@@ -735,7 +736,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         }
         const computed = latestValuation > 0 ? (latestValuation / calculatedTotalShares) : 0;
         setPricePerShare(computed);
-    }, [founders, investmentRecords, startup.currentValuation, startup.esopReservedShares, recognitionRecords]);
+    }, [founders, investmentRecords, currentValuation, startup.esopReservedShares, recognitionRecords]);
 
     // Real-time subscription for offers received
     useEffect(() => {
@@ -849,8 +850,8 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 financialsService.getFinancialRecords(startup.id),
                 recognitionService.getRecognitionRecordsByStartupId(startup.id),
                 mentorEquityService.getMentorRecordsByStartupId(startup.id),
-                // Load startup data to get country, registration info, and profile data (all from startups table)
-                supabase.from('startups').select('country_of_registration, company_type, registration_date, currency, country, total_shares, price_per_share').eq('id', startup.id).single(),
+                // Load startup data to get country, registration info, profile data, and current_valuation (all from startups table)
+                supabase.from('startups').select('country_of_registration, company_type, registration_date, currency, country, total_shares, price_per_share, current_valuation').eq('id', startup.id).single(),
                 employeesService.getEmployees(startup.id)
             ]);
 
@@ -967,7 +968,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     console.log('🔄 No price per share in database, calculating and saving...');
                     try {
                         // Get latest valuation
-                        let latestValuation = startup.currentValuation || 0;
+                        let latestValuation = currentValuation > 0 ? currentValuation : (startup.currentValuation || 0);
                         if (investmentRecords && investmentRecords.length > 0) {
                             const latest = [...investmentRecords]
                                 .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
@@ -1088,6 +1089,16 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             
             if (startupDataResult) {
                 setStartupProfileData(startupDataResult);
+                // Update current valuation from database
+                if (startupDataResult.current_valuation !== undefined && startupDataResult.current_valuation !== null) {
+                    const freshValuation = Number(startupDataResult.current_valuation) || 0;
+                    setCurrentValuation(freshValuation);
+                    // Also update startup object for consistency
+                    if (startup) {
+                        startup.currentValuation = freshValuation;
+                    }
+                    console.log('✅ Current valuation updated from database:', freshValuation);
+                }
                 console.log('✅ Startup profile data loaded and set:', startupDataResult);
             } else {
                 console.log('⚠️ No startup profile data available');
@@ -1201,6 +1212,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setIsLoading(false);
         }
     };
+
+    // Update current valuation when startup prop changes
+    useEffect(() => {
+        if (startup?.currentValuation !== undefined) {
+            setCurrentValuation(startup.currentValuation || 0);
+        }
+    }, [startup?.currentValuation]);
 
     const setupRealTimeSubscriptions = () => {
         if (!startup?.id) return;
@@ -2749,9 +2767,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                      <p className="text-sm font-medium text-slate-500">Current Valuation</p>
                      <p className="text-2xl font-bold">
                         {(() => {
-                            // Use cumulative current valuation from startup object
-                            // This ensures we show the total valuation, not just the latest investment
-                            return formatCurrency(startup.currentValuation || 0, startupCurrency);
+                            // Use current valuation from state (refreshed from database)
+                            // Fallback to startup prop if state is not yet loaded
+                            const valuation = currentValuation > 0 ? currentValuation : (startup.currentValuation || 0);
+                            return formatCurrency(valuation, startupCurrency);
                         })()}
                     </p>
                 </Card>
@@ -2788,7 +2807,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                     if (calculatedTotalShares > 0) {
                                         // Use cumulative current valuation for price per share calculation
                                         // This ensures consistent pricing across all shares
-                                        const cumulativeValuation = startup.currentValuation || 0;
+                                        const cumulativeValuation = currentValuation > 0 ? currentValuation : (startup.currentValuation || 0);
                                         const computedPricePerShare = cumulativeValuation / calculatedTotalShares;
                                         
                                         // DETAILED DEBUG: Track Equity Allocation price calculation

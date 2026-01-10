@@ -1072,6 +1072,15 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     // Check if this is a facilitator accessing the startup
     const isFacilitatorAccess = isViewOnly && userRole === 'Startup Facilitation Center';
     
+    // Check if this is a due diligence view (from investor advisor, investor, incubation CA, CS, or mentor)
+    const isDueDiligenceView = isViewOnly && (
+        userRole === 'Investment Advisor' || 
+        userRole === 'Investor' || 
+        userRole === 'CA' || 
+        userRole === 'CS' || 
+        userRole === 'Mentor'
+    );
+    
     // Get the target tab for facilitator access
     const facilitatorTargetTab = (window as any).facilitatorTargetTab;
     
@@ -1089,6 +1098,12 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         
         // Prefer URL param if provided; otherwise default to dashboard
         const fromUrl = (getQueryParam('tab') as TabId) || 'dashboard';
+        
+        // In due diligence view, don't allow 'services' tab
+        if (isDueDiligenceView && fromUrl === 'services') {
+            return 'dashboard';
+        }
+        
         return fromUrl;
     });
     const [currentStartup, setCurrentStartup] = useState<Startup>(startup);
@@ -1822,6 +1837,10 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     };
 
     const handleTabChange = (tabId: TabId) => {
+        // Prevent switching to 'services' tab in due diligence view
+        if (isDueDiligenceView && tabId === 'services') {
+            return;
+        }
         setActiveTab(tabId);
         setQueryParam('tab', tabId, true);
         setIsMobileMenuOpen(false); // Close mobile menu when tab changes
@@ -1838,6 +1857,17 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
             { id: 'services', name: 'Services', icon: <Wrench className="w-4 h-4" /> },
+          ]
+        : isDueDiligenceView
+        ? [
+            // Due diligence view: hide services tab, show other tabs
+            { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+            { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
+            { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
+            { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
+            { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
+            { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
           ]
         : [
             // Regular startup users see all tabs; programs moved under Fundraising → Grant / Incubation Programs
@@ -1863,7 +1893,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                     currentUser={user} 
                     onUpdateCompliance={handleUpdateCompliance}
                     isViewOnly={isViewOnly}
-                    allowCAEdit={userRole === 'CA' || userRole === 'CS'}
+                    allowCAEdit={!isDueDiligenceView && (userRole === 'CA' || userRole === 'CS')}
                     onProfileUpdated={profileUpdateTrigger}
                 />;
             case 'financials':
@@ -1890,6 +1920,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                     user={user}
                     isViewOnly={isViewOnly}
                     onActivateFundraising={onActivateFundraising}
+                    isDueDiligenceView={isDueDiligenceView}
                   />
                 );
             case 'services':

@@ -135,34 +135,20 @@ class ComplianceRulesIntegrationService {
       let companyType: string | null = null;
       let registrationDate: string | null = null;
       
+      // Only select columns that actually exist in the database
       const { data: startupData, error: startupError } = await supabase
         .from('startups')
-        .select('country_of_registration, company_type, registration_date, country, companyType')
+        .select('country_of_registration, company_type, registration_date')
         .eq('id', startupId)
         .maybeSingle(); // Use maybeSingle() to avoid 406 error
 
       if (startupError) {
         console.error('Error fetching startup data:', startupError);
-        // Try alternative query with different column names
-        const { data: altStartup, error: altError } = await supabase
-          .from('startups')
-          .select('country, companyType, registration_date')
-          .eq('id', startupId)
-          .maybeSingle();
-        
-        if (altError || !altStartup) {
-          console.error('Error fetching startup data (alternative query):', altError);
-          return [];
-        }
-        
-        // Map alternative columns to expected format
-        countryName = altStartup.country || null;
-        companyType = altStartup.companyType || null;
-        registrationDate = altStartup.registration_date || null;
+        return [];
       } else if (startupData) {
         startup = startupData;
-        countryName = startup.country_of_registration || startup.country || null;
-        companyType = startup.company_type || startup.companyType || null;
+        countryName = startup.country_of_registration || null;
+        companyType = startup.company_type || null;
         registrationDate = startup.registration_date || null;
       }
 

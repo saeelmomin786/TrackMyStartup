@@ -1994,10 +1994,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           handler: async (response: any) => {
             try {
               // Verify payment and add credits
-              const verifyResponse = await fetch('/api/razorpay/verify', {
+              const verifyResponse = await fetch('/api/payment/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                  provider: 'razorpay',
                   razorpay_order_id: response.razorpay_order_id,
                   razorpay_payment_id: response.razorpay_payment_id,
                   razorpay_signature: response.razorpay_signature

@@ -635,12 +635,13 @@ const MentorView: React.FC<MentorViewProps> = ({
     const mentorCode = currentUser.mentor_code;
 
     try {
-      const response = await fetch('/api/invite-startup-mentor', {
+      const response = await fetch('/api/invite', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          type: 'startup-mentor',
           startupName,
           contactEmail: contactEmail,
           contactName: startupName,

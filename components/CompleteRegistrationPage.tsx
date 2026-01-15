@@ -712,11 +712,12 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     try {
       const appUrl = window.location.origin;
       const isProd = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
-      const inviteApi = isProd ? '/api/send-invite' : ((import.meta as any).env?.VITE_INVITE_API_URL || '/api/send-invite');
+      const inviteApi = isProd ? '/api/invite' : ((import.meta as any).env?.VITE_INVITE_API_URL || '/api/invite');
       const res = await fetch(inviteApi, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          type: 'center',
           kind: 'center',
           name: inviteCenter.name,
           email: inviteCenter.email,
@@ -755,11 +756,12 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     try {
       const appUrl = window.location.origin;
       const isProd = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
-      const inviteApi = isProd ? '/api/send-invite' : ((import.meta as any).env?.VITE_INVITE_API_URL || '/api/send-invite');
+      const inviteApi = isProd ? '/api/invite' : ((import.meta as any).env?.VITE_INVITE_API_URL || '/api/invite');
       const res = await fetch(inviteApi, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          type: 'investor',
           kind: 'investor',
           name: inviteInvestor.name,
           email: inviteInvestor.email,

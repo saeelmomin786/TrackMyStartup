@@ -962,12 +962,13 @@ class PaymentService {
         throw new Error('Missing PayPal order ID for payment verification');
       }
       
-      const response = await fetch(`/api/paypal/verify`, {
+      const response = await fetch(`/api/payment/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          provider: 'paypal',
           paypal_order_id: paymentResponse.paypal_order_id,
           paypal_payer_id: paymentResponse.paypal_payer_id,
           // persistence context
@@ -1032,12 +1033,13 @@ class PaymentService {
       
       const subscriptionId = paymentResponse.paypal_subscription_id || context?.paypalSubscriptionId;
       
-      const response = await fetch(`/api/paypal/verify-subscription`, {
+      const response = await fetch(`/api/payment/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          provider: 'paypal',
           paypal_subscription_id: subscriptionId,
           paypal_payer_id: paymentResponse.paypal_payer_id,
           // persistence context
@@ -1180,12 +1182,13 @@ class PaymentService {
         has_signature: !!paymentResponse.razorpay_signature
       });
       
-      const response = await fetch(`/api/razorpay/verify`, {
+      const response = await fetch(`/api/payment/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          provider: 'razorpay',
           razorpay_payment_id: paymentResponse.razorpay_payment_id,
           razorpay_order_id: orderId || subscriptionId, // Use subscription_id for subscription payments
           razorpay_signature: paymentResponse.razorpay_signature,

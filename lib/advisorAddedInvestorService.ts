@@ -208,13 +208,14 @@ class AdvisorAddedInvestorService {
       }
 
       // Call API endpoint to handle invite
-      const apiUrl = '/api/invite-investor-advisor';
+      const apiUrl = '/api/invite';
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          type: 'investor-advisor',
           investorId,
           advisorId,
           advisorCode,

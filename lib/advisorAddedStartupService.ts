@@ -378,13 +378,14 @@ class AdvisorAddedStartupService {
       }
 
       // Call API endpoint to handle invite
-      const apiUrl = '/api/invite-startup-advisor';
+      const apiUrl = '/api/invite';
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          type: 'startup-advisor',
           startupId,
           advisorId,
           advisorCode,

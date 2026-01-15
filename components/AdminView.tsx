@@ -4,7 +4,7 @@ import { ValidationRequest } from '../lib/validationService';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Badge from './ui/Badge';
-import { Users, Building2, HelpCircle, FileCheck2, LayoutGrid, Eye, Check, X, UserCheck, NotebookPen, BookUser, FileStack, Database, Shield, Settings, DollarSign, TrendingUp, AlertTriangle, BarChart3, UserPlus, Building, CreditCard, MessageSquare, Calendar, Globe, Target, Zap, Megaphone, FileText } from 'lucide-react';
+import { Users, Building2, HelpCircle, FileCheck2, LayoutGrid, Eye, Check, X, UserCheck, NotebookPen, BookUser, FileStack, Database, Shield, Settings, TrendingUp, AlertTriangle, BarChart3, UserPlus, Building, CreditCard, MessageSquare, Calendar, Globe, Target, Zap, Megaphone, FileText, DollarSign, Coins } from 'lucide-react';
 import AdminProgramsTab from './admin/AdminProgramsTab';
 import AdminBlogsTab from './admin/AdminBlogsTab';
 import InvestorListManager from './admin/InvestorListManager';
@@ -15,10 +15,12 @@ import DataManager from './DataManager';
 import { complianceRulesComprehensiveService } from '../lib/complianceRulesComprehensiveService';
 import { complianceManagementService, AuditorType, GovernanceType, CompanyType, ComplianceRule } from '../lib/complianceManagementService';
 import ComplianceRulesComprehensiveManager from './ComplianceRulesComprehensiveManager';
-import FinancialModelAdmin from './FinancialModelAdmin';
 import InvestorView from './InvestorView';
 import InvestmentAdvisorView from './InvestmentAdvisorView';
 import GeneralDataManager from './admin/GeneralDataManager';
+import FinancialTab from './admin/FinancialTab';
+import MentorPaymentsTab from './admin/MentorPaymentsTab';
+import CreditPricingTab from './admin/CreditPricingTab';
 import { supabase } from '../lib/supabase';
 import { investmentService } from '../lib/database';
 import { AuthUser } from '../lib/auth';
@@ -36,7 +38,7 @@ interface AdminViewProps {
   onViewStartup: (id: number) => void;
 }
 
-type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'financial' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList' | 'questionBank';
+type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList' | 'questionBank' | 'financial' | 'mentorPayments' | 'creditPricing';
 type TimeFilter = '30d' | '90d' | 'all';
 
 const SummaryCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -363,13 +365,15 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             case 'startupManagement': return <StartupManagementTab startups={startups} verificationRequests={verificationRequests} validationRequests={validationRequests} onProcessVerification={onProcessVerification} onProcessValidationRequest={onProcessValidationRequest} onViewStartup={onViewStartup} />;
             case 'investmentFlow': return <InvestmentFlowTab offers={investmentOffers} onProcessOffer={onProcessOffer} />;
             case 'compliance': return <ComplianceTab />;
-            case 'financial': return <FinancialTab />;
             case 'analytics': return <AnalyticsTab users={filteredUsers} startups={startups} offers={investmentOffers} timeFilter={timeFilter} setTimeFilter={setTimeFilter} />;
             case 'system': return <SystemTab />;
             case 'programs': return <AdminProgramsTab />;
             case 'blogs': return <AdminBlogsTab />;
             case 'investorList': return <InvestorListManager />;
             case 'questionBank': return <AdminQuestionBankTab />;
+            case 'financial': return <FinancialTab />;
+            case 'mentorPayments': return <MentorPaymentsTab />;
+            case 'creditPricing': return <CreditPricingTab />;
             default: return null;
         }
     }
@@ -407,8 +411,10 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
                     <TabButton id="startupManagement" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Building2 />}>Startup Management</TabButton>
                     <TabButton id="investmentFlow" activeTab={activeTab} setActiveTab={setActiveTab} icon={<TrendingUp />}>Investment Flow</TabButton>
                     <TabButton id="compliance" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Shield />}>Compliance</TabButton>
-                    <TabButton id="financial" activeTab={activeTab} setActiveTab={setActiveTab} icon={<DollarSign />}>Financial</TabButton>
                     <TabButton id="analytics" activeTab={activeTab} setActiveTab={setActiveTab} icon={<BarChart3 />}>Analytics</TabButton>
+                    <TabButton id="financial" activeTab={activeTab} setActiveTab={setActiveTab} icon={<DollarSign />}>Financial</TabButton>
+                    <TabButton id="mentorPayments" activeTab={activeTab} setActiveTab={setActiveTab} icon={<CreditCard />}>Mentor Payments</TabButton>
+                    <TabButton id="creditPricing" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Coins />}>Credit Pricing</TabButton>
                     <TabButton id="system" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Settings />}>System</TabButton>
                     <TabButton id="programs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Megaphone />}>Programs</TabButton>
                     <TabButton id="blogs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<FileText />}>Blogs</TabButton>
@@ -1287,9 +1293,6 @@ const ComplianceTab: React.FC = () => {
     return <ComplianceRulesComprehensiveManager />;
 };
 
-const FinancialTab: React.FC = () => {
-    return <FinancialModelAdmin currentUser={null} />;
-};
 
 const AnalyticsTab: React.FC<{
     users: User[];

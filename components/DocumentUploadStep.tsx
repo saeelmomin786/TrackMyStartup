@@ -264,8 +264,8 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
       return;
     }
 
-    // Role-specific document is not required for Mentor
-    if (userData.role !== 'Mentor' && !uploadedFiles.roleSpecific) {
+    // Role-specific document is not required for Mentor or Investment Advisor
+    if (userData.role !== 'Mentor' && userData.role !== 'Investment Advisor' && !uploadedFiles.roleSpecific) {
       setError(`${getRoleSpecificDocumentType(userData.role)} is required`);
       setIsLoading(false);
       return;
@@ -299,13 +299,8 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
       }
     }
 
-    // For Investment Advisors, license and logo are required
+    // For Investment Advisors, logo is required (license is optional)
     if (userData.role === 'Investment Advisor' || userData.role?.trim() === 'Investment Advisor') {
-      if (!uploadedFiles.license) {
-        setError('License (As per country regulations) is required for Investment Advisors');
-        setIsLoading(false);
-        return;
-      }
       if (!uploadedFiles.logo) {
         setError('Company logo is required for Investment Advisors');
         setIsLoading(false);
@@ -412,11 +407,12 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
               )}
             </div>
 
-            {/* Role-specific document - Not required for Mentor */}
+            {/* Role-specific document - Not required for Mentor or Investment Advisor */}
             {userData.role !== 'Mentor' && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   {getRoleSpecificDocumentType(userData.role)}
+                  {userData.role === 'Investment Advisor' && <span className="text-slate-500 text-xs ml-1">(Optional)</span>}
                 </label>
                 <CloudDriveInput
                   value=""
@@ -431,7 +427,7 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                   maxSize={10}
                   documentType="role-specific document"
                   showPrivacyMessage={false}
-                  required
+                  required={userData.role !== 'Investment Advisor'}
                 />
                 <input type="hidden" id="role-specific-url" name="role-specific-url" />
                 {uploadedFiles.roleSpecific && (
@@ -446,7 +442,7 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
             {(userData.role === 'Investment Advisor' || userData.role?.trim() === 'Investment Advisor') && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  License (As per country regulations)
+                  License (As per country regulations) <span className="text-slate-500 text-xs ml-1">(Optional)</span>
                 </label>
                 <CloudDriveInput
                   value=""
@@ -461,7 +457,6 @@ export const DocumentUploadStep: React.FC<DocumentUploadStepProps> = ({
                   maxSize={10}
                   documentType="license"
                   showPrivacyMessage={true}
-                  required
                 />
                 <input type="hidden" id="license-url" name="license-url" />
                 {uploadedFiles.license && (

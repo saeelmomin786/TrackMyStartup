@@ -91,6 +91,7 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
   const [loadingDomains, setLoadingDomains] = useState(true);
   const [logoInputMethod, setLogoInputMethod] = useState<'upload' | 'url'>('upload');
   const [logoUrlInput, setLogoUrlInput] = useState('');
+  const [country, setCountry] = useState<string>('');
 
   const serviceTypes = ['Investment Advisory', 'Due Diligence', 'Deal Sourcing', 'Valuation Services', 'Fundraising Support', 'Strategic Consulting', 'Other'];
   const [currencies, setCurrencies] = useState<Array<{ code: string; name: string; color: string }>>([]);
@@ -269,11 +270,13 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
         return;
       }
 
-      // Load logo_url and firm_name from user_profiles table (for current profile)
-      // logo_url and firm_name are stored in user_profiles table
+      // Load logo_url, firm_name, and country from user_profiles table (for current profile)
+      // logo_url, firm_name, and country are stored in user_profiles table
       const logoUrl = (currentUser as any).logo_url || null;
       const firmName = (currentUser as any).firm_name || null;
       const userName = currentUser.name || '';
+      const userCountry = (currentUser as any).country || '';
+      setCountry(userCountry);
 
       if (data) {
         // Determine media_type: prefer video if video_url exists, otherwise use logo
@@ -535,6 +538,10 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
       if (profile.advisor_name !== undefined) {
         userUpdates.name = profile.advisor_name;
       }
+      // Save country to user_profiles.country
+      if (country !== undefined) {
+        userUpdates.country = country;
+      }
       
       if (Object.keys(userUpdates).length > 0) {
         // Update user_profiles table using profile ID (currentUser.id is profile ID)
@@ -641,6 +648,22 @@ const InvestmentAdvisorProfileForm: React.FC<InvestmentAdvisorProfileFormProps> 
               onChange={(e) => handleChange('global_hq', e.target.value)}
               disabled={!isEditing || isViewOnly}
             />
+            
+            <Select
+              label="Country"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              disabled={!isEditing || isViewOnly}
+            >
+              <option value="">Select Country</option>
+              {loadingCountries ? (
+                <option>Loading...</option>
+              ) : (
+                countries.map(countryName => (
+                  <option key={countryName} value={countryName}>{countryName}</option>
+                ))
+              )}
+            </Select>
             
             <Input
               label="Email"

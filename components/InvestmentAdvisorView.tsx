@@ -27,8 +27,9 @@ import { generalDataService } from '../lib/generalDataService';
 import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../lib/advisorConnectionRequestService';
 import { advisorMandateService, AdvisorMandate, CreateAdvisorMandate } from '../lib/advisorMandateService';
 import { investorMandateService, InvestorMandate } from '../lib/investorMandateService';
-import { PlusCircle, Edit, Trash2, Filter, X, Clock } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, Filter, X, Clock, Download } from 'lucide-react';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
+import { advisorCreditService, CreditAssignment, AdvisorCredits, CreditPurchaseHistory, CreditSubscriptionPlan, AdvisorCreditSubscription } from '../lib/advisorCreditService';
 
 interface InvestmentAdvisorViewProps {
   currentUser: AuthUser | null;
@@ -51,7 +52,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   pendingRelationships = [],
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'management' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'portfolio' | 'collaboration' | 'mandate'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'management' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'portfolio' | 'collaboration' | 'mandate' | 'credits'>('dashboard');
   const [managementSubTab, setManagementSubTab] = useState<'myInvestments' | 'myInvestors' | 'myStartups'>('myInvestments');
   const [mandateSubTab, setMandateSubTab] = useState<'myMandates' | 'investorMandates'>('myMandates');
   const [showProfilePage, setShowProfilePage] = useState(false);
@@ -100,6 +101,42 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [isLoadingPitches, setIsLoadingPitches] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [notifications, setNotifications] = useState<Array<{id: string, message: string, type: 'info' | 'success' | 'warning' | 'error', timestamp: Date}>>([]);
+  
+  // Credit system state
+  const [advisorCredits, setAdvisorCredits] = useState<AdvisorCredits | null>(null);
+  const [creditAssignments, setCreditAssignments] = useState<Map<string, CreditAssignment>>(new Map());
+  const [loadingCredits, setLoadingCredits] = useState(false);
+  // Track which startups have self-paid subscriptions (paid_by_advisor_id IS NULL)
+  // Map: startupUserId -> { expiryDate, status }
+  const [startupSelfPaidSubscriptions, setStartupSelfPaidSubscriptions] = useState<Map<string, { expiryDate: string; status: string }>>(new Map());
+  
+  // Helper function to get auth user ID (for credit operations - foreign key expects auth.users.id)
+  const getAuthUserId = async (): Promise<string | null> => {
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      return authUser?.id || null;
+    } catch (error) {
+      console.error('Error getting auth user ID:', error);
+      return null;
+    }
+  };
+  const [purchaseHistory, setPurchaseHistory] = useState<CreditPurchaseHistory[]>([]);
+  const [downloadingInvoice, setDownloadingInvoice] = useState<string | null>(null);
+  const [showBuyCreditsModal, setShowBuyCreditsModal] = useState(false);
+  const [selectedCreditPackage, setSelectedCreditPackage] = useState<number>(1);
+  const [togglingStartups, setTogglingStartups] = useState<Set<string>>(new Set());
+  const [creditQuantity, setCreditQuantity] = useState<number>(1);
+  const [creditPricing, setCreditPricing] = useState<{ price: number; currency: string } | null>(null);
+  const [loadingPricing, setLoadingPricing] = useState(false);
+  const [advisorCountry, setAdvisorCountry] = useState<string>('');
+  const [needsCountrySelection, setNeedsCountrySelection] = useState(false);
+  const [savingCountry, setSavingCountry] = useState(false);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<CreditSubscriptionPlan[]>([]);
+  const [activeSubscriptions, setActiveSubscriptions] = useState<AdvisorCreditSubscription[]>([]);
+  const [loadingSubscription, setLoadingSubscription] = useState(false);
+  const [purchaseType, setPurchaseType] = useState<'one-time' | 'subscription'>('one-time');
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('');
+  const [paypalButtonRendered, setPaypalButtonRendered] = useState(false);
   
   // Dashboard navigation state
   const [viewingInvestorDashboard, setViewingInvestorDashboard] = useState(false);
@@ -292,6 +329,477 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     };
     loadAdvisorAddedStartups();
   }, [currentUser?.id]); // Load when currentUser changes (always, not just on myStartups tab)
+
+  // Load advisor credits
+  useEffect(() => {
+    const loadCredits = async () => {
+      if (!currentUser?.id) {
+        setAdvisorCredits(null);
+        return;
+      }
+
+      setLoadingCredits(true);
+      try {
+        // Get auth user ID (not profile ID) - foreign key expects auth.users.id
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser?.id) {
+          console.error('No auth user found');
+          setAdvisorCredits(null);
+          return;
+        }
+        
+        const credits = await advisorCreditService.getAdvisorCredits(authUser.id);
+        setAdvisorCredits(credits);
+      } catch (error) {
+        console.error('Error loading advisor credits:', error);
+        setAdvisorCredits(null);
+      } finally {
+        setLoadingCredits(false);
+      }
+    };
+
+    loadCredits();
+  }, [currentUser?.id]);
+
+  // Load subscription plans and active subscription
+  useEffect(() => {
+    const loadSubscriptions = async () => {
+      if (!currentUser?.id) {
+        setSubscriptionPlans([]);
+        setActiveSubscriptions([]);
+        return;
+      }
+
+      setLoadingSubscription(true);
+      try {
+        // Get advisor's country
+        const { data: userProfile } = await supabase
+          .from('user_profiles')
+          .select('country')
+          .eq('id', currentUser.id)
+          .maybeSingle();
+
+        const country = userProfile?.country || 'Global';
+        const normalizedCountry = country === 'India' ? 'India' : 'Global';
+
+        // Load subscription plans
+        const plans = await advisorCreditService.getSubscriptionPlans(normalizedCountry);
+        setSubscriptionPlans(plans);
+
+        // CRITICAL FIX: Use auth_user_id for subscriptions too
+        const authUserId = await getAuthUserId();
+        if (authUserId) {
+          const subscriptions = await advisorCreditService.getActiveSubscriptions(authUserId);
+          setActiveSubscriptions(subscriptions);
+        } else {
+          setActiveSubscriptions([]);
+        }
+      } catch (error) {
+        console.error('Error loading subscriptions:', error);
+      } finally {
+        setLoadingSubscription(false);
+      }
+    };
+
+    loadSubscriptions();
+  }, [currentUser?.id]);
+
+  // Load credit assignments for all startups
+  useEffect(() => {
+    const loadAssignments = async () => {
+      if (!currentUser?.id) {
+        setCreditAssignments(new Map());
+        return;
+      }
+
+      try {
+        // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+        const authUserId = await getAuthUserId();
+        if (!authUserId) {
+          console.error('No auth user found');
+          return;
+        }
+        
+        const assignments = await advisorCreditService.getAdvisorAssignments(authUserId);
+        const assignmentsMap = new Map<string, CreditAssignment>();
+        
+        assignments.forEach(assignment => {
+          assignmentsMap.set(assignment.startup_user_id, assignment);
+        });
+        
+        setCreditAssignments(assignmentsMap);
+      } catch (error) {
+        console.error('Error loading credit assignments:', error);
+        setCreditAssignments(new Map());
+      }
+    };
+
+    if (activeTab === 'management' || activeTab === 'credits') {
+      loadAssignments();
+    }
+  }, [currentUser?.id, activeTab]);
+
+  // Function to render PayPal button when user clicks "Pay with PayPal"
+  const renderPayPalButton = async () => {
+    // Prevent multiple calls
+    if (paypalButtonRendered || isLoading) {
+      return;
+    }
+
+    if (!creditPricing || creditPricing.currency !== 'EUR' || !currentUser?.id || creditQuantity < 1) {
+      return;
+    }
+
+    setIsLoading(true);
+    setPaypalButtonRendered(true);
+
+    // Wait for container to exist with retry logic
+    let container: HTMLElement | null = null;
+    let attempts = 0;
+    const maxAttempts = 20;
+    
+    while (attempts < maxAttempts && !container) {
+      container = document.getElementById('paypal-button-container-onetime');
+      if (!container) {
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    if (!container) {
+      console.error('PayPal container not found after multiple attempts');
+      setIsLoading(false);
+      setPaypalButtonRendered(false);
+      alert('Failed to load PayPal. Please refresh and try again.');
+      return;
+    }
+
+    // Clear existing button
+    container.innerHTML = '';
+
+    const PAYPAL_CLIENT_ID = import.meta.env.VITE_PAYPAL_CLIENT_ID;
+    if (!PAYPAL_CLIENT_ID) {
+      container.innerHTML = '<p className="text-red-500 text-sm">PayPal not configured</p>';
+      setIsLoading(false);
+      setPaypalButtonRendered(false);
+      return;
+    }
+
+    try {
+      const totalAmount = creditQuantity * creditPricing.price;
+
+      // Create PayPal order (only once)
+      const orderResponse = await fetch('/api/paypal/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: totalAmount,
+          currency: 'EUR'
+        })
+      });
+
+      if (!orderResponse.ok) {
+        const errorText = await orderResponse.text();
+        throw new Error(`Failed to create PayPal order: ${errorText}`);
+      }
+
+      const { orderId } = await orderResponse.json();
+      
+      if (!orderId) {
+        throw new Error('No order ID received from PayPal');
+      }
+
+      // Verify container still exists before rendering
+      const finalContainer = document.getElementById('paypal-button-container-onetime');
+      if (!finalContainer) {
+        console.error('PayPal container disappeared before render');
+        setIsLoading(false);
+        setPaypalButtonRendered(false);
+        return;
+      }
+
+      // Load PayPal SDK if not already loaded
+      const existingScript = document.querySelector('script[src*="paypal.com/sdk"]');
+      if (existingScript && (window as any).paypal) {
+        // PayPal SDK already loaded
+        try {
+          (window as any).paypal.Buttons({
+            createOrder: () => orderId,
+            onApprove: async (data: any, actions: any) => {
+              try {
+                setIsLoading(true);
+                const order = await actions.order.capture();
+                
+                // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+                const authUserId = await getAuthUserId();
+                if (!authUserId) {
+                  throw new Error('User not authenticated');
+                }
+                
+                // Add credits to advisor account
+                const success = await advisorCreditService.addCredits(
+                  authUserId,
+                  creditQuantity,
+                  totalAmount,
+                  'EUR',
+                  'payaid',
+                  order.id
+                );
+
+                if (success) {
+                  // Reload credits with retry
+                  let credits = await advisorCreditService.getAdvisorCredits(authUserId);
+                  if (!credits) {
+                    // Wait a bit and retry
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    credits = await advisorCreditService.getAdvisorCredits(authUserId);
+                  }
+                  setAdvisorCredits(credits);
+                  setShowBuyCreditsModal(false);
+                  setCreditQuantity(1);
+                  setPaypalButtonRendered(false);
+                  alert(`Successfully purchased ${creditQuantity} credit${creditQuantity !== 1 ? 's' : ''}!`);
+                } else {
+                  throw new Error('Failed to add credits. Payment was successful but credits were not added. Please contact support with your payment ID: ' + order.id);
+                }
+              } catch (error: any) {
+                console.error('Payment processing error:', error);
+                alert(error.message || 'Payment processing failed. Please contact support.');
+              } finally {
+                setIsLoading(false);
+              }
+            },
+            onCancel: () => {
+              setIsLoading(false);
+              setPaypalButtonRendered(false);
+            },
+            onError: (err: any) => {
+              console.error('PayPal error:', err);
+              alert('Payment failed. Please try again.');
+              setIsLoading(false);
+              setPaypalButtonRendered(false);
+            }
+          }).render('#paypal-button-container-onetime');
+          setIsLoading(false); // Button is rendering, no longer loading
+        } catch (renderError: any) {
+          console.error('PayPal render error:', renderError);
+          finalContainer.innerHTML = '<p className="text-red-500 text-sm">Failed to load PayPal button. Please refresh and try again.</p>';
+          setIsLoading(false);
+          setPaypalButtonRendered(false);
+        }
+      } else {
+        // Load PayPal SDK
+        const script = document.createElement('script');
+        script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=EUR`;
+        script.async = true;
+        document.body.appendChild(script);
+
+        script.onload = () => {
+          const containerCheck = document.getElementById('paypal-button-container-onetime');
+          if (!containerCheck) {
+            console.error('PayPal container not found when SDK loaded');
+            setIsLoading(false);
+            setPaypalButtonRendered(false);
+            return;
+          }
+          
+          if ((window as any).paypal) {
+            try {
+              (window as any).paypal.Buttons({
+                createOrder: () => orderId,
+                onApprove: async (data: any, actions: any) => {
+                  try {
+                    setIsLoading(true);
+                    const order = await actions.order.capture();
+                    
+                    // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+                    const authUserId = await getAuthUserId();
+                    if (!authUserId) {
+                      throw new Error('User not authenticated');
+                    }
+                    
+                    // Add credits to advisor account
+                    const success = await advisorCreditService.addCredits(
+                      authUserId,
+                      creditQuantity,
+                      totalAmount,
+                      'EUR',
+                      'payaid',
+                      order.id
+                    );
+
+                    if (success) {
+                      // Reload credits with retry
+                      let credits = await advisorCreditService.getAdvisorCredits(authUserId);
+                      if (!credits) {
+                        // Wait a bit and retry
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        credits = await advisorCreditService.getAdvisorCredits(authUserId);
+                      }
+                      setAdvisorCredits(credits);
+                      setShowBuyCreditsModal(false);
+                      setCreditQuantity(1);
+                      setPaypalButtonRendered(false);
+                      alert(`Successfully purchased ${creditQuantity} credit${creditQuantity !== 1 ? 's' : ''}!`);
+                    } else {
+                      throw new Error('Failed to add credits. Payment was successful but credits were not added. Please contact support with your payment ID: ' + order.id);
+                    }
+                  } catch (error: any) {
+                    console.error('Payment processing error:', error);
+                    alert(error.message || 'Payment processing failed. Please contact support.');
+                  } finally {
+                    setIsLoading(false);
+                  }
+                },
+                onCancel: () => {
+                  setIsLoading(false);
+                  setPaypalButtonRendered(false);
+                },
+                onError: (err: any) => {
+                  console.error('PayPal error:', err);
+                  alert('Payment failed. Please try again.');
+                  setIsLoading(false);
+                  setPaypalButtonRendered(false);
+                }
+              }).render('#paypal-button-container-onetime');
+              setIsLoading(false); // Button is rendering, no longer loading
+            } catch (renderError: any) {
+              console.error('PayPal render error:', renderError);
+              containerCheck.innerHTML = '<p className="text-red-500 text-sm">Failed to load PayPal button. Please refresh and try again.</p>';
+              setIsLoading(false);
+              setPaypalButtonRendered(false);
+            }
+          } else {
+            console.error('PayPal SDK not available after script load');
+            containerCheck.innerHTML = '<p className="text-red-500 text-sm">Failed to load PayPal SDK. Please refresh and try again.</p>';
+            setIsLoading(false);
+            setPaypalButtonRendered(false);
+          }
+        };
+
+        script.onerror = () => {
+          const containerCheck = document.getElementById('paypal-button-container-onetime');
+          if (containerCheck) {
+            containerCheck.innerHTML = '<p className="text-red-500 text-sm">Failed to load PayPal SDK. Please check your internet connection and try again.</p>';
+          }
+          setIsLoading(false);
+          setPaypalButtonRendered(false);
+        };
+      }
+    } catch (error: any) {
+      console.error('Error rendering PayPal button:', error);
+      container.innerHTML = '<p className="text-red-500 text-sm">Failed to load PayPal. Please try again.</p>';
+      setIsLoading(false);
+      setPaypalButtonRendered(false);
+    }
+  };
+
+  // Load purchase history
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (!currentUser?.id || activeTab !== 'credits') {
+        return;
+      }
+
+      try {
+        // CRITICAL FIX: Use auth_user_id (UUID from auth.users) instead of profile ID
+        // Purchase history is stored with advisor_user_id = auth_user_id, not profile_id
+        const authUserId = await getAuthUserId();
+        if (!authUserId) {
+          console.error('⚠️ Cannot load purchase history - no auth user ID');
+          setPurchaseHistory([]);
+          return;
+        }
+        
+        console.log('🔍 Loading purchase history for auth_user_id:', authUserId);
+        const history = await advisorCreditService.getPurchaseHistory(authUserId);
+        console.log('✅ Purchase history loaded:', history.length, 'records');
+        setPurchaseHistory(history);
+      } catch (error) {
+        console.error('Error loading purchase history:', error);
+        setPurchaseHistory([]);
+      }
+    };
+
+    loadHistory();
+  }, [currentUser?.id, activeTab]);
+
+  // Invoice download handler for credit purchases
+  const handleDownloadInvoice = async (purchase: CreditPurchaseHistory) => {
+    try {
+      setDownloadingInvoice(purchase.id);
+      
+      // Import PDF generator dynamically
+      const { generateInvoicePDF, downloadBlob } = await import('../lib/pdfGenerator');
+      
+      // Get user details for invoice
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const userName = currentUser?.name || authUser?.user_metadata?.name || authUser?.email || 'Investment Advisor';
+      const userEmail = currentUser?.email || authUser?.email || '';
+      
+      // Determine purchase type - check both payment_type and purchase_type for consistency
+      const isSubscription = 
+        purchase.metadata?.payment_type === 'subscription' || 
+        purchase.metadata?.purchase_type === 'subscription' ||
+        (purchase.metadata?.subscription_id && purchase.metadata?.billing_cycle);
+      const planName = isSubscription 
+        ? `Credit Subscription - ${purchase.credits_purchased} credits/month`
+        : `Credit Purchase - ${purchase.credits_purchased} credits`;
+      
+      // Get billing cycle info if subscription
+      let billingPeriod = '';
+      if (isSubscription && purchase.metadata?.billing_cycle) {
+        // Try to get period dates from subscription if available
+        const subscriptionId = purchase.metadata?.subscription_id;
+              if (subscriptionId) {
+                const { data: subscription } = await supabase
+                  .from('advisor_credit_subscriptions')
+                  .select('current_period_start, current_period_end')
+                  .eq('id', subscriptionId)
+                  .maybeSingle();
+                
+                if (subscription && (subscription as any).current_period_start && (subscription as any).current_period_end) {
+                  const startDate = new Date((subscription as any).current_period_start).toLocaleDateString();
+                  const endDate = new Date((subscription as any).current_period_end).toLocaleDateString();
+                  billingPeriod = `${startDate} - ${endDate}`;
+                }
+              }
+      }
+      
+      // Prepare invoice data
+      const invoiceData = {
+        invoiceNumber: `INV-CREDIT-${purchase.id.slice(-8).toUpperCase()}`,
+        invoiceDate: new Date(purchase.purchased_at).toLocaleDateString(),
+        paymentDate: new Date(purchase.purchased_at).toLocaleDateString(),
+        customerName: userName,
+        customerEmail: userEmail,
+        amount: purchase.amount_paid,
+        currency: purchase.currency || 'EUR',
+        taxAmount: undefined,
+        totalAmount: purchase.amount_paid,
+        planName: planName,
+        planTier: 'credits',
+        billingPeriod: billingPeriod || undefined,
+        paymentGateway: (purchase.payment_gateway === 'payaid' || purchase.payment_gateway === 'razorpay' ? 'razorpay' : 'paypal') as 'razorpay' | 'paypal',
+        gatewayPaymentId: purchase.payment_transaction_id || undefined,
+        gatewayOrderId: purchase.payment_transaction_id || undefined,
+        transactionId: purchase.id,
+        status: purchase.status,
+        country: undefined
+      };
+      
+      // Generate and download PDF
+      const pdfBlob = await generateInvoicePDF(invoiceData);
+      const filename = `Invoice-${invoiceData.invoiceNumber}-${new Date(purchase.purchased_at).toISOString().split('T')[0]}.pdf`;
+      downloadBlob(pdfBlob, filename);
+      
+    } catch (error) {
+      console.error('Error generating invoice:', error);
+      alert('Failed to generate invoice. Please try again.');
+    } finally {
+      setDownloadingInvoice(null);
+    }
+  };
 
   // Keep add-startup form advisor id in sync
   useEffect(() => {
@@ -1264,6 +1772,612 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     }
   };
 
+  // Credit system handlers
+  const handleToggleCreditAssignment = async (startupUserId: string, enable: boolean) => {
+    if (!currentUser?.id) {
+      alert('Advisor information not available');
+      return;
+    }
+
+    setTogglingStartups(prev => {
+      const next = new Set(prev);
+      next.add(startupUserId);
+      return next;
+    });
+
+    try {
+      // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+      const authUserId = await getAuthUserId();
+      if (!authUserId) {
+        alert('User not authenticated');
+        return;
+      }
+      
+      if (enable) {
+        // Assign credit (or just enable auto-renewal if assignment already exists)
+        const result = await advisorCreditService.assignCredit(
+          authUserId,
+          startupUserId,
+          true // Enable auto-renewal
+        );
+
+        if (result.success) {
+          // Reload credits and assignments
+          const credits = await advisorCreditService.getAdvisorCredits(authUserId);
+          setAdvisorCredits(credits);
+          
+          const assignments = await advisorCreditService.getAdvisorAssignments(authUserId);
+          const assignmentsMap = new Map<string, CreditAssignment>();
+          assignments.forEach(a => assignmentsMap.set(a.startup_user_id, a));
+          setCreditAssignments(assignmentsMap);
+
+          // Show appropriate message based on what happened
+          if (result.wasJustUpdatingAutoRenewal) {
+            // Just enabled auto-renewal on existing premium (no credit deducted)
+            setNotifications(prev => [...prev, {
+              id: Date.now().toString(),
+              message: 'Auto-renewal enabled successfully! Premium will auto-renew when credits are available.',
+              type: 'success',
+              timestamp: new Date()
+            }]);
+          } else {
+            // Created new assignment or reactivated expired one (credit was deducted)
+            setNotifications(prev => [...prev, {
+              id: Date.now().toString(),
+              message: 'Credit assigned successfully! Premium access activated.',
+              type: 'success',
+              timestamp: new Date()
+            }]);
+          }
+        } else {
+          alert(result.error || 'Failed to assign credit. Please ensure you have available credits.');
+        }
+      } else {
+        // Toggle OFF: Only disable auto-renewal
+        // Plan continues until natural expiry date, but won't auto-renew
+        const success = await advisorCreditService.cancelAssignment(
+          authUserId,
+          startupUserId
+        );
+
+        if (success) {
+          // Reload assignments
+          const assignments = await advisorCreditService.getAdvisorAssignments(authUserId);
+          const assignmentsMap = new Map<string, CreditAssignment>();
+          assignments.forEach(a => assignmentsMap.set(a.startup_user_id, a));
+          setCreditAssignments(assignmentsMap);
+
+          setNotifications(prev => [...prev, {
+            id: Date.now().toString(),
+            message: 'Auto-renewal disabled. Premium will continue until expiry date.',
+            type: 'info',
+            timestamp: new Date()
+          }]);
+        } else {
+          alert('Failed to disable auto-renewal. Please try again.');
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling credit assignment:', error);
+      alert('An error occurred. Please try again.');
+    } finally {
+      setTogglingStartups(prev => {
+        const next = new Set(prev);
+        next.delete(startupUserId);
+        return next;
+      });
+    }
+  };
+
+  const getPremiumStatusForStartup = (startupUserId: string): { status: string; expiryDate?: string; autoRenewal: boolean; isActive: boolean; isSelfPaid?: boolean } => {
+    // First check if startup has a self-paid subscription
+    const selfPaidSub = startupSelfPaidSubscriptions.get(startupUserId);
+    
+    // If self-paid, return self-paid status with expiry date
+    if (selfPaidSub) {
+      return { 
+        status: 'Premium Active', 
+        expiryDate: selfPaidSub.expiryDate,
+        autoRenewal: false, 
+        isActive: true,
+        isSelfPaid: true
+      };
+    }
+    
+    // Check advisor-paid assignment
+    const assignment = creditAssignments.get(startupUserId);
+    
+    if (!assignment) {
+      return { status: 'No Premium', autoRenewal: false, isActive: false, isSelfPaid: false };
+    }
+
+    // Check if assignment is still active (not expired)
+    const isActive = assignment.status === 'active' && new Date(assignment.end_date) > new Date();
+    
+    if (isActive) {
+      const expiryDate = new Date(assignment.end_date).toLocaleDateString();
+      return {
+        status: 'Premium Active',
+        expiryDate,
+        autoRenewal: assignment.auto_renewal_enabled,
+        isActive: true,
+        isSelfPaid: false
+      };
+    }
+
+    // Assignment expired
+    return { status: 'Premium Expired', autoRenewal: false, isActive: false, isSelfPaid: false };
+  };
+
+  // Load Razorpay script
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if ((window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleBuyCredits = async (quantity: number) => {
+    if (!currentUser?.id) {
+      alert('Advisor information not available');
+      return;
+    }
+
+    if (!creditPricing) {
+      alert('Pricing information not available. Please try again.');
+      return;
+    }
+
+    if (quantity < 1) {
+      alert('Please enter a valid number of credits (minimum 1)');
+      return;
+    }
+
+    const totalAmount = quantity * creditPricing.price;
+    const currency = creditPricing.currency;
+    const paymentGateway = currency === 'INR' ? 'razorpay' : 'payaid';
+
+    setIsLoading(true);
+    try {
+      if (paymentGateway === 'razorpay') {
+        // Razorpay for India
+        const loaded = await loadRazorpayScript();
+        if (!loaded) {
+          alert('Failed to load Razorpay. Please refresh and try again.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Create Razorpay order
+        // Note: Server expects amount in major currency units (e.g., 200 for ₹200), not paise
+        // Server will convert to paise internally
+        // Razorpay receipt limit is 40 characters, so we need a shorter receipt
+        const shortReceipt = `cr_${currentUser.id.slice(0, 8)}_${Date.now().toString().slice(-8)}`;
+        
+        const orderResponse = await fetch('/api/razorpay/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: totalAmount, // Amount in major currency units (server converts to paise)
+            currency: 'INR',
+            receipt: shortReceipt // Max 40 characters for Razorpay
+          })
+        });
+
+        if (!orderResponse.ok) {
+          throw new Error('Failed to create payment order');
+        }
+
+        const order = await orderResponse.json();
+        const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+
+        if (!RAZORPAY_KEY_ID) {
+          throw new Error('Razorpay key not configured');
+        }
+
+        // Open Razorpay checkout
+        const options = {
+          key: RAZORPAY_KEY_ID,
+          amount: order.amount,
+          currency: order.currency,
+          name: 'Track My Startup',
+          description: `Purchase ${quantity} credit${quantity !== 1 ? 's' : ''}`,
+          order_id: order.id,
+          handler: async (response: any) => {
+            try {
+              // Verify payment and add credits
+              const verifyResponse = await fetch('/api/razorpay/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature
+                })
+              });
+
+              if (!verifyResponse.ok) {
+                throw new Error('Payment verification failed');
+              }
+
+              // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+              const authUserId = await getAuthUserId();
+              if (!authUserId) {
+                throw new Error('User not authenticated');
+              }
+              
+              // Add credits to advisor account
+              const success = await advisorCreditService.addCredits(
+                authUserId,
+                quantity,
+                totalAmount,
+                currency,
+                'razorpay',
+                response.razorpay_payment_id
+              );
+
+              if (success) {
+                // Reload credits
+                const credits = await advisorCreditService.getAdvisorCredits(authUserId);
+                setAdvisorCredits(credits);
+                setShowBuyCreditsModal(false);
+                setCreditQuantity(1);
+                alert(`Successfully purchased ${quantity} credit${quantity !== 1 ? 's' : ''}!`);
+              } else {
+                throw new Error('Failed to add credits');
+              }
+            } catch (error: any) {
+              console.error('Payment processing error:', error);
+              alert(error.message || 'Payment verification failed. Please contact support.');
+            } finally {
+              setIsLoading(false);
+            }
+          },
+          prefill: {
+            name: currentUser.name || '',
+            email: currentUser.email || ''
+          },
+          theme: {
+            color: '#2563eb'
+          },
+          modal: {
+            ondismiss: () => {
+              setIsLoading(false);
+            }
+          }
+        };
+
+        const razorpay = new (window as any).Razorpay(options);
+        razorpay.open();
+      } else {
+        // PayPal for other countries
+        const PAYPAL_CLIENT_ID = import.meta.env.VITE_PAYPAL_CLIENT_ID;
+        if (!PAYPAL_CLIENT_ID) {
+          alert('PayPal not configured');
+          setIsLoading(false);
+          return;
+        }
+
+        // Create PayPal order
+        const orderResponse = await fetch('/api/paypal/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: totalAmount,
+            currency: 'EUR'
+          })
+        });
+
+        if (!orderResponse.ok) {
+          throw new Error('Failed to create PayPal order');
+        }
+
+        const { orderId } = await orderResponse.json();
+
+        // Load PayPal SDK
+        const existingScript = document.querySelector('script[src*="paypal.com/sdk"]');
+        if (existingScript) {
+          // PayPal SDK already loaded
+          if ((window as any).paypal) {
+            // Clear any existing buttons
+            const container = document.getElementById('paypal-button-container-onetime');
+            if (container) container.innerHTML = '';
+
+            (window as any).paypal.Buttons({
+              createOrder: () => orderId,
+              onApprove: async (data: any, actions: any) => {
+                try {
+                  const order = await actions.order.capture();
+                  
+                  // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+                  const authUserId = await getAuthUserId();
+                  if (!authUserId) {
+                    throw new Error('User not authenticated');
+                  }
+                  
+                  // Add credits to advisor account
+                  const success = await advisorCreditService.addCredits(
+                    authUserId,
+                    quantity,
+                    totalAmount,
+                    currency,
+                    'payaid',
+                    order.id
+                  );
+
+                  if (success) {
+                    // Reload credits
+                    const credits = await advisorCreditService.getAdvisorCredits(authUserId);
+                    setAdvisorCredits(credits);
+                    setShowBuyCreditsModal(false);
+                    setCreditQuantity(1);
+                    alert(`Successfully purchased ${quantity} credit${quantity !== 1 ? 's' : ''}!`);
+                  } else {
+                    throw new Error('Failed to add credits');
+                  }
+                } catch (error: any) {
+                  console.error('Payment processing error:', error);
+                  alert(error.message || 'Payment processing failed. Please contact support.');
+                } finally {
+                  setIsLoading(false);
+                }
+              },
+              onCancel: () => {
+                setIsLoading(false);
+              },
+              onError: (err: any) => {
+                console.error('PayPal error:', err);
+                alert('Payment failed. Please try again.');
+                setIsLoading(false);
+              }
+            }).render('#paypal-button-container-onetime');
+          }
+        } else {
+          const script = document.createElement('script');
+          script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=EUR`;
+          script.async = true;
+          document.body.appendChild(script);
+
+          script.onload = () => {
+            if ((window as any).paypal) {
+              // Clear any existing buttons
+              const container = document.getElementById('paypal-button-container-onetime');
+              if (container) container.innerHTML = '';
+
+              (window as any).paypal.Buttons({
+                createOrder: () => orderId,
+                onApprove: async (data: any, actions: any) => {
+                  try {
+                    const order = await actions.order.capture();
+                    
+                    // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+                    const authUserId = await getAuthUserId();
+                    if (!authUserId) {
+                      throw new Error('User not authenticated');
+                    }
+                    
+                    // Add credits to advisor account
+                    const success = await advisorCreditService.addCredits(
+                      authUserId,
+                      quantity,
+                      totalAmount,
+                      currency,
+                      'payaid',
+                      order.id
+                    );
+
+                    if (success) {
+                      // Reload credits
+                      const credits = await advisorCreditService.getAdvisorCredits(authUserId);
+                      setAdvisorCredits(credits);
+                      setShowBuyCreditsModal(false);
+                      setCreditQuantity(1);
+                      alert(`Successfully purchased ${quantity} credit${quantity !== 1 ? 's' : ''}!`);
+                    } else {
+                      throw new Error('Failed to add credits');
+                    }
+                  } catch (error: any) {
+                    console.error('Payment processing error:', error);
+                    alert(error.message || 'Payment processing failed. Please contact support.');
+                  } finally {
+                    setIsLoading(false);
+                  }
+                },
+                onCancel: () => {
+                  setIsLoading(false);
+                },
+                onError: (err: any) => {
+                  console.error('PayPal error:', err);
+                  alert('Payment failed. Please try again.');
+                  setIsLoading(false);
+                }
+              }).render('#paypal-button-container-onetime');
+            }
+          };
+        }
+      }
+    } catch (error: any) {
+      console.error('Error processing payment:', error);
+      alert(error.message || 'Failed to process payment. Please try again.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubscribeToPlan = async (planId: string) => {
+    if (!currentUser?.id) {
+      alert('Advisor information not available');
+      return;
+    }
+
+    const plan = subscriptionPlans.find(p => p.id === planId);
+    if (!plan) {
+      alert('Selected plan not found');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const paymentGateway = plan.currency === 'INR' ? 'razorpay' : 'payaid';
+
+      if (paymentGateway === 'razorpay') {
+        // Razorpay subscription for India
+        const loaded = await loadRazorpayScript();
+        if (!loaded) {
+          alert('Failed to load Razorpay. Please refresh and try again.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+        const authUserId = await getAuthUserId();
+        if (!authUserId) {
+          throw new Error('User not authenticated');
+        }
+        
+        // Create Razorpay subscription
+        const subscriptionResponse = await fetch('/api/razorpay/create-subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: authUserId,
+            final_amount: plan.price_per_month,
+            interval: 'monthly',
+            plan_name: plan.plan_name,
+            total_count: 12 // 12 months
+          })
+        });
+
+        if (!subscriptionResponse.ok) {
+          const errorText = await subscriptionResponse.text();
+          throw new Error(errorText || 'Failed to create subscription');
+        }
+
+        const subscription = await subscriptionResponse.json();
+        const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+
+        if (!RAZORPAY_KEY_ID) {
+          throw new Error('Razorpay key not configured');
+        }
+
+        // Open Razorpay subscription checkout
+        const options = {
+          key: RAZORPAY_KEY_ID,
+          subscription_id: subscription.id,
+          name: 'Track My Startup',
+          description: `${plan.plan_name} - ${plan.credits_per_month} credits/month`,
+          prefill: {
+            name: currentUser.name || '',
+            email: currentUser.email || ''
+          },
+          theme: {
+            color: '#2563eb'
+          },
+          handler: async (response: any) => {
+            try {
+              // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+              const authUserId = await getAuthUserId();
+              if (!authUserId) {
+                throw new Error('User not authenticated');
+              }
+              
+              // Create subscription record in database
+              const result = await advisorCreditService.createSubscription(
+                authUserId,
+                planId,
+                subscription.id,
+                undefined
+              );
+
+              if (result.success) {
+                // Reload subscriptions
+                const activeSubs = await advisorCreditService.getActiveSubscriptions(currentUser.id);
+                setActiveSubscriptions(activeSubs);
+                setShowBuyCreditsModal(false);
+                setSelectedPlanId('');
+                alert('Subscription activated successfully! Credits will be added automatically each month.');
+              } else {
+                throw new Error(result.error || 'Failed to create subscription');
+              }
+            } catch (error: any) {
+              console.error('Subscription creation error:', error);
+              alert(error.message || 'Failed to activate subscription. Please contact support.');
+            } finally {
+              setIsLoading(false);
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              setIsLoading(false);
+            }
+          }
+        };
+
+        const razorpay = new (window as any).Razorpay(options);
+        razorpay.open();
+      } else {
+        // PayPal subscription for other countries
+        const PAYPAL_CLIENT_ID = import.meta.env.VITE_PAYPAL_CLIENT_ID;
+        if (!PAYPAL_CLIENT_ID) {
+          alert('PayPal not configured');
+          setIsLoading(false);
+          return;
+        }
+
+        // Get auth user ID (foreign key expects auth.users.id, not profile ID)
+        const authUserId = await getAuthUserId();
+        if (!authUserId) {
+          throw new Error('User not authenticated');
+        }
+        
+        // Create PayPal subscription
+        const subscriptionResponse = await fetch('/api/paypal/create-subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: authUserId,
+            final_amount: plan.price_per_month,
+            interval: 'monthly',
+            plan_name: plan.plan_name,
+            currency: 'EUR'
+          })
+        });
+
+        if (!subscriptionResponse.ok) {
+          const errorText = await subscriptionResponse.text();
+          throw new Error(errorText || 'Failed to create subscription');
+        }
+
+        const { subscriptionId, approvalUrl } = await subscriptionResponse.json();
+
+        if (approvalUrl) {
+          // Redirect to PayPal approval page
+          // Store subscription info before redirect
+          sessionStorage.setItem('pending_credit_subscription', JSON.stringify({
+            subscriptionId: subscriptionId,
+            planId: planId,
+            advisorUserId: authUserId
+          }));
+          
+          window.location.href = approvalUrl;
+        } else {
+          throw new Error('No approval URL received from PayPal');
+        }
+      }
+    } catch (error: any) {
+      console.error('Error subscribing to plan:', error);
+      alert(error.message || 'Failed to create subscription. Please try again.');
+      setIsLoading(false);
+    }
+  };
+
   // Handle send invite to TMS for advisor-added startups
   const handleSendInviteToTMS = async (startupId: number) => {
     if (!currentUser?.id || !advisorCode) {
@@ -1562,6 +2676,19 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
           if (error) {
             console.error('❌ Error fetching advisor code from DB:', error);
+            console.error('❌ Error details:', {
+              code: error.code,
+              message: error.message,
+              details: error.details,
+              hint: error.hint,
+              userId: authUser.id
+            });
+            
+            // If it's a 406 error, it's likely an RLS issue
+            if (error.code === 'PGRST116' || error.message?.includes('406')) {
+              console.error('❌ 406 Error detected - RLS policy may be blocking access');
+              console.error('❌ Please run database/32_fix_users_table_rls_investment_advisor_code.sql to fix this');
+            }
             return;
           }
 
@@ -1724,13 +2851,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
     // Find startups whose users have entered the investment advisor code and have been accepted
     const acceptedStartups = startups.filter(startup => {
-      // Find the user who owns this startup
+      // CRITICAL FIX: For new registrations, user.id is profile ID, but startup.user_id is auth_user_id
+      // Check both user.id (old registrations) and user.auth_user_id (new registrations)
       const startupUser = users.find(user => 
         user.role === 'Startup' && 
-        user.id === startup.user_id
+        (user.id === startup.user_id || (user as any).auth_user_id === startup.user_id)
       );
       
       if (!startupUser) {
+        console.log('🔍 My Startups: No matching user found for startup:', {
+          startupId: startup.id,
+          startupName: startup.name,
+          startupUserId: startup.user_id,
+          totalUsers: users.length,
+          usersWithStartupRole: users.filter(u => u.role === 'Startup').length
+        });
         return false;
       }
 
@@ -1745,11 +2880,105 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       const hasEnteredCode = enteredCode.trim() === advisorCode.trim();
       const isAccepted = (startupUser as any).advisor_accepted === true;
 
+      console.log('🔍 My Startups: Startup check:', {
+        startupId: startup.id,
+        startupName: startup.name,
+        userId: startupUser.id,
+        enteredCode,
+        advisorCode,
+        hasEnteredCode,
+        isAccepted,
+        shouldInclude: hasEnteredCode && isAccepted
+      });
+
       return hasEnteredCode && isAccepted;
     });
 
     return acceptedStartups;
   }, [advisorCode, startups, users]);
+
+  // Load startup subscriptions to check which ones are self-paid (paid_by_advisor_id IS NULL)
+  // Moved here after myStartups is defined
+  useEffect(() => {
+    const loadStartupSubscriptions = async () => {
+      if (!currentUser?.id || (activeTab !== 'management' && activeTab !== 'credits')) {
+        setStartupSelfPaidSubscriptions(new Map());
+        return;
+      }
+
+      try {
+        // Get all startup user IDs from myStartups and advisorAddedStartups
+        const startupUserIds: string[] = [];
+        
+        // TMS startups
+        myStartups.forEach(startup => {
+          // CRITICAL FIX: For new registrations, user.id is profile ID, but startup.user_id is auth_user_id
+          const startupUser = users.find(u => 
+            u.role === 'Startup' && 
+            (u.id === startup.user_id || (u as any).auth_user_id === startup.user_id)
+          );
+          if (startupUser?.id) {
+            startupUserIds.push(startupUser.id);
+          }
+        });
+        
+        // Advisor-added startups
+        advisorAddedStartups.forEach(startup => {
+          if (startup.is_on_tms && startup.tms_startup_id) {
+            const tmsStartup = startups.find(s => s.id === startup.tms_startup_id);
+            if (tmsStartup) {
+              // CRITICAL FIX: For new registrations, user.id is profile ID, but startup.user_id is auth_user_id
+              const startupUser = users.find(u => 
+                u.role === 'Startup' && 
+                (u.id === tmsStartup.user_id || (u as any).auth_user_id === tmsStartup.user_id)
+              );
+              if (startupUser?.id) {
+                startupUserIds.push(startupUser.id);
+              }
+            }
+          }
+        });
+
+        if (startupUserIds.length === 0) {
+          setStartupSelfPaidSubscriptions(new Map());
+          return;
+        }
+
+        // Check subscriptions for these startups
+        const { data: subscriptions, error } = await supabase
+          .from('user_subscriptions')
+          .select('user_id, paid_by_advisor_id, status, current_period_end')
+          .in('user_id', startupUserIds)
+          .eq('status', 'active');
+
+        if (error) {
+          console.error('Error loading startup subscriptions:', error);
+          setStartupSelfPaidSubscriptions(new Map());
+          return;
+        }
+
+        // Find startups with self-paid subscriptions (paid_by_advisor_id IS NULL and still active)
+        const selfPaidMap = new Map<string, { expiryDate: string; status: string }>();
+        const now = new Date();
+        
+        subscriptions?.forEach(sub => {
+          if (sub.paid_by_advisor_id === null && new Date(sub.current_period_end) > now) {
+            selfPaidMap.set(sub.user_id, {
+              expiryDate: new Date(sub.current_period_end).toLocaleDateString(),
+              status: sub.status
+            });
+          }
+        });
+
+        setStartupSelfPaidSubscriptions(selfPaidMap);
+      } catch (error) {
+        console.error('Error loading startup subscriptions:', error);
+        setStartupSelfPaidSubscriptions(new Map());
+      }
+    };
+
+    loadStartupSubscriptions();
+  }, [currentUser?.id, activeTab, advisorCode, advisorAddedStartups, users, startups]);
 
   // Filter advisor-added startups to exclude those already in myStartups (to prevent duplicates)
   // Also matches by email to catch duplicates even if tms_startup_id is not set
@@ -2238,11 +3467,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       let finalCoInvestmentData: any[] = [];
       
       // First, check what investors have this advisor's code
+      // Use SECURITY DEFINER function to avoid RLS recursion
       const { data: clientsData, error: clientsError } = await supabase
-        .from('users')
-        .select('email, name, investment_advisor_code_entered')
-        .eq('investment_advisor_code_entered', currentUser?.investment_advisor_code)
-        .eq('role', 'Investor');
+        .rpc('get_investors_by_advisor_code', { advisor_code: currentUser?.investment_advisor_code || '' });
       
       console.log('🔍 Investors with this advisor code:', clientsData?.length || 0);
       if (clientsData && clientsData.length > 0) {
@@ -2323,11 +3550,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       const investorEmails = [...new Set(allOffersData.map(offer => offer.investor_email))];
       const startupIds = [...new Set(allOffersData.filter(offer => offer.startup_id).map(offer => offer.startup_id))];
 
-      // Fetch investor data
+      // Fetch investor data using SECURITY DEFINER function to avoid RLS recursion
       const { data: investorsData, error: investorsError } = await supabase
-        .from('users')
-        .select('id, email, name, investment_advisor_code_entered, phone')
-        .in('email', investorEmails);
+        .rpc('get_users_by_emails', { email_list: investorEmails });
 
       if (investorsError) {
         console.error('Error fetching investors:', investorsError);
@@ -2369,11 +3594,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         console.error('Error fetching fundraising details:', fundraisingError);
       }
 
-      // Fetch all advisors data for contact information
+      // Fetch all advisors data for contact information using SECURITY DEFINER function
       const { data: advisorsData, error: advisorsError } = await supabase
-        .from('users')
-        .select('id, email, name, investment_advisor_code, phone')
-        .not('investment_advisor_code', 'is', null);
+        .rpc('get_investment_advisors');
 
       if (advisorsError) {
         console.error('Error fetching advisors:', advisorsError);
@@ -2381,11 +3604,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
       // Try to fetch startup emails by matching startup names with user names
       // This is a fallback approach since startup_id doesn't exist in users table
+      // Use SECURITY DEFINER function to avoid RLS recursion
       const startupNames = [...new Set(allOffersData.map(offer => offer.startup_name))];
       const { data: startupUsersData, error: startupUsersError } = await supabase
-        .from('users')
-        .select('id, email, name')
-        .in('name', startupNames);
+        .rpc('get_users_by_names', { name_list: startupNames });
 
       if (startupUsersError) {
         console.error('Error fetching startup users:', startupUsersError);
@@ -2623,6 +3845,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       ];
       
       if (allListedByUserIds.length > 0) {
+        // Use direct user_profiles query (RLS is now simple and non-recursive)
         const { data: userProfilesData } = await supabase
           .from('user_profiles')
           .select('auth_user_id, name, email, investment_advisor_code_entered, role')
@@ -3072,6 +4295,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             // Fetch investor names separately from user_profiles using auth_user_id
             const investorMap: Record<string, { name: string; email: string }> = {};
             if (authUserIds.length > 0) {
+              // Use direct user_profiles query (RLS is now simple and non-recursive)
               const { data: investorsData, error: investorsError } = await supabase
                 .from('user_profiles')
                 .select('auth_user_id, name, email')
@@ -3268,6 +4492,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           // Fetch user profile data for listed_by_user_id (manual join - no FK constraints after migration)
           const listedByUserIds = [...new Set(stage1Opps.map((opp: any) => opp.listed_by_user_id).filter(Boolean))];
           if (listedByUserIds.length > 0) {
+            // Use direct user_profiles query (RLS is now simple and non-recursive)
             const { data: userProfilesData } = await supabase
               .from('user_profiles')
               .select('auth_user_id, name, email, investment_advisor_code_entered, role')
@@ -3753,7 +4978,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           throw new Error('Startup not found');
         }
         
-        const startupUser = users.find(user => user.id === startup.user_id);
+        // CRITICAL FIX: For new registrations, user.id is profile ID, but startup.user_id is auth_user_id
+        // Check both user.id (old registrations) and user.auth_user_id (new registrations)
+        const startupUser = users.find(user => 
+          user.role === 'Startup' && 
+          (user.id === startup.user_id || (user as any).auth_user_id === startup.user_id)
+        );
         if (!startupUser) {
           throw new Error('Startup user not found');
         }
@@ -4259,9 +5489,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         message: error?.message,
         code: error?.code,
         details: error?.details,
-        hint: error?.hint
+        hint: error?.hint,
+        originalError: error?.originalError
       });
-      const errorMessage = error?.message || `Failed to ${action} offer. Please try again.`;
+      
+      // Show user-friendly error message
+      let errorMessage = error?.message || `Failed to ${action} offer. Please try again.`;
+      
+      // If it's a function not found error, provide helpful guidance
+      if (error?.message?.includes('Function does not exist') || 
+          error?.message?.includes('schema cache') ||
+          error?.code === '42883') {
+        errorMessage = `Database function error. Please contact support or run the SQL migration: ${error?.message}`;
+      } else if (error?.message?.includes('not found')) {
+        errorMessage = `Offer not found. Please refresh the page and try again.`;
+      } else if (error?.message?.includes('not in pending')) {
+        errorMessage = `Cannot ${action} this offer: ${error?.message}`;
+      }
+      
       alert(errorMessage);
     } finally {
       setIsLoading(false);
@@ -5094,6 +6339,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a3 3 0 00-.879-2.121M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2a3 3 0 01.879-2.121M12 12a4 4 0 100-8 4 4 0 000 8zm0 0a4 4 0 01-3.121 1.5H9a3 3 0 013 3v1" />
                 </svg>
                 Collaboration
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('credits')}
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+                activeTab === 'credits'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                Account
               </div>
             </button>
           </nav>
@@ -7832,149 +9092,338 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup Ask</th>
                     <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                     <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Premium Status</th>
                     <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {/* TMS Startups */}
-                  {myStartups.map((startup) => (
-                    <tr key={`tms-${startup.id}`}>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
-                        {startup.name}
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
-                        {startup.sector || 'Not specified'}
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
-                        {(() => {
-                          // Get startup ask from fundraising_details table
-                          const fundraising = startupFundraisingData[startup.id];
-                          const investmentValue = Number(fundraising?.value) || 0;
-                          const equityAllocation = Number(fundraising?.equity) || 0;
-                          const currency = fundraising?.currency || startup.currency || 'USD';
-                          
-                          if (investmentValue === 0 && equityAllocation === 0) {
-                            return (
-                              <span className="text-gray-500 italic">
-                                Funding ask not specified
-                              </span>
-                            );
-                          }
-                          
-                          return `Seeking ${formatCurrency(investmentValue, currency)} for ${equityAllocation}% equity`;
-                        })()}
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                          TMS
-                        </span>
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
-                        {startup.created_at 
-                          ? new Date(startup.created_at).toLocaleDateString()
-                          : 'N/A'}
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
-                        <button
-                          onClick={() => handleViewStartupDashboard(startup)}
-                          className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
-                        >
-                          View Dashboard
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {myStartups.map((startup) => {
+                    const startupUser = users.find(u => u.role === 'Startup' && u.id === startup.user_id);
+                    const startupUserId = startupUser?.id || '';
+                    const premiumStatus = startupUserId ? getPremiumStatusForStartup(startupUserId) : { status: 'No Premium', autoRenewal: false, isActive: false, isSelfPaid: false };
+                    const isToggling = togglingStartups.has(startupUserId);
+                    const hasActivePremium = premiumStatus.status === 'Premium Active' && premiumStatus.isSelfPaid !== true;
+                    const isAutoRenewalOn = premiumStatus.autoRenewal === true;
+                    
+                    return (
+                        <tr key={`tms-${startup.id}`}>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
+                            {startup.name}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
+                            {startup.sector || 'Not specified'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
+                            {(() => {
+                              // Get startup ask from fundraising_details table
+                              const fundraising = startupFundraisingData[startup.id];
+                              const investmentValue = Number(fundraising?.value) || 0;
+                              const equityAllocation = Number(fundraising?.equity) || 0;
+                              const currency = fundraising?.currency || startup.currency || 'USD';
+                              
+                              if (investmentValue === 0 && equityAllocation === 0) {
+                                return (
+                                  <span className="text-gray-500 italic">
+                                    Funding ask not specified
+                                  </span>
+                                );
+                              }
+                              
+                              return `Seeking ${formatCurrency(investmentValue, currency)} for ${equityAllocation}% equity`;
+                            })()}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                              TMS
+                            </span>
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
+                            {startup.created_at 
+                              ? new Date(startup.created_at).toLocaleDateString()
+                              : 'N/A'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
+                            <div className="flex items-center gap-3">
+                              {startupUserId ? (() => {
+                                // Check if startup has self-paid subscription
+                                const isSelfPaid = premiumStatus.isSelfPaid === true;
+                                
+                                // If startup paid themselves, show badge and hide toggle
+                                if (isSelfPaid && premiumStatus.status === 'Premium Active') {
+                                  return (
+                                    <div className="flex flex-col">
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                        Premium Active by Startup
+                                      </span>
+                                      {premiumStatus.expiryDate && (
+                                        <span className="text-xs text-gray-500 mt-1">Expires: {premiumStatus.expiryDate}</span>
+                                      )}
+                                    </div>
+                                  );
+                                }
+                                
+                                // Otherwise, show toggle as before
+                                return (
+                                  <>
+                                    <button
+                                      type="button"
+                                      role="switch"
+                                      aria-checked={isAutoRenewalOn}
+                                      onClick={() => {
+                                        // Allow toggle if:
+                                        // 1. Not currently toggling
+                                        // 2. If auto-renewal is ON, turn it OFF (always allowed)
+                                        // 3. If auto-renewal is OFF, turn it ON (requires credits if premium not active, or just enable auto-renewal if premium is active)
+                                        if (!isToggling) {
+                                          if (isAutoRenewalOn) {
+                                            // Auto-renewal is ON - turn it OFF
+                                            handleToggleCreditAssignment(startupUserId, false);
+                                          } else {
+                                            // Auto-renewal is OFF - turn it ON
+                                            if (hasActivePremium) {
+                                              // Premium is active but auto-renewal is OFF - just enable auto-renewal (no credit needed)
+                                              handleToggleCreditAssignment(startupUserId, true);
+                                            } else if (advisorCredits && advisorCredits.credits_available >= 1) {
+                                              // Premium expired or doesn't exist - create new assignment (requires credit)
+                                              handleToggleCreditAssignment(startupUserId, true);
+                                            }
+                                          }
+                                        }
+                                      }}
+                                      disabled={isToggling || (!isAutoRenewalOn && !hasActivePremium && (!advisorCredits || advisorCredits.credits_available < 1))}
+                                      className={`${
+                                        isAutoRenewalOn ? 'bg-blue-600' : 'bg-gray-300'
+                                      } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed`}
+                                      title={isToggling ? 'Processing...' : isAutoRenewalOn ? 'Turn OFF Auto-Renewal' : hasActivePremium ? 'Turn ON Auto-Renewal' : 'Turn ON Premium (Requires 1 credit)'}
+                                    >
+                                      <span
+                                        aria-hidden="true"
+                                        className={`${
+                                          isAutoRenewalOn ? 'translate-x-5' : 'translate-x-0'
+                                        } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+                                    />
+                                  </button>
+                                  <div className="flex flex-col">
+                                    {premiumStatus.status === 'Premium Active' ? (
+                                      <>
+                                        <span className="text-green-600 font-medium">Premium Active</span>
+                                        <span className="text-xs text-gray-500">Expires: {premiumStatus.expiryDate}</span>
+                                        <span className="text-xs text-gray-500">
+                                          {premiumStatus.autoRenewal ? '(Auto-renewal ON)' : '(Auto-renewal OFF)'}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <span className="text-gray-500">No Premium</span>
+                                    )}
+                                  </div>
+                                </>
+                              );
+                            })() : (
+                              <span className="text-gray-400 text-xs">N/A</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
+                          <button
+                            onClick={() => handleViewStartupDashboard(startup)}
+                            className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                          >
+                            View Dashboard
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   
                   {/* Advisor-Added Startups */}
                   {loadingAddedStartups ? (
                     <tr>
-                      <td colSpan={6} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
+                      <td colSpan={7} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                         Loading added startups...
                       </td>
                     </tr>
                   ) : ((filteredAdvisorAddedStartups.length === 0 && myStartups.length === 0) ? (
                     <tr>
-                      <td colSpan={6} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
+                      <td colSpan={7} className="px-3 sm:px-6 py-4 text-center text-xs sm:text-sm text-gray-500">
                         No startups found. Click "Add Startup" to add startups who are not on TMS.
                       </td>
                     </tr>
                   ) : (
-                    filteredAdvisorAddedStartups.map((startup) => (
-                      <tr key={`added-${startup.id}`}>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
-                          {startup.startup_name}
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
-                          {startup.sector || startup.domain || 'Not specified'}
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
-                          {startup.investment_amount && startup.equity_percentage
-                            ? `Seeking ${formatCurrency(startup.investment_amount, startup.currency || 'USD')} for ${startup.equity_percentage}% equity`
-                            : startup.current_valuation
-                              ? `Valuation: ${formatCurrency(startup.current_valuation, startup.currency || 'USD')}`
-                              : (<span className="text-gray-500 italic">Funding ask not specified</span>)}
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                            Added
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
-                          {new Date(startup.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
-                          <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-                            {startup.is_on_tms && startup.tms_startup_id ? (
-                              <>
-                              <button
-                                onClick={() => {
-                                  const tmsStartup = startups.find(s => s.id === startup.tms_startup_id);
-                                  if (tmsStartup) {
-                                    handleViewStartupDashboard(tmsStartup);
-                                  }
-                                }}
-                                className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
-                              >
-                                View Dashboard
-                              </button>
-                                <button
-                                  onClick={() => handleDeleteAddedStartup(startup.id)}
-                                  className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
-                                  title="Delete manual entry (startup is now on TMS)"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => handleSendInviteToTMS(startup.id)}
-                                  disabled={isLoading}
-                                  className={`text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed`}
-                                  title="Send or resend invite"
-                                >
-                                  {startup.invite_status === 'sent' ? 'Resend Invite' : 'Invite to TMS'}
-                                </button>
-                                <button
-                                  onClick={() => handleEditAddedStartup(startup)}
-                                  className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors"
-                                  title="Edit"
-                                >
-                                  <Edit className="h-3 w-3" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteAddedStartup(startup.id)}
-                                  className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
-                                  title="Delete"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                    filteredAdvisorAddedStartups.map((startup) => {
+                      // For advisor-added startups, we need to find the TMS startup user_id if linked
+                      let startupUserId = '';
+                      if (startup.is_on_tms && startup.tms_startup_id) {
+                        const tmsStartup = startups.find(s => s.id === startup.tms_startup_id);
+                        if (tmsStartup) {
+                          const startupUser = users.find(u => u.role === 'Startup' && u.id === tmsStartup.user_id);
+                          startupUserId = startupUser?.id || '';
+                        }
+                      }
+                      
+                      const premiumStatus = startupUserId ? getPremiumStatusForStartup(startupUserId) : { status: 'No Premium', autoRenewal: false, isActive: false, isSelfPaid: false };
+                      const isToggling = togglingStartups.has(startupUserId);
+                      // Toggle state reflects auto-renewal status, not premium status
+                      // Toggle ON = auto-renewal enabled, Toggle OFF = auto-renewal disabled
+                      const isToggleOn = premiumStatus.autoRenewal;
+                      
+                      return (
+                        <tr key={`added-${startup.id}`}>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
+                            {startup.startup_name}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
+                            {startup.sector || startup.domain || 'Not specified'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
+                            {startup.investment_amount && startup.equity_percentage
+                              ? `Seeking ${formatCurrency(startup.investment_amount, startup.currency || 'USD')} for ${startup.equity_percentage}% equity`
+                              : startup.current_valuation
+                                ? `Valuation: ${formatCurrency(startup.current_valuation, startup.currency || 'USD')}`
+                                : (<span className="text-gray-500 italic">Funding ask not specified</span>)}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                              Added
+                            </span>
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
+                            {new Date(startup.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
+                            <div className="flex items-center gap-3">
+                              {startupUserId ? (() => {
+                                // Check if startup has self-paid subscription
+                                const isSelfPaid = premiumStatus.isSelfPaid === true;
+                                
+                                // If startup paid themselves, show badge and hide toggle
+                                if (isSelfPaid && premiumStatus.status === 'Premium Active') {
+                                  return (
+                                    <div className="flex flex-col">
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                        Premium Active by Startup
+                                      </span>
+                                      {premiumStatus.expiryDate && (
+                                        <span className="text-xs text-gray-500 mt-1">Expires: {premiumStatus.expiryDate}</span>
+                                      )}
+                                    </div>
+                                  );
+                                }
+                                
+                                // Otherwise, show toggle as before
+                                return (
+                                  <>
+                                    <button
+                                      type="button"
+                                      role="switch"
+                                      aria-checked={isToggleOn}
+                                      onClick={() => {
+                                        // Allow toggle if:
+                                        // 1. Not currently toggling
+                                        // 2. Either turning OFF (auto-renewal ON) OR turning ON
+                                        if (!isToggling) {
+                                          if (isToggleOn) {
+                                            // Turning OFF auto-renewal - always allowed, no credit check needed
+                                            handleToggleCreditAssignment(startupUserId, false);
+                                          } else {
+                                            // Turning ON auto-renewal
+                                            if (premiumStatus.isActive) {
+                                              // Premium is active but auto-renewal is OFF - just enable auto-renewal (no credit needed)
+                                              handleToggleCreditAssignment(startupUserId, true);
+                                            } else if (advisorCredits && advisorCredits.credits_available >= 1) {
+                                              // Premium expired or doesn't exist - create new assignment (requires credit)
+                                              handleToggleCreditAssignment(startupUserId, true);
+                                            }
+                                          }
+                                        }
+                                      }}
+                                      disabled={isToggling || (!isToggleOn && !premiumStatus.isActive && (!advisorCredits || advisorCredits.credits_available < 1))}
+                                      className={`${
+                                        isToggleOn ? 'bg-blue-600' : 'bg-gray-300'
+                                      } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed`}
+                                      title={isToggling ? 'Processing...' : isToggleOn ? 'Turn OFF Auto-Renewal' : premiumStatus.isActive ? 'Turn ON Auto-Renewal (Premium active until expiry)' : 'Turn ON Premium (Requires 1 credit)'}
+                                    >
+                                      <span
+                                        aria-hidden="true"
+                                        className={`${
+                                          isToggleOn ? 'translate-x-5' : 'translate-x-0'
+                                        } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+                                      />
+                                    </button>
+                                    <div className="flex flex-col">
+                                      {premiumStatus.status === 'Premium Active' ? (
+                                        <>
+                                          <span className="text-green-600 font-medium">Premium Active</span>
+                                          <span className="text-xs text-gray-500">Expires: {premiumStatus.expiryDate}</span>
+                                          <span className="text-xs text-gray-500">
+                                            {premiumStatus.autoRenewal ? '(Auto-renewal ON)' : '(Auto-renewal OFF)'}
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <span className="text-gray-500">No Premium</span>
+                                      )}
+                                    </div>
+                                  </>
+                                );
+                              })() : (
+                                <span className="text-gray-400 text-xs">N/A</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
+                            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+                              {startup.is_on_tms && startup.tms_startup_id ? (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      const tmsStartup = startups.find(s => s.id === startup.tms_startup_id);
+                                      if (tmsStartup) {
+                                        handleViewStartupDashboard(tmsStartup);
+                                      }
+                                    }}
+                                    className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                                  >
+                                    View Dashboard
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteAddedStartup(startup.id)}
+                                    className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                    title="Delete manual entry (startup is now on TMS)"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleSendInviteToTMS(startup.id)}
+                                    disabled={isLoading}
+                                    className={`text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed`}
+                                    title="Send or resend invite"
+                                  >
+                                    {startup.invite_status === 'sent' ? 'Resend Invite' : 'Invite to TMS'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleEditAddedStartup(startup)}
+                                    className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                    title="Edit"
+                                  >
+                                    <Edit className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteAddedStartup(startup.id)}
+                                    className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium transition-colors"
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   ))}
                 </tbody>
               </table>
@@ -10618,6 +12067,582 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                 </div>
               </div>
             </Modal>
+      )}
+
+      {/* Account Tab */}
+      {activeTab === 'credits' && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 mb-2">Account</h2>
+                <p className="text-sm text-gray-600">
+                  Buy credits to provide Premium subscriptions to your startups
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  // Load pricing and check country before showing modal
+                  if (currentUser?.id) {
+                    setLoadingPricing(true);
+                    try {
+                      // Get advisor's country from user_profiles only
+                      let country = '';
+                      
+                      // Get auth user ID first
+                      const { data: { user: authUser } } = await supabase.auth.getUser();
+                      if (authUser?.id) {
+                        const { data: userProfile } = await supabase
+                          .from('user_profiles')
+                          .select('country, id')
+                          .eq('auth_user_id', authUser.id)
+                          .eq('role', 'Investment Advisor')
+                          .maybeSingle();
+                        
+                        if (userProfile?.country) {
+                          country = userProfile.country;
+                          setAdvisorCountry(country);
+                          setNeedsCountrySelection(false);
+                        } else {
+                          // Country not set - need to ask for it
+                          setNeedsCountrySelection(true);
+                          setAdvisorCountry('');
+                          // Load countries if not already loaded
+                          if (countries.length === 0) {
+                            setLoadingCountries(true);
+                            try {
+                              const countryData = await generalDataService.getItemsByCategory('country');
+                              const countryNames = countryData.map(c => c.name);
+                              setCountries(countryNames);
+                            } catch (error) {
+                              console.error('Error loading countries:', error);
+                              setCountries(['India', 'USA', 'UK', 'Singapore', 'UAE', 'Germany', 'France', 'Canada', 'Australia', 'Japan', 'China', 'Other']);
+                            } finally {
+                              setLoadingCountries(false);
+                            }
+                          }
+                          setShowBuyCreditsModal(true);
+                          setLoadingPricing(false);
+                          return;
+                        }
+                      }
+                      
+                      // Normalize country name
+                      const normalizedCountry = country === 'India' ? 'India' : 'Global';
+                      const pricing = await advisorCreditService.getCreditPricing(normalizedCountry);
+                      setCreditPricing(pricing);
+                      setNeedsCountrySelection(false);
+                    } catch (error) {
+                      console.error('Error loading pricing:', error);
+                    } finally {
+                      setLoadingPricing(false);
+                    }
+                  }
+                  setShowBuyCreditsModal(true);
+                }}
+                className="mt-4 sm:mt-0 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+              >
+                Buy Credits
+              </button>
+            </div>
+
+            {/* Credits Summary */}
+            {loadingCredits ? (
+              <div className="text-center py-8 text-gray-500">Loading credits...</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <div className="text-sm text-gray-600 mb-1">Available Credits</div>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {advisorCredits?.credits_available || 0}
+                  </div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4">
+                  <div className="text-sm text-gray-600 mb-1">Credits Used</div>
+                  <div className="text-2xl font-bold text-green-600">
+                    {advisorCredits?.credits_used || 0}
+                  </div>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-4">
+                  <div className="text-sm text-gray-600 mb-1">Total Purchased</div>
+                  <div className="text-2xl font-bold text-purple-600">
+                    {advisorCredits?.credits_purchased || 0}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Purchase History */}
+            <div className="mt-8">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Purchase History</h3>
+                {purchaseHistory.filter(p => p.status === 'completed').length > 0 && (
+                  <button
+                    onClick={async () => {
+                      // Download all invoices
+                      const successfulPurchases = purchaseHistory.filter(p => p.status === 'completed');
+                      for (const purchase of successfulPurchases) {
+                        await handleDownloadInvoice(purchase);
+                        await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between downloads
+                      }
+                    }}
+                    className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                  >
+                    Download All Invoices
+                  </button>
+                )}
+              </div>
+              {purchaseHistory.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No purchase history yet. Buy credits to get started.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Credits</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {purchaseHistory.map((purchase) => {
+                        // Check both payment_type and purchase_type for consistency
+                        const isSubscription = 
+                          purchase.metadata?.payment_type === 'subscription' || 
+                          purchase.metadata?.purchase_type === 'subscription' ||
+                          (purchase.metadata?.subscription_id && purchase.metadata?.billing_cycle);
+                        
+                        return (
+                          <tr key={purchase.id}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {new Date(purchase.purchased_at).toLocaleDateString()}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                isSubscription ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {isSubscription ? 'Subscription' : 'One-Time'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {purchase.credits_purchased}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {formatCurrency(purchase.amount_paid, purchase.currency)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                purchase.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                purchase.status === 'failed' ? 'bg-red-100 text-red-800' :
+                                purchase.status === 'refunded' ? 'bg-gray-100 text-gray-800' :
+                                'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {purchase.status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {purchase.status === 'completed' ? (
+                                <button
+                                  onClick={async () => {
+                                    setDownloadingInvoice(purchase.id);
+                                    await handleDownloadInvoice(purchase);
+                                    setDownloadingInvoice(null);
+                                  }}
+                                  disabled={downloadingInvoice === purchase.id}
+                                  className="text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                                >
+                                  {downloadingInvoice === purchase.id ? (
+                                    <>
+                                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                      </svg>
+                                      Generating...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="h-4 w-4" />
+                                      Invoice
+                                    </>
+                                  )}
+                                </button>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Buy Credits Modal */}
+      {showBuyCreditsModal && (
+        <Modal
+          isOpen={showBuyCreditsModal}
+          onClose={() => {
+            setShowBuyCreditsModal(false);
+            setCreditQuantity(1);
+            setCreditPricing(null);
+            setNeedsCountrySelection(false);
+            setAdvisorCountry('');
+          }}
+          title="Buy Credits"
+        >
+          <div className="space-y-4">
+            {/* Purchase Type Tabs */}
+            {!needsCountrySelection && (
+              <div className="flex border-b border-gray-200">
+                <button
+                  onClick={() => setPurchaseType('one-time')}
+                  className={`flex-1 px-4 py-2 text-sm font-medium ${
+                    purchaseType === 'one-time'
+                      ? 'border-b-2 border-blue-600 text-blue-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  One-Time Purchase
+                </button>
+                <button
+                  onClick={() => setPurchaseType('subscription')}
+                  className={`flex-1 px-4 py-2 text-sm font-medium ${
+                    purchaseType === 'subscription'
+                      ? 'border-b-2 border-blue-600 text-blue-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Monthly Subscription
+                </button>
+              </div>
+            )}
+
+            {needsCountrySelection ? (
+              <>
+                <p className="text-sm text-gray-600 mb-4">
+                  Please select your country to determine the credit pricing.
+                </p>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Country <span className="text-red-500">*</span>
+                  </label>
+                  <Select
+                    value={advisorCountry}
+                    onChange={async (e) => {
+                      const selectedCountry = e.target.value;
+                      setAdvisorCountry(selectedCountry);
+                      
+                      if (selectedCountry) {
+                        // Save country to user_profiles
+                        setSavingCountry(true);
+                        try {
+                          const { data: { user: authUser } } = await supabase.auth.getUser();
+                          if (authUser?.id && currentUser?.id) {
+                            // Update user_profiles.country using profile ID
+                            const { error: updateError } = await supabase
+                              .from('user_profiles')
+                              .update({ country: selectedCountry })
+                              .eq('id', currentUser.id); // Use profile ID
+                            
+                            if (updateError) {
+                              console.error('Error saving country:', updateError);
+                              alert('Failed to save country. Please try again.');
+                              return;
+                            }
+                            
+                            // Load pricing after country is saved
+                            const normalizedCountry = selectedCountry === 'India' ? 'India' : 'Global';
+                            const pricing = await advisorCreditService.getCreditPricing(normalizedCountry);
+                            setCreditPricing(pricing);
+                            setNeedsCountrySelection(false);
+                          }
+                        } catch (error) {
+                          console.error('Error saving country:', error);
+                          alert('Failed to save country. Please try again.');
+                        } finally {
+                          setSavingCountry(false);
+                        }
+                      }
+                    }}
+                    disabled={savingCountry}
+                  >
+                    <option value="">Select Country</option>
+                    {loadingCountries ? (
+                      <option>Loading...</option>
+                    ) : (
+                      countries.map(countryName => (
+                        <option key={countryName} value={countryName}>{countryName}</option>
+                      ))
+                    )}
+                  </Select>
+                  {savingCountry && (
+                    <p className="text-xs text-gray-500 mt-1">Saving country...</p>
+                  )}
+                </div>
+              </>
+            ) : purchaseType === 'one-time' ? (
+              // One-Time Purchase
+              loadingPricing ? (
+                <div className="text-center py-4 text-gray-500">Loading pricing...</div>
+              ) : creditPricing ? (
+                <>
+                  <p className="text-sm text-gray-600">
+                    Each credit provides 1 month of Premium subscription for a startup.
+                  </p>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Number of Credits
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={creditQuantity}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value) || 1;
+                        setCreditQuantity(Math.max(1, value));
+                        // Reset PayPal button state when quantity changes
+                        setPaypalButtonRendered(false);
+                        const container = document.getElementById('paypal-button-container-onetime');
+                        if (container) container.innerHTML = '';
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Enter number of credits"
+                    />
+                  </div>
+
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-gray-600">Price per credit:</span>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {formatCurrency(creditPricing.price, creditPricing.currency)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-gray-600">Quantity:</span>
+                      <span className="text-sm font-semibold text-gray-900">{creditQuantity}</span>
+                    </div>
+                    <div className="border-t border-gray-200 pt-2 mt-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-base font-semibold text-gray-900">Total Amount:</span>
+                        <span className="text-lg font-bold text-blue-600">
+                          {formatCurrency(creditQuantity * creditPricing.price, creditPricing.currency)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* PayPal button container (for non-India one-time purchases) */}
+                  {creditPricing.currency === 'EUR' && (
+                    <div id="paypal-button-container-onetime" className="mt-4"></div>
+                  )}
+
+                  <div className="flex justify-end gap-3 pt-4">
+                    <button
+                      onClick={() => {
+                        setShowBuyCreditsModal(false);
+                        setCreditQuantity(1);
+                        setCreditPricing(null);
+                        setNeedsCountrySelection(false);
+                        setAdvisorCountry('');
+                        setPurchaseType('one-time');
+                        setIsLoading(false);
+                        // Clear PayPal button containers
+                        const container1 = document.getElementById('paypal-button-container-onetime');
+                        const container2 = document.getElementById('paypal-button-container');
+                        if (container1) container1.innerHTML = '';
+                        if (container2) container2.innerHTML = '';
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                    >
+                      Cancel
+                    </button>
+                    {creditPricing.currency === 'INR' && (
+                      <button
+                        onClick={() => handleBuyCredits(creditQuantity)}
+                        disabled={isLoading}
+                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {isLoading ? 'Processing...' : `Buy ${creditQuantity} Credit${creditQuantity !== 1 ? 's' : ''} (${formatCurrency(creditQuantity * creditPricing.price, creditPricing.currency)})`}
+                      </button>
+                    )}
+                    {creditPricing.currency === 'EUR' && !paypalButtonRendered && (
+                      <button
+                        onClick={() => renderPayPalButton()}
+                        disabled={isLoading || paypalButtonRendered}
+                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {isLoading ? 'Processing...' : `Pay with PayPal (${formatCurrency(creditQuantity * creditPricing.price, creditPricing.currency)})`}
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-4 text-red-500">
+                  Unable to load pricing. Please try again.
+                </div>
+              )
+            ) : (
+              // Monthly Subscription
+              loadingSubscription ? (
+                <div className="text-center py-4 text-gray-500">Loading subscription plans...</div>
+              ) : activeSubscriptions.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <h3 className="font-semibold text-green-900 mb-3">Active Subscriptions ({activeSubscriptions.length})</h3>
+                    <div className="space-y-3">
+                      {activeSubscriptions.map((subscription) => (
+                        <div key={subscription.id} className="bg-white rounded-md p-3 border border-green-200">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">
+                                {subscription.credits_per_month} credits/month
+                              </p>
+                              <p className="text-xs text-gray-600 mt-1">
+                                Price: {subscription.currency} {subscription.price_per_month.toFixed(2)}/month
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                Next billing: {subscription.next_billing_date 
+                                  ? new Date(subscription.next_billing_date).toLocaleDateString()
+                                  : 'N/A'}
+                              </p>
+                            </div>
+                            <button
+                              onClick={async () => {
+                                if (confirm(`Are you sure you want to cancel this subscription (${subscription.credits_per_month} credits/month)? Credits will stop being added after the current billing period.`)) {
+                                  const cancelled = await advisorCreditService.cancelSubscriptionById(subscription.id);
+                                  if (cancelled) {
+                                    const updatedSubs = await advisorCreditService.getActiveSubscriptions(currentUser!.id);
+                                    setActiveSubscriptions(updatedSubs);
+                                    alert('Subscription cancelled successfully.');
+                                  } else {
+                                    alert('Failed to cancel subscription. Please try again.');
+                                  }
+                                }
+                              }}
+                              className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => {
+                        setShowBuyCreditsModal(false);
+                        setPurchaseType('one-time');
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              ) : subscriptionPlans.length > 0 ? (
+                <>
+                  <p className="text-sm text-gray-600">
+                    Choose a monthly subscription plan. Credits will be automatically added to your account every month.
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {subscriptionPlans.map((plan) => (
+                      <button
+                        key={plan.id}
+                        onClick={() => setSelectedPlanId(plan.id)}
+                        className={`p-4 border-2 rounded-lg text-left transition-all ${
+                          selectedPlanId === plan.id
+                            ? 'border-blue-600 bg-blue-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="font-semibold text-gray-900 mb-1">{plan.plan_name}</div>
+                        <div className="text-2xl font-bold text-blue-600 mb-1">
+                          {formatCurrency(plan.price_per_month, plan.currency)}
+                        </div>
+                        <div className="text-xs text-gray-600">per month</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {selectedPlanId && (
+                    <div className="bg-blue-50 rounded-lg p-4">
+                      <p className="text-sm text-gray-700">
+                        Selected plan: <strong>{subscriptionPlans.find(p => p.id === selectedPlanId)?.plan_name}</strong>
+                      </p>
+                      <p className="text-xs text-gray-600 mt-1">
+                        You will be charged monthly. Credits will be automatically added to your account.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-3 pt-4">
+                    <button
+                      onClick={() => {
+                        setShowBuyCreditsModal(false);
+                        setSelectedPlanId('');
+                        setPurchaseType('one-time');
+                        // Clear PayPal button container
+                        const container = document.getElementById('paypal-button-container');
+                        if (container) container.innerHTML = '';
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                    >
+                      Cancel
+                    </button>
+                    {selectedPlanId && subscriptionPlans.find(p => p.id === selectedPlanId)?.currency === 'INR' && (
+                      <button
+                        onClick={async () => {
+                          if (!selectedPlanId) {
+                            alert('Please select a subscription plan.');
+                            return;
+                          }
+                          await handleSubscribeToPlan(selectedPlanId);
+                        }}
+                        disabled={!selectedPlanId || isLoading}
+                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isLoading ? 'Processing...' : 'Subscribe with Razorpay'}
+                      </button>
+                    )}
+                    {selectedPlanId && subscriptionPlans.find(p => p.id === selectedPlanId)?.currency === 'EUR' && (
+                      <button
+                        onClick={async () => {
+                          if (!selectedPlanId) {
+                            alert('Please select a subscription plan.');
+                            return;
+                          }
+                          await handleSubscribeToPlan(selectedPlanId);
+                        }}
+                        disabled={!selectedPlanId || isLoading}
+                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isLoading ? 'Processing...' : 'Subscribe with PayPal'}
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-4 text-red-500">
+                  No subscription plans available. Please contact support.
+                </div>
+              )
+            )}
+          </div>
+        </Modal>
       )}
     </div>
   );

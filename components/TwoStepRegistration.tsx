@@ -304,8 +304,9 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
               }
             }
 
-            // Save fundraising details only if active fundraising is enabled
-            if (fundraising && fundraising.active && fundraising.type && fundraising.value !== '' && fundraising.equity !== '') {
+            // Save fundraising details (even if inactive, so user can activate later when they have premium)
+            // For new registrations, fundraising.active will be validated and set to false if user doesn't have premium
+            if (fundraising && fundraising.type && fundraising.value !== '' && fundraising.equity !== '') {
               let deckUrl: string | undefined = undefined;
               
               // Upload pitch deck if provided
@@ -320,9 +321,10 @@ export const TwoStepRegistration: React.FC<TwoStepRegistrationProps> = ({
                 }
               }
 
-              // Save to fundraising_details table only
+              // Save to fundraising_details table
+              // Note: active status will be validated in capTableService based on subscription
               const frToSave: FundraisingDetails = {
-                active: !!fundraising.active,
+                active: !!fundraising.active, // Will be overridden to false if no premium access
                 type: fundraising.type as InvestmentType,
                 value: Number(fundraising.value),
                 equity: Number(fundraising.equity),

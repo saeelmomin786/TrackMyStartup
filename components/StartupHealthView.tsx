@@ -23,12 +23,14 @@ import StartupRequestsSection from './mentor/StartupRequestsSection';
 import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
 import SchedulingModal from './mentor/SchedulingModal';
 import StartupMentorScheduleSection from './startup/StartupMentorScheduleSection';
+import MyServicesSection from './startup/MyServicesSection';
 import { formatDateDDMMYYYY } from '../lib/dateTimeUtils';
 import { mentorService } from '../lib/mentorService';
 import { createSlug, createProfileUrl } from '../lib/slugUtils';
 import Modal from './ui/Modal';
 import { capTableService } from '../lib/capTableService';
 import { StartupStage, StartupDomain } from '../types';
+import { subscriptionService } from '../lib/subscriptionService';
 
 const ArrowLeftIcon = ArrowLeft;
 
@@ -37,7 +39,8 @@ const MentorCardWithDetails: React.FC<{
   mentor: any;
   videoEmbedUrl: string | null;
   onConnect: () => void;
-}> = ({ mentor, videoEmbedUrl, onConnect }) => {
+  requestStatus?: { status: string; requestId?: number } | null;
+}> = ({ mentor, videoEmbedUrl, onConnect, requestStatus }) => {
   const [metrics, setMetrics] = useState(() => {
     // Initialize with mentor prop values if available, otherwise 0
     const initialMetrics = {
@@ -896,10 +899,23 @@ const MentorCardWithDetails: React.FC<{
               </div>
               <Button
                 size="sm"
-                variant="primary"
+                variant={requestStatus ? 'outline' : 'primary'}
                 onClick={onConnect}
+                disabled={!!requestStatus}
+                className={requestStatus ? 'cursor-not-allowed opacity-60' : ''}
+                title={requestStatus ? 
+                  (requestStatus.status === 'accepted' ? 'You already have an accepted request with this mentor. Please check your dashboard.' :
+                   requestStatus.status === 'pending' ? 'You already have a pending request with this mentor.' :
+                   requestStatus.status === 'negotiating' ? 'You have a request under negotiation with this mentor.' :
+                   'You already have a request with this mentor.') : 
+                  'Connect with this mentor'}
               >
-                Connect
+                {requestStatus ? 
+                  (requestStatus.status === 'accepted' ? 'Request Accepted' :
+                   requestStatus.status === 'pending' ? 'Request Pending' :
+                   requestStatus.status === 'negotiating' ? 'Under Negotiation' :
+                   'Request Sent') : 
+                  'Connect'}
               </Button>
             </div>
           </div>
@@ -1112,6 +1128,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [showAccountPage, setShowAccountPage] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
+    const [hasAdvisorPaidSubscription, setHasAdvisorPaidSubscription] = useState(false);
     const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>('explore');
     const [userInvestmentAdvisorCode, setUserInvestmentAdvisorCode] = useState<string | null | undefined>((user as any)?.investment_advisor_code_entered);
     
@@ -1140,6 +1157,8 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [selectedMentor, setSelectedMentor] = useState<any>(null);
     const [startupRequests, setStartupRequests] = useState<any[]>([]);
     const [acceptedMentorRequests, setAcceptedMentorRequests] = useState<any[]>([]);
+    // Map to track request status for each mentor (mentor_id -> request status)
+    const [mentorRequestStatus, setMentorRequestStatus] = useState<Map<string, { status: string; requestId?: number }>>(new Map());
     
     // State for scheduling
     const [schedulingModalOpen, setSchedulingModalOpen] = useState(false);
@@ -1212,6 +1231,26 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             refreshData();
         }
     }, [activeTab, servicesSubTab, currentStartup?.id, user?.id]);
+
+    // Check if user has advisor-paid subscription (hide Account tab if true)
+    useEffect(() => {
+        const checkAdvisorSubscription = async () => {
+            if (!user?.id || isViewOnly || isFacilitatorAccess) {
+                setHasAdvisorPaidSubscription(false);
+                return;
+            }
+
+            try {
+                const hasAdvisorPaid = await subscriptionService.hasAdvisorPaidSubscription(user.id);
+                setHasAdvisorPaidSubscription(hasAdvisorPaid);
+            } catch (error) {
+                console.error('Error checking advisor-paid subscription:', error);
+                setHasAdvisorPaidSubscription(false);
+            }
+        };
+
+        checkAdvisorSubscription();
+    }, [user?.id, isViewOnly, isFacilitatorAccess]);
 
     const viewLabels = useMemo(() => {
         const name = currentStartup?.name || startup?.name || 'Startup';
@@ -1337,59 +1376,74 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                 });
 
             setStartupRequests(mappedRequests);
+            
+            // Also create a map of mentor_id -> request status for all requests (including accepted)
+            // This is used to disable Connect button for mentors with existing requests
+            // Exclude cancelled and rejected requests (startup can send new request after cancellation/rejection)
+            const requestStatusMap = new Map<string, { status: string; requestId?: number }>();
+            (requests || []).forEach((req: any) => {
+                if (req.mentor_id && req.status !== 'cancelled' && req.status !== 'rejected') {
+                    requestStatusMap.set(req.mentor_id, {
+                        status: req.status,
+                        requestId: req.id
+                    });
+                }
+            });
+            setMentorRequestStatus(requestStatusMap);
         } catch (error) {
             console.error('Error loading startup requests:', error);
         }
     };
 
-    // Load accepted mentor requests for "My Services" tab
+    // Load accepted mentor assignments for "My Services" tab
     const loadAcceptedMentorRequests = async () => {
         if (!currentStartup?.id || !user?.id) return;
         
         try {
-            // CRITICAL FIX: mentor_requests.requester_id references auth.users(id), not profile_id
-            // Get auth_user_id to ensure RLS policy allows the query
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            const authUserId = authUser?.id;
-            
-            if (!authUserId) {
-                console.error('Error: Not authenticated');
-                return;
-            }
-            
-            const { data: requests, error } = await supabase
-                .from('mentor_requests')
+            // Fetch mentor_startup_assignments for this startup (all statuses except cancelled)
+            const { data: assignments, error } = await supabase
+                .from('mentor_startup_assignments')
                 .select('*')
                 .eq('startup_id', currentStartup.id)
-                .eq('requester_id', authUserId)  // Use auth_user_id for RLS policy
-                .eq('status', 'accepted')
-                .order('responded_at', { ascending: false });
+                .neq('status', 'cancelled')
+                .order('assigned_at', { ascending: false });
 
             if (error) {
-                console.error('Error loading accepted mentor requests:', error);
+                console.error('Error loading mentor assignments:', error);
+                console.error('Error details:', {
+                    message: error.message,
+                    code: error.code,
+                    details: error.details,
+                    hint: error.hint
+                });
                 return;
             }
 
-            // Enrich with mentor profile data and assignment ID
-            const mappedRequests = await Promise.all((requests || []).map(async (req: any) => {
+            // Enrich with mentor profile data and request data
+            const mappedAssignments = await Promise.all((assignments || []).map(async (assignment: any) => {
                 let mentorName = 'Unknown Mentor';
-                let assignmentId: number | null = null;
+                let feeType: string | undefined;
+                let feeCurrency: string | undefined;
+                let requestId: number | null = null;
                 
+                // Get mentor profile data
                 try {
                     const { data: mentorProfile } = await supabase
                         .from('mentor_profiles')
-                        .select('mentor_name')
-                        .eq('user_id', req.mentor_id)
+                        .select('mentor_name, fee_type, fee_currency, fee_amount_min, fee_amount_max, equity_amount_min, equity_amount_max')
+                        .eq('user_id', assignment.mentor_id)
                         .maybeSingle();
                     
-                    if (mentorProfile?.mentor_name) {
-                        mentorName = mentorProfile.mentor_name;
+                    if (mentorProfile) {
+                        mentorName = mentorProfile.mentor_name || 'Unknown Mentor';
+                        feeType = mentorProfile.fee_type;
+                        feeCurrency = mentorProfile.fee_currency;
                     } else {
-                        // Try user_profiles
+                        // Try user_profiles as fallback
                         const { data: userProfile } = await supabase
                             .from('user_profiles')
                             .select('name')
-                            .eq('auth_user_id', req.mentor_id)
+                            .eq('auth_user_id', assignment.mentor_id)
                             .maybeSingle();
                         
                         if (userProfile?.name) {
@@ -1397,49 +1451,80 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         }
                     }
                 } catch (err) {
-                    console.warn('Error fetching mentor name:', err);
+                    console.warn('Error fetching mentor profile:', err);
                 }
-
-                // Get the assignment ID for this mentor-startup pair
+                
+                // Get related request ID
                 try {
-                    const { data: assignment } = await supabase
-                        .from('mentor_startup_assignments')
-                        .select('id')
-                        .eq('mentor_id', req.mentor_id)
-                        .eq('startup_id', currentStartup.id)
-                        .eq('status', 'active')
-                        .maybeSingle();
+                    const { data: { user: authUser } } = await supabase.auth.getUser();
+                    const authUserId = authUser?.id;
                     
-                    if (assignment) {
-                        assignmentId = assignment.id;
+                    if (authUserId) {
+                        const { data: request } = await supabase
+                            .from('mentor_requests')
+                            .select('id')
+                            .eq('mentor_id', assignment.mentor_id)
+                            .eq('startup_id', assignment.startup_id)
+                            .eq('requester_id', authUserId)
+                            .in('status', ['accepted'])
+                            .maybeSingle();
+                        
+                        if (request) {
+                            requestId = request.id;
+                        }
                     }
                 } catch (err) {
-                    console.warn('Error fetching assignment ID:', err);
+                    console.warn('Error fetching request:', err);
                 }
-
-                return {
-                    ...req,
+                
+                const mappedAssignment = {
+                    id: assignment.id,
+                    assignment_id: assignment.id,
+                    mentor_id: assignment.mentor_id,
                     mentor_name: mentorName,
-                    startup_name: currentStartup?.name || 'Unknown Startup',
-                    startup_website: currentStartup?.domain || '',
-                    startup_sector: currentStartup?.sector || '',
-                    assignment_id: assignmentId
+                    request_id: requestId,
+                    status: assignment.status,
+                    payment_status: assignment.payment_status,
+                    agreement_status: assignment.agreement_status,
+                    fee_amount: assignment.fee_amount,
+                    fee_currency: assignment.fee_currency || feeCurrency,
+                    esop_value: assignment.esop_value,
+                    fee_type: feeType,
+                    assigned_at: assignment.assigned_at,
+                    created_at: assignment.assigned_at, // Use assigned_at as fallback if created_at doesn't exist
+                    agreement_url: assignment.agreement_url,
+                    mentor_signed_agreement_url: assignment.mentor_signed_agreement_url
                 };
+                
+                // Debug log for agreement status
+                if (assignment.id === 15) {
+                    console.log('🔍 Assignment 15 data from database:', {
+                        id: assignment.id,
+                        agreement_status: assignment.agreement_status,
+                        agreement_url: assignment.agreement_url,
+                        status: assignment.status
+                    });
+                }
+                
+                return mappedAssignment;
             }));
-
-            setAcceptedMentorRequests(mappedRequests);
+            
+            setAcceptedMentorRequests(mappedAssignments);
         } catch (error) {
-            console.error('Error loading accepted mentor requests:', error);
+            console.error('Error loading accepted mentor assignments:', error);
         }
     };
 
     useEffect(() => {
         if (activeTab === 'services' && servicesSubTab === 'requested') {
             loadStartupRequests();
-            // Also check if any requests were accepted (mentor accepted)
-            checkForAcceptedRequests();
+            // Check for accepted requests but don't auto-switch (user manually clicked on requested tab)
+            checkForAcceptedRequests(false);
         } else if (activeTab === 'services' && servicesSubTab === 'my-services') {
             loadAcceptedMentorRequests();
+        } else if (activeTab === 'services' && servicesSubTab === 'explore') {
+            // Load request status when exploring mentors to disable Connect buttons
+            loadStartupRequests();
         }
     }, [activeTab, servicesSubTab, currentStartup?.id, user?.id]);
 
@@ -1728,8 +1813,9 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         return mentor.fee_type;
     };
 
-    // Check if any requests were accepted by mentor and switch to My Services
-    const checkForAcceptedRequests = async () => {
+    // Check if any requests were accepted by mentor (without auto-switching tabs)
+    // This is used to refresh data, but doesn't force tab switching
+    const checkForAcceptedRequests = async (shouldAutoSwitch: boolean = false) => {
         if (!currentStartup?.id || !user?.id) return;
         
         try {
@@ -1753,19 +1839,21 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                 .limit(1);
 
             if (!error && acceptedRequests && acceptedRequests.length > 0) {
-                // Check if this is a newly accepted request (accepted in last 5 minutes)
-                const newestAccepted = acceptedRequests[0];
-                if (newestAccepted.responded_at) {
-                    const acceptedTime = new Date(newestAccepted.responded_at).getTime();
-                    const now = Date.now();
-                    const fiveMinutesAgo = now - (5 * 60 * 1000);
-                    
-                    // If accepted within last 5 minutes, auto-switch to My Services
-                    if (acceptedTime > fiveMinutesAgo) {
-                        setServicesSubTab('my-services');
-                        loadAcceptedMentorRequests();
-                        // Show notification
-                        alert('Great news! A mentor has accepted your connection request. Check "My Services" to see your active connections.');
+                // Only auto-switch if explicitly requested (e.g., from notification or initial load)
+                // Don't auto-switch when user manually clicks on "requested" tab
+                if (shouldAutoSwitch) {
+                    // Check if this is a newly accepted request (accepted in last 5 minutes)
+                    const newestAccepted = acceptedRequests[0];
+                    if (newestAccepted.responded_at) {
+                        const acceptedTime = new Date(newestAccepted.responded_at).getTime();
+                        const now = Date.now();
+                        const fiveMinutesAgo = now - (5 * 60 * 1000);
+                        
+                        // If accepted within last 5 minutes, auto-switch to My Services
+                        if (acceptedTime > fiveMinutesAgo) {
+                            setServicesSubTab('my-services');
+                            loadAcceptedMentorRequests();
+                        }
                     }
                 }
             }
@@ -1856,7 +1944,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
-            { id: 'services', name: 'Services', icon: <Wrench className="w-4 h-4" /> },
+            { id: 'services', name: 'Explore', icon: <Wrench className="w-4 h-4" /> },
           ]
         : isDueDiligenceView
         ? [
@@ -1878,7 +1966,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
-            { id: 'services', name: 'Services', icon: <Wrench className="w-4 h-4" /> },
+            { id: 'services', name: 'Explore', icon: <Wrench className="w-4 h-4" /> },
           ];
 
     const renderTabContent = () => {
@@ -2182,6 +2270,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                               <MentorCardWithDetails 
                                                 mentor={mentor} 
                                                 videoEmbedUrl={videoEmbedUrl}
+                                                requestStatus={mentorRequestStatus.get(mentor.user_id || mentor.id)}
                                                 onConnect={() => {
                                                   setSelectedMentor(mentor);
                                                   setConnectModalOpen(true);
@@ -2205,8 +2294,9 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                           requests={startupRequests}
                           onRequestAction={() => {
                             loadStartupRequests();
-                            // Check if any requests were accepted by mentor
-                            checkForAcceptedRequests();
+                            // Check if any requests were accepted by mentor but don't auto-switch
+                            // User should manually navigate to "My Services" if needed
+                            checkForAcceptedRequests(false);
                           }}
                           onRequestAccepted={() => {
                             // Switch to My Services tab when startup accepts negotiation
@@ -2218,68 +2308,20 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
 
                       {servicesSubTab === 'my-services' && (
                         <div className="space-y-4">
-                          {/* Accepted Mentor Connections */}
-                          {acceptedMentorRequests.length > 0 && (
-                            <Card>
-                              <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
-                                <CheckCircle className="h-5 w-5 text-green-600" />
-                                Accepted Mentor Connections
-                              </h3>
-                              <div className="overflow-x-auto">
-                                <table className="w-full">
-                                  <thead>
-                                    <tr className="border-b border-slate-200">
-                                      <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Mentor</th>
-                                      <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Accepted Date</th>
-                                      <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Status</th>
-                                      <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Action</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {acceptedMentorRequests.map((request) => (
-                                      <tr key={request.id} className="border-b border-slate-100 hover:bg-slate-50">
-                                        <td className="py-3 px-4">
-                                          <div className="font-medium text-slate-900">{request.mentor_name || 'Unknown Mentor'}</div>
-                                        </td>
-                                        <td className="py-3 px-4 text-sm text-slate-600">
-                                          {request.responded_at ? formatDateDDMMYYYY(request.responded_at) : 'N/A'}
-                                        </td>
-                                        <td className="py-3 px-4">
-                                          <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">Accepted</span>
-                                        </td>
-                                        <td className="py-3 px-4 text-right">
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                                            onClick={() => {
-                                              setSelectedMentorForView(request);
-                                              setViewScheduleSectionOpen(true);
-                                            }}
-                                          >
-                                            <Eye className="mr-1 h-3 w-3" /> View
-                                          </Button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </Card>
-                          )}
+                          <MyServicesSection
+                            assignments={acceptedMentorRequests}
+                            onRefresh={loadAcceptedMentorRequests}
+                            startupName={currentStartup?.name}
+                            onViewSchedule={(assignment) => {
+                              setSelectedMentorForView(assignment);
+                              setViewScheduleSectionOpen(true);
+                            }}
+                          />
                           
                           <ScheduledSessionsSection
                             startupId={currentStartup.id}
                             userType="Startup"
                           />
-                          
-                          {acceptedMentorRequests.length === 0 && (
-                            <div className="text-center py-4 text-slate-600">
-                              <p className="text-sm">
-                                Accepted services and ongoing relationships will appear here.
-                              </p>
-                            </div>
-                          )}
                         </div>
                       )}
                     </Card>
@@ -2481,10 +2523,11 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
           mentorFeeAmountMax={selectedMentor.fee_amount_max || selectedMentor.fee_amount}
           mentorEquityPercentage={selectedMentor.equity_percentage}
           mentorCurrency={selectedMentor.fee_currency || 'USD'}
+          startupCurrency={currentStartup?.currency || startup?.currency || 'USD'}
           startupId={currentStartup.id}
           requesterId={user?.id!}
           onRequestSent={() => {
-            loadStartupRequests();
+            loadStartupRequests(); // This will also update mentorRequestStatus map
             setServicesSubTab('requested'); // Switch to "Requested" tab
             setConnectModalOpen(false);
             setSelectedMentor(null);

@@ -1392,8 +1392,8 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               ))}
             </Select>
 
-            {/* Currency - Show for Fees and Hybrid */}
-            {(profile.fee_type === 'Fees' || profile.fee_type === 'Hybrid') && (
+            {/* Currency - Show for Fees, Stock Options, and Hybrid */}
+            {(profile.fee_type === 'Fees' || profile.fee_type === 'Stock Options' || profile.fee_type === 'Hybrid') && (
               <Select
                 label="Currency"
                 value={profile.fee_currency || 'USD'}

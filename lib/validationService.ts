@@ -183,26 +183,27 @@ class ValidationService {
         .select('*')
         .eq('startup_id', startupId)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          // No validation request found
-          return null;
-        }
         console.error('Error fetching startup validation status:', error);
         throw error;
       }
 
+      // If no rows, return null (no validation request yet)
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) {
+        return null;
+      }
+
       return {
-        id: data.id,
-        startupId: data.startup_id,
-        startupName: data.startup_name,
-        requestDate: data.created_at,
-        status: data.status,
-        adminNotes: data.admin_notes,
-        createdAt: data.created_at
+        id: row.id,
+        startupId: row.startup_id,
+        startupName: row.startup_name,
+        requestDate: row.created_at,
+        status: row.status,
+        adminNotes: row.admin_notes,
+        createdAt: row.created_at
       };
     } catch (error) {
       console.error('Error in getStartupValidationStatus:', error);

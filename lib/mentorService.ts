@@ -184,12 +184,12 @@ class MentorService {
       let allRequests: any[] = [];
       try {
         console.log('🔍 Fetching mentor requests for mentor_id:', actualMentorId);
-        // First, get the basic request data
+        // First, get the basic request data (pending, accepted, and cancelled - cancelled ones can be deleted)
         const { data: requestsData, error: requestsError } = await supabase
           .from('mentor_requests')
           .select('*')
           .eq('mentor_id', actualMentorId)
-          .eq('status', 'pending')
+          .in('status', ['pending', 'accepted', 'cancelled'])
           .order('requested_at', { ascending: false });
 
         if (requestsError) {
@@ -260,7 +260,7 @@ class MentorService {
                 }
               }
 
-              // Fetch fee information from mentor_equity_records
+              // Fetch fee information from mentor_equity_records (if table exists)
               let feeType: string | undefined;
               let feeAmount: number | undefined;
               try {
@@ -268,13 +268,14 @@ class MentorService {
                   .from('mentor_equity_records')
                   .select('fee_type, fee_amount')
                   .eq('request_id', request.id)
-                  .single();
+                  .maybeSingle();
                 if (!equityError && equityData) {
                   feeType = equityData.fee_type || undefined;
                   feeAmount = equityData.fee_amount || undefined;
                 }
               } catch (err) {
-                console.warn('Error fetching fee data:', err);
+                // Table might not exist or RLS might block access - ignore silently
+                console.warn('Could not fetch fee data from mentor_equity_records:', err);
               }
 
               return {
@@ -560,9 +561,9 @@ class MentorService {
         return false;
       }
 
-      // Check if request is pending or negotiating
-      if (request.status !== 'pending' && request.status !== 'negotiating') {
-        console.error('Request is not pending or negotiating:', request.status);
+      // Check if request is pending
+      if (request.status !== 'pending') {
+        console.error('Request is not pending:', request.status);
         return false;
       }
 
@@ -583,47 +584,94 @@ class MentorService {
       // Create mentor assignment if startup_id exists
       if (request.startup_id) {
         console.log('📝 Creating mentor assignment for startup_id:', request.startup_id);
-        // Get mentor equity record to get fee details
+        
+        // Get mentor profile to determine fee_type
+        let mentorFeeType = 'Free';
+        let assignmentCurrency = 'USD';
+          try {
+            const { data: mentorProfile } = await supabase
+              .from('mentor_profiles')
+            .select('fee_type')
+              .eq('user_id', request.mentor_id)
+              .single();
+            
+          if (mentorProfile) {
+            mentorFeeType = mentorProfile.fee_type || 'Free';
+            }
+          } catch (err) {
+          console.warn('Could not fetch mentor profile, using defaults:', err);
+        }
+
+        // Use startup's currency from request (startup proposes in their currency)
+        if ((request as any).fee_currency) {
+          assignmentCurrency = (request as any).fee_currency;
+        } else if (request.startup_id) {
+          // Fallback: get currency from startup profile
+          try {
+            const { data: startupData } = await supabase
+              .from('startups')
+              .select('currency')
+              .eq('id', request.startup_id)
+              .single();
+            
+            if (startupData?.currency) {
+              assignmentCurrency = startupData.currency;
+            }
+          } catch (err) {
+            console.warn('Could not fetch startup currency, using USD:', err);
+          }
+        }
+
+        // Get mentor equity record to get fee details (if exists)
         const { data: equityRecord, error: equityError } = await supabase
           .from('mentor_equity_records')
           .select('fee_amount, fee_type, shares, price_per_share, equity_allocated, investment_amount')
           .eq('request_id', requestId)
-          .single();
+          .maybeSingle();
 
         if (equityError) {
-          console.warn('⚠️ Error fetching equity record:', equityError);
-        }
-
-        // Use negotiated amounts if available, otherwise use proposed amounts, otherwise use equity record
-        const feeAmount = request.negotiated_fee_amount ?? request.proposed_fee_amount ?? equityRecord?.fee_amount ?? 0;
-        const esopPercentage = request.negotiated_esop_percentage ?? request.proposed_esop_percentage ?? equityRecord?.equity_allocated ?? 0;
-        const esopValue = request.negotiated_equity_amount ?? request.proposed_equity_amount ?? equityRecord?.investment_amount ?? 0;
-
-        // Get currency from request or mentor profile
-        let assignmentCurrency = (request as any).fee_currency || 'USD';
-        if (!(request as any).fee_currency) {
-          try {
-            const { data: mentorProfile } = await supabase
-              .from('mentor_profiles')
-              .select('fee_currency')
-              .eq('user_id', request.mentor_id)
-              .single();
-            
-            if (mentorProfile?.fee_currency) {
-              assignmentCurrency = mentorProfile.fee_currency;
-            }
-          } catch (err) {
-            console.warn('Could not fetch mentor currency, using USD:', err);
+          // Table might not exist or RLS might block access - ignore silently
+          console.warn('⚠️ Could not fetch equity record (table may not exist):', equityError);
           }
+
+        // Use proposed amounts directly (mentor confirms the startup's offer)
+        const feeAmount = request.proposed_fee_amount ?? equityRecord?.fee_amount ?? 0;
+        const esopPercentage = request.proposed_esop_percentage ?? equityRecord?.equity_allocated ?? 0;
+        const esopValue = request.proposed_equity_amount ?? equityRecord?.investment_amount ?? 0;
+
+        // Determine assignment status based on fee_type
+        let assignmentStatus: string;
+        let assignedAt: string | null = null;
+        let paymentStatus: string | null = null;
+        let agreementStatus: string | null = null;
+
+        if (mentorFeeType === 'Free') {
+          assignmentStatus = 'active';
+          assignedAt = new Date().toISOString();
+        } else if (mentorFeeType === 'Fees') {
+          assignmentStatus = 'pending_payment';
+          paymentStatus = 'pending';
+        } else if (mentorFeeType === 'Stock Options') {
+          assignmentStatus = 'pending_agreement';
+          agreementStatus = 'pending_upload';
+        } else if (mentorFeeType === 'Hybrid') {
+          assignmentStatus = 'pending_payment_and_agreement';
+          paymentStatus = 'pending';
+          agreementStatus = 'pending_upload';
+        } else {
+          // Default to active for unknown types
+          assignmentStatus = 'active';
+          assignedAt = new Date().toISOString();
         }
 
         console.log('💰 Assignment details:', {
           mentor_id: request.mentor_id,
           startup_id: request.startup_id,
+          fee_type: mentorFeeType,
           feeAmount,
-          esopPercentage,
           esopValue,
-          currency: assignmentCurrency
+          currency: assignmentCurrency,
+          status: assignmentStatus
         });
 
         // Check if assignment already exists
@@ -644,16 +692,27 @@ class MentorService {
         if (existingAssignment) {
           // Update existing assignment
           console.log('🔄 Updating existing assignment:', existingAssignment.id);
-          const { data, error } = await supabase
-            .from('mentor_startup_assignments')
-            .update({
-              status: 'active',
+          const updateData: any = {
+            status: assignmentStatus,
               fee_amount: feeAmount,
               fee_currency: assignmentCurrency,
               esop_percentage: esopPercentage,
-              esop_value: esopValue,
-              assigned_at: new Date().toISOString()
-            })
+            esop_value: esopValue
+          };
+          
+          if (assignedAt) {
+            updateData.assigned_at = assignedAt;
+          }
+          if (paymentStatus) {
+            updateData.payment_status = paymentStatus;
+          }
+          if (agreementStatus) {
+            updateData.agreement_status = agreementStatus;
+          }
+
+          const { data, error } = await supabase
+            .from('mentor_startup_assignments')
+            .update(updateData)
             .eq('id', existingAssignment.id)
             .select();
           assignmentData = data;
@@ -661,18 +720,29 @@ class MentorService {
         } else {
           // Create new assignment
           console.log('➕ Creating new assignment');
-          const { data, error } = await supabase
-            .from('mentor_startup_assignments')
-            .insert({
+          const insertData: any = {
               mentor_id: request.mentor_id,
               startup_id: request.startup_id,
-              status: 'active',
+            status: assignmentStatus,
               fee_amount: feeAmount,
               fee_currency: assignmentCurrency,
               esop_percentage: esopPercentage,
-              esop_value: esopValue,
-              assigned_at: new Date().toISOString()
-            })
+            esop_value: esopValue
+          };
+          
+          if (assignedAt) {
+            insertData.assigned_at = assignedAt;
+          }
+          if (paymentStatus) {
+            insertData.payment_status = paymentStatus;
+          }
+          if (agreementStatus) {
+            insertData.agreement_status = agreementStatus;
+          }
+
+          const { data, error } = await supabase
+            .from('mentor_startup_assignments')
+            .insert(insertData)
             .select();
           assignmentData = data;
           assignmentError = error;
@@ -683,6 +753,35 @@ class MentorService {
           return false; // Fail if assignment creation fails
         } else {
           console.log('✅ Mentor assignment created/updated successfully:', assignmentData);
+          
+          // Create payment record if Fees or Hybrid
+          if ((mentorFeeType === 'Fees' || mentorFeeType === 'Hybrid') && feeAmount > 0 && assignmentData && assignmentData[0]) {
+            const commissionPercentage = 20.00;
+            const commissionAmount = (feeAmount * commissionPercentage) / 100;
+            const payoutAmount = feeAmount - commissionAmount;
+
+            const { error: paymentError } = await supabase
+              .from('mentor_payments')
+              .insert({
+                assignment_id: assignmentData[0].id,
+                mentor_id: request.mentor_id,
+                startup_id: request.startup_id,
+                amount: feeAmount,
+                currency: assignmentCurrency,
+                commission_percentage: commissionPercentage,
+                commission_amount: commissionAmount,
+                payout_amount: payoutAmount,
+                payment_status: 'pending_payment',
+                payout_status: 'not_initiated'
+              });
+
+            if (paymentError) {
+              console.error('❌ Error creating payment record:', paymentError);
+              // Don't fail the whole operation, just log the error
+            } else {
+              console.log('✅ Payment record created successfully');
+            }
+          }
         }
       } else {
         console.warn('⚠️ Request has no startup_id, cannot create assignment');
@@ -739,6 +838,209 @@ class MentorService {
     } catch (error) {
       console.error('Error rejecting mentor request:', error);
       return false;
+    }
+  }
+
+  // Cancel mentor request (startup can cancel their own request before mentor accepts)
+  async cancelMentorRequest(requestId: number): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log('🔄 Cancelling mentor request:', requestId);
+      
+      // First, check the current status of the request
+      const { data: request, error: fetchError } = await supabase
+        .from('mentor_requests')
+        .select('id, status, requester_id, mentor_id, startup_id')
+        .eq('id', requestId)
+        .single();
+
+      if (fetchError) {
+        console.error('❌ Error fetching request:', fetchError);
+        return { success: false, error: `Request not found: ${fetchError.message}` };
+      }
+
+      if (!request) {
+        console.error('❌ Request not found with ID:', requestId);
+        return { success: false, error: 'Request not found.' };
+      }
+
+      console.log('📋 Request found:', {
+        id: request.id,
+        status: request.status,
+        requester_id: request.requester_id,
+        mentor_id: request.mentor_id,
+        startup_id: request.startup_id
+      });
+
+      // Verify the current user is the requester
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !authUser) {
+        console.error('❌ Auth error:', authError);
+        return { success: false, error: 'Authentication failed. Please log in again.' };
+      }
+
+      console.log('👤 Current user:', {
+        authUserId: authUser.id,
+        requestRequesterId: request.requester_id,
+        match: request.requester_id === authUser.id
+      });
+
+      if (request.requester_id !== authUser.id) {
+        console.error('❌ User mismatch:', {
+          authUserId: authUser.id,
+          requestRequesterId: request.requester_id
+        });
+        return { success: false, error: 'You can only cancel your own requests.' };
+      }
+
+      // Only allow cancellation if status is pending or negotiating (not accepted)
+      if (request.status === 'accepted') {
+        return { 
+          success: false, 
+          error: 'Cannot cancel request. Mentor has already accepted it. Please proceed with payment/agreement.' 
+        };
+      }
+
+      if (request.status === 'rejected' || request.status === 'cancelled') {
+        return { 
+          success: false, 
+          error: 'Request is already closed.' 
+        };
+      }
+
+      console.log('✅ Validation passed, updating request status to cancelled...');
+
+      // Update status to cancelled
+      const { data: updatedRequest, error: updateError } = await supabase
+        .from('mentor_requests')
+        .update({
+          status: 'cancelled',
+          responded_at: new Date().toISOString()
+        })
+        .eq('id', requestId)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error('❌ Error cancelling mentor request:', updateError);
+        return { success: false, error: `Failed to cancel request: ${updateError.message}` };
+      }
+
+      if (!updatedRequest) {
+        console.error('❌ Update returned no data');
+        return { success: false, error: 'Failed to cancel request. Please try again.' };
+      }
+
+      console.log('✅ Request cancelled successfully:', {
+        id: updatedRequest.id,
+        status: updatedRequest.status
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('❌ Exception in cancelMentorRequest:', error);
+      return { success: false, error: error.message || 'Unknown error occurred' };
+    }
+  }
+
+  // Delete mentor request (mentor can delete cancelled requests)
+  async deleteMentorRequest(requestId: number): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log('🔄 Deleting mentor request:', requestId);
+      
+      // First, check the current status of the request
+      const { data: request, error: fetchError } = await supabase
+        .from('mentor_requests')
+        .select('id, status, mentor_id, requester_id, startup_id')
+        .eq('id', requestId)
+        .single();
+
+      if (fetchError) {
+        console.error('❌ Error fetching request:', fetchError);
+        return { success: false, error: `Request not found: ${fetchError.message}` };
+      }
+
+      if (!request) {
+        console.error('❌ Request not found with ID:', requestId);
+        return { success: false, error: 'Request not found.' };
+      }
+
+      console.log('📋 Request found:', {
+        id: request.id,
+        status: request.status,
+        mentor_id: request.mentor_id,
+        requester_id: request.requester_id,
+        startup_id: request.startup_id
+      });
+
+      // Verify the current user is the mentor
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !authUser) {
+        console.error('❌ Auth error:', authError);
+        return { success: false, error: 'Authentication failed. Please log in again.' };
+      }
+
+      console.log('👤 Current user:', {
+        authUserId: authUser.id,
+        requestMentorId: request.mentor_id,
+        match: request.mentor_id === authUser.id
+      });
+
+      // Check if mentor_id matches auth.uid() OR if mentor_id matches user_profiles
+      let isMentor = false;
+      
+      if (request.mentor_id === authUser.id) {
+        isMentor = true;
+      } else {
+        // Check if mentor_id is a profile_id and matches user_profiles
+        const { data: mentorProfile } = await supabase
+          .from('user_profiles')
+          .select('id, auth_user_id')
+          .eq('id', request.mentor_id)
+          .eq('auth_user_id', authUser.id)
+          .maybeSingle();
+        
+        if (mentorProfile) {
+          isMentor = true;
+          console.log('✅ Mentor verified via user_profiles:', mentorProfile);
+        }
+      }
+
+      if (!isMentor) {
+        console.error('❌ User is not the mentor for this request');
+        return { success: false, error: 'You can only delete requests sent to you.' };
+      }
+
+      // Only allow deletion if status is cancelled
+      if (request.status !== 'cancelled') {
+        console.error('❌ Request status is not cancelled:', request.status);
+        return { 
+          success: false, 
+          error: `Only cancelled requests can be deleted. Current status: ${request.status}` 
+        };
+      }
+
+      console.log('✅ Validation passed, deleting request...');
+
+      // Delete the request
+      const { data: deletedData, error: deleteError } = await supabase
+        .from('mentor_requests')
+        .delete()
+        .eq('id', requestId)
+        .select();
+
+      if (deleteError) {
+        console.error('❌ Error deleting mentor request:', deleteError);
+        return { success: false, error: `Failed to delete request: ${deleteError.message}` };
+      }
+
+      console.log('✅ Request deleted successfully:', deletedData);
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('❌ Exception in deleteMentorRequest:', error);
+      return { success: false, error: error.message || 'Unknown error occurred' };
     }
   }
 
@@ -876,21 +1178,55 @@ class MentorService {
         }
       }
 
-      // Get mentor's fee_currency if not provided
-      let mentorCurrency = currency || 'USD';
-      if (!currency) {
+      // Check for existing request (pending, negotiating, or accepted)
+      // Startup cannot send new request until current one is completed/rejected/cancelled
+      const { data: existingRequest, error: existingError } = await supabase
+        .from('mentor_requests')
+        .select('id, status')
+        .eq('mentor_id', actualMentorId)
+        .eq('requester_id', actualRequesterId)
+        .eq('startup_id', startupId)
+        .in('status', ['pending', 'negotiating', 'accepted'])
+        .maybeSingle();
+
+      if (existingError && existingError.code !== 'PGRST116') {
+        console.error('Error checking existing request:', existingError);
+        return { 
+          success: false, 
+          error: 'Failed to check existing requests. Please try again.' 
+        };
+      }
+
+      if (existingRequest) {
+        let errorMessage = '';
+        if (existingRequest.status === 'accepted') {
+          errorMessage = 'You already have an accepted request with this mentor. Please check your dashboard.';
+        } else if (existingRequest.status === 'negotiating') {
+          errorMessage = 'You already have a request under negotiation with this mentor. Please wait for their response or cancel the existing request.';
+        } else {
+          errorMessage = 'You already have a pending request with this mentor. Please wait for their response or cancel the existing request.';
+        }
+        return { 
+          success: false, 
+          error: errorMessage 
+        };
+      }
+
+      // Get startup's currency (startup proposes in their own currency)
+      let startupCurrency = currency || 'USD';
+      if (!currency && startupId) {
         try {
-          const { data: mentorProfile } = await supabase
-            .from('mentor_profiles')
-            .select('fee_currency')
-            .eq('user_id', actualMentorId)
+          const { data: startupData } = await supabase
+            .from('startups')
+            .select('currency')
+            .eq('id', startupId)
             .single();
           
-          if (mentorProfile?.fee_currency) {
-            mentorCurrency = mentorProfile.fee_currency;
+          if (startupData?.currency) {
+            startupCurrency = startupData.currency;
           }
         } catch (err) {
-          console.warn('Could not fetch mentor currency, using USD:', err);
+          console.warn('Could not fetch startup currency, using USD:', err);
         }
       }
 
@@ -906,7 +1242,7 @@ class MentorService {
           proposed_fee_amount: proposedFeeAmount || null,
           proposed_equity_amount: proposedEquityAmount || null,
           proposed_esop_percentage: proposedEsopPercentage || null,
-          fee_currency: mentorCurrency
+          fee_currency: startupCurrency // Store startup's currency
         })
         .select()
         .single();
@@ -1149,6 +1485,349 @@ class MentorService {
     } catch (error) {
       console.error('Error in getAllMentorProfiles:', error);
       return [];
+    }
+  }
+
+  /**
+   * Complete payment for mentor assignment
+   * Supports both PayPal (orderId) and Razorpay (paymentId)
+   */
+  async completePayment(assignmentId: number, paymentId: string, isRazorpay: boolean = false): Promise<boolean> {
+    try {
+      // Get assignment to check status
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('mentor_startup_assignments')
+        .select('*')
+        .eq('id', assignmentId)
+        .single();
+
+      if (assignmentError || !assignment) {
+        console.error('Error fetching assignment:', assignmentError);
+        return false;
+      }
+
+      // Update payment record - check if it's Razorpay or PayPal
+      const updateData: any = {
+        payment_status: 'completed',
+        payment_date: new Date().toISOString()
+      };
+
+      if (isRazorpay) {
+        updateData.razorpay_payment_id = paymentId;
+      } else {
+        updateData.paypal_order_id = paymentId;
+      }
+
+      const { error: paymentError } = await supabase
+        .from('mentor_payments')
+        .update(updateData)
+        .eq('assignment_id', assignmentId);
+
+      if (paymentError) {
+        console.error('Error updating payment:', paymentError);
+        return false;
+      }
+
+      // Update assignment payment status
+      const assignmentUpdateData: any = {
+        payment_status: 'completed'
+      };
+
+      // Don't auto-activate - wait for mentor's final acceptance
+      // If status is pending_payment, change to ready_for_activation
+      if (assignment.status === 'pending_payment') {
+        assignmentUpdateData.status = 'ready_for_activation';
+      } else if (assignment.status === 'pending_payment_and_agreement') {
+        // Check if agreement is also approved
+        if (assignment.agreement_status === 'approved') {
+          assignmentUpdateData.status = 'ready_for_activation';
+        }
+      }
+
+      const { error: updateError } = await supabase
+        .from('mentor_startup_assignments')
+        .update(assignmentUpdateData)
+        .eq('id', assignmentId);
+
+      if (updateError) {
+        console.error('Error updating assignment:', updateError);
+        return false;
+      }
+
+      console.log('✅ Payment completed successfully');
+      return true;
+    } catch (error) {
+      console.error('Error completing payment:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Upload agreement for mentor assignment
+   */
+  async uploadAgreement(assignmentId: number, agreementUrl: string): Promise<boolean> {
+    try {
+      console.log('💾 uploadAgreement called:', { assignmentId, agreementUrl });
+      
+      // First, check if the assignment exists and we can access it
+      const { data: checkData, error: checkError } = await supabase
+        .from('mentor_startup_assignments')
+        .select('id, startup_id, agreement_status, agreement_url')
+        .eq('id', assignmentId)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('❌ Error checking assignment:', checkError);
+        return false;
+      }
+
+      if (!checkData) {
+        console.error('❌ Assignment not found:', assignmentId);
+        return false;
+      }
+
+      console.log('🔍 Current assignment data:', checkData);
+      
+      // Now try to update
+      const { data, error } = await supabase
+        .from('mentor_startup_assignments')
+        .update({
+          agreement_url: agreementUrl,
+          agreement_uploaded_at: new Date().toISOString(),
+          agreement_status: 'pending_mentor_approval'
+        })
+        .eq('id', assignmentId)
+        .select();
+
+      if (error) {
+        console.error('❌ Error updating assignment:', error);
+        console.error('❌ Error details:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
+        return false;
+      }
+
+      if (!data || data.length === 0) {
+        console.error('❌ Update returned no rows - RLS policy may be blocking the update');
+        console.error('❌ This usually means the RLS policy does not allow updates for this user');
+        console.error('❌ Please run ADD_STARTUP_UPDATE_ASSIGNMENT_RLS.sql in Supabase SQL Editor');
+        return false;
+      }
+
+      console.log('✅ Assignment updated successfully:', data);
+      console.log('✅ Agreement uploaded successfully - status set to pending_mentor_approval');
+      return true;
+    } catch (error) {
+      console.error('❌ Exception in uploadAgreement:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Approve agreement for mentor assignment
+   */
+  async approveAgreement(assignmentId: number): Promise<boolean> {
+    try {
+      // Get assignment to check status
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('mentor_startup_assignments')
+        .select('*')
+        .eq('id', assignmentId)
+        .single();
+
+      if (assignmentError || !assignment) {
+        console.error('Error fetching assignment:', assignmentError);
+        return false;
+      }
+
+      // Check if mentor has uploaded signed agreement
+      if (!assignment.mentor_signed_agreement_url) {
+        console.error('Mentor must upload signed agreement before approval');
+        return false;
+      }
+
+      const updateData: any = {
+        agreement_status: 'approved'
+      };
+
+      // Don't auto-activate - wait for mentor's final acceptance
+      // If status is pending_agreement, change to ready_for_activation
+      if (assignment.status === 'pending_agreement') {
+        updateData.status = 'ready_for_activation';
+      } else if (assignment.status === 'pending_payment_and_agreement') {
+        // Check if payment is also completed
+        if (assignment.payment_status === 'completed') {
+          updateData.status = 'ready_for_activation';
+        }
+      }
+
+      const { error } = await supabase
+        .from('mentor_startup_assignments')
+        .update(updateData)
+        .eq('id', assignmentId);
+
+      if (error) {
+        console.error('Error approving agreement:', error);
+        return false;
+      }
+
+      console.log('✅ Agreement approved successfully');
+      return true;
+    } catch (error) {
+      console.error('Error approving agreement:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Upload mentor's signed agreement
+   */
+  async uploadSignedAgreement(assignmentId: number, signedAgreementUrl: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('mentor_startup_assignments')
+        .update({
+          mentor_signed_agreement_url: signedAgreementUrl,
+          mentor_signed_agreement_uploaded_at: new Date().toISOString(),
+          agreement_status: 'pending_mentor_signature'
+        })
+        .eq('id', assignmentId);
+
+      if (error) {
+        console.error('Error uploading signed agreement:', error);
+        return false;
+      }
+
+      console.log('✅ Signed agreement uploaded successfully');
+      return true;
+    } catch (error) {
+      console.error('Error uploading signed agreement:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Final acceptance - Mentor accepts assignment after payment/agreement is complete
+   * This activates the assignment and adds startup to mentoring
+   */
+  async finalAcceptAssignment(assignmentId: number): Promise<boolean> {
+    try {
+      // Get assignment to check status
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('mentor_startup_assignments')
+        .select('*')
+        .eq('id', assignmentId)
+        .single();
+
+      if (assignmentError || !assignment) {
+        console.error('Error fetching assignment:', assignmentError);
+        return false;
+      }
+
+      // Only allow final acceptance if status is ready_for_activation
+      if (assignment.status !== 'ready_for_activation') {
+        console.error('Assignment is not ready for activation:', assignment.status);
+        return false;
+      }
+
+      // Verify payment/agreement requirements are met
+      // Payment is required if payment_status exists and is not 'completed'
+      // (If payment_status is null, payment is not required)
+      const paymentRequired = assignment.payment_status !== null && assignment.payment_status !== undefined;
+      const paymentCompleted = assignment.payment_status === 'completed';
+      const needsPayment = paymentRequired && !paymentCompleted;
+
+      // Agreement is required if agreement_status exists and is not 'approved'
+      // (If agreement_status is null, agreement is not required)
+      // Note: 'pending_upload' means agreement is required but not yet uploaded/approved
+      const agreementRequired = assignment.agreement_status !== null && assignment.agreement_status !== undefined;
+      const agreementCompleted = assignment.agreement_status === 'approved';
+      const needsAgreement = agreementRequired && !agreementCompleted;
+
+      if (needsPayment || needsAgreement) {
+        console.error('Payment or agreement not completed yet', {
+          payment_status: assignment.payment_status,
+          agreement_status: assignment.agreement_status,
+          needsPayment,
+          needsAgreement
+        });
+        return false;
+      }
+
+      // Activate assignment
+      const { error } = await supabase
+        .from('mentor_startup_assignments')
+        .update({
+          status: 'active',
+          assigned_at: new Date().toISOString()
+        })
+        .eq('id', assignmentId);
+
+      if (error) {
+        console.error('Error activating assignment:', error);
+        return false;
+      }
+
+      console.log('✅ Assignment activated successfully');
+      return true;
+    } catch (error) {
+      console.error('Error in final acceptance:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Reject agreement for mentor assignment
+   */
+  async rejectAgreement(assignmentId: number): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('mentor_startup_assignments')
+        .update({
+          agreement_status: 'rejected'
+        })
+        .eq('id', assignmentId);
+
+      if (error) {
+        console.error('Error rejecting agreement:', error);
+        return false;
+      }
+
+      console.log('✅ Agreement rejected');
+      return true;
+    } catch (error) {
+      console.error('Error rejecting agreement:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get payment details for assignment
+   */
+  async getPaymentDetails(assignmentId: number): Promise<any | null> {
+    try {
+      const { data, error } = await supabase
+        .from('mentor_payments')
+        .select('*')
+        .eq('assignment_id', assignmentId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No payment record found
+          return null;
+        }
+        console.error('Error fetching payment details:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in getPaymentDetails:', error);
+      return null;
     }
   }
 

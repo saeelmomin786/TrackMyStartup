@@ -118,6 +118,8 @@ const App: React.FC = () => {
   const isServicePage = currentPath.startsWith('/services/');
   const isBlogDetailPage = currentPath.startsWith('/blogs/') && currentPath !== '/blogs';
   const isEventDetailPage = currentPath.startsWith('/events/') && currentPath !== '/events';
+  const isPaymentPage = currentPath.startsWith('/payment');
+  const isMentorPaymentPage = currentPath.startsWith('/mentor-payment');
   
   // Check if we're on a public program view page
   const isPublicProgramView = getQueryParam('view') === 'program' && getQueryParam('opportunityId');
@@ -250,7 +252,7 @@ const App: React.FC = () => {
   
   
   
-  if (standalonePages.includes(currentPath) || isServicePage || isBlogDetailPage || isEventDetailPage) {
+  if (standalonePages.includes(currentPath) || isServicePage || isBlogDetailPage || isEventDetailPage || isPaymentPage || isMentorPaymentPage) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col">
         <main className="flex-1">
@@ -2792,16 +2794,19 @@ const App: React.FC = () => {
             wantsCoInvestment
           });
           
-          // For co-investment, we need to find the corresponding startup_id
-          // Since opportunity.id is from new_investments, we need to map it to startups
+          // For co-investment, use opportunity.id directly as it's the startup_id
+          // This avoids the issue when multiple startups have the same name
+          const startupId = opportunity.id;
+          
+          // Verify the startup exists (optional check)
           const { data: startupData, error: startupError } = await supabase
             .from('startups')
             .select('id, name')
-            .eq('name', opportunity.name)
+            .eq('id', startupId)
             .single();
           
           if (startupError || !startupData) {
-            console.error('❌ Startup not found for co-investment:', opportunity.name, startupError);
+            console.error('❌ Startup not found for co-investment:', startupId, startupError);
             // Notification removed - startup not found error logged silently
             return;
           }
@@ -2827,7 +2832,7 @@ const App: React.FC = () => {
             : offerAmount; // If no remaining, allow up to the offer amount
           
           console.log('🔍 Co-investment opportunity parameters:', {
-            startup_id: startupData.id,
+            startup_id: startupId,
             listed_by_user_id: authUserId,
             investment_amount: opportunity.investmentValue,
             equity_percentage: opportunity.equityAllocation,
@@ -2836,7 +2841,7 @@ const App: React.FC = () => {
           });
           
           const coInvestmentOpportunity = await investmentService.createCoInvestmentOpportunity({
-            startup_id: startupData.id,
+            startup_id: startupId,
             listed_by_user_id: authUserId,  // Use auth_user_id, not profile ID!
             listed_by_type: 'Investor',
             investment_amount: opportunity.investmentValue,

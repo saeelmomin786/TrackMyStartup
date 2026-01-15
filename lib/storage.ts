@@ -89,6 +89,51 @@ export const storageService = {
     const uniqueId = Math.random().toString(36).substring(2, 15);
     const fileName = `${userIdOrEmail}/${documentType}_${timestamp}_${uniqueId}_${file.name}`;
     
+    // Try to get userId if it's an email (for storage tracking)
+    let userId: string | undefined = undefined;
+    if (!isUUID) {
+      // Try to find user by email
+      const { data: userData } = await supabase
+        .from('user_profiles')
+        .select('auth_user_id')
+        .eq('email', userIdOrEmail)
+        .limit(1)
+        .maybeSingle();
+      
+      userId = userData?.auth_user_id;
+      
+      // If not found in user_profiles, try auth.users
+      if (!userId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        userId = user?.id;
+      }
+    } else {
+      userId = userIdOrEmail;
+    }
+    
+    // If we have userId, use storage tracking; otherwise use direct upload (registration case)
+    if (userId) {
+      const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+      const uploadResult = await uploadFileWithTracking({
+        bucket: 'verification-documents',
+        path: fileName,
+        file,
+        cacheControl: '3600',
+        upsert: false,
+        userId: userId,
+        fileType: 'verification',
+        relatedEntityType: 'user',
+        relatedEntityId: userId
+      });
+      
+      return {
+        success: uploadResult.success,
+        url: uploadResult.url,
+        error: uploadResult.error
+      };
+    }
+    
+    // Fallback to direct upload (during registration, before user is created)
     return this.uploadFile(file, 'verification-documents', fileName);
   },
 
@@ -98,9 +143,39 @@ export const storageService = {
     startupId: string, 
     documentType: string
   ): Promise<FileUploadResult> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', parseInt(startupId))
+      .single();
+    
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `${startupId}/${documentType}_${timestamp}_${file.name}`;
     
+    // If we have userId, use storage tracking
+    if (startupData?.user_id) {
+      const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+      const uploadResult = await uploadFileWithTracking({
+        bucket: 'startup-documents',
+        path: fileName,
+        file,
+        cacheControl: '3600',
+        upsert: false,
+        userId: startupData.user_id,
+        fileType: 'document',
+        relatedEntityType: 'startup',
+        relatedEntityId: startupId
+      });
+      
+      return {
+        success: uploadResult.success,
+        url: uploadResult.url,
+        error: uploadResult.error
+      };
+    }
+    
+    // Fallback to direct upload
     return this.uploadFile(file, 'startup-documents', fileName);
   },
 
@@ -109,9 +184,39 @@ export const storageService = {
     file: File, 
     startupId: string
   ): Promise<FileUploadResult> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', parseInt(startupId))
+      .single();
+    
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `${startupId}/pitch-deck_${timestamp}_${file.name}`;
     
+    // If we have userId, use storage tracking
+    if (startupData?.user_id) {
+      const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+      const uploadResult = await uploadFileWithTracking({
+        bucket: 'pitch-decks',
+        path: fileName,
+        file,
+        cacheControl: '3600',
+        upsert: false,
+        userId: startupData.user_id,
+        fileType: 'pitch_deck',
+        relatedEntityType: 'startup',
+        relatedEntityId: startupId
+      });
+      
+      return {
+        success: uploadResult.success,
+        url: uploadResult.url,
+        error: uploadResult.error
+      };
+    }
+    
+    // Fallback to direct upload
     return this.uploadFile(file, 'pitch-decks', fileName);
   },
 
@@ -144,9 +249,39 @@ export const storageService = {
     startupId: string, 
     employeeId: string
   ): Promise<FileUploadResult> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', parseInt(startupId))
+      .single();
+    
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `${startupId}/employees/${employeeId}_contract_${timestamp}_${file.name}`;
     
+    // If we have userId, use storage tracking
+    if (startupData?.user_id) {
+      const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+      const uploadResult = await uploadFileWithTracking({
+        bucket: 'employee-contracts',
+        path: fileName,
+        file,
+        cacheControl: '3600',
+        upsert: false,
+        userId: startupData.user_id,
+        fileType: 'contract',
+        relatedEntityType: 'employee',
+        relatedEntityId: employeeId
+      });
+      
+      return {
+        success: uploadResult.success,
+        url: uploadResult.url,
+        error: uploadResult.error
+      };
+    }
+    
+    // Fallback to direct upload
     return this.uploadFile(file, 'employee-contracts', fileName);
   },
 

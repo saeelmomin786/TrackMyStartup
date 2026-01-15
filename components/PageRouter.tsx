@@ -21,6 +21,8 @@ import BlogsPage from './pages/BlogsPage';
 import BlogDetailPage from './pages/BlogDetailPage';
 import EventsPage from './pages/EventsPage';
 import TMSVirtualConferenceDetailPage from './pages/TMSVirtualConferenceDetailPage';
+import PaymentPage from './PaymentPage';
+import MentorPaymentPage from './mentor/MentorPaymentPage';
 
 const PageRouter: React.FC = () => {
   const path = window.location.pathname;
@@ -73,6 +75,57 @@ const PageRouter: React.FC = () => {
       return <TMSVirtualConferenceDetailPage />;
     }
     // Add more event detail pages here as needed
+  }
+
+  // Handle mentor payment page with query params
+  if (path.startsWith('/mentor-payment')) {
+    return <MentorPaymentPage />;
+  }
+
+  // Handle payment page with query params
+  if (path.startsWith('/payment')) {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const planTier = urlParams.get('plan') as 'basic' | 'premium' | null;
+      const userId = urlParams.get('userId') || '';
+      
+      console.log('Payment page route - planTier:', planTier, 'userId:', userId);
+      
+      if (!planTier || (planTier !== 'basic' && planTier !== 'premium')) {
+        return (
+          <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-slate-900 mb-4">Invalid Plan</h1>
+              <p className="text-slate-600 mb-6">Please select a valid plan.</p>
+              <button
+                onClick={() => window.history.back()}
+                className="bg-brand-primary text-white px-6 py-2 rounded-md hover:bg-brand-secondary transition-colors"
+              >
+                Go Back
+              </button>
+            </div>
+          </div>
+        );
+      }
+      
+      return <PaymentPage planTier={planTier} userId={userId || undefined} />;
+    } catch (error) {
+      console.error('Error loading payment page:', error);
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-slate-900 mb-4">Error Loading Payment Page</h1>
+            <p className="text-slate-600 mb-6">Please try again.</p>
+            <button
+              onClick={() => window.history.back()}
+              className="bg-brand-primary text-white px-6 py-2 rounded-md hover:bg-brand-secondary transition-colors"
+            >
+              Go Back
+            </button>
+          </div>
+        </div>
+      );
+    }
   }
 
   switch (path) {

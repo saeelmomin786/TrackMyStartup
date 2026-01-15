@@ -42,7 +42,7 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
           if (user.role === 'Startup' && user.startup_name) {
             const { data: startups } = await supabase
               .from('startups')
-              .select('id, name')
+              .select('id, name, currency')
               .eq('name', user.startup_name)
               .limit(1);
             
@@ -805,6 +805,7 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
           mentorFeeAmountMax={selectedMentor.fee_amount_max}
           mentorEquityPercentage={selectedMentor.equity_amount_min || selectedMentor.equity_amount_max}
           mentorCurrency={selectedMentor.fee_currency || 'USD'}
+          startupCurrency={currentStartup?.currency || 'USD'}
           startupId={currentStartup.id}
           requesterId={currentUser.id}
           onRequestSent={() => {

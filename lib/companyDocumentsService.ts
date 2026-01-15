@@ -161,11 +161,34 @@ class CompanyDocumentsService {
   // Upload a file to the company-documents storage bucket
   async uploadFile(file: File, startupId: number): Promise<string> {
     try {
+      // Get userId from startup (for storage tracking)
+      const { data: startupData } = await supabase
+        .from('startups')
+        .select('user_id')
+        .eq('id', startupId)
+        .single();
+      
+      if (!startupData?.user_id) {
+        throw new Error('Startup not found or user_id missing');
+      }
+      
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const uniqueId = Math.random().toString(36).substring(2, 10);
       const path = `${startupId}/company-documents/${timestamp}_${uniqueId}_${file.name}`;
 
-      const uploadResult = await storageService.uploadFile(file, 'company-documents', path);
+      // Upload with storage tracking
+      const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+      const uploadResult = await uploadFileWithTracking({
+        bucket: 'company-documents',
+        path: path,
+        file,
+        cacheControl: '3600',
+        upsert: false,
+        userId: startupData.user_id,
+        fileType: 'document',
+        relatedEntityType: 'startup',
+        relatedEntityId: startupId.toString()
+      });
 
       if (!uploadResult.success || !uploadResult.url) {
         throw new Error(uploadResult.error || 'Failed to upload company document');

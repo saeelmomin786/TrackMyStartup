@@ -8,6 +8,8 @@ import { messageService } from '../../lib/messageService';
 import { supabase } from '../../lib/supabase';
 import { incubationProgramsService } from '../../lib/incubationProgramsService';
 import { AddIncubationProgramData } from '../../types';
+import { featureAccessService } from '../../lib/featureAccessService';
+import SubscriptionPlansPage from '../SubscriptionPlansPage';
 
 interface InvestorCRM {
   id: string;
@@ -49,6 +51,7 @@ type CRMItem = InvestorCRM | ProgramCRM;
 
 interface FundraisingCRMProps {
   startupId: number;
+  userId?: string; // auth_user_id for feature checks
   onInvestorAdded?: (investor: InvestorCRM) => void;
   // Expose method to add investor from outside
   addInvestorToCRM?: (investorData: {
@@ -76,7 +79,7 @@ const PRIORITY_COLORS = {
 const FundraisingCRM = React.forwardRef<{ 
   addInvestorToCRM: (investorData: { name: string; email?: string; website?: string; linkedin?: string }) => void;
   addProgramToCRM: (programData: { programName: string; programType?: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp'; description?: string; programUrl?: string; facilitatorName?: string }) => void;
-}, FundraisingCRMProps>(({ startupId, onInvestorAdded }, ref) => {
+}, FundraisingCRMProps>(({ startupId, userId, onInvestorAdded }, ref) => {
   const [crmItems, setCrmItems] = useState<CRMItem[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -84,9 +87,29 @@ const FundraisingCRM = React.forwardRef<{
   const [selectedItem, setSelectedItem] = useState<CRMItem | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddingProgram, setIsAddingProgram] = useState(false);
+  const [hasCrmAccess, setHasCrmAccess] = useState<boolean | null>(null);
+  const [showPlans, setShowPlans] = useState(false);
   
   // Legacy investors state for backward compatibility
   const investors = crmItems.filter(item => item.type === 'investor') as InvestorCRM[];
+  
+  // Check CRM access
+  useEffect(() => {
+    const checkAccess = async () => {
+      if (!userId) {
+        setHasCrmAccess(false);
+        return;
+      }
+      try {
+        const access = await featureAccessService.canAccessFeature(userId, 'crm_access');
+        setHasCrmAccess(access);
+      } catch (error) {
+        console.error('Error checking CRM access:', error);
+        setHasCrmAccess(false);
+      }
+    };
+    checkAccess();
+  }, [userId]);
   
   // Grant/Incubation Program modal states
   const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
@@ -477,18 +500,31 @@ const FundraisingCRM = React.forwardRef<{
   };
 
   const handleDragStart = (e: React.DragEvent, itemId: string) => {
+    if (!hasCrmAccess) {
+      e.preventDefault();
+      return;
+    }
     setDraggedItem(itemId);
     e.dataTransfer.effectAllowed = 'move';
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (!hasCrmAccess) {
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   };
 
   const handleDrop = (e: React.DragEvent, targetStatus: CRMItem['status']) => {
     e.preventDefault();
-    if (!draggedItem) return;
+    if (!hasCrmAccess || !draggedItem) {
+      if (!hasCrmAccess) {
+        messageService.warning('Premium Feature', 'Upgrade to Basic or Premium to manage CRM items.', 3000);
+      }
+      return;
+    }
 
     const item = crmItems.find(i => i.id === draggedItem);
     if (!item) return;
@@ -652,46 +688,78 @@ const FundraisingCRM = React.forwardRef<{
               className="pl-10 pr-4 py-2 w-48"
             />
           </div>
-          <Button
-            onClick={() => {
-              resetForm();
-              setIsAddModalOpen(true);
-            }}
-            variant="primary"
-            size="sm"
-            className="bg-slate-900 hover:bg-slate-800"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add investor
-          </Button>
-          <Button
-            onClick={() => {
-              setProgramFormData({
-                programName: '',
-                programType: 'Grant',
-                status: 'to_be_contacted',
-                priority: 'medium',
-                approach: '',
-                firstContact: '',
-                notes: '',
-                startDate: '',
-                endDate: '',
-                description: '',
-                mentorName: '',
-                mentorEmail: '',
-                programUrl: '',
-                tags: '',
-              });
-              setIsAddingProgram(true);
-              setIsProgramModalOpen(true);
-            }}
-            variant="primary"
-            size="sm"
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add grant/incubation program
-          </Button>
+          <div className="relative group">
+            <Button
+              onClick={() => {
+                if (!hasCrmAccess) {
+                  // Open subscription plans when CRM is locked
+                  setShowPlans(true);
+                  return;
+                }
+                resetForm();
+                setIsAddModalOpen(true);
+              }}
+              variant="primary"
+              size="sm"
+              className={`${hasCrmAccess ? 'bg-slate-900 hover:bg-slate-800' : 'opacity-60 bg-gray-600'}`}
+              title={!hasCrmAccess ? 'Premium Feature - Click to upgrade and add investors to CRM' : 'Add investor'}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add investor
+            </Button>
+            {!hasCrmAccess && (
+              <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
+                <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                  Premium Feature - Upgrade to unlock
+                  <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="relative group">
+            <Button
+              onClick={() => {
+                if (!hasCrmAccess) {
+                  // Open subscription plans when CRM is locked
+                  setShowPlans(true);
+                  return;
+                }
+                setProgramFormData({
+                  programName: '',
+                  programType: 'Grant',
+                  status: 'to_be_contacted',
+                  priority: 'medium',
+                  approach: '',
+                  firstContact: '',
+                  notes: '',
+                  startDate: '',
+                  endDate: '',
+                  description: '',
+                  mentorName: '',
+                  mentorEmail: '',
+                  programUrl: '',
+                  tags: '',
+                });
+                setIsAddingProgram(true);
+                setIsProgramModalOpen(true);
+              }}
+              variant="primary"
+              size="sm"
+              className={`${hasCrmAccess ? 'bg-blue-600 hover:bg-blue-700' : 'opacity-60 bg-gray-600'}`}
+              title={!hasCrmAccess ? 'Premium Feature - Click to upgrade and add programs to CRM' : 'Add grant/incubation program'}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add grant/incubation program
+            </Button>
+            {!hasCrmAccess && (
+              <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
+                <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                  Premium Feature - Upgrade to unlock
+                  <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
+                </div>
+              </div>
+            )}
+          </div>
           <div className="text-sm text-slate-600">
             {crmItems.length} {crmItems.length === 1 ? 'item' : 'items'} in CRM ({investors.length} investors, {crmItems.filter(i => i.type === 'program').length} programs)
           </div>
@@ -720,8 +788,8 @@ const FundraisingCRM = React.forwardRef<{
                 {columnItems.map(item => (
                   <Card
                     key={item.id}
-                    className="p-3 hover:shadow-md transition-shadow relative"
-                    draggable
+                    className={`p-3 hover:shadow-md transition-shadow relative ${!hasCrmAccess ? 'opacity-75' : ''}`}
+                    draggable={hasCrmAccess === true}
                     onDragStart={e => handleDragStart(e, item.id)}
                   >
                     {/* Type Tag */}
@@ -765,20 +833,30 @@ const FundraisingCRM = React.forwardRef<{
                         <button
                           onClick={e => {
                             e.stopPropagation();
+                            if (!hasCrmAccess) {
+                              messageService.warning('Premium Feature', 'Upgrade to Basic or Premium to edit CRM items.', 3000);
+                              return;
+                            }
                             openEditModal(item);
                           }}
-                          className="text-slate-400 hover:text-blue-600 p-1"
-                          title={`Edit ${item.type}`}
+                          className={`${hasCrmAccess ? 'text-slate-400 hover:text-blue-600' : 'text-gray-300 cursor-not-allowed opacity-50'} p-1`}
+                          title={hasCrmAccess ? `Edit ${item.type}` : 'Premium Feature - Upgrade to edit'}
+                          disabled={!hasCrmAccess}
                         >
                           <Edit2 className="h-4 w-4" />
                         </button>
                         <button
                           onClick={e => {
                             e.stopPropagation();
+                            if (!hasCrmAccess) {
+                              messageService.warning('Premium Feature', 'Upgrade to Basic or Premium to delete CRM items.', 3000);
+                              return;
+                            }
                             handleDeleteItem(item.id, item.type);
                           }}
-                          className="text-slate-400 hover:text-red-600 p-1"
-                          title={`Delete ${item.type}`}
+                          className={`${hasCrmAccess ? 'text-slate-400 hover:text-red-600' : 'text-gray-300 cursor-not-allowed opacity-50'} p-1`}
+                          title={hasCrmAccess ? `Delete ${item.type}` : 'Premium Feature - Upgrade to delete'}
+                          disabled={!hasCrmAccess}
                         >
                           <X className="h-4 w-4" />
                         </button>
@@ -790,10 +868,16 @@ const FundraisingCRM = React.forwardRef<{
                         value={item.status}
                         onChange={e => {
                           e.stopPropagation();
+                          if (!hasCrmAccess) {
+                            messageService.warning('Premium Feature', 'Upgrade to Basic or Premium to update CRM status.', 3000);
+                            return;
+                          }
                           handleQuickStatusUpdate(item.id, e.target.value as CRMItem['status']);
                         }}
                         onClick={e => e.stopPropagation()}
-                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary bg-white"
+                        className={`w-full rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary ${hasCrmAccess ? 'bg-white' : 'bg-gray-100 cursor-not-allowed opacity-60'}`}
+                        disabled={!hasCrmAccess}
+                        title={!hasCrmAccess ? 'Premium Feature - Upgrade to update status' : 'Update status'}
                       >
                         {STATUS_COLUMNS.map(col => (
                           <option key={col.id} value={col.id}>
@@ -837,6 +921,31 @@ const FundraisingCRM = React.forwardRef<{
           );
         })}
       </div>
+
+      {/* Subscription Plans Modal for locked CRM actions */}
+      {showPlans && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-2 sm:p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <h2 className="text-base sm:text-lg font-semibold text-slate-900">
+                Choose a Plan to Unlock CRM Features
+              </h2>
+              <button
+                onClick={() => setShowPlans(false)}
+                className="text-slate-500 hover:text-slate-700 text-sm"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <SubscriptionPlansPage
+                userId={userId}
+                onBack={() => setShowPlans(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Investor Modal */}
       <Modal

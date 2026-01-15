@@ -13,6 +13,10 @@ import { toDirectImageUrl } from '../../lib/imageUrl';
 import ReferenceApplicationDraft from '../ReferenceApplicationDraft';
 import DraftAnswersView from '../DraftAnswersView';
 import { questionBankService, OpportunityQuestion, StartupAnswer } from '../../lib/questionBankService';
+import FeatureGuard from '../FeatureGuard';
+import UpgradePrompt from '../UpgradePrompt';
+import { featureAccessService } from '../../lib/featureAccessService';
+import SubscriptionPlansPage from '../SubscriptionPlansPage';
 
 interface StartupRef {
     id: number;
@@ -44,6 +48,7 @@ interface OpportunitiesTabProps {
       addProgramToCRM: (programData: { programName: string; programType?: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp'; description?: string; programUrl?: string; facilitatorName?: string }) => void;
     }>;
     onProgramAddedToCRM?: () => void;
+    authUserId?: string; // Optional: auth_user_id for feature checks
 }
 
  const SECTOR_OPTIONS = [
@@ -80,11 +85,30 @@ interface OpportunitiesTabProps {
      'Scaling'
  ];
 
-const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, onProgramAddedToCRM }) => {
+const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, onProgramAddedToCRM, authUserId: propAuthUserId }) => {
     const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
     const [applications, setApplications] = useState<ApplicationItem[]>([]);
     const [selectedOpportunity, setSelectedOpportunity] = useState<OpportunityItem | null>(null);
     const [adminPosts, setAdminPosts] = useState<AdminProgramPost[]>([]);
+    const [authUserId, setAuthUserId] = useState<string>(propAuthUserId || '');
+    
+    // Get auth_user_id if not provided as prop
+    useEffect(() => {
+        if (!propAuthUserId) {
+            const getAuthUserId = async () => {
+                try {
+                    const { data: { user: authUser } } = await supabase.auth.getUser();
+                    if (authUser?.id) {
+                        setAuthUserId(authUser.id);
+                    }
+                } catch (error) {
+                    console.error('Error getting auth user ID:', error);
+                }
+            };
+            getAuthUserId();
+        }
+    }, [propAuthUserId]);
+    
     // Per-application apply modal state
     const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
     const [applyingOppId, setApplyingOppId] = useState<string | null>(null);
@@ -223,8 +247,17 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             const questions = await questionBankService.getOpportunityQuestions(opportunityId);
             setOpportunityQuestions(questions);
             
-            // Auto-fill answers from saved answers (draft)
-            if (questions.length > 0) {
+            // Auto-fill answers from saved answers (draft) - Only for Basic/Premium users
+            let canUseDrafts = false;
+            if (authUserId) {
+                try {
+                    canUseDrafts = await featureAccessService.canAccessFeature(authUserId, 'grants_draft');
+                } catch (error) {
+                    console.error('Error checking draft access:', error);
+                }
+            }
+            
+            if (canUseDrafts && questions.length > 0) {
                 const answersMap = new Map<string, string>();
                 for (const q of questions) {
                     if (q.questionId) {
@@ -239,22 +272,22 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     }
                 }
                 
-                // If portfolio URL is available and there's a matching question, auto-fill it
-                if (portfolioUrl && portfolioUrl.trim()) {
-                    const portfolioQuestion = questions.find(q => 
-                        q.question?.questionText.toLowerCase().includes('portfolio') ||
-                        q.question?.questionText.toLowerCase().includes('website') ||
-                        q.question?.questionText.toLowerCase().includes('url') ||
-                        q.question?.questionText.toLowerCase().includes('link')
-                    );
-                    
-                    if (portfolioQuestion && !answersMap.has(portfolioQuestion.questionId)) {
-                        answersMap.set(portfolioQuestion.questionId, portfolioUrl);
+                    // If portfolio URL is available and there's a matching question, auto-fill it
+                    if (portfolioUrl && portfolioUrl.trim()) {
+                        const portfolioQuestion = questions.find(q => 
+                            q.question?.questionText.toLowerCase().includes('portfolio') ||
+                            q.question?.questionText.toLowerCase().includes('website') ||
+                            q.question?.questionText.toLowerCase().includes('url') ||
+                            q.question?.questionText.toLowerCase().includes('link')
+                        );
+                        
+                        if (portfolioQuestion && !answersMap.has(portfolioQuestion.questionId)) {
+                            answersMap.set(portfolioQuestion.questionId, portfolioUrl);
+                        }
                     }
+                    
+                    setQuestionAnswers(answersMap);
                 }
-                
-                setQuestionAnswers(answersMap);
-            }
         } catch (error: any) {
             console.error('Failed to load questions:', error);
             // Don't show error, just continue without questions
@@ -483,25 +516,22 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     <h2 className="text-2xl font-bold text-slate-800">Programs</h2>
                     <p className="text-slate-600">Explore accelerator programs and other programs posted by our network of facilitation centers.</p>
                 </div>
+                {/* Draft buttons - shown but disabled for free users */}
                 <div className="flex gap-2 flex-wrap">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
+                    <DraftButton 
+                        feature="grants_draft"
+                        userId={authUserId}
                         onClick={() => setIsDraftAnswersModalOpen(true)}
-                    >
-                        <FileText className="h-4 w-4 mr-2" />
-                        Draft
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
+                        label="Draft"
+                        icon={<FileText className="h-4 w-4 mr-2" />}
+                    />
+                    <DraftButton 
+                        feature="grants_draft"
+                        userId={authUserId}
                         onClick={() => setIsReferenceDraftModalOpen(true)}
-                    >
-                        <FileText className="h-4 w-4 mr-2" />
-                        Reference Application Draft
-                    </Button>
+                        label="Reference Application Draft"
+                        icon={<FileText className="h-4 w-4 mr-2" />}
+                    />
                 </div>
             </div>
 
@@ -645,10 +675,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     View
                                                 </Button>
                                                 {crmRef && (
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                                    <CrmButton
+                                                        feature="grants_add_to_crm"
+                                                        userId={authUserId}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             if (crmRef.current) {
@@ -684,11 +713,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                                 messageService.warning('CRM Not Ready', 'Please wait a moment and try again.', 2000);
                                                             }
                                                         }}
-                                                        title="Add to CRM"
-                                                    >
-                                                        <Plus className="h-4 w-4 mr-2" />
-                                                        Add to CRM
-                                                    </Button>
+                                                    />
                                                 )}
                                             </div>
                                             {!hasApplied ? (
@@ -783,10 +808,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     View
                                                 </Button>
                                                 {crmRef && (
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                                    <CrmButton
+                                                        feature="grants_add_to_crm"
+                                                        userId={authUserId}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             if (crmRef.current) {
@@ -802,7 +826,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                                 } else if (centerLower.includes('bootcamp')) {
                                                                     programType = 'Bootcamp';
                                                                 }
-                                                                
+                                                            
                                                                 crmRef.current.addProgramToCRM({
                                                                     programName: p.programName,
                                                                     programType: programType,
@@ -817,11 +841,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                                 messageService.warning('CRM Not Ready', 'Please wait a moment and try again.', 2000);
                                                             }
                                                         }}
-                                                        title="Add to CRM"
-                                                    >
-                                                        <Plus className="h-4 w-4 mr-2" />
-                                                        Add to CRM
-                                                    </Button>
+                                                    />
                                                 )}
                                             </div>
                                             <a href={p.applicationLink} target="_blank" rel="noopener noreferrer" className="w-full">
@@ -1016,23 +1036,326 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 </div>
             </Modal>
             
-            {/* Reference Application Draft Modal */}
-            <ReferenceApplicationDraft
-                isOpen={isReferenceDraftModalOpen}
-                onClose={() => setIsReferenceDraftModalOpen(false)}
-                startupId={startup.id}
-            />
+            {/* Reference Application Draft Modal - Only show if user has access */}
+            {isReferenceDraftModalOpen && (
+                <DraftModalGuard
+                    feature="grants_draft"
+                    userId={authUserId}
+                    onClose={() => setIsReferenceDraftModalOpen(false)}
+                >
+                    <ReferenceApplicationDraft
+                        isOpen={isReferenceDraftModalOpen}
+                        onClose={() => setIsReferenceDraftModalOpen(false)}
+                        startupId={startup.id}
+                    />
+                </DraftModalGuard>
+            )}
             
-            {/* Draft Answers Modal */}
-            <DraftAnswersView
-                isOpen={isDraftAnswersModalOpen}
-                onClose={() => setIsDraftAnswersModalOpen(false)}
-                startupId={startup.id}
-            />
+            {/* Draft Answers Modal - Only show if user has access */}
+            {isDraftAnswersModalOpen && (
+                <DraftModalGuard
+                    feature="grants_draft"
+                    userId={authUserId}
+                    onClose={() => setIsDraftAnswersModalOpen(false)}
+                >
+                    <DraftAnswersView
+                        isOpen={isDraftAnswersModalOpen}
+                        onClose={() => setIsDraftAnswersModalOpen(false)}
+                        startupId={startup.id}
+                    />
+                </DraftModalGuard>
+            )}
             
         </div>
     );
 };
+
+// Draft Button Component - Disabled for free users with message
+function DraftButton({ 
+    feature, 
+    userId, 
+    onClick, 
+    label, 
+    icon 
+}: { 
+    feature: string; 
+    userId: string; 
+    onClick: () => void; 
+    label: string; 
+    icon: React.ReactNode;
+}) {
+    const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+    const [planTier, setPlanTier] = useState<'free' | 'basic' | 'premium'>('free');
+    const [showPlans, setShowPlans] = useState(false);
+
+    useEffect(() => {
+        const checkAccess = async () => {
+            if (!userId) {
+                setHasAccess(false);
+                return;
+            }
+            try {
+                const tier = await featureAccessService.getUserPlanTier(userId);
+                setPlanTier(tier);
+                const access = await featureAccessService.canAccessFeature(userId, feature);
+                setHasAccess(access);
+            } catch (error) {
+                console.error('Error checking feature access:', error);
+                setHasAccess(false);
+            }
+        };
+        checkAccess();
+    }, [userId, feature]);
+
+    const handleClick = () => {
+        if (hasAccess) {
+            onClick();
+        } else {
+            // Open subscription plans modal when clicked without access
+            setShowPlans(true);
+        }
+    };
+
+    if (hasAccess === null) {
+        return (
+            <Button type="button" variant="outline" size="sm" disabled>
+                {icon}
+                {label}
+            </Button>
+        );
+    }
+
+    return (
+        <>
+            <div className="relative group">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClick}
+                    className={!hasAccess ? 'opacity-60' : ''}
+                    title={!hasAccess ? 'Premium Feature - Click to upgrade' : ''}
+                >
+                    {icon}
+                    {label}
+                </Button>
+                {!hasAccess && (
+                    <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
+                        <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                            Premium Feature - Click to upgrade
+                            <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
+                        </div>
+                    </div>
+                )}
+            </div>
+            {showPlans && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-2 sm:p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+                        <div className="flex items-center justify-between px-4 py-3 border-b">
+                            <h2 className="text-base sm:text-lg font-semibold text-slate-900">
+                                Choose a Plan to Unlock Premium Features
+                            </h2>
+                            <button
+                                onClick={() => setShowPlans(false)}
+                                className="text-slate-500 hover:text-slate-700 text-sm"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                            <SubscriptionPlansPage
+                                userId={userId}
+                                onBack={() => setShowPlans(false)}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
+
+// CRM Button Component - Disabled for free users with message
+function CrmButton({ 
+    feature, 
+    userId, 
+    onClick 
+}: { 
+    feature: string; 
+    userId: string; 
+    onClick: (e: React.MouseEvent) => void;
+}) {
+    const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+    const [planTier, setPlanTier] = useState<'free' | 'basic' | 'premium'>('free');
+    const [showPlans, setShowPlans] = useState(false);
+
+    useEffect(() => {
+        const checkAccess = async () => {
+            if (!userId) {
+                setHasAccess(false);
+                return;
+            }
+            try {
+                const tier = await featureAccessService.getUserPlanTier(userId);
+                setPlanTier(tier);
+                const access = await featureAccessService.canAccessFeature(userId, feature);
+                setHasAccess(access);
+            } catch (error) {
+                console.error('Error checking feature access:', error);
+                setHasAccess(false);
+            }
+        };
+        checkAccess();
+    }, [userId, feature]);
+
+    const handleClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (hasAccess) {
+            onClick(e);
+        } else {
+            // Open subscription plans modal when clicked without access
+            setShowPlans(true);
+        }
+    };
+
+    if (hasAccess === null) {
+        return (
+            <Button
+                type="button"
+                variant="outline"
+                className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                disabled
+            >
+                <Plus className="h-4 w-4 mr-2" />
+                Add to CRM
+            </Button>
+        );
+    }
+
+    return (
+        <>
+            <div className="relative group flex-1">
+                <Button
+                    type="button"
+                    variant="outline"
+                    className={`flex-1 ${hasAccess ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200' : 'opacity-60 bg-gray-50 text-gray-500 border-gray-200'}`}
+                    onClick={handleClick}
+                    title={!hasAccess ? 'Premium Feature - Click to upgrade' : 'Add to CRM'}
+                >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add to CRM
+                </Button>
+                {!hasAccess && (
+                    <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
+                        <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                            Premium Feature - Click to upgrade
+                            <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
+                        </div>
+                    </div>
+                )}
+            </div>
+            {showPlans && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-2 sm:p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+                        <div className="flex items-center justify-between px-4 py-3 border-b">
+                            <h2 className="text-base sm:text-lg font-semibold text-slate-900">
+                                Choose a Plan to Unlock Premium Features
+                            </h2>
+                            <button
+                                onClick={() => setShowPlans(false)}
+                                className="text-slate-500 hover:text-slate-700 text-sm"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                            <SubscriptionPlansPage
+                                userId={userId}
+                                onBack={() => setShowPlans(false)}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
+
+// Draft Modal Guard - Prevents modal from opening if no access
+function DraftModalGuard({ 
+    feature, 
+    userId, 
+    onClose, 
+    children 
+}: { 
+    feature: string; 
+    userId: string; 
+    onClose: () => void; 
+    children: React.ReactNode;
+}) {
+    const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+    const [planTier, setPlanTier] = useState<'free' | 'basic' | 'premium'>('free');
+    const [showPlans, setShowPlans] = useState(false);
+
+    useEffect(() => {
+        const checkAccess = async () => {
+            if (!userId) {
+                setHasAccess(false);
+                return;
+            }
+            try {
+                const tier = await featureAccessService.getUserPlanTier(userId);
+                setPlanTier(tier);
+                const access = await featureAccessService.canAccessFeature(userId, feature);
+                setHasAccess(access);
+                if (!access) {
+                    // Close modal and show subscription plans
+                    onClose();
+                    setShowPlans(true);
+                }
+            } catch (error) {
+                console.error('Error checking feature access:', error);
+                setHasAccess(false);
+                onClose();
+                setShowPlans(true);
+            }
+        };
+        checkAccess();
+    }, [userId, feature, onClose]);
+
+    if (hasAccess === null) {
+        return null; // Loading
+    }
+
+    if (!hasAccess) {
+        // Show subscription plans modal instead of just closing
+        return showPlans ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-2 sm:p-4">
+                <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+                    <div className="flex items-center justify-between px-4 py-3 border-b">
+                        <h2 className="text-base sm:text-lg font-semibold text-slate-900">
+                            Choose a Plan to Unlock Premium Features
+                        </h2>
+                        <button
+                            onClick={() => setShowPlans(false)}
+                            className="text-slate-500 hover:text-slate-700 text-sm"
+                        >
+                            Close
+                        </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                        <SubscriptionPlansPage
+                            userId={userId}
+                            onBack={() => setShowPlans(false)}
+                        />
+                    </div>
+                </div>
+            </div>
+        ) : null;
+    }
+
+    return <>{children}</>;
+}
 
 export default OpportunitiesTab;
 

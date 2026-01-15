@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Startup, InvestmentType, ComplianceStatus } from '../types';
-import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar, Edit, Save, Image as ImageIcon, Upload, Link, Cloud } from 'lucide-react';
+import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar, Edit, Save, Image as ImageIcon, Upload, Link, Cloud, Download } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { AuthUser } from '../lib/auth';
@@ -21,6 +21,7 @@ import MentorProfileForm from './mentor/MentorProfileForm';
 import MentorCard from './mentor/MentorCard';
 import { AddProfileModal } from './AddProfileModal';
 import MentorPendingRequestsSection from './mentor/MentorPendingRequestsSection';
+import PendingAgreementsSection from './mentor/PendingAgreementsSection';
 import SchedulingModal from './mentor/SchedulingModal';
 import ScheduledSessionsSection from './mentor/ScheduledSessionsSection';
 import ManageAvailabilityModal from './mentor/ManageAvailabilityModal';
@@ -987,6 +988,19 @@ const MentorView: React.FC<MentorViewProps> = ({
                   }}
                 />
 
+                {/* Pending Agreements */}
+                {currentUser?.id && (
+                  <PendingAgreementsSection
+                    mentorId={currentUser.id}
+                    onAgreementAction={async () => {
+                      if (currentUser?.id) {
+                        const metrics = await mentorService.getMentorMetrics(currentUser.id);
+                        setMentorMetrics(metrics);
+                      }
+                    }}
+                  />
+                )}
+
                 {/* Combined Mentor Startups Section */}
                 {mentorMetrics && (
                   <Card>
@@ -1155,6 +1169,29 @@ const MentorView: React.FC<MentorViewProps> = ({
                                   </td>
                                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <div className="flex items-center justify-end gap-2">
+                                      {/* Download Agreement button - show if mentor has uploaded signed agreement */}
+                                      {(assignment as any).mentor_signed_agreement_url && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-purple-600 border-purple-300 hover:bg-purple-50"
+                                          onClick={() => {
+                                            const agreementUrl = (assignment as any).mentor_signed_agreement_url;
+                                            if (agreementUrl) {
+                                              // Create a download link
+                                              const link = document.createElement('a');
+                                              link.href = agreementUrl;
+                                              link.download = `agreement-${startupName}-signed.pdf`;
+                                              document.body.appendChild(link);
+                                              link.click();
+                                              document.body.removeChild(link);
+                                            }
+                                          }}
+                                          title="Download Signed Agreement"
+                                        >
+                                          <Download className="mr-1 h-3 w-3" /> Agreement
+                                        </Button>
+                                      )}
                                       {/* Schedule button - only for TMS startups */}
                                       {assignment.startup && (
                                         <Button
@@ -2038,7 +2075,7 @@ const MentorView: React.FC<MentorViewProps> = ({
                           <option value="Hybrid">Hybrid</option>
                         </Select>
 
-                        {(previewProfile.fee_type === 'Fees' || previewProfile.fee_type === 'Hybrid') && (
+                        {(previewProfile.fee_type === 'Fees' || previewProfile.fee_type === 'Stock Options' || previewProfile.fee_type === 'Hybrid') && (
                           <Select
                             label="Currency"
                             value={previewProfile.fee_currency || 'USD'}

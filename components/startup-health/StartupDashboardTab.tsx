@@ -506,8 +506,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         setRevenueData(finalRevenueData);
       }
       
-      setRevenueData(finalRevenueData);
-      
       // Generate fund usage data based on actual expense categories
       const expenseByVertical: { [key: string]: number } = {};
       allRecords
@@ -1812,12 +1810,25 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     let uploadedFilePath: string | null = null;
     
     try {
+      if (!currentUser?.id) {
+        throw new Error('User not authenticated');
+      }
+
+      // CRITICAL: Get auth_user_id (UUID from auth.users) for storage tracking
+      // Storage tracking uses auth_user_id, not profile ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser?.id) {
+        throw new Error('Unable to get authenticated user ID');
+      }
+      const authUserId = authUser.id;
+
       console.log('📄 Starting contract upload for application:', applicationId);
       console.log('📄 File details:', {
         name: file.name,
         size: file.size,
         type: file.type
       });
+      console.log('📄 Using auth_user_id for storage tracking:', authUserId);
       
       // Validate file
       if (!file) {
@@ -1845,28 +1856,35 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       
       console.log('📄 Uploading to path:', filePath);
       
-      // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('startup-documents')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false // Don't overwrite existing files
-        });
+      // Upload with storage tracking - use auth_user_id (UUID from auth.users)
+      const { uploadFileWithTracking } = await import('../../lib/uploadWithStorageTracking');
+      const uploadResult = await uploadFileWithTracking({
+        bucket: 'startup-documents',
+        path: filePath,
+        file,
+        cacheControl: '3600',
+        upsert: false,
+        userId: authUserId, // Use auth_user_id, not profile ID
+        fileType: 'document',
+        relatedEntityType: 'opportunity_application',
+        relatedEntityId: applicationId
+      });
       
-      if (uploadError) {
-        console.error('❌ Storage upload error:', uploadError);
-        throw new Error(`Upload failed: ${uploadError.message}`);
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.error || 'Upload failed');
       }
       
       uploadedFilePath = filePath;
-      console.log('✅ File uploaded to storage:', uploadData);
+      console.log('✅ File uploaded to storage with tracking:', uploadResult);
       
-      // Get the public URL
-      const { data: urlData } = supabase.storage
-        .from('startup-documents')
-        .getPublicUrl(filePath);
+      // Use the URL from upload result
+      const publicUrl = uploadResult.url;
       
-      console.log('📄 Generated public URL:', urlData.publicUrl);
+      if (!publicUrl) {
+        throw new Error('Failed to get public URL');
+      }
+      
+      console.log('📄 Generated public URL:', publicUrl);
       
       // Verify the application exists before updating
       const { data: existingApp, error: fetchError } = await supabase
@@ -1885,7 +1903,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       const { data: updateData, error: updateError } = await supabase
         .from('opportunity_applications')
         .update({ 
-          contract_url: urlData.publicUrl,
+          contract_url: publicUrl,
           updated_at: new Date().toISOString()
         })
         .eq('id', applicationId)
@@ -1911,7 +1929,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         console.log('✅ Database update verified:', verifyData);
       }
       
-      console.log('✅ Contract uploaded and saved successfully:', urlData.publicUrl);
+      console.log('✅ Contract uploaded and saved successfully:', publicUrl);
       
       // Reload offers to reflect the change
       await loadOffersReceived();
@@ -1927,7 +1945,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         }
       }
       
-      return { success: true, url: urlData.publicUrl };
+      return { success: true, url: publicUrl };
       
     } catch (error) {
       console.error('❌ Contract upload failed:', error);
@@ -1958,6 +1976,10 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     let uploadedFilePath: string | null = null;
     
     try {
+      if (!currentUser?.id) {
+        throw new Error('User not authenticated');
+      }
+
       console.log('📄 Starting agreement upload for application:', applicationId);
       console.log('📄 File details:', {
         name: file.name,
@@ -1991,28 +2013,43 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       
       console.log('📄 Uploading to path:', filePath);
       
-      // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('startup-documents')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false // Don't overwrite existing files
-        });
+      // CRITICAL: Get auth_user_id (UUID from auth.users) for storage tracking
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser?.id) {
+        throw new Error('Unable to get authenticated user ID');
+      }
+      const authUserId = authUser.id;
+      console.log('📄 Using auth_user_id for storage tracking:', authUserId);
+
+      // Upload with storage tracking - use auth_user_id (UUID from auth.users)
+      const { uploadFileWithTracking } = await import('../../lib/uploadWithStorageTracking');
+      const uploadResult = await uploadFileWithTracking({
+        bucket: 'startup-documents',
+        path: filePath,
+        file,
+        cacheControl: '3600',
+        upsert: false,
+        userId: authUserId, // Use auth_user_id, not profile ID
+        fileType: 'document',
+        relatedEntityType: 'opportunity_application',
+        relatedEntityId: applicationId
+      });
       
-      if (uploadError) {
-        console.error('❌ Storage upload error:', uploadError);
-        throw new Error(`Upload failed: ${uploadError.message}`);
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.error || 'Upload failed');
       }
       
       uploadedFilePath = filePath;
-      console.log('✅ File uploaded to storage:', uploadData);
+      console.log('✅ File uploaded to storage with tracking:', uploadResult);
       
-      // Get the public URL
-      const { data: urlData } = supabase.storage
-        .from('startup-documents')
-        .getPublicUrl(filePath);
+      // Use the URL from upload result
+      const publicUrl = uploadResult.url;
       
-      console.log('📄 Generated public URL:', urlData.publicUrl);
+      if (!publicUrl) {
+        throw new Error('Failed to get public URL');
+      }
+      
+      console.log('📄 Generated public URL:', publicUrl);
       
       // Verify the application exists before updating
       const { data: existingApp, error: fetchError } = await supabase
@@ -2031,7 +2068,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       const { data: updateData, error: updateError } = await supabase
         .from('opportunity_applications')
         .update({ 
-          agreement_url: urlData.publicUrl,
+          agreement_url: publicUrl,
           updated_at: new Date().toISOString()
         })
         .eq('id', applicationId)
@@ -2057,7 +2094,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         console.log('✅ Database update verified:', verifyData);
       }
       
-      console.log('✅ Agreement uploaded and saved successfully:', urlData.publicUrl);
+      console.log('✅ Agreement uploaded and saved successfully:', publicUrl);
       
       // Reload offers to reflect the change
       await loadOffersReceived();
@@ -2073,7 +2110,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         }
       }
       
-      return { success: true, url: urlData.publicUrl };
+      return { success: true, url: publicUrl };
       
     } catch (error) {
       console.error('❌ Agreement upload failed:', error);

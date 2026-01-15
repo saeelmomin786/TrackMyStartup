@@ -456,18 +456,38 @@ class FinancialsService {
   // =====================================================
 
   async uploadAttachment(file: File, startupId: number): Promise<string> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', startupId)
+      .single();
+    
+    if (!startupData?.user_id) {
+      throw new Error('Startup not found or user_id missing');
+    }
+    
     const fileName = `${startupId}/${Date.now()}_${file.name}`;
-    const { data, error } = await supabase.storage
-      .from('financial-attachments')
-      .upload(fileName, file);
+    
+    // Upload with storage tracking
+    const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+    const uploadResult = await uploadFileWithTracking({
+      bucket: 'financial-attachments',
+      path: fileName,
+      file,
+      cacheControl: '3600',
+      upsert: false,
+      userId: startupData.user_id,
+      fileType: 'financial',
+      relatedEntityType: 'financial_record',
+      relatedEntityId: startupId.toString()
+    });
 
-    if (error) throw error;
+    if (!uploadResult.success || !uploadResult.url) {
+      throw new Error(uploadResult.error || 'Upload failed');
+    }
 
-    const { data: urlData } = supabase.storage
-      .from('financial-attachments')
-      .getPublicUrl(fileName);
-
-    return urlData.publicUrl;
+    return uploadResult.url;
   }
 
   async deleteAttachment(url: string): Promise<void> {

@@ -1,7 +1,11 @@
 import { supabase } from './supabase';
+import { selectPaymentGateway } from './paymentGatewaySelector';
 
 // Razorpay configuration (only public key on client)
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+
+// PayPal configuration
+const PAYPAL_CLIENT_ID = import.meta.env.VITE_PAYPAL_CLIENT_ID;
 
 // Types
 export interface PaymentOrder {
@@ -13,9 +17,12 @@ export interface PaymentOrder {
 }
 
 export interface PaymentResponse {
-  razorpay_payment_id: string;
-  razorpay_order_id: string;
-  razorpay_signature: string;
+  razorpay_payment_id?: string;
+  razorpay_order_id?: string;
+  razorpay_signature?: string;
+  paypal_order_id?: string;
+  paypal_payer_id?: string;
+  paypal_subscription_id?: string;
 }
 
 export interface SubscriptionPlan {
@@ -61,6 +68,13 @@ class PaymentService {
       this.paymentSuccessCallback();
     } else {
       console.log('⚠️ No payment success callback set - payment completed but no dashboard unlock');
+    }
+    
+    // Dispatch custom event for AccountTab to listen and refresh
+    if (typeof window !== 'undefined') {
+      const event = new CustomEvent('payment-success');
+      window.dispatchEvent(event);
+      console.log('📢 Dispatched payment-success event for AccountTab refresh');
     }
   }
 
@@ -336,6 +350,49 @@ class PaymentService {
     }
   }
 
+  // Enable autopay for subscription after mandate authorization
+  private async enableAutopayForSubscription(userId: string, razorpaySubscriptionId: string): Promise<void> {
+    try {
+      // Update subscription with autopay details
+      const { data: subscription, error: fetchError } = await supabase
+        .from('user_subscriptions')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .order('current_period_start', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (fetchError || !subscription) {
+        console.error('Error fetching subscription for autopay enablement:', fetchError);
+        return;
+      }
+
+      // Enable autopay - mandate will be synced from Razorpay webhook
+      const updateData: any = {
+        autopay_enabled: true,
+        razorpay_subscription_id: razorpaySubscriptionId,
+        mandate_status: 'active', // Will be updated by webhook with actual mandate ID
+        updated_at: new Date().toISOString()
+      };
+
+      const { error: updateError } = await supabase
+        .from('user_subscriptions')
+        .update(updateData)
+        .eq('id', subscription.id);
+
+      if (updateError) {
+        console.error('Error enabling autopay:', updateError);
+      } else {
+        console.log('✅ Autopay enabled for subscription:', subscription.id, {
+          razorpaySubscriptionId
+        });
+      }
+    } catch (error) {
+      console.error('Error in enableAutopayForSubscription:', error);
+    }
+  }
+
   private async deactivateExistingSubscriptions(userId: string): Promise<void> {
     try {
       const { error } = await supabase
@@ -407,8 +464,24 @@ class PaymentService {
     }
   }
 
+  // Process payment - routes to Razorpay or PayPal based on country
+  async processPayment(plan: SubscriptionPlan, userId: string, couponCode?: string, currentUser?: any, country?: string): Promise<boolean> {
+    // Determine payment gateway based on country
+    const gateway = country ? selectPaymentGateway(country) : 'paypal';
+    
+    console.log('🎯 [PaymentService] Routing payment:', { country, gateway, planName: plan.name });
+    
+    if (gateway === 'razorpay') {
+      console.log('💳 [PaymentService] Routing to Razorpay...');
+      return this.processRazorpayPayment(plan, userId, couponCode, currentUser, country);
+    } else {
+      console.log('💳 [PaymentService] Routing to PayPal...');
+      return this.processPayPalPayment(plan, userId, couponCode, currentUser, country);
+    }
+  }
+
   // Process payment with Razorpay
-  async processPayment(plan: SubscriptionPlan, userId: string, couponCode?: string, currentUser?: any): Promise<boolean> {
+  private async processRazorpayPayment(plan: SubscriptionPlan, userId: string, couponCode?: string, currentUser?: any, country?: string): Promise<boolean> {
     return new Promise(async (resolve, reject) => {
       try {
         // Load Razorpay script
@@ -462,17 +535,22 @@ class PaymentService {
           return;
         }
 
-        // Create one-time order for the discounted amount
-        const order = await this.createOrder(plan, userId, finalAmount);
+        // Create Razorpay subscription FIRST (this includes mandate setup for autopay)
+        console.log('🔄 Creating Razorpay subscription with autopay mandate...');
+        const razorpaySubscription = await this.createSubscription(plan, userId);
+        
+        if (!razorpaySubscription?.id) {
+          throw new Error('Failed to create Razorpay subscription for autopay');
+        }
 
-        // Razorpay options for one-time payment
+        console.log('✅ Razorpay subscription created:', razorpaySubscription.id);
+
+        // Razorpay options for subscription payment (with mandate authorization)
         const options = {
           key: RAZORPAY_KEY_ID,
-          amount: Math.round(finalAmount * 100), // Convert to paise
-          currency: plan.currency,
-          order_id: order.id,
+          subscription_id: razorpaySubscription.id, // Use subscription_id instead of order_id
           name: 'Track My Startup',
-          description: `Subscription: ${plan.name}`,
+          description: `Subscription: ${plan.name} (Autopay Enabled)`,
           prefill: {
             name: currentUser?.name || 'Startup User',
             email: currentUser?.email || 'user@startup.com',
@@ -482,7 +560,15 @@ class PaymentService {
           },
           handler: async (response: PaymentResponse) => {
             try {
-              console.log('Payment handler triggered:', response);
+              console.log('Payment handler triggered (subscription with mandate):', response);
+              
+              // For subscription payments, response might not have order_id
+              // Use subscription_id for signature verification instead
+              const paymentResponseForVerification = {
+                ...response,
+                razorpay_order_id: response.razorpay_order_id || razorpaySubscription.id, // Use subscription_id if order_id missing
+                razorpay_subscription_id: razorpaySubscription.id
+              };
               
               // Prepare tax information for verification
               const taxInfo = taxPercentage > 0 ? {
@@ -493,13 +579,19 @@ class PaymentService {
               
               // Verify the first payment with tax information
               await this.verifyPayment(
-                response,
+                paymentResponseForVerification,
                 plan,
                 userId,
                 couponCode,
                 taxInfo,
-                { finalAmount, interval: plan.interval, planName: plan.name }
+                { finalAmount, interval: plan.interval, planName: plan.name, razorpaySubscriptionId: razorpaySubscription.id, country }
               );
+              
+              // Update subscription with Razorpay subscription ID and enable autopay
+              await this.attachRazorpaySubscriptionId(userId, razorpaySubscription.id);
+              
+              // Enable autopay in database
+              await this.enableAutopayForSubscription(userId, razorpaySubscription.id);
               
               // Wait a moment for Supabase to commit the transaction
               await new Promise(resolve => setTimeout(resolve, 500));
@@ -507,24 +599,22 @@ class PaymentService {
               // Verify subscription was created before triggering success
               const { data: verifySub } = await supabase
                 .from('user_subscriptions')
-                .select('id, status')
+                .select('id, status, autopay_enabled, razorpay_subscription_id')
                 .eq('user_id', userId)
                 .eq('status', 'active')
                 .limit(1);
               
               if (verifySub && verifySub.length > 0) {
-                console.log('✅ Payment verified and subscription confirmed, triggering success callback');
+                console.log('✅ Payment verified, subscription confirmed, autopay enabled:', {
+                  subscriptionId: verifySub[0].id,
+                  autopayEnabled: verifySub[0].autopay_enabled,
+                  razorpaySubscriptionId: verifySub[0].razorpay_subscription_id
+                });
                 this.triggerPaymentSuccess();
               } else {
                 console.warn('⚠️ Payment verified but subscription not found yet, triggering success anyway');
                 this.triggerPaymentSuccess();
               }
-              
-              // Background subscription creation (non-blocking) always for Pay Now
-              console.log('🔄 Creating subscription for future autopay in background...');
-              this.createSubscription(plan, userId).catch(error => {
-                console.error('⚠️ Background subscription creation failed (non-critical):', error);
-              });
               
               resolve(true);
             } catch (error) {
@@ -540,7 +630,7 @@ class PaymentService {
           },
         };
 
-        // Open Razorpay checkout
+        // Open Razorpay checkout with subscription (mandate authorization)
         const razorpay = new (window as any).Razorpay(options);
         razorpay.open();
 
@@ -551,20 +641,544 @@ class PaymentService {
     });
   }
 
-  // Verify payment
-  async verifyPayment(
+  // Load PayPal script dynamically
+  private loadPayPalScript(): Promise<boolean> {
+    return new Promise((resolve) => {
+      if ((window as any).paypal) {
+        resolve(true);
+        return;
+      }
+
+      const isProduction = import.meta.env.VITE_PAYPAL_ENVIRONMENT === 'production';
+      const script = document.createElement('script');
+      // Include vault=true for subscription support
+      script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=EUR&vault=true${isProduction ? '' : '&buyer-country=US'}`;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  }
+
+  // Create PayPal order (for one-time payments)
+  private async createPayPalOrder(amount: number, currency: string = 'EUR'): Promise<string> {
+    try {
+      const response = await fetch(`/api/paypal/create-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: amount.toFixed(2),
+          currency: currency,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create PayPal order');
+      }
+
+      const data = await response.json();
+      return data.orderId;
+    } catch (error) {
+      console.error('Error creating PayPal order:', error);
+      throw error;
+    }
+  }
+
+  // Create PayPal subscription (for recurring payments with autopay)
+  private async createPayPalSubscription(plan: SubscriptionPlan, userId: string, finalAmount: number): Promise<string> {
+    try {
+      console.log('📞 [PayPal] Calling /api/paypal/create-subscription with:', {
+        user_id: userId,
+        final_amount: finalAmount,
+        interval: plan.interval,
+        plan_name: plan.name,
+        currency: plan.currency || 'EUR',
+      });
+      
+      const response = await fetch(`/api/paypal/create-subscription`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          final_amount: finalAmount,
+          interval: plan.interval,
+          plan_name: plan.name,
+          currency: plan.currency || 'EUR',
+        }),
+      });
+
+      console.log('📥 [PayPal] Response status:', response.status, response.statusText);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [PayPal] API error response:', errorText);
+        throw new Error(`Failed to create PayPal subscription: ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ [PayPal] Subscription created, received:', data);
+      return data.subscriptionId;
+    } catch (error) {
+      console.error('❌ [PayPal] Error creating PayPal subscription:', error);
+      throw error;
+    }
+  }
+
+  // Process payment with PayPal
+  private async processPayPalPayment(plan: SubscriptionPlan, userId: string, couponCode?: string, currentUser?: any, country?: string): Promise<boolean> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        console.log('🚀 [PayPal] Starting PayPal payment process...', { plan, userId, country });
+        
+        // Load PayPal script
+        console.log('📜 [PayPal] Loading PayPal SDK script...');
+        const scriptLoaded = await this.loadPayPalScript();
+        if (!scriptLoaded) {
+          console.error('❌ [PayPal] Failed to load PayPal script');
+          throw new Error('Failed to load PayPal script');
+        }
+        console.log('✅ [PayPal] PayPal SDK loaded successfully');
+
+        // Calculate base price with coupon
+        let baseAmount = plan.price;
+        if (couponCode) {
+          const coupon = await this.validateCoupon(couponCode);
+          if (coupon) {
+            if (coupon.discount_type === 'percentage') {
+              baseAmount = plan.price * (1 - coupon.discount_value / 100);
+            } else {
+              baseAmount = Math.max(0, plan.price - coupon.discount_value);
+            }
+          }
+        }
+
+        // Get tax percentage from plan
+        const taxPercentage = plan.tax_percentage || 0;
+        let taxAmount = 0;
+        let finalAmount = baseAmount;
+
+        if (taxPercentage > 0) {
+          taxAmount = this.calculateTaxAmount(baseAmount, taxPercentage);
+          finalAmount = baseAmount + taxAmount;
+          
+          console.log(`Tax calculation: Base: ${baseAmount}, Tax: ${taxPercentage}%, Tax Amount: ${taxAmount}, Total: ${finalAmount}`);
+        } else {
+          console.log('No tax configured for this plan, using base amount only');
+        }
+
+        // Handle free payments (100% discount)
+        if (finalAmount <= 0) {
+          console.log('Free payment detected, creating subscription directly...');
+          const taxInfo = taxPercentage > 0 ? {
+            taxPercentage: taxPercentage,
+            taxAmount: taxAmount,
+            totalAmountWithTax: finalAmount
+          } : undefined;
+          
+          await this.createUserSubscription(plan, userId, couponCode, taxInfo);
+          
+          // Trigger centralized payment success callback for free payments
+          this.triggerPaymentSuccess();
+          
+          resolve(true);
+          return;
+        }
+
+        // Create PayPal subscription FIRST (for autopay/recurring payments)
+        console.log('🔄 [PayPal] Creating PayPal subscription with autopay...', { finalAmount, plan: plan.name });
+        const subscriptionId = await this.createPayPalSubscription(plan, userId, finalAmount);
+        
+        if (!subscriptionId) {
+          console.error('❌ [PayPal] Failed to create PayPal subscription - no subscriptionId returned');
+          throw new Error('Failed to create PayPal subscription for autopay');
+        }
+
+        console.log('✅ [PayPal] PayPal subscription created:', subscriptionId);
+
+        // Initialize PayPal buttons
+        const paypal = (window as any).paypal;
+        if (!paypal) {
+          throw new Error('PayPal SDK not loaded');
+        }
+
+        // Create PayPal button container with overlay (declare outside try for scope)
+        let overlay: HTMLElement | null = null;
+        
+        // Create overlay
+        overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+        overlay.style.zIndex = '9999';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+
+        const buttonContainer = document.createElement('div');
+        buttonContainer.id = 'paypal-button-container';
+        buttonContainer.style.backgroundColor = 'white';
+        buttonContainer.style.padding = '30px';
+        buttonContainer.style.borderRadius = '8px';
+        buttonContainer.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+        buttonContainer.style.minWidth = '300px';
+        buttonContainer.style.position = 'relative';
+
+        // Add close button
+        const closeButton = document.createElement('button');
+        closeButton.textContent = '×';
+        closeButton.style.position = 'absolute';
+        closeButton.style.top = '10px';
+        closeButton.style.right = '10px';
+        closeButton.style.background = 'none';
+        closeButton.style.border = 'none';
+        closeButton.style.fontSize = '24px';
+        closeButton.style.cursor = 'pointer';
+        closeButton.style.color = '#666';
+        closeButton.onclick = () => {
+          if (overlay && document.body.contains(overlay)) {
+            document.body.removeChild(overlay);
+          }
+          reject(new Error('Payment cancelled by user'));
+        };
+        buttonContainer.appendChild(closeButton);
+
+        overlay.appendChild(buttonContainer);
+        document.body.appendChild(overlay);
+
+        // Render PayPal subscription button
+        paypal.Buttons({
+          createSubscription: async () => {
+            return subscriptionId;
+          },
+          onApprove: async (data: any) => {
+            try {
+              console.log('PayPal payment approved:', data);
+              
+              // Prepare payment response for verification (subscription approval)
+              const paymentResponse: PaymentResponse = {
+                paypal_order_id: data.subscriptionID || data.orderID,
+                paypal_payer_id: data.payerID,
+                paypal_subscription_id: subscriptionId,
+              };
+
+              // Prepare tax information for verification
+              const taxInfo = taxPercentage > 0 ? {
+                taxPercentage: taxPercentage,
+                taxAmount: taxAmount,
+                totalAmountWithTax: finalAmount
+              } : undefined;
+              
+              // Verify the subscription setup (first payment will be captured automatically)
+              await this.verifyPayPalSubscription(
+                paymentResponse,
+                plan,
+                userId,
+                couponCode,
+                taxInfo,
+                { finalAmount, interval: plan.interval, planName: plan.name, country, paypalSubscriptionId: subscriptionId }
+              );
+              
+              // Wait a moment for Supabase to commit the transaction
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Verify subscription was created before triggering success
+              const { data: verifySub } = await supabase
+                .from('user_subscriptions')
+                .select('id, status')
+                .eq('user_id', userId)
+                .eq('status', 'active')
+                .limit(1);
+              
+              if (verifySub && verifySub.length > 0) {
+                console.log('✅ Payment verified, subscription confirmed:', {
+                  subscriptionId: verifySub[0].id
+                });
+                this.triggerPaymentSuccess();
+              } else {
+                console.warn('⚠️ Payment verified but subscription not found yet, triggering success anyway');
+                this.triggerPaymentSuccess();
+              }
+              
+              // Remove overlay
+              if (overlay && document.body.contains(overlay)) {
+                document.body.removeChild(overlay);
+              }
+              
+              resolve(true);
+            } catch (error) {
+              console.error('PayPal payment verification failed:', error);
+              if (overlay && document.body.contains(overlay)) {
+                document.body.removeChild(overlay);
+              }
+              reject(error);
+            }
+          },
+          onCancel: () => {
+            console.log('❌ PayPal payment cancelled by user');
+            if (overlay && document.body.contains(overlay)) {
+              document.body.removeChild(overlay);
+            }
+            reject(new Error('Payment cancelled by user'));
+          },
+          onError: (err: any) => {
+            console.error('❌ PayPal payment error:', err);
+            if (overlay && document.body.contains(overlay)) {
+              document.body.removeChild(overlay);
+            }
+            reject(new Error('PayPal payment error'));
+          }
+        }).render('#paypal-button-container');
+
+      } catch (error) {
+        console.error('Error processing PayPal payment:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // Verify PayPal payment
+  private async verifyPayPalPayment(
     paymentResponse: PaymentResponse,
     plan: SubscriptionPlan,
     userId: string,
     couponCode?: string,
     taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number },
-    context?: { finalAmount: number; interval: 'monthly' | 'yearly'; planName: string }
+    context?: { finalAmount: number; interval: 'monthly' | 'yearly'; planName: string; country?: string }
+  ): Promise<boolean> {
+    try {
+      console.log('🔍 Verifying PayPal payment...');
+      console.log('Payment response:', JSON.stringify(paymentResponse, null, 2));
+      console.log('Plan:', plan);
+      console.log('User ID:', userId);
+      console.log('Context:', context);
+      
+      if (!paymentResponse.paypal_order_id) {
+        throw new Error('Missing PayPal order ID for payment verification');
+      }
+      
+      const response = await fetch(`/api/paypal/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          paypal_order_id: paymentResponse.paypal_order_id,
+          paypal_payer_id: paymentResponse.paypal_payer_id,
+          // persistence context
+          user_id: userId,
+          plan_id: plan.id,
+          amount: context?.finalAmount ?? taxInfo?.totalAmountWithTax ?? plan.price,
+          currency: plan.currency || 'EUR',
+          tax_percentage: taxInfo?.taxPercentage,
+          tax_amount: taxInfo?.taxAmount,
+          total_amount_with_tax: taxInfo?.totalAmountWithTax ?? context?.finalAmount,
+          interval: context?.interval ?? plan.interval,
+          country: context?.country || null,
+        }),
+      });
+
+      console.log('Verification response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('PayPal payment verification failed:', errorText);
+        throw new Error(`Payment verification failed: ${errorText}`);
+      }
+
+      const verificationResult = await response.json();
+      console.log('Verification result:', verificationResult);
+      
+      if (verificationResult.success) {
+        console.log('✅ PayPal payment verified successfully, creating subscription...');
+        // Create user subscription with tax information
+        await this.createUserSubscription(plan, userId, couponCode, taxInfo);
+        console.log('✅ User subscription created successfully');
+        return true;
+      } else {
+        console.error('❌ PayPal payment verification failed:', verificationResult);
+        throw new Error('Payment verification failed');
+      }
+    } catch (error) {
+      console.error('❌ Error verifying PayPal payment:', error);
+      throw error;
+    }
+  }
+
+  // Verify PayPal subscription setup
+  private async verifyPayPalSubscription(
+    paymentResponse: PaymentResponse,
+    plan: SubscriptionPlan,
+    userId: string,
+    couponCode?: string,
+    taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number },
+    context?: { finalAmount: number; interval: 'monthly' | 'yearly'; planName: string; country?: string; paypalSubscriptionId?: string }
+  ): Promise<boolean> {
+    try {
+      console.log('🔍 Verifying PayPal subscription setup...');
+      console.log('Payment response:', JSON.stringify(paymentResponse, null, 2));
+      console.log('Plan:', plan);
+      console.log('User ID:', userId);
+      console.log('Context:', context);
+      
+      if (!paymentResponse.paypal_subscription_id && !context?.paypalSubscriptionId) {
+        throw new Error('Missing PayPal subscription ID for verification');
+      }
+      
+      const subscriptionId = paymentResponse.paypal_subscription_id || context?.paypalSubscriptionId;
+      
+      const response = await fetch(`/api/paypal/verify-subscription`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          paypal_subscription_id: subscriptionId,
+          paypal_payer_id: paymentResponse.paypal_payer_id,
+          // persistence context
+          user_id: userId,
+          plan_id: plan.id,
+          amount: context?.finalAmount ?? taxInfo?.totalAmountWithTax ?? plan.price,
+          currency: plan.currency || 'EUR',
+          tax_percentage: taxInfo?.taxPercentage,
+          tax_amount: taxInfo?.taxAmount,
+          total_amount_with_tax: taxInfo?.totalAmountWithTax ?? context?.finalAmount,
+          interval: context?.interval ?? plan.interval,
+          country: context?.country || null,
+        }),
+      });
+
+      console.log('Verification response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('PayPal subscription verification failed:', errorText);
+        throw new Error(`Subscription verification failed: ${errorText}`);
+      }
+
+      const verificationResult = await response.json();
+      console.log('Verification result:', verificationResult);
+      
+      if (verificationResult.success) {
+        console.log('✅ PayPal subscription verified successfully, creating subscription...');
+        // Create user subscription with tax information and PayPal subscription ID
+        await this.createUserSubscription(plan, userId, couponCode, taxInfo);
+        
+        // Attach PayPal subscription ID
+        await this.attachPayPalSubscriptionId(userId, subscriptionId!);
+        
+        console.log('✅ User subscription created successfully with autopay');
+        return true;
+      } else {
+        console.error('❌ PayPal subscription verification failed:', verificationResult);
+        throw new Error('Subscription verification failed');
+      }
+    } catch (error) {
+      console.error('❌ Error verifying PayPal subscription:', error);
+      throw error;
+    }
+  }
+
+  // Attach PayPal subscription ID to user subscription
+  private async attachPayPalSubscriptionId(userId: string, paypalSubscriptionId: string): Promise<void> {
+    try {
+      const { data, error } = await supabase
+        .from('user_subscriptions')
+        .select('id, paypal_subscription_id')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .order('current_period_start', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error('Supabase error fetching subscription for PayPal attachment:', error);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('No active subscription found to attach PayPal subscription ID for user:', userId);
+        return;
+      }
+
+      const latest = data[0] as { id: string; paypal_subscription_id: string | null };
+      if (latest.paypal_subscription_id) {
+        console.log('Skipping PayPal subscription attachment; already present for subscription:', latest.id);
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from('user_subscriptions')
+        .update({
+          paypal_subscription_id: paypalSubscriptionId,
+          autopay_enabled: true, // Enable autopay for PayPal subscriptions
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', latest.id);
+
+      if (updateError) {
+        console.error('Error updating subscription with PayPal subscription ID:', updateError);
+      } else {
+        console.log('✅ PayPal subscription ID attached to subscription:', latest.id);
+      }
+    } catch (error) {
+      console.error('Unexpected error attaching PayPal subscription ID:', error);
+    }
+  }
+
+  // Verify payment - routes to Razorpay or PayPal based on response type
+  async verifyPayment(
+    paymentResponse: PaymentResponse & { razorpay_subscription_id?: string; paypal_subscription_id?: string },
+    plan: SubscriptionPlan,
+    userId: string,
+    couponCode?: string,
+    taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number },
+    context?: { finalAmount: number; interval: 'monthly' | 'yearly'; planName: string; razorpaySubscriptionId?: string; paypalSubscriptionId?: string; country?: string }
+  ): Promise<boolean> {
+    // Route to appropriate verification based on payment response
+    if (paymentResponse.paypal_subscription_id || context?.paypalSubscriptionId) {
+      return this.verifyPayPalSubscription(paymentResponse, plan, userId, couponCode, taxInfo, context);
+    } else if (paymentResponse.paypal_order_id) {
+      return this.verifyPayPalPayment(paymentResponse, plan, userId, couponCode, taxInfo, context);
+    } else {
+      return this.verifyRazorpayPayment(paymentResponse, plan, userId, couponCode, taxInfo, context);
+    }
+  }
+
+  // Verify Razorpay payment
+  private async verifyRazorpayPayment(
+    paymentResponse: PaymentResponse & { razorpay_subscription_id?: string },
+    plan: SubscriptionPlan,
+    userId: string,
+    couponCode?: string,
+    taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number },
+    context?: { finalAmount: number; interval: 'monthly' | 'yearly'; planName: string; razorpaySubscriptionId?: string; country?: string }
   ): Promise<boolean> {
     try {
       console.log('🔍 Verifying payment with Razorpay...');
-      console.log('Payment response:', paymentResponse);
+      console.log('Payment response:', JSON.stringify(paymentResponse, null, 2));
       console.log('Plan:', plan);
       console.log('User ID:', userId);
+      console.log('Context:', context);
+      
+      // For subscription payments, use subscription_id if order_id is missing
+      const orderId = paymentResponse.razorpay_order_id || paymentResponse.razorpay_subscription_id || context?.razorpaySubscriptionId;
+      const subscriptionId = paymentResponse.razorpay_subscription_id || context?.razorpaySubscriptionId;
+      
+      if (!orderId && !subscriptionId) {
+        throw new Error('Missing order_id or subscription_id for payment verification');
+      }
+      
+      console.log('📝 Verification data:', {
+        payment_id: paymentResponse.razorpay_payment_id,
+        order_id: orderId,
+        subscription_id: subscriptionId,
+        has_signature: !!paymentResponse.razorpay_signature
+      });
       
       const response = await fetch(`/api/razorpay/verify`, {
         method: 'POST',
@@ -573,8 +1187,9 @@ class PaymentService {
         },
         body: JSON.stringify({
           razorpay_payment_id: paymentResponse.razorpay_payment_id,
-          razorpay_order_id: paymentResponse.razorpay_order_id,
+          razorpay_order_id: orderId || subscriptionId, // Use subscription_id for subscription payments
           razorpay_signature: paymentResponse.razorpay_signature,
+          razorpay_subscription_id: subscriptionId, // Pass subscription_id
           // persistence context
           user_id: userId,
           plan_id: plan.id,
@@ -584,6 +1199,7 @@ class PaymentService {
           tax_amount: taxInfo?.taxAmount,
           total_amount_with_tax: taxInfo?.totalAmountWithTax ?? context?.finalAmount,
           interval: context?.interval ?? plan.interval,
+          country: context?.country || null, // Pass country to backend
         }),
       });
 
@@ -652,6 +1268,12 @@ class PaymentService {
     taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number }
   ): Promise<UserSubscription> {
     try {
+      // Validate plan.id is a valid UUID
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!plan.id || !uuidRegex.test(plan.id)) {
+        throw new Error(`Invalid plan ID: ${plan.id}. Plan ID must be a valid UUID from the database.`);
+      }
+
       const { data: existing, error: existingError } = await supabase
         .from('user_subscriptions')
         .select('id, has_used_trial')

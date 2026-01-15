@@ -365,6 +365,44 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         financial_advisor_license_url: formData.financial_advisor_license_url,
       };
 
+      // CRITICAL FIX: When investment advisor code is entered or changed, reset advisor_accepted status
+      // This ensures the request shows up in the advisor dashboard's Service Requests
+      const previousCode = (currentUser?.investment_advisor_code_entered || '').trim();
+      const newCode = (formData.investment_advisor_code_entered || '').trim();
+      
+      // If code is being set/changed (and is not empty), reset acceptance status
+      // This handles both: 1) First time entering a code, 2) Changing to a different code
+      if (newCode && newCode !== previousCode) {
+        console.log('🔄 Investment advisor code changed - resetting advisor_accepted status', {
+          previousCode: previousCode || '(empty)',
+          newCode,
+          wasEmpty: !previousCode,
+          isChanging: previousCode && previousCode !== newCode,
+          userRole: currentUser?.role
+        });
+        profileData.advisor_accepted = false;
+        profileData.advisor_accepted_date = null;
+        console.log('✅ Set advisor_accepted=false and advisor_accepted_date=null in profileData');
+      } else if (newCode && !previousCode) {
+        // First time entering a code (previous was empty/null)
+        console.log('🔄 Investment advisor code entered for first time - setting advisor_accepted to false', {
+          newCode,
+          userRole: currentUser?.role
+        });
+        profileData.advisor_accepted = false;
+        profileData.advisor_accepted_date = null;
+        console.log('✅ Set advisor_accepted=false and advisor_accepted_date=null in profileData');
+      }
+      
+      // Log the final profileData to verify fields are included
+      console.log('🔍 Profile data to be saved:', {
+        hasInvestmentAdvisorCode: !!profileData.investment_advisor_code_entered,
+        investmentAdvisorCode: profileData.investment_advisor_code_entered,
+        advisorAccepted: profileData.advisor_accepted,
+        advisorAcceptedDate: profileData.advisor_accepted_date,
+        allKeys: Object.keys(profileData)
+      });
+
       // Add firm_name for Investment Advisor role
       if (currentUser?.role === 'Investment Advisor') {
         profileData.firm_name = formData.firm_name;
@@ -374,9 +412,54 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
       // CRITICAL FIX: Use currentUser.id (profile_id) to update the active profile
       // In multi-profile system, we need to update the specific active profile, not all profiles
       const profileId = currentUser.id; // This is now profile_id after our ID mapping fix
+      
+      console.log('🔄 Calling authService.updateProfile with:', {
+        profileId,
+        hasAdvisorCode: !!profileData.investment_advisor_code_entered,
+        advisorAccepted: profileData.advisor_accepted,
+        advisorAcceptedDate: profileData.advisor_accepted_date
+      });
+      
       const updateResult = await authService.updateProfile(profileId, profileData);
+      
       if (updateResult.error) {
+        console.error('❌ Error updating profile:', updateResult.error);
         throw new Error(updateResult.error);
+      }
+      
+      console.log('✅ Profile updated successfully:', {
+        updatedUser: updateResult.user,
+        hasAdvisorCode: !!updateResult.user?.investment_advisor_code_entered
+      });
+      
+      // CRITICAL: Also update the users table for backward compatibility (old registrations)
+      // This ensures the fix works for both new (user_profiles) and old (users) registrations
+      if (profileData.investment_advisor_code_entered && (profileData.advisor_accepted === false || profileData.advisor_accepted_date === null)) {
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          const authUserId = authUser?.id;
+          
+          if (authUserId) {
+            console.log('🔄 Also updating users table for backward compatibility');
+            const { error: usersTableError } = await supabase
+              .from('users')
+              .update({
+                investment_advisor_code_entered: profileData.investment_advisor_code_entered,
+                advisor_accepted: profileData.advisor_accepted,
+                advisor_accepted_date: profileData.advisor_accepted_date
+              })
+              .eq('id', authUserId);
+            
+            if (usersTableError) {
+              console.warn('⚠️ Could not update users table (may not exist for new registrations):', usersTableError);
+            } else {
+              console.log('✅ Also updated users table successfully');
+            }
+          }
+        } catch (error) {
+          console.warn('⚠️ Error updating users table (non-critical):', error);
+          // Don't throw - this is just for backward compatibility
+        }
       }
 
       // If user is a startup, also update the startups table with startup-specific fields
@@ -448,6 +531,21 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
       };
       
       await onSave(updatedData);
+      
+      // CRITICAL: If investment advisor code was set/changed, show a message to refresh
+      if (newCode && newCode !== previousCode && (currentUser?.role === 'Startup' || currentUser?.role === 'Investor')) {
+        console.log('✅ Investment advisor code saved. Request will appear in advisor dashboard.');
+        console.log('📋 Request details:', {
+          code: newCode,
+          advisorAccepted: false,
+          advisorAcceptedDate: null,
+          message: 'The investment advisor will see this request in their Service Requests tab after refreshing.'
+        });
+        
+        // Show user-friendly message
+        alert(`✅ Investment Advisor Code saved!\n\nYour request will appear in the advisor's Service Requests tab. They may need to refresh their dashboard to see it.`);
+      }
+      
       onClose();
     } catch (error) {
       console.error('Error saving profile:', error);

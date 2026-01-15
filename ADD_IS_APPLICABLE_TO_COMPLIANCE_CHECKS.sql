@@ -25,3 +25,4 @@ COMMENT ON COLUMN public.compliance_checks.is_applicable IS
 
 
 
+

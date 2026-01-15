@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Bell, HelpCircle, Edit3, Shield, RefreshCw, Building2 } from 'lucide-react';
 import Button from './ui/Button';
 import EditProfileModal from './EditProfileModal';
+import AccountTab from './startup-health/AccountTab';
 // PaymentSection removed
 // SubscriptionSummaryCards removed
 import { authService } from '../lib/auth';
@@ -24,6 +25,7 @@ const StartupProfilePage: React.FC<StartupProfilePageProps> = ({
   const [showEditModal, setShowEditModal] = useState(false);
   const [refreshedProfile, setRefreshedProfile] = useState<AuthUser | null>(currentUser);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showAccountTab, setShowAccountTab] = useState(false);
   
   // Refresh profile data when component mounts only (not on every user change)
   useEffect(() => {
@@ -90,8 +92,8 @@ const StartupProfilePage: React.FC<StartupProfilePageProps> = ({
       id: 'account',
       icon: <User className="h-5 w-5" />,
       title: 'Account',
-      description: 'Manage your account settings',
-      onClick: () => setShowEditModal(true)
+      description: 'Manage subscription, billing, and payment history',
+      onClick: () => setShowAccountTab(true)
     },
     {
       id: 'notifications',
@@ -309,6 +311,30 @@ const StartupProfilePage: React.FC<StartupProfilePageProps> = ({
       </div>
 
 
+      {/* Account Tab - Shows subscription, billing, payment history */}
+      {showAccountTab && (
+        <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+          <div className="bg-blue-600 text-white sticky top-0 z-10">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4">
+              <button
+                onClick={() => setShowAccountTab(false)}
+                className="p-2 rounded-full hover:bg-blue-700 transition-colors"
+                aria-label="Go back"
+              >
+                <ArrowLeft className="h-5 w-5 sm:h-6 sm:w-6" />
+              </button>
+              <h1 className="text-lg sm:text-xl font-semibold">Account & Billing</h1>
+              <div className="w-10"></div> {/* Spacer for centering */}
+            </div>
+          </div>
+          <div className="container mx-auto px-4 sm:px-6 py-6">
+            <AccountTab 
+              userId={refreshedProfile?.id || currentUser?.id || ''} 
+              startupId={startup?.id?.toString()} 
+            />
+          </div>
+        </div>
+      )}
       {/* Edit Profile Modal */}
       <EditProfileModal
         currentUser={refreshedProfile}

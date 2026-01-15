@@ -785,6 +785,10 @@ class CapTableService {
         throw new Error('Fundraising type is required');
       }
       
+      // Check if fundraising details exist (needed for both validation and update logic)
+      const existing = await this.getFundraisingDetails(startupId);
+      console.log('📋 Existing fundraising details:', existing);
+      
       // Allow saving even if value/equity are 0 (user might be setting up the round)
       // Only validate if they're trying to activate fundraising
       if (fundraisingData.active) {
@@ -795,12 +799,35 @@ class CapTableService {
         if (!fundraisingData.equity || fundraisingData.equity <= 0 || fundraisingData.equity > 100) {
           throw new Error('Valid equity percentage (1-100%) is required when fundraising is active');
         }
+        
+        // For NEW registrations: Check subscription status before allowing activation
+        // Only check if this is a new fundraising record (no existing active record)
+        // This ensures existing startups are NOT affected - only new registrations
+        const hasExistingActive = existing.some(r => r.active);
+        
+        // If no existing active fundraising, this is likely a new registration
+        // Check subscription status before allowing activation
+        if (!hasExistingActive) {
+          const { data: startup } = await supabase
+            .from('startups')
+            .select('user_id')
+            .eq('id', startupId)
+            .single();
+          
+          if (startup?.user_id) {
+            const { featureAccessService } = await import('./featureAccessService');
+            const hasAccess = await featureAccessService.canAccessFeature(startup.user_id, 'fundraising_active');
+            
+            if (!hasAccess) {
+              // Force fundraising to inactive for new registrations without premium
+              console.log('⚠️ New registration: User does not have premium access. Setting fundraising.active = false');
+              fundraisingData.active = false;
+              // Don't throw error - just silently set to inactive so registration can continue
+            }
+          }
+        }
       }
       
-      // Check if fundraising details exist
-      const existing = await this.getFundraisingDetails(startupId);
-      console.log('📋 Existing fundraising details:', existing);
-
       const updateData = {
         active: fundraisingData.active,
         type: fundraisingData.type,
@@ -1433,61 +1460,97 @@ class CapTableService {
   // =====================================================
 
   async uploadProofDocument(startupId: number, file: File): Promise<string> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', startupId)
+      .single();
+    
+    if (!startupData?.user_id) {
+      throw new Error('Startup not found or user_id missing');
+    }
+    
     const fileName = `${startupId}/investment-proofs/${Date.now()}_${file.name}`;
-    const { data, error } = await supabase.storage
-      .from('cap-table-documents')
-      .upload(fileName, file);
+    
+    // Upload with storage tracking
+    const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+    const uploadResult = await uploadFileWithTracking({
+      bucket: 'cap-table-documents',
+      path: fileName,
+      file,
+      cacheControl: '3600',
+      upsert: false,
+      userId: startupData.user_id,
+      fileType: 'document',
+      relatedEntityType: 'investment',
+      relatedEntityId: startupId.toString()
+    });
 
-    if (error) throw error;
+    if (!uploadResult.success || !uploadResult.url) {
+      throw new Error(uploadResult.error || 'Failed to upload proof document');
+    }
 
-    const { data: urlData } = supabase.storage
-      .from('cap-table-documents')
-      .getPublicUrl(fileName);
-
-    return urlData.publicUrl;
+    return uploadResult.url;
   }
 
   async uploadPitchDeck(file: File, startupId: number): Promise<string> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', startupId)
+      .single();
+    
+    if (!startupData?.user_id) {
+      throw new Error('Startup not found or user_id missing');
+    }
+    
     const fileName = `${startupId}/pitch-decks/${Date.now()}_${file.name}`;
     console.log('📤 Uploading pitch deck:', { fileName, startupId, fileSize: file.size });
     
-    const { data, error } = await supabase.storage
-      .from('pitch-decks')
-      .upload(fileName, file);
+    // Upload with storage tracking
+    const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+    const uploadResult = await uploadFileWithTracking({
+      bucket: 'pitch-decks',
+      path: fileName,
+      file,
+      cacheControl: '3600',
+      upsert: false,
+      userId: startupData.user_id,
+      fileType: 'pitch_deck',
+      relatedEntityType: 'startup',
+      relatedEntityId: startupId.toString()
+    });
 
-    if (error) {
-      console.error('❌ Error uploading pitch deck:', error);
-      console.error('❌ Upload error details:', {
-        message: error.message,
-        statusCode: error.statusCode,
-        error: error.error,
-        fileName,
-        startupId
-      });
-      
-      // Provide more helpful error messages
-      if (error.message?.includes('permission denied') || error.message?.includes('policy') || error.statusCode === 403) {
-        throw new Error(`Permission denied: Unable to upload pitch deck. This may be due to storage policy restrictions. Please check that your startup is properly linked to your account. Error: ${error.message}`);
-      }
-      
-      throw new Error(`Failed to upload pitch deck: ${error.message}`);
+    if (!uploadResult.success || !uploadResult.url) {
+      console.error('❌ Error uploading pitch deck:', uploadResult.error);
+      throw new Error(uploadResult.error || 'Failed to upload pitch deck');
     }
 
-    console.log('✅ Pitch deck uploaded successfully:', data.path);
-    const { data: urlData } = supabase.storage
-      .from('pitch-decks')
-      .getPublicUrl(fileName);
-
-    return urlData.publicUrl;
+    console.log('✅ Pitch deck uploaded successfully:', uploadResult.url);
+    return uploadResult.url;
   }
 
   async uploadLogo(file: File, startupId: number): Promise<string> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', startupId)
+      .single();
+    
+    if (!startupData?.user_id) {
+      throw new Error('Startup not found or user_id missing');
+    }
+    
     // Use consistent filename to replace existing logo instead of creating new files
     // Extract file extension from original filename
     const fileExtension = file.name.split('.').pop()?.toLowerCase() || 'png';
     const fileName = `${startupId}/logo.${fileExtension}`;
     
     // First, try to delete the existing logo if it exists (to ensure clean replacement)
+    // Also delete from storage tracking
     const existingFiles = await supabase.storage
       .from('logos')
       .list(`${startupId}/`, {
@@ -1500,34 +1563,57 @@ class CapTableService {
       await supabase.storage
         .from('logos')
         .remove(filesToDelete);
+      
+      // Delete from storage tracking
+      const { deleteFileWithTracking } = await import('./uploadWithStorageTracking');
+      for (const filePath of filesToDelete) {
+        await deleteFileWithTracking('logos', filePath, startupData.user_id).catch(() => {
+          // Ignore errors - file might not be tracked
+        });
+      }
     }
     
-    // Upload the new logo (this will replace if filename matches, or create new)
-    const { data, error } = await supabase.storage
-      .from('logos')
-      .upload(fileName, file, {
-        upsert: true // This replaces the file if it already exists
-      });
+    // Upload the new logo with storage tracking
+    const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+    const uploadResult = await uploadFileWithTracking({
+      bucket: 'logos',
+      path: fileName,
+      file,
+      cacheControl: '3600',
+      upsert: true, // This replaces the file if it already exists
+      userId: startupData.user_id,
+      fileType: 'image',
+      relatedEntityType: 'startup',
+      relatedEntityId: startupId.toString()
+    });
 
-    if (error) {
-      console.error('Error uploading logo:', error);
-      throw new Error(`Failed to upload logo: ${error.message}`);
+    if (!uploadResult.success || !uploadResult.url) {
+      console.error('Error uploading logo:', uploadResult.error);
+      throw new Error(uploadResult.error || 'Failed to upload logo');
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('logos')
-      .getPublicUrl(data.path);
-
-    return publicUrl;
+    return uploadResult.url;
   }
 
   async uploadBusinessPlan(file: File, startupId: number): Promise<string> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', startupId)
+      .single();
+    
+    if (!startupData?.user_id) {
+      throw new Error('Startup not found or user_id missing');
+    }
+    
     // Use consistent filename to replace existing business plan instead of creating new files
     // Extract file extension from original filename
     const fileExtension = file.name.split('.').pop()?.toLowerCase() || 'pdf';
     const fileName = `${startupId}/business-plan.${fileExtension}`;
     
     // First, try to delete the existing business plan if it exists (to ensure clean replacement)
+    // Also delete from storage tracking
     const existingFiles = await supabase.storage
       .from('business-plans')
       .list(`${startupId}/`, {
@@ -1540,103 +1626,94 @@ class CapTableService {
       await supabase.storage
         .from('business-plans')
         .remove(filesToDelete);
+      
+      // Delete from storage tracking
+      const { deleteFileWithTracking } = await import('./uploadWithStorageTracking');
+      for (const filePath of filesToDelete) {
+        await deleteFileWithTracking('business-plans', filePath, startupData.user_id).catch(() => {
+          // Ignore errors - file might not be tracked
+        });
+      }
     }
     
-    // Upload the new business plan (this will replace if filename matches, or create new)
-    const { data, error } = await supabase.storage
-      .from('business-plans')
-      .upload(fileName, file, {
-        upsert: true // This replaces the file if it already exists
-      });
+    // Upload the new business plan with storage tracking
+    const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+    const uploadResult = await uploadFileWithTracking({
+      bucket: 'business-plans',
+      path: fileName,
+      file,
+      cacheControl: '3600',
+      upsert: true, // This replaces the file if it already exists
+      userId: startupData.user_id,
+      fileType: 'document',
+      relatedEntityType: 'startup',
+      relatedEntityId: startupId.toString()
+    });
 
-    if (error) {
-      console.error('❌ Error uploading business plan:', error);
-      console.error('❌ Upload error details:', {
-        message: error.message,
-        statusCode: error.statusCode,
-        error: error.error,
-        fileName,
-        startupId
-      });
-      
-      // Provide more helpful error messages
-      if (error.message?.includes('permission denied') || error.message?.includes('policy') || error.statusCode === 403) {
-        throw new Error(`Permission denied: Unable to upload business plan. This may be due to storage policy restrictions. Please check that your startup is properly linked to your account. Error: ${error.message}`);
-      }
-      
-      throw new Error(`Failed to upload business plan: ${error.message}`);
+    if (!uploadResult.success || !uploadResult.url) {
+      console.error('❌ Error uploading business plan:', uploadResult.error);
+      throw new Error(uploadResult.error || 'Failed to upload business plan');
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('business-plans')
-      .getPublicUrl(data.path);
-
-    return publicUrl;
+    return uploadResult.url;
   }
 
   async uploadOnePagerPDF(file: File, startupId: number): Promise<string> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', startupId)
+      .single();
+    
+    if (!startupData?.user_id) {
+      throw new Error('Startup not found or user_id missing');
+    }
+    
     // Use consistent filename - always the same name to replace existing PDF
     const fileName = `${startupId}/one-pagers/one-pager.pdf`;
     console.log('📤 Uploading one-pager PDF:', { fileName, startupId, fileSize: file.size });
     
     // First, try to delete the existing file if it exists (to ensure clean replacement)
+    // Also delete from storage tracking
     try {
       await supabase.storage
         .from('pitch-decks')
         .remove([fileName]);
+      
+      // Delete from storage tracking
+      const { deleteFileWithTracking } = await import('./uploadWithStorageTracking');
+      await deleteFileWithTracking('pitch-decks', fileName, startupData.user_id).catch(() => {
+        // Ignore errors - file might not be tracked
+      });
+      
       console.log('✅ Existing one-pager deleted (if it existed)');
     } catch (deleteError) {
       // Ignore error if file doesn't exist - that's fine, we'll upload new one
       console.log('ℹ️ No existing one-pager to delete (or already deleted)');
     }
     
-    // Upload new PDF with upsert to replace any existing file
-    const { data, error } = await supabase.storage
-      .from('pitch-decks')
-      .upload(fileName, file, {
-        upsert: true, // Replace file if it exists
-        cacheControl: '3600',
-      });
+    // Upload new PDF with storage tracking
+    const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+    const uploadResult = await uploadFileWithTracking({
+      bucket: 'pitch-decks',
+      path: fileName,
+      file,
+      cacheControl: '3600',
+      upsert: true, // Replace file if it exists
+      userId: startupData.user_id,
+      fileType: 'document',
+      relatedEntityType: 'startup',
+      relatedEntityId: startupId.toString()
+    });
 
-    if (error) {
-      console.error('❌ Error uploading one-pager PDF:', error);
-      console.error('❌ Upload error details:', {
-        message: error.message,
-        statusCode: error.statusCode,
-        error: error.error,
-        fileName,
-        startupId
-      });
-      
-      // If upload fails, try without upsert as fallback
-      const { data: retryData, error: retryError } = await supabase.storage
-        .from('pitch-decks')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-        });
-      
-      if (retryError) {
-        console.error('❌ Retry upload also failed:', retryError);
-        
-        // Provide more helpful error messages
-        if (retryError.message?.includes('permission denied') || retryError.message?.includes('policy') || retryError.statusCode === 403) {
-          throw new Error(`Permission denied: Unable to upload one-pager PDF. This may be due to storage policy restrictions. Please check that your startup is properly linked to your account. Error: ${retryError.message}`);
-        }
-        
-        throw new Error(`Failed to upload one-pager PDF: ${retryError.message}`);
-      }
-      
-      console.log('✅ One-pager PDF uploaded successfully on retry:', retryData?.path);
-    } else {
-      console.log('✅ One-pager PDF uploaded successfully:', data.path);
+    if (!uploadResult.success || !uploadResult.url) {
+      console.error('❌ Error uploading one-pager PDF:', uploadResult.error);
+      throw new Error(uploadResult.error || 'Failed to upload one-pager PDF');
     }
 
-    // Get the public URL (same URL every time since filename is consistent)
-    const { data: urlData } = supabase.storage
-      .from('pitch-decks')
-      .getPublicUrl(fileName);
-
-    return urlData.publicUrl;
+    console.log('✅ One-pager PDF uploaded successfully:', uploadResult.url);
+    return uploadResult.url;
   }
 
   async getAttachmentDownloadUrl(url: string): Promise<string> {

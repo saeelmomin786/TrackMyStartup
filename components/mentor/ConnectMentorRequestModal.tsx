@@ -3,6 +3,7 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { mentorService, MentorRequest } from '../../lib/mentorService';
+import { supabase } from '../../lib/supabase';
 import { X } from 'lucide-react';
 
 interface ConnectMentorRequestModalProps {
@@ -15,7 +16,8 @@ interface ConnectMentorRequestModalProps {
   mentorFeeAmountMin?: number;
   mentorFeeAmountMax?: number;
   mentorEquityPercentage?: number;
-  mentorCurrency?: string;
+  mentorCurrency?: string; // Mentor's currency (for display only)
+  startupCurrency?: string; // Startup's currency (for payment)
   startupId: number | null;
   requesterId: string;
   onRequestSent: () => void;
@@ -32,6 +34,7 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
   mentorFeeAmountMax,
   mentorEquityPercentage,
   mentorCurrency = 'USD',
+  startupCurrency = 'USD', // Default to USD if not provided
   startupId,
   requesterId,
   onRequestSent
@@ -55,8 +58,45 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
       setProposedEquityAmount(undefined);
       setProposedEsopPercentage(undefined);
       setError(null);
+      
+      // Check for existing request
+      checkExistingRequest();
     }
-  }, [isOpen]);
+  }, [isOpen, mentorId, startupId, requesterId]);
+
+  const checkExistingRequest = async () => {
+    if (!mentorId || !startupId || !requesterId) return;
+
+    try {
+      const { mentorService } = await import('../../lib/mentorService');
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+
+      // Check if request already exists
+      const existing = await mentorService.checkExistingRequest(
+        mentorId,
+        authUser.id,
+        startupId
+      );
+
+      if (existing.exists && existing.request) {
+        let errorMessage = '';
+        if (existing.request.status === 'accepted') {
+          errorMessage = 'You already have an accepted request with this mentor. Please check your dashboard.';
+        } else if (existing.request.status === 'negotiating') {
+          errorMessage = 'You already have a request under negotiation with this mentor. Please wait for their response or cancel the existing request.';
+        } else if (existing.request.status === 'pending') {
+          errorMessage = 'You already have a pending request with this mentor. Please wait for their response or cancel the existing request.';
+        }
+        
+        if (errorMessage) {
+          setError(errorMessage);
+        }
+      }
+    } catch (err) {
+      console.error('Error checking existing request:', err);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,7 +112,7 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
         proposedFeeAmount,
         proposedEquityAmount,
         proposedEsopPercentage,
-        mentorCurrency
+        startupCurrency // Use startup's currency for the request
       );
 
       if (result.success) {
@@ -89,7 +129,7 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
   };
 
   const showFeeField = mentorFeeType === 'Fees' || mentorFeeType === 'Hybrid';
-  const showEquityField = mentorFeeType === 'Equity' || mentorFeeType === 'Hybrid';
+  const showEquityField = mentorFeeType === 'Equity' || mentorFeeType === 'Stock Options' || mentorFeeType === 'Hybrid';
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Connect with ${mentorName}`}>
@@ -175,8 +215,9 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
             {showFeeField && (
               <div className="mb-3">
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Proposed Fee Amount ({mentorCurrency})
+                  Proposed Fee Amount ({startupCurrency})
                 </label>
+                <p className="text-xs text-slate-500 mb-1">Amount in your currency ({startupCurrency})</p>
                 <Input
                   type="number"
                   value={proposedFeeAmount || ''}
@@ -190,33 +231,55 @@ const ConnectMentorRequestModal: React.FC<ConnectMentorRequestModalProps> = ({
 
             {showEquityField && (
               <>
-                <div className="mb-3">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Proposed Equity Amount ({mentorCurrency})
-                  </label>
-                  <Input
-                    type="number"
-                    value={proposedEquityAmount || ''}
-                    onChange={(e) => setProposedEquityAmount(e.target.value ? parseFloat(e.target.value) : undefined)}
-                    placeholder="Enter equity amount"
-                    min="0"
-                    step="0.01"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Proposed ESOP Percentage (%)
-                  </label>
-                  <Input
-                    type="number"
-                    value={proposedEsopPercentage || ''}
-                    onChange={(e) => setProposedEsopPercentage(e.target.value ? parseFloat(e.target.value) : undefined)}
-                    placeholder="Enter ESOP percentage"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                  />
-                </div>
+                {mentorFeeType === 'Stock Options' ? (
+                  // For Stock Options, show only ESOP Amount
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Proposed ESOP Amount ({startupCurrency})
+                    </label>
+                    <p className="text-xs text-slate-500 mb-1">Amount in your currency ({startupCurrency})</p>
+                    <Input
+                      type="number"
+                      value={proposedEquityAmount || ''}
+                      onChange={(e) => setProposedEquityAmount(e.target.value ? parseFloat(e.target.value) : undefined)}
+                      placeholder="Enter ESOP amount"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                ) : (
+                  // For Equity or Hybrid, show Equity Amount and ESOP Percentage
+                  <>
+                    <div className="mb-3">
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Proposed Equity Amount ({startupCurrency})
+                      </label>
+                      <p className="text-xs text-slate-500 mb-1">Amount in your currency ({startupCurrency})</p>
+                      <Input
+                        type="number"
+                        value={proposedEquityAmount || ''}
+                        onChange={(e) => setProposedEquityAmount(e.target.value ? parseFloat(e.target.value) : undefined)}
+                        placeholder="Enter equity amount"
+                        min="0"
+                        step="0.01"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Proposed ESOP Percentage (%)
+                      </label>
+                      <Input
+                        type="number"
+                        value={proposedEsopPercentage || ''}
+                        onChange={(e) => setProposedEsopPercentage(e.target.value ? parseFloat(e.target.value) : undefined)}
+                        placeholder="Enter ESOP percentage"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

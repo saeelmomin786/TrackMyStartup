@@ -166,23 +166,35 @@ class ComplianceService {
         uploadedBy: string
     ): Promise<ComplianceUpload | null> {
         try {
-            // Upload file to storage
+            // Get userId from startup (for storage tracking)
+            const { data: startupData } = await supabase
+                .from('startups')
+                .select('user_id')
+                .eq('id', startupId)
+                .single();
+            
+            const userId = startupData?.user_id || uploadedBy; // Fallback to uploadedBy if startup not found
+            
+            // Upload file to storage with tracking
             const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
             const fileName = `${startupId}/${taskId}/${Date.now()}_${safeName}`;
-            const { data: uploadData, error: uploadError } = await supabase.storage
-                .from('compliance-documents')
-                .upload(fileName, file, {
-                    upsert: true,
-                    contentType: file.type || 'application/pdf',
-                    cacheControl: '3600'
-                });
+            
+            const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+            const uploadResult = await uploadFileWithTracking({
+                bucket: 'compliance-documents',
+                path: fileName,
+                file,
+                cacheControl: '3600',
+                upsert: true,
+                userId: userId,
+                fileType: 'compliance',
+                relatedEntityType: 'compliance_task',
+                relatedEntityId: taskId
+            });
 
-            if (uploadError) throw uploadError;
-
-            // Get public URL
-            const { data: urlData } = supabase.storage
-                .from('compliance-documents')
-                .getPublicUrl(fileName);
+            if (!uploadResult.success || !uploadResult.url) {
+                throw new Error(uploadResult.error || 'Upload failed');
+            }
 
             // Save upload record to database
             const { data: recordData, error: recordError } = await supabase
@@ -191,7 +203,7 @@ class ComplianceService {
                     startup_id: startupId,
                     task_id: taskId,
                     file_name: file.name,
-                    file_url: urlData.publicUrl,
+                    file_url: uploadResult.url,
                     uploaded_by: uploadedBy,
                     file_size: file.size,
                     file_type: file.type

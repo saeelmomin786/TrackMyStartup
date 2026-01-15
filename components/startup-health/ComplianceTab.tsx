@@ -670,11 +670,18 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
                 // Check if status update had any issues (it's logged but doesn't fail the upload)
                 if (result.statusUpdateError) {
                     console.warn('⚠️ Upload succeeded but status update failed:', result.statusUpdateError);
-                    messageService.error(
-                        'Status Update Failed',
-                        'Document uploaded successfully, but status could not be updated to "Submitted". ' +
-                        'Please run the database migration: ADD_SUBMITTED_STATUS_TO_COMPLIANCE_CHECKS.sql'
-                    );
+                    // Only show migration message if it's actually a constraint error
+                    if (result.statusUpdateError.includes('constraint') || result.statusUpdateError.includes('DATABASE CONSTRAINT')) {
+                        messageService.error(
+                            'Status Update Failed',
+                            'Document uploaded successfully, but status could not be updated to "Submitted". ' +
+                            'Please run the database migration: ADD_SUBMITTED_STATUS_TO_COMPLIANCE_CHECKS.sql'
+                        );
+                    } else {
+                        // Other errors (like missing fields) - show generic message
+                        console.warn('⚠️ Status update failed for other reason:', result.statusUpdateError);
+                        // Don't show error to user - upload succeeded, status update is secondary
+                    }
                 }
                 
                 setUploadSuccess(true);

@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
-import { MentorRequest } from '../../lib/mentorService';
-import { CheckCircle, XCircle, Clock, MessageSquare, DollarSign, TrendingUp, Eye, FileText } from 'lucide-react';
+import { MentorRequest, mentorService } from '../../lib/mentorService';
+import { CheckCircle, XCircle, Clock, MessageSquare, DollarSign, TrendingUp, Eye, FileText, CreditCard, Upload, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import MentorCard from './MentorCard';
+import AgreementUploadModal from './AgreementUploadModal';
 import { formatDateDDMMYYYY, formatTimeAMPM } from '../../lib/dateTimeUtils';
 
 interface StartupRequestsSectionProps {
@@ -44,6 +45,10 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
   const [actionType, setActionType] = useState<'accept' | 'reject' | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assignments, setAssignments] = useState<Map<number, any>>(new Map());
+  const [loadingAssignments, setLoadingAssignments] = useState(false);
+  const [agreementModalOpen, setAgreementModalOpen] = useState(false);
+  const [selectedAssignment, setSelectedAssignment] = useState<any>(null);
 
   // Load mentor profiles for all requests
   useEffect(() => {
@@ -93,7 +98,40 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
     loadMentorProfiles();
   }, [requests]);
 
-  const handleAcceptNegotiation = async () => {
+  // Load assignments for accepted requests
+  useEffect(() => {
+    const loadAssignments = async () => {
+      const acceptedRequests = requests.filter(r => r.status === 'accepted' && r.startup_id);
+      if (acceptedRequests.length === 0) return;
+
+      setLoadingAssignments(true);
+      const assignmentsMap = new Map<number, any>();
+
+      try {
+        for (const request of acceptedRequests) {
+          const { data: assignment, error } = await supabase
+            .from('mentor_startup_assignments')
+            .select('*')
+            .eq('mentor_id', request.mentor_id)
+            .eq('startup_id', request.startup_id)
+            .maybeSingle();
+
+          if (!error && assignment) {
+            assignmentsMap.set(request.id, assignment);
+          }
+        }
+      } catch (err) {
+        console.error('Error loading assignments:', err);
+      } finally {
+        setAssignments(assignmentsMap);
+        setLoadingAssignments(false);
+      }
+    };
+
+    loadAssignments();
+  }, [requests]);
+
+  const handleAcceptRequest = async () => {
     if (!selectedRequest) return;
     
     setIsProcessing(true);
@@ -104,6 +142,8 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
       const success = await mentorService.acceptMentorRequest(selectedRequest.id);
       
       if (success) {
+        // Show success message
+        alert('✅ Request accepted successfully! The startup will be notified and can proceed with payment/agreement as needed.');
         onRequestAction();
         if (onRequestAccepted) {
           onRequestAccepted(); // Switch to My Services tab
@@ -112,7 +152,7 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
         setActionType(null);
         setViewType(null);
       } else {
-        setError('Failed to accept negotiation. Please try again.');
+        setError('Failed to accept request. Please try again.');
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred.');
@@ -121,7 +161,7 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
     }
   };
 
-  const handleRejectNegotiation = async () => {
+  const handleRejectRequest = async () => {
     if (!selectedRequest) return;
     
     setIsProcessing(true);
@@ -137,10 +177,51 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
         setActionType(null);
         setViewType(null);
       } else {
-        setError('Failed to reject negotiation. Please try again.');
+        setError('Failed to reject request. Please try again.');
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCancelRequest = async (request: MentorRequest) => {
+    if (!confirm('Are you sure you want to cancel this request? This action cannot be undone.')) {
+      return;
+    }
+
+    console.log('🔄 handleCancelRequest called for request:', request.id, request.status);
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const { mentorService } = await import('../../lib/mentorService');
+      console.log('📞 Calling cancelMentorRequest with ID:', request.id);
+      const result = await mentorService.cancelMentorRequest(request.id);
+      
+      console.log('📥 cancelMentorRequest result:', result);
+      
+      if (result.success) {
+        console.log('✅ Cancellation successful, refreshing requests...');
+        alert('✅ Request cancelled successfully.');
+        // Force refresh by calling onRequestAction
+        onRequestAction();
+        // Also wait a bit and refresh again to ensure UI updates
+        setTimeout(() => {
+          onRequestAction();
+        }, 500);
+      } else {
+        const errorMsg = result.error || 'Failed to cancel request. Please try again.';
+        console.error('❌ Cancellation failed:', errorMsg);
+        setError(errorMsg);
+        alert(errorMsg);
+      }
+    } catch (err: any) {
+      console.error('❌ Exception in handleCancelRequest:', err);
+      const errorMsg = err.message || 'An error occurred.';
+      setError(errorMsg);
+      alert(errorMsg);
     } finally {
       setIsProcessing(false);
     }
@@ -168,33 +249,29 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
     return parts.length > 0 ? parts.join(', ') : 'No terms specified';
   };
 
-  const formatNegotiatedOffer = (request: MentorRequest) => {
-    const parts: string[] = [];
-    const currency = request.fee_currency || 'USD';
-    
-    if (request.negotiated_fee_amount) {
-      parts.push(`Fee: ${formatCurrency(request.negotiated_fee_amount, currency)}`);
-    }
-    if (request.negotiated_equity_amount) {
-      parts.push(`Equity: ${formatCurrency(request.negotiated_equity_amount, currency)}`);
-    }
-    if (request.negotiated_esop_percentage) {
-      parts.push(`ESOP: ${request.negotiated_esop_percentage}%`);
-    }
-    
-    return parts.length > 0 ? parts.join(', ') : 'No terms specified';
-  };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, assignment?: any) => {
     switch (status) {
       case 'pending':
         return <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">Pending</span>;
-      case 'negotiating':
-        return <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">Offer Received</span>;
       case 'accepted':
+        // Show different badge based on assignment status
+        if (assignment) {
+          if (assignment.status === 'pending_payment') {
+            return <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full">Accepted - Fees in process</span>;
+          } else if (assignment.status === 'pending_agreement') {
+            return <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full">Accepted - Agreement in process</span>;
+          } else if (assignment.status === 'pending_payment_and_agreement') {
+            return <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full">Accepted - Fees & Agreement in process</span>;
+          } else if (assignment.status === 'active') {
+            return <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">Active</span>;
+          }
+        }
         return <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">Accepted</span>;
       case 'rejected':
         return <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">Rejected</span>;
+      case 'cancelled':
+        return <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full">Cancelled</span>;
       default:
         return <span className="px-2 py-1 text-xs font-medium bg-slate-100 text-slate-800 rounded-full">{status}</span>;
     }
@@ -252,7 +329,7 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      {getStatusBadge(request.status)}
+                      {getStatusBadge(request.status, assignments.get(request.id))}
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex justify-end gap-2">
@@ -269,54 +346,82 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
                           View Profile
                         </Button>
                         
-                        {/* View Offer Button - Available for negotiating status */}
-                        {request.status === 'negotiating' && (
+                        {/* Cancel Button - Only for pending or negotiating requests (before mentor accepts) */}
+                        {/* Don't show cancel button for cancelled, rejected, or accepted requests */}
+                        {(request.status === 'pending' || request.status === 'negotiating') && (
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              setSelectedRequest(request);
-                              setViewType('offer');
-                            }}
+                            className="text-red-600 border-red-300 hover:bg-red-50"
+                            onClick={() => handleCancelRequest(request)}
+                            disabled={isProcessing}
                           >
-                            <FileText className="h-3 w-3 mr-1" />
-                            View Offer
+                            <X className="h-3 w-3 mr-1" />
+                            Cancel Request
                           </Button>
                         )}
                         
-                        {/* Accept/Reject buttons - Only for negotiating status */}
-                        {request.status === 'negotiating' && (
-                          <>
-                            <Button
-                              size="sm"
-                              className="bg-green-600 hover:bg-green-700"
-                              onClick={() => {
-                                setSelectedRequest(request);
-                                setActionType('accept');
-                              }}
-                            >
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Accept
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600 border-red-300 hover:bg-red-50"
-                              onClick={() => {
-                                setSelectedRequest(request);
-                                setActionType('reject');
-                              }}
-                            >
-                              <XCircle className="h-3 w-3 mr-1" />
-                              Reject
-                            </Button>
-                          </>
+                        {/* Cancelled status - Show message only */}
+                        {request.status === 'cancelled' && (
+                          <span className="text-xs text-gray-600 font-medium">Request Cancelled</span>
                         )}
                         
-                        {/* Accepted status - No actions */}
-                        {request.status === 'accepted' && (
-                          <span className="text-xs text-green-600 font-medium">Moved to My Services</span>
-                        )}
+                        {/* Accepted status - Show payment/agreement actions */}
+                        {request.status === 'accepted' && (() => {
+                          const assignment = assignments.get(request.id);
+                          if (!assignment) {
+                            return <span className="text-xs text-slate-500">Loading...</span>;
+                          }
+
+                          const needsPayment = assignment.status === 'pending_payment' || assignment.status === 'pending_payment_and_agreement';
+                          const needsAgreement = assignment.status === 'pending_agreement' || assignment.status === 'pending_payment_and_agreement';
+                          const isActive = assignment.status === 'active';
+
+                          return (
+                            <div className="flex flex-col gap-2">
+                              {/* Status message */}
+                              {needsPayment && !needsAgreement && (
+                                <span className="text-xs text-orange-600 font-medium">Fees in process</span>
+                              )}
+                              {needsAgreement && !needsPayment && (
+                                <span className="text-xs text-orange-600 font-medium">Agreement in process</span>
+                              )}
+                              {needsPayment && needsAgreement && (
+                                <span className="text-xs text-orange-600 font-medium">Fees & Agreement in process</span>
+                              )}
+                              {isActive && (
+                                <span className="text-xs text-green-600 font-medium">Active</span>
+                              )}
+                              
+                              {/* Action buttons */}
+                              <div className="flex gap-2">
+                                {needsPayment && (
+                                  <Button
+                                    size="sm"
+                                    className="bg-blue-600 hover:bg-blue-700"
+                                    onClick={() => window.location.href = `/mentor-payment?assignmentId=${assignment.id}`}
+                                  >
+                                    <CreditCard className="h-3 w-3 mr-1" />
+                                    Pay Now
+                                  </Button>
+                                )}
+                                {needsAgreement && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelectedAssignment(assignment);
+                                      setAgreementModalOpen(true);
+                                    }}
+                                  >
+                                    <Upload className="h-3 w-3 mr-1" />
+                                    Upload Agreement
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                         
                         {/* Rejected status - No actions */}
                         {request.status === 'rejected' && (
@@ -398,33 +503,6 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
               </div>
             </div>
 
-            {selectedRequest.status === 'negotiating' && (
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700 mb-2">Mentor's Counter-Proposal</h3>
-                <div className="p-3 bg-blue-50 rounded-md">
-                  <div className="space-y-2 text-sm">
-                    {selectedRequest.negotiated_fee_amount && (
-                      <div className="flex items-center gap-2">
-                        <DollarSign className="h-4 w-4 text-blue-600" />
-                        <span>Fee: {formatCurrency(selectedRequest.negotiated_fee_amount, selectedRequest.fee_currency || 'USD')}</span>
-                      </div>
-                    )}
-                    {selectedRequest.negotiated_equity_amount && (
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4 text-blue-600" />
-                        <span>Equity: {formatCurrency(selectedRequest.negotiated_equity_amount, selectedRequest.fee_currency || 'USD')}</span>
-                      </div>
-                    )}
-                    {selectedRequest.negotiated_esop_percentage && (
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4 text-blue-600" />
-                        <span>ESOP: {selectedRequest.negotiated_esop_percentage}%</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
 
             {selectedRequest.message && (
               <div>
@@ -445,45 +523,7 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
         </Modal>
       )}
 
-      {/* Accept Negotiation Modal */}
-      {selectedRequest && actionType === 'accept' && (
-        <Modal
-          isOpen={true}
-          onClose={() => {
-            setSelectedRequest(null);
-            setActionType(null);
-          }}
-          title="Accept Negotiation"
-        >
-          <div className="space-y-4">
-            <p className="text-sm text-slate-600">
-              Are you sure you want to accept the mentor's counter-proposal? This will move the connection to "My Services".
-            </p>
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
-                {error}
-              </div>
-            )}
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSelectedRequest(null);
-                  setActionType(null);
-                }}
-                disabled={isProcessing}
-              >
-                Cancel
-              </Button>
-              <Button onClick={handleAcceptNegotiation} disabled={isProcessing}>
-                {isProcessing ? 'Accepting...' : 'Accept Negotiation'}
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Reject Negotiation Modal */}
+      {/* Reject Request Modal */}
       {selectedRequest && actionType === 'reject' && (
         <Modal
           isOpen={true}
@@ -491,11 +531,11 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
             setSelectedRequest(null);
             setActionType(null);
           }}
-          title="Reject Negotiation"
+          title="Reject Request"
         >
           <div className="space-y-4">
             <p className="text-sm text-slate-600">
-              Are you sure you want to reject the mentor's counter-proposal? This will close the request.
+              Are you sure you want to reject this request? This will close the request.
             </p>
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
@@ -516,14 +556,34 @@ const StartupRequestsSection: React.FC<StartupRequestsSectionProps> = ({
               <Button
                 variant="outline"
                 className="text-red-600 border-red-300 hover:bg-red-50"
-                onClick={handleRejectNegotiation}
+                onClick={handleRejectRequest}
                 disabled={isProcessing}
               >
-                {isProcessing ? 'Rejecting...' : 'Reject Negotiation'}
+                {isProcessing ? 'Rejecting...' : 'Reject Request'}
               </Button>
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Agreement Upload Modal */}
+      {selectedAssignment && (
+        <AgreementUploadModal
+          isOpen={agreementModalOpen}
+          onClose={() => {
+            setAgreementModalOpen(false);
+            setSelectedAssignment(null);
+          }}
+          assignmentId={selectedAssignment.id}
+          assignment={selectedAssignment}
+          mentorName={mentorProfiles.get(selectedAssignment.mentor_id)?.mentor_name}
+          startupName={requests.find(r => r.startup_id === selectedAssignment.startup_id)?.startup_name}
+          onUploadSuccess={() => {
+            onRequestAction();
+            setAgreementModalOpen(false);
+            setSelectedAssignment(null);
+          }}
+        />
       )}
     </div>
   );

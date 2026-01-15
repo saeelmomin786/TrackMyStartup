@@ -939,20 +939,15 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       return;
     }
 
-    // Role-specific document is not required for Mentor
-    if (userData.role !== 'Mentor' && !uploadedFiles.roleSpecific && !cloudDriveUrls.roleSpecific) {
+    // Role-specific document is not required for Mentor or Investment Advisor
+    if (userData.role !== 'Mentor' && userData.role !== 'Investment Advisor' && !uploadedFiles.roleSpecific && !cloudDriveUrls.roleSpecific) {
       setError(`${getRoleSpecificDocumentType(userData.role)} is required`);
       setIsLoading(false);
       return;
     }
 
-    // For Investment Advisors, license and logo are required
+    // For Investment Advisors, logo is required (license is optional)
     if (userData.role === 'Investment Advisor') {
-      if (!uploadedFiles.license && !cloudDriveUrls.license) {
-        setError('License (As per country regulations) is required for Investment Advisors');
-        setIsLoading(false);
-        return;
-      }
       if (!uploadedFiles.logo && !cloudDriveUrls.logo) {
         setError('Company logo is required for Investment Advisors');
         setIsLoading(false);
@@ -1563,8 +1558,9 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
               esop_reserved_shares: (updatedStartup as any)?.[0]?.esop_reserved_shares
             });
 
-            // Save fundraising details only if active fundraising is enabled
-            if (fundraising && fundraising.active && fundraising.type && fundraising.value !== '' && fundraising.equity !== '') {
+            // Save fundraising details (even if inactive, so user can activate later when they have premium)
+            // For new registrations, fundraising.active will be validated and set to false if user doesn't have premium
+            if (fundraising && fundraising.type && fundraising.value !== '' && fundraising.equity !== '') {
               let deckUrl: string | undefined = undefined;
               
               // Upload pitch deck if provided
@@ -1579,9 +1575,10 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 }
               }
 
-              // Save to fundraising_details table only
+              // Save to fundraising_details table
+              // Note: active status will be validated in capTableService based on subscription
               const frToSave: FundraisingDetails = {
-                active: !!fundraising.active,
+                active: !!fundraising.active, // Will be overridden to false if no premium access
                 type: fundraising.type as any,
                 value: Number(fundraising.value),
                 equity: Number(fundraising.equity),
@@ -1877,11 +1874,12 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 )}
               </div>
 
-              {/* Role-specific document - Not required for Mentor */}
+              {/* Role-specific document - Not required for Mentor or Investment Advisor */}
               {userData.role !== 'Mentor' && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
                     {getRoleSpecificDocumentType(userData.role)}
+                    {userData.role === 'Investment Advisor' && <span className="text-slate-500 text-xs ml-1">(Optional)</span>}
                   </label>
                   <CloudDriveInput
                     value={cloudDriveUrls.roleSpecific}
@@ -1893,7 +1891,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                     maxSize={10}
                     documentType="role-specific document"
                     showPrivacyMessage={false}
-                    required
+                    required={userData.role !== 'Investment Advisor'}
                   />
                 <input type="hidden" id="role-specific-url" name="role-specific-url" />
                 {(uploadedFiles.roleSpecific || cloudDriveUrls.roleSpecific) && (
@@ -1909,7 +1907,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 <>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
-                      License (As per country regulations)
+                      License (As per country regulations) <span className="text-slate-500 text-xs ml-1">(Optional)</span>
                     </label>
                     <CloudDriveInput
                       value={cloudDriveUrls.license}
@@ -1921,7 +1919,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                       maxSize={10}
                       documentType="license"
                       showPrivacyMessage={false}
-                      required
                     />
                     <input type="hidden" id="license-url" name="license-url" />
                     {(uploadedFiles.license || cloudDriveUrls.license) && (

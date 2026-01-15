@@ -1449,15 +1449,33 @@ export const investmentService = {
           code: error.code
         });
         
-        // If it's a schema cache error, provide helpful message
+        // Enhanced error messages for common issues
+        let errorMessage = error.message || 'Unknown error occurred';
+        
         if (error.message?.includes('schema cache') || error.message?.includes('Could not find the function')) {
+          errorMessage = 'Function not found. Please run FIX_APPROVE_CO_INVESTMENT_OFFER_INVESTOR_ADVISOR.sql in Supabase SQL Editor.';
           console.error('💡 Schema cache issue detected. Try:');
-          console.error('   1. Restart your Supabase project');
-          console.error('   2. Or wait a few minutes for schema cache to refresh');
-          console.error('   3. Or run REFRESH_POSTGREST_SCHEMA_CACHE.sql in Supabase SQL Editor');
+          console.error('   1. Run FIX_APPROVE_CO_INVESTMENT_OFFER_INVESTOR_ADVISOR.sql in Supabase SQL Editor');
+          console.error('   2. Restart your Supabase project');
+          console.error('   3. Or wait a few minutes for schema cache to refresh');
+        } else if (error.message?.includes('not found')) {
+          errorMessage = `Offer not found: ${error.message}`;
+        } else if (error.message?.includes('not in pending')) {
+          errorMessage = `Invalid offer status: ${error.message}`;
+        } else if (error.code === 'PGRST116') {
+          errorMessage = `Database error: ${error.message}. ${error.hint || ''}`;
+        } else if (error.code === '42883') {
+          errorMessage = 'Function does not exist. Please run FIX_APPROVE_CO_INVESTMENT_OFFER_INVESTOR_ADVISOR.sql in Supabase SQL Editor.';
         }
         
-        throw error;
+        // Create enhanced error object
+        const enhancedError = new Error(errorMessage);
+        (enhancedError as any).originalError = error;
+        (enhancedError as any).code = error.code;
+        (enhancedError as any).hint = error.hint;
+        (enhancedError as any).details = error.details;
+        
+        throw enhancedError;
       }
 
       console.log('✅ Co-investment offer investor advisor approval result:', data);

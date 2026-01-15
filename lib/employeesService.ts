@@ -631,19 +631,39 @@ class EmployeesService {
   // FILE UPLOAD HELPERS
   // =====================================================
 
-  async uploadContract(file: File, startupId: number): Promise<string> {
+  async uploadContract(file: File, startupId: number, employeeId?: string): Promise<string> {
+    // Get userId from startup (for storage tracking)
+    const { data: startupData } = await supabase
+      .from('startups')
+      .select('user_id')
+      .eq('id', startupId)
+      .single();
+    
+    if (!startupData?.user_id) {
+      throw new Error('Startup not found or user_id missing');
+    }
+    
     const fileName = `${startupId}/${Date.now()}_${file.name}`;
-    const { data, error } = await supabase.storage
-      .from('employee-contracts')
-      .upload(fileName, file);
+    
+    // Upload with storage tracking
+    const { uploadFileWithTracking } = await import('./uploadWithStorageTracking');
+    const uploadResult = await uploadFileWithTracking({
+      bucket: 'employee-contracts',
+      path: fileName,
+      file,
+      cacheControl: '3600',
+      upsert: false,
+      userId: startupData.user_id,
+      fileType: 'contract',
+      relatedEntityType: 'employee',
+      relatedEntityId: employeeId || startupId.toString()
+    });
 
-    if (error) throw error;
+    if (!uploadResult.success || !uploadResult.url) {
+      throw new Error(uploadResult.error || 'Upload failed');
+    }
 
-    const { data: urlData } = supabase.storage
-      .from('employee-contracts')
-      .getPublicUrl(fileName);
-
-    return urlData.publicUrl;
+    return uploadResult.url;
   }
 
   async deleteContract(url: string): Promise<void> {

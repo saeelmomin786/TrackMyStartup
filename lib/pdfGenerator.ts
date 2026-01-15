@@ -313,6 +313,231 @@ export async function generateIndividualInvestorPDF(
 }
 
 /**
+ * Invoice data interface
+ */
+export interface InvoiceData {
+  invoiceNumber: string;
+  invoiceDate: string;
+  paymentDate: string;
+  customerName: string;
+  customerEmail?: string;
+  billingAddress?: string;
+  startupName?: string; // Add startup name
+  amount: number;
+  currency: string;
+  taxAmount?: number;
+  totalAmount: number;
+  planName: string;
+  planTier: string;
+  billingPeriod?: string;
+  paymentGateway: 'razorpay' | 'paypal';
+  gatewayPaymentId?: string;
+  gatewayOrderId?: string;
+  transactionId: string;
+  status: string;
+  country?: string;
+}
+
+/**
+ * Generate an invoice PDF
+ */
+export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<Blob> {
+  const PDF = await loadJsPDF();
+  const doc = new PDF('p', 'mm', 'a4');
+  
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  let yPos = 30;
+
+  // Header - Company Info
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Track My Startup', margin, yPos);
+  
+  yPos += 10;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Invoice', margin, yPos);
+  
+  yPos += 15;
+  
+  // Invoice Details (Right side)
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('INVOICE', pageWidth - margin - 40, yPos);
+  
+  yPos += 8;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Invoice #: ${invoiceData.invoiceNumber}`, pageWidth - margin - 40, yPos);
+  
+  yPos += 6;
+  doc.text(`Date: ${invoiceData.invoiceDate}`, pageWidth - margin - 40, yPos);
+  
+  yPos += 6;
+  doc.text(`Status: ${invoiceData.status.toUpperCase()}`, pageWidth - margin - 40, yPos);
+  
+  yPos = 60;
+  
+  // Bill To Section
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Bill To:', margin, yPos);
+  
+  yPos += 8;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(invoiceData.customerName, margin, yPos);
+  
+  // Add startup name if available
+  if (invoiceData.startupName) {
+    yPos += 6;
+    doc.setFont('helvetica', 'bold');
+    doc.text(invoiceData.startupName, margin, yPos);
+    doc.setFont('helvetica', 'normal');
+  }
+  
+  if (invoiceData.customerEmail) {
+    yPos += 6;
+    doc.text(invoiceData.customerEmail, margin, yPos);
+  }
+  
+  if (invoiceData.billingAddress) {
+    yPos += 6;
+    const addressLines = invoiceData.billingAddress.split('\n');
+    addressLines.forEach(line => {
+      doc.text(line, margin, yPos);
+      yPos += 6;
+    });
+  }
+  
+  yPos += 15;
+  
+  // Line separator
+  doc.setLineWidth(0.5);
+  doc.line(margin, yPos, pageWidth - margin, yPos);
+  yPos += 10;
+  
+  // Service Details
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Service Details', margin, yPos);
+  
+  yPos += 10;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  
+  // Plan Name
+  doc.setFont('helvetica', 'bold');
+  doc.text('Plan:', margin, yPos);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${invoiceData.planName} (${invoiceData.planTier})`, margin + 25, yPos);
+  
+  yPos += 8;
+  if (invoiceData.billingPeriod) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Billing Period:', margin, yPos);
+    doc.setFont('helvetica', 'normal');
+    doc.text(invoiceData.billingPeriod, margin + 40, yPos);
+    yPos += 8;
+  }
+  
+  doc.setFont('helvetica', 'bold');
+  doc.text('Payment Gateway:', margin, yPos);
+  doc.setFont('helvetica', 'normal');
+  doc.text(invoiceData.paymentGateway === 'paypal' ? 'PayPal' : 'Razorpay', margin + 40, yPos);
+  
+  yPos += 8;
+  if (invoiceData.gatewayPaymentId) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Payment ID:', margin, yPos);
+    doc.setFont('helvetica', 'normal');
+    doc.text(invoiceData.gatewayPaymentId, margin + 30, yPos);
+    yPos += 8;
+  }
+  
+  if (invoiceData.gatewayOrderId) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Order ID:', margin, yPos);
+    doc.setFont('helvetica', 'normal');
+    doc.text(invoiceData.gatewayOrderId, margin + 30, yPos);
+    yPos += 8;
+  }
+  
+  yPos += 10;
+  
+  // Line separator
+  doc.setLineWidth(0.5);
+  doc.line(margin, yPos, pageWidth - margin, yPos);
+  yPos += 10;
+  
+  // Amount Breakdown
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Amount Breakdown', margin, yPos);
+  
+  yPos += 15;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  
+  // Subtotal
+  doc.text('Subtotal:', pageWidth - margin - 60, yPos);
+  doc.text(`${invoiceData.amount.toFixed(2)} ${invoiceData.currency}`, pageWidth - margin, yPos, { align: 'right' });
+  
+  if (invoiceData.taxAmount && invoiceData.taxAmount > 0) {
+    yPos += 8;
+    doc.text('Tax:', pageWidth - margin - 60, yPos);
+    doc.text(`${invoiceData.taxAmount.toFixed(2)} ${invoiceData.currency}`, pageWidth - margin, yPos, { align: 'right' });
+  }
+  
+  yPos += 10;
+  doc.setLineWidth(0.5);
+  doc.line(pageWidth - margin - 60, yPos, pageWidth - margin, yPos);
+  
+  yPos += 8;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text('Total:', pageWidth - margin - 60, yPos);
+  doc.text(`${invoiceData.totalAmount.toFixed(2)} ${invoiceData.currency}`, pageWidth - margin, yPos, { align: 'right' });
+  
+  yPos += 20;
+  
+  // Payment Information
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Payment Date: ${invoiceData.paymentDate}`, margin, yPos);
+  
+  yPos += 8;
+  doc.text(`Transaction ID: ${invoiceData.transactionId}`, margin, yPos);
+  
+  if (invoiceData.country) {
+    yPos += 8;
+    doc.text(`Country: ${invoiceData.country}`, margin, yPos);
+  }
+  
+  yPos += 20;
+  
+  // Footer
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'italic');
+  doc.text('Thank you for your business!', margin, yPos);
+  
+  yPos += 6;
+  doc.text('This is an auto-generated invoice. For any queries, please contact support.', margin, yPos);
+  
+  // Add page numbers
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin - 20, doc.internal.pageSize.getHeight() - 10);
+  }
+  
+  return doc.output('blob');
+}
+
+/**
  * Download a blob as a file
  */
 export function downloadBlob(blob: Blob, filename: string): void {

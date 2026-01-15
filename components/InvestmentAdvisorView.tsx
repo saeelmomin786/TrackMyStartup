@@ -1977,10 +1977,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
 
         const order = await orderResponse.json();
-        const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+        // Use same pattern as paymentService.ts (which works)
+        let RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+
+        // Fallback: fetch from config API if env var not available
+        if (!RAZORPAY_KEY_ID) {
+          try {
+            const configResponse = await fetch('/api/config');
+            if (configResponse.ok) {
+              const config = await configResponse.json();
+              RAZORPAY_KEY_ID = config.razorpayKeyId;
+            }
+          } catch (configError) {
+            console.error('Failed to fetch config:', configError);
+          }
+        }
 
         if (!RAZORPAY_KEY_ID) {
-          throw new Error('Razorpay key not configured');
+          throw new Error('Razorpay key not configured. Please set VITE_RAZORPAY_KEY_ID in your environment variables.');
         }
 
         // Open Razorpay checkout
@@ -2262,10 +2276,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
 
         const subscription = await subscriptionResponse.json();
-        const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+        // Use same pattern as paymentService.ts (which works)
+        let RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+
+        // Fallback: fetch from config API if env var not available
+        if (!RAZORPAY_KEY_ID) {
+          try {
+            const configResponse = await fetch('/api/config');
+            if (configResponse.ok) {
+              const config = await configResponse.json();
+              RAZORPAY_KEY_ID = config.razorpayKeyId;
+            }
+          } catch (configError) {
+            console.error('Failed to fetch config:', configError);
+          }
+        }
 
         if (!RAZORPAY_KEY_ID) {
-          throw new Error('Razorpay key not configured');
+          throw new Error('Razorpay key not configured. Please set VITE_RAZORPAY_KEY_ID in your environment variables.');
         }
 
         // Open Razorpay subscription checkout
@@ -5514,6 +5542,53 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     }
   };
 
+  // Handle deleting a rejected offer
+  const handleDeleteOffer = async (offerId: number) => {
+    // Find the offer to check if it's a co-investment offer
+    const offer = offersMade.find(o => o.id === offerId);
+    const isCoInvestment = !!(offer as any)?.is_co_investment || !!(offer as any)?.isCoInvestment;
+    
+    // Confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to delete this ${isCoInvestment ? 'co-investment ' : ''}offer? This action cannot be undone.`
+    );
+    if (!confirmed) return;
+    
+    try {
+      setIsLoading(true);
+      console.log('🗑️ Deleting offer:', { offerId, isCoInvestment });
+      
+      if (isCoInvestment) {
+        // Delete from co_investment_offers table
+        const { error } = await supabase
+          .from('co_investment_offers')
+          .delete()
+          .eq('id', offerId);
+        
+        if (error) {
+          console.error('Error deleting co-investment offer:', error);
+          throw new Error(`Failed to delete co-investment offer: ${error.message}`);
+        }
+      } else {
+        // Delete from investment_offers table using the service
+        await investmentService.deleteInvestmentOffer(offerId);
+      }
+      
+      console.log('✅ Offer deleted successfully');
+      
+      // Refresh offers list
+      await fetchOffersMade();
+      
+      // Show success message
+      alert(`${isCoInvestment ? 'Co-investment ' : ''}Offer deleted successfully.`);
+    } catch (error: any) {
+      console.error('Error deleting offer:', error);
+      alert(`Failed to delete offer: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Handle negotiating an offer (move to Stage 4 and reveal contact details)
   const handleNegotiateOffer = async (offerId: number) => {
     try {
@@ -6873,12 +6948,20 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 const isCoInvestment = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
                                 const coStatus = (offer as any).status || 'pending';
                                 const investorAdvisorStatus = (offer as any).investor_advisor_approval_status || 'not_required';
+                                const startupAdvisorStatus = (offer as any).startup_advisor_approval_status || 'not_required';
                                 
                                 // Get offer stage (default to 1 if not set)
                                 const offerStage = (offer as any).stage || 1;
+                                const offerStatus = (offer as any).status || 'pending';
                                 
                                 // For co-investment offers: Only show Accept/Decline if status is still pending_investor_advisor_approval
                                 if (isCoInvestment) {
+                                  // Check if offer is rejected
+                                  const isRejected = investorAdvisorStatus === 'rejected' || 
+                                                    coStatus === 'investor_advisor_rejected' || 
+                                                    coStatus === 'lead_investor_rejected' || 
+                                                    coStatus === 'rejected';
+                                  
                                   // If already approved by investor advisor, don't show action buttons
                                   if (coStatus !== 'pending_investor_advisor_approval' || investorAdvisorStatus === 'approved' || investorAdvisorStatus === 'rejected') {
                                     return (
@@ -6901,9 +6984,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                         >
                                           View Startup
                                         </button>
-                                        <span className="text-xs text-gray-500 mt-1">
-                                          {investorAdvisorStatus === 'approved' ? '✅ Approved' : investorAdvisorStatus === 'rejected' ? '❌ Rejected' : 'No actions'}
-                                        </span>
+                                        {isRejected && (
+                                          <button
+                                            onClick={() => handleDeleteOffer(offer.id)}
+                                            disabled={isLoading}
+                                            className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium flex items-center justify-center gap-1"
+                                          >
+                                            <Trash2 className="h-3 w-3" />
+                                            Delete
+                                          </button>
+                                        )}
+                                        {!isRejected && (
+                                          <span className="text-xs text-gray-500 mt-1">
+                                            {investorAdvisorStatus === 'approved' ? '✅ Approved' : 'No actions'}
+                                          </span>
+                                        )}
                                       </div>
                                     );
                                   }
@@ -6974,6 +7069,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 // For regular offers: Show approval buttons based on stage
                                 if (offerStage === 1) {
                                   // Stage 1: Investor advisor approval
+                                  // Check if offer is rejected
+                                  const isRejected = investorAdvisorStatus === 'rejected' || 
+                                                    startupAdvisorStatus === 'rejected' || 
+                                                    offerStatus === 'rejected';
+                                  
                                   // Only show Accept/Decline if not already approved/rejected
                                   if (investorAdvisorStatus === 'approved' || investorAdvisorStatus === 'rejected') {
                                     return (
@@ -6996,9 +7096,21 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                         >
                                           View Startup
                                         </button>
-                                        <span className="text-xs text-gray-500 mt-1">
-                                          {investorAdvisorStatus === 'approved' ? '✅ Approved' : '❌ Rejected'}
-                                        </span>
+                                        {isRejected && (
+                                          <button
+                                            onClick={() => handleDeleteOffer(offer.id)}
+                                            disabled={isLoading}
+                                            className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium flex items-center justify-center gap-1"
+                                          >
+                                            <Trash2 className="h-3 w-3" />
+                                            Delete
+                                          </button>
+                                        )}
+                                        {!isRejected && (
+                                          <span className="text-xs text-gray-500 mt-1">
+                                            {investorAdvisorStatus === 'approved' ? '✅ Approved' : 'No actions'}
+                                          </span>
+                                        )}
                                       </div>
                                     );
                                   }
@@ -7121,10 +7233,47 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 
                                 if (offerStage === 3) {
                                   // Stage 3: No advisor actions needed, offer is ready for startup
+                                  // Check if offer is rejected
+                                  const isRejected = investorAdvisorStatus === 'rejected' || 
+                                                    startupAdvisorStatus === 'rejected' || 
+                                                    offerStatus === 'rejected';
+                                  
+                                  if (isRejected) {
+                                    return (
+                                      <button
+                                        onClick={() => handleDeleteOffer(offer.id)}
+                                        disabled={isLoading}
+                                        className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium flex items-center justify-center gap-1"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                        Delete
+                                      </button>
+                                    );
+                                  }
+                                  
                                   return (
                                     <span className="text-xs text-gray-500">
                                       Ready
                                     </span>
+                                  );
+                                }
+                                
+                                // Check if offer is rejected at any stage
+                                const isRejected = investorAdvisorStatus === 'rejected' || 
+                                                  startupAdvisorStatus === 'rejected' || 
+                                                  offerStatus === 'rejected';
+                                
+                                // Show delete button for rejected offers
+                                if (isRejected) {
+                                  return (
+                                    <button
+                                      onClick={() => handleDeleteOffer(offer.id)}
+                                      disabled={isLoading}
+                                      className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium flex items-center justify-center gap-1"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                      Delete
+                                    </button>
                                   );
                                 }
                                 

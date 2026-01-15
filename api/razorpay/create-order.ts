@@ -34,16 +34,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
 
     // Convert amount to paise (smallest currency unit) for Razorpay
-    // Razorpay expects amount in paise for INR (e.g., ₹200 = 20000 paise)
-    // Note: Frontend may already send in paise, so check if it's already in paise
-    let amountInPaise: number;
-    if (amount > 1000) {
-      // Likely already in paise (e.g., 20000 for ₹200)
-      amountInPaise = Math.round(amount);
-    } else {
-      // Likely in rupees, convert to paise
-      amountInPaise = Math.round(amount * 100);
-    }
+    // Razorpay expects amount in paise for INR (e.g., ₹2000 = 200000 paise)
+    // Frontend always sends amount in major currency units (INR), so always convert to paise
+    const amountInPaise = Math.round(amount * 100);
 
     // Razorpay minimum amount is 100 paise (₹1)
     if (amountInPaise < 100) {

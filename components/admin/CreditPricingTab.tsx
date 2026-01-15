@@ -98,12 +98,25 @@ const CreditPricingTab: React.FC = () => {
       for (const price of creditPricing) {
         const newPrice = editingPrices[`pricing_${price.id}`];
         if (newPrice !== undefined && newPrice !== price.price_per_credit) {
-          const { error } = await supabase
+          const { data, error } = await supabase
             .from('credit_pricing_config')
-            .update({ price_per_credit: newPrice })
-            .eq('id', price.id);
+            .update({ 
+              price_per_credit: newPrice,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', price.id)
+            .select();
 
-          if (error) throw error;
+          if (error) {
+            console.error(`Error updating pricing ${price.id} (${price.country}):`, error);
+            throw new Error(`Failed to update ${price.country} pricing: ${error.message}`);
+          }
+          
+          if (data && data.length > 0) {
+            console.log(`Successfully updated ${price.country} pricing to ${newPrice} ${price.currency}:`, data[0]);
+          } else {
+            console.warn(`No rows updated for pricing ${price.id} (${price.country})`);
+          }
         }
       }
 
@@ -111,16 +124,32 @@ const CreditPricingTab: React.FC = () => {
       for (const plan of subscriptionPlans) {
         const newPrice = editingSubscriptionPrices[`plan_${plan.id}`];
         if (newPrice !== undefined && newPrice !== plan.price_per_month) {
-          const { error } = await supabase
+          const { data, error } = await supabase
             .from('credit_subscription_plans')
-            .update({ price_per_month: newPrice })
-            .eq('id', plan.id);
+            .update({ 
+              price_per_month: newPrice,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', plan.id)
+            .select();
 
-          if (error) throw error;
+          if (error) {
+            console.error(`Error updating plan ${plan.id} (${plan.plan_name}):`, error);
+            throw new Error(`Failed to update ${plan.plan_name}: ${error.message}`);
+          }
+          
+          if (data && data.length > 0) {
+            console.log(`Successfully updated ${plan.plan_name} to ${newPrice} ${plan.currency}:`, data[0]);
+          } else {
+            console.warn(`No rows updated for plan ${plan.id} (${plan.plan_name})`);
+          }
         }
       }
 
       setMessage({ type: 'success', text: 'Pricing updated successfully!' });
+      
+      // Wait a moment for database to commit, then reload
+      await new Promise(resolve => setTimeout(resolve, 500));
       await loadData(); // Reload to get updated values
     } catch (error) {
       console.error('Error saving pricing:', error);

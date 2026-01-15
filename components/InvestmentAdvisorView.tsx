@@ -6,6 +6,7 @@ import { formatCurrency, formatCurrencyCompact, getCurrencySymbol } from '../lib
 import { useInvestmentAdvisorCurrency } from '../lib/hooks/useInvestmentAdvisorCurrency';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { AuthUser, authService } from '../lib/auth';
+import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { Eye, Users, FileText, Globe, ExternalLink, Linkedin, HelpCircle, Heart, Share2, CheckCircle, Video, Star, Briefcase, Shield, Building2, Search } from 'lucide-react';
 import ProfilePage from './ProfilePage';
 import InvestorView from './InvestorView';
@@ -52,7 +53,25 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   pendingRelationships = [],
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'management' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'portfolio' | 'collaboration' | 'mandate' | 'credits'>('dashboard');
+  // Initialize activeTab from URL or default to 'dashboard'
+  // This prevents tab reset on component remount
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discovery' | 'management' | 'myInvestments' | 'myInvestors' | 'myStartups' | 'interests' | 'portfolio' | 'collaboration' | 'mandate' | 'credits'>(() => {
+    const tab = getQueryParam('tab');
+    const validTabs = ['dashboard', 'discovery', 'management', 'myInvestments', 'myInvestors', 'myStartups', 'interests', 'portfolio', 'collaboration', 'mandate', 'credits'];
+    if (tab && validTabs.includes(tab)) {
+      return tab as typeof activeTab;
+    }
+    return 'dashboard';
+  });
+
+  // Persist activeTab to URL (only update URL, don't cause re-render)
+  useEffect(() => {
+    if (activeTab !== 'dashboard') {
+      setQueryParam('tab', activeTab, true);
+    } else {
+      setQueryParam('tab', '', true);
+    }
+  }, [activeTab]);
   const [managementSubTab, setManagementSubTab] = useState<'myInvestments' | 'myInvestors' | 'myStartups'>('myInvestments');
   const [mandateSubTab, setMandateSubTab] = useState<'myMandates' | 'investorMandates'>('myMandates');
   const [showProfilePage, setShowProfilePage] = useState(false);
@@ -330,7 +349,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     loadAdvisorAddedStartups();
   }, [currentUser?.id]); // Load when currentUser changes (always, not just on myStartups tab)
 
-  // Load advisor credits
+  // Load advisor credits (only when credits tab is active or on initial load)
   useEffect(() => {
     const loadCredits = async () => {
       if (!currentUser?.id) {
@@ -358,8 +377,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
     };
 
-    loadCredits();
-  }, [currentUser?.id]);
+    // Load credits on mount or when credits tab becomes active
+    if (activeTab === 'credits' || !advisorCredits) {
+      loadCredits();
+    }
+  }, [currentUser?.id, activeTab]);
 
   // Load subscription plans and active subscription
   useEffect(() => {

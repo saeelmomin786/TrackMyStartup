@@ -467,10 +467,10 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
     setIsSendingOtp(true);
     try {
       const purpose = advisorCode ? 'invite' : 'forgot';
-      const response = await fetch('/api/request-otp', {
+      const response = await fetch('/api/otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, purpose, advisorCode }),
+        body: JSON.stringify({ action: 'request', email, purpose, advisorCode }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -503,10 +503,11 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigateToLogin
     setIsVerifyingOtp(true);
     try {
       const purpose = advisorCode ? 'invite' : 'forgot';
-      const response = await fetch('/api/verify-otp', {
+      const response = await fetch('/api/otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'verify',
           email,
           code: otpCode,
           newPassword,

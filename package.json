@@ -50,6 +50,6 @@
     "vite-plugin-copy": "^0.1.6"
   },
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   }
 }

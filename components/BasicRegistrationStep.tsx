@@ -300,10 +300,11 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
 
     try {
       setIsSendingOtp(true);
-      const response = await fetch('/api/request-otp', {
+      const response = await fetch('/api/otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'request',
           email: formData.email,
           purpose: 'register',
           advisorCode: formData.investmentAdvisorCode || undefined
@@ -362,10 +363,11 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
               }
               setIsVerifyingOtp(true);
               try {
-                const response = await fetch('/api/verify-otp', {
+                const response = await fetch('/api/otp', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
+                    action: 'verify',
                     email: formData.email,
                     code: otpCode,
                     newPassword: formData.password,

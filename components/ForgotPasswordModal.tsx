@@ -85,10 +85,10 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
     }
 
     try {
-      const response = await fetch('/api/request-otp', {
+      const response = await fetch('/api/otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, purpose: 'forgot' })
+        body: JSON.stringify({ action: 'request', email, purpose: 'forgot' })
       });
       const data = await response.json();
       if (!response.ok) {
@@ -129,10 +129,11 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
 
     setIsVerifying(true);
     try {
-      const response = await fetch('/api/verify-otp', {
+      const response = await fetch('/api/otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'verify',
           email,
           code: otpCode,
           newPassword,

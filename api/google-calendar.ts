@@ -69,11 +69,119 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  // Try to use App Account OAuth first (for Meet links)
+  const appAccountRefreshToken = process.env.GOOGLE_APP_ACCOUNT_REFRESH_TOKEN;
+  const useAppAccount = !!appAccountRefreshToken;
+
+  console.log('Generating Meet link:', {
+    hasAppAccountToken: !!appAccountRefreshToken,
+    hasClientId: !!process.env.GOOGLE_CLIENT_ID,
+    hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET
+  });
+
+  if (useAppAccount) {
+    try {
+      console.log('Attempting to use app account OAuth for Meet link generation...');
+      // Use App Account OAuth - this CAN create Meet links!
+      const accessToken = await getAppAccountAccessToken();
+      console.log('Successfully got access token from app account');
+      
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        throw new Error('OAuth credentials not configured');
+      }
+
+      const oauth2Client = new google.auth.OAuth2(
+        clientId,
+        clientSecret,
+        process.env.GOOGLE_REDIRECT_URI
+      );
+
+      oauth2Client.setCredentials({ access_token: accessToken });
+      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+      const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
+
+      const now = new Date();
+      const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
+
+      const event = {
+        summary: 'Mentoring Session',
+        description: 'Temporary event to generate Google Meet link',
+        start: {
+          dateTime: now.toISOString(),
+          timeZone: 'UTC'
+        },
+        end: {
+          dateTime: oneHourLater.toISOString(),
+          timeZone: 'UTC'
+        },
+        conferenceData: {
+          createRequest: {
+            requestId: `meet-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            conferenceSolutionKey: {
+              type: 'hangoutsMeet'
+            }
+          }
+        }
+      };
+
+      const response = await calendar.events.insert({
+        calendarId: calendarId,
+        conferenceDataVersion: 1,
+        requestBody: event
+      });
+
+      const meetLink = response.data.hangoutLink || 
+                       response.data.conferenceData?.entryPoints?.[0]?.uri;
+
+      if (!meetLink) {
+        if (response.data.id) {
+          await calendar.events.delete({
+            calendarId: calendarId,
+            eventId: response.data.id
+          });
+        }
+        return res.status(500).json({ error: 'Failed to generate Google Meet link' });
+      }
+
+      // IMPORTANT: Do NOT delete the temporary event!
+      // When a Google Calendar event is deleted, the associated Meet link becomes invalid.
+      // The Meet link is tied to the event, so we must keep the event for the link to work.
+      // The temporary event will be cleaned up later or can be manually removed.
+      
+      const eventId = response.data.id;
+
+      console.log('✅ Meet link generated successfully:', {
+        eventId: eventId,
+        meetLink: meetLink
+      });
+
+      return res.status(200).json({ 
+        meetLink,
+        eventId: eventId,
+        method: 'app_account_oauth'
+      });
+    } catch (error: any) {
+      console.error('Error generating Meet link with app account OAuth:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        hasRefreshToken: !!appAccountRefreshToken
+      });
+      // Fall through to service account fallback (though it won't work for Meet links)
+    }
+  }
+
+  // Fallback: Try Service Account (will likely fail for Meet links, but provide better error)
   const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   
   if (!serviceAccountKey) {
     return res.status(500).json({ 
-      error: 'Google service account not configured. Please set GOOGLE_SERVICE_ACCOUNT_KEY environment variable.' 
+      error: 'Neither GOOGLE_APP_ACCOUNT_REFRESH_TOKEN nor GOOGLE_SERVICE_ACCOUNT_KEY is configured. Please set at least one.',
+      hint: 'Set GOOGLE_APP_ACCOUNT_REFRESH_TOKEN for Meet link generation, or GOOGLE_SERVICE_ACCOUNT_KEY for basic event creation.'
     });
   }
 
@@ -94,6 +202,7 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
   });
 
   const calendar = google.calendar({ version: 'v3', auth });
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
   const now = new Date();
   const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
@@ -121,7 +230,7 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
 
   try {
     const response = await calendar.events.insert({
-      calendarId: 'primary',
+      calendarId: calendarId,
       conferenceDataVersion: 1,
       requestBody: event
     });
@@ -132,25 +241,22 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
     if (!meetLink) {
       if (response.data.id) {
         await calendar.events.delete({
-          calendarId: 'primary',
+          calendarId: calendarId,
           eventId: response.data.id
         });
       }
-      return res.status(500).json({ error: 'Failed to generate Google Meet link' });
+      return res.status(500).json({ 
+        error: 'Failed to generate Google Meet link',
+        details: 'Service accounts cannot create Google Meet links. Please set GOOGLE_APP_ACCOUNT_REFRESH_TOKEN to enable Meet link generation.'
+      });
     }
 
-    // IMPORTANT: Do NOT delete the temporary event!
-    // When a Google Calendar event is deleted, the associated Meet link becomes invalid.
-    // The Meet link is tied to the event, so we must keep the event for the link to work.
-    // The temporary event will be cleaned up later or can be manually removed.
-    // Alternatively, use the Meet link from the actual calendar event created in SchedulingModal.
-    
-    // Store event ID for potential cleanup (optional)
     const eventId = response.data.id;
 
     return res.status(200).json({ 
       meetLink,
-      eventId: eventId // Return event ID in case we want to clean it up later
+      eventId: eventId,
+      method: 'service_account'
     });
   } catch (error: any) {
     // Handle specific Google API errors
@@ -159,26 +265,16 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
       console.error('Google Meet link creation failed - service account may not support Meet links:', error);
       return res.status(500).json({ 
         error: 'Unable to generate Google Meet link with service account',
-        details: 'Service accounts may not have permission to create Google Meet links. Consider using OAuth 2.0 for user calendars instead.',
-        hint: 'Try using the create-event-service-account endpoint which creates events in a shared calendar, or enable Google Meet API separately'
+        details: 'Service accounts may not have permission to create Google Meet links. Please set GOOGLE_APP_ACCOUNT_REFRESH_TOKEN to enable Meet link generation.',
+        hint: 'Use OAuth 2.0 with app account refresh token for Meet link generation'
       });
     }
-    throw error; // Re-throw other errors
+    console.error('Error generating Meet link:', error);
+    return res.status(500).json({ 
+      error: 'Failed to generate Google Meet link',
+      details: error.message || 'Unknown error'
+    });
   }
-
-  // IMPORTANT: Do NOT delete the temporary event!
-  // When a Google Calendar event is deleted, the associated Meet link becomes invalid.
-  // The Meet link is tied to the event, so we must keep the event for the link to work.
-  // The temporary event will be cleaned up later or can be manually removed.
-  // Alternatively, use the Meet link from the actual calendar event created in SchedulingModal.
-  
-  // Store event ID for potential cleanup (optional)
-  const eventId = response.data.id;
-
-  return res.status(200).json({ 
-    meetLink,
-    eventId: eventId // Return event ID in case we want to clean it up later
-  });
 }
 
 // Create Google Calendar Event
@@ -524,9 +620,25 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
         message: error.message,
         stack: error.stack,
         hasRefreshToken: !!appAccountRefreshToken,
-        refreshTokenStart: appAccountRefreshToken?.substring(0, 10)
+        refreshTokenStart: appAccountRefreshToken?.substring(0, 10),
+        hasClientId: !!process.env.GOOGLE_CLIENT_ID,
+        hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET
       });
-      // Fall through to service account fallback
+      
+      // If it's a token-related error, don't fall back - return error immediately
+      if (error.message?.includes('token') || 
+          error.message?.includes('invalid_grant') ||
+          error.message?.includes('unauthorized') ||
+          error.message?.includes('authentication')) {
+        return res.status(500).json({ 
+          error: 'Failed to authenticate with Google Calendar',
+          details: error.message || 'Authentication error',
+          hint: 'Please check GOOGLE_APP_ACCOUNT_REFRESH_TOKEN, GOOGLE_CLIENT_ID, and GOOGLE_CLIENT_SECRET environment variables'
+        });
+      }
+      
+      // For other errors, fall through to service account fallback
+      console.log('Falling back to service account...');
     }
   } else {
     console.log('App account refresh token not found, using service account fallback');
@@ -587,9 +699,34 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
     });
   } catch (error: any) {
     console.error('Error creating calendar event with service account:', error);
+    console.error('Service account error details:', {
+      message: error.message,
+      stack: error.stack,
+      hasServiceAccountKey: !!serviceAccountKey,
+      calendarId: calendarId
+    });
+    
+    // Provide more specific error messages
+    if (error.message?.includes('permission') || error.message?.includes('forbidden')) {
+      return res.status(500).json({ 
+        error: 'Permission denied when creating calendar event',
+        details: 'The service account may not have access to the calendar. Please check calendar sharing settings.',
+        hint: error.message
+      });
+    }
+    
+    if (error.message?.includes('not found') || error.message?.includes('404')) {
+      return res.status(500).json({ 
+        error: 'Calendar not found',
+        details: `Calendar ID "${calendarId}" not found or not accessible`,
+        hint: 'Please check GOOGLE_CALENDAR_ID environment variable'
+      });
+    }
+    
     return res.status(500).json({ 
       error: 'Failed to create calendar event',
-      details: error.message 
+      details: error.message || 'Unknown error',
+      hint: 'Check server logs for more details'
     });
   }
 }

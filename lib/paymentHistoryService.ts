@@ -54,6 +54,39 @@ export interface BillingCycle {
 
 export class PaymentHistoryService {
   /**
+   * Convert auth_user_id to profile_id for database queries
+   * Subscriptions are stored with user_id = profile_id (not auth_user_id)
+   */
+  private async convertAuthIdToProfileId(userId: string): Promise<string> {
+    // Check if this userId exists as a profile_id directly
+    const { data: directProfile, error: directError } = await supabase
+      .from('user_profiles')
+      .select('id')
+      .eq('id', userId)
+      .limit(1)
+      .maybeSingle();
+    
+    if (!directError && directProfile) {
+      return directProfile.id; // Already a profile_id
+    }
+
+    // Try to convert from auth_user_id
+    const { data: userProfiles, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('id')
+      .eq('auth_user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (!profileError && userProfiles && userProfiles.length > 0) {
+      return userProfiles[0].id;
+    }
+
+    // Fallback to original userId
+    return userId;
+  }
+
+  /**
    * Get payment history for a user
    */
   async getPaymentHistory(
@@ -62,10 +95,15 @@ export class PaymentHistoryService {
   ): Promise<PaymentTransaction[]> {
     try {
       console.log('🔍 PaymentHistoryService.getPaymentHistory - userId:', userId);
+      
+      // Convert auth_user_id to profile_id if needed
+      const profileId = await this.convertAuthIdToProfileId(userId);
+      console.log('✅ Using profileId for query:', profileId);
+      
       const { data, error } = await supabase
         .from('payment_transactions')
         .select('*')
-        .eq('user_id', userId)
+        .eq('user_id', profileId)
         .order('created_at', { ascending: false })
         .limit(limit);
 
@@ -127,11 +165,16 @@ export class PaymentHistoryService {
   ): Promise<BillingCycle[]> {
     try {
       console.log('🔍 PaymentHistoryService.getAllBillingCyclesForUser - userId:', userId);
+      
+      // Convert auth_user_id to profile_id if needed
+      const profileId = await this.convertAuthIdToProfileId(userId);
+      console.log('✅ Using profileId for query:', profileId);
+      
       // Get all subscriptions for the user (active and inactive)
       const { data: subscriptions, error: subError } = await supabase
         .from('user_subscriptions')
         .select('id, payment_gateway, status')
-        .eq('user_id', userId);
+        .eq('user_id', profileId);
 
       if (subError) {
         console.error('❌ Error fetching user subscriptions:', subError);

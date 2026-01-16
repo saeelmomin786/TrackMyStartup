@@ -48,14 +48,50 @@ export interface SubscriptionPlan {
 export class SubscriptionService {
   /**
    * Get user's current active subscription
+   * @param userId - Can be auth_user_id or profile_id (will handle both)
    */
   async getUserSubscription(userId: string): Promise<UserSubscription | null> {
     try {
+      // ⚠️ CRITICAL: Convert auth_user_id to profile_id for subscription lookup
+      // Subscriptions are stored with user_id = profile_id (not auth_user_id)
+      console.log('🔍 getUserSubscription: Received userId:', userId);
+      
+      // Check if this userId exists as a profile_id directly
+      let profileId = userId;
+      const { data: directProfile, error: directError } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('id', userId)
+        .limit(1)
+        .maybeSingle();
+      
+      if (!directError && directProfile) {
+        // userId is already a profile_id
+        profileId = directProfile.id;
+        console.log('✅ userId is profile_id:', profileId);
+      } else {
+        // userId might be auth_user_id, convert to profile_id
+        const { data: userProfiles, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('id, role')
+          .eq('auth_user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (!profileError && userProfiles && userProfiles.length > 0) {
+          profileId = userProfiles[0].id;
+          console.log('✅ Converted auth_user_id to profile_id:', profileId);
+        } else {
+          console.warn('⚠️ Could not convert userId to profileId, using as-is:', userId);
+          profileId = userId;
+        }
+      }
+
       // First, get the subscription without join (to avoid 406 errors)
       const { data, error } = await supabase
         .from('user_subscriptions')
         .select('*')
-        .eq('user_id', userId)
+        .eq('user_id', profileId)
         .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1)

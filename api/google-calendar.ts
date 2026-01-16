@@ -182,11 +182,14 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
                             error.error === 'invalid_grant' ||
                             error.response?.data?.error === 'invalid_grant';
       
+      // Check for unauthorized_client (OAuth credentials mismatch)
+      const isUnauthorizedClient = error.message?.includes('unauthorized_client') || 
+                                  error.error === 'unauthorized_client' ||
+                                  error.response?.data?.error === 'unauthorized_client';
+      
       // If it's a token/auth error, don't fall back - return error immediately
       // Service accounts can't create Meet links anyway
-      if (isInvalidGrant || 
-          error.message?.includes('token') ||
-          error.message?.includes('authentication')) {
+      if (isInvalidGrant) {
         const errorDescription = error.response?.data?.error_description || 
                                 error.message || 
                                 'Token has been expired or revoked';
@@ -194,6 +197,29 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
           error: 'Refresh token expired or revoked',
           details: errorDescription,
           hint: 'Please get a new refresh token from Google OAuth Playground and update GOOGLE_APP_ACCOUNT_REFRESH_TOKEN in Vercel environment variables. See SETUP_APP_ACCOUNT_FOR_MEET_LINKS.md for instructions.'
+        });
+      }
+      
+      if (isUnauthorizedClient) {
+        const errorDescription = error.response?.data?.error_description || 
+                                error.message || 
+                                'OAuth client credentials do not match the refresh token';
+        return res.status(500).json({ 
+          error: 'OAuth client credentials mismatch',
+          details: errorDescription,
+          hint: 'The GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET don\'t match the refresh token. Ensure the refresh token was generated with the same OAuth credentials, or get a new refresh token using the current OAuth credentials.'
+        });
+      }
+      
+      if (error.message?.includes('token') ||
+          error.message?.includes('authentication')) {
+        const errorDescription = error.response?.data?.error_description || 
+                                error.message || 
+                                'Authentication error';
+        return res.status(500).json({ 
+          error: 'Failed to authenticate with Google Calendar',
+          details: errorDescription,
+          hint: 'Please check GOOGLE_APP_ACCOUNT_REFRESH_TOKEN, GOOGLE_CLIENT_ID, and GOOGLE_CLIENT_SECRET environment variables.'
         });
       }
       
@@ -503,10 +529,14 @@ async function getAppAccountAccessToken(): Promise<string> {
     return credentials.access_token;
   } catch (error: any) {
     // Handle invalid_grant error specifically (expired/revoked token)
-    // Check both error.message and error.response.data.error
     const isInvalidGrant = error.message?.includes('invalid_grant') || 
                           error.error === 'invalid_grant' ||
                           error.response?.data?.error === 'invalid_grant';
+    
+    // Handle unauthorized_client error (OAuth credentials don't match refresh token)
+    const isUnauthorizedClient = error.message?.includes('unauthorized_client') || 
+                                 error.error === 'unauthorized_client' ||
+                                 error.response?.data?.error === 'unauthorized_client';
     
     if (isInvalidGrant) {
       const errorDescription = error.response?.data?.error_description || 
@@ -514,6 +544,14 @@ async function getAppAccountAccessToken(): Promise<string> {
                               'Token has been expired or revoked';
       throw new Error(`Refresh token expired or revoked: ${errorDescription}. Please get a new refresh token from Google OAuth Playground.`);
     }
+    
+    if (isUnauthorizedClient) {
+      const errorDescription = error.response?.data?.error_description || 
+                              error.message || 
+                              'OAuth client credentials do not match the refresh token';
+      throw new Error(`OAuth client mismatch: ${errorDescription}. The GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET don't match the refresh token. Please ensure the refresh token was generated with the same OAuth credentials, or get a new refresh token.`);
+    }
+    
     // Re-throw other errors
     throw error;
   }
@@ -670,10 +708,20 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
         hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET
       });
       
+      // Check for invalid_grant (expired/revoked token)
+      const isInvalidGrant = error.message?.includes('invalid_grant') || 
+                            error.message?.includes('expired') || 
+                            error.message?.includes('revoked') ||
+                            error.error === 'invalid_grant' ||
+                            error.response?.data?.error === 'invalid_grant';
+      
+      // Check for unauthorized_client (OAuth credentials mismatch)
+      const isUnauthorizedClient = error.message?.includes('unauthorized_client') || 
+                                  error.error === 'unauthorized_client' ||
+                                  error.response?.data?.error === 'unauthorized_client';
+      
       // If it's a token-related error, don't fall back - return error immediately
-      if (error.message?.includes('invalid_grant') || 
-          error.message?.includes('expired') || 
-          error.message?.includes('revoked')) {
+      if (isInvalidGrant) {
         return res.status(500).json({ 
           error: 'Refresh token expired or revoked',
           details: error.message || 'The refresh token has been expired or revoked',
@@ -681,8 +729,18 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
         });
       }
       
+      if (isUnauthorizedClient) {
+        const errorDescription = error.response?.data?.error_description || 
+                                error.message || 
+                                'OAuth client credentials do not match the refresh token';
+        return res.status(500).json({ 
+          error: 'OAuth client credentials mismatch',
+          details: errorDescription,
+          hint: 'The GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET don\'t match the refresh token. Ensure the refresh token was generated with the same OAuth credentials, or get a new refresh token using the current OAuth credentials.'
+        });
+      }
+      
       if (error.message?.includes('token') || 
-          error.message?.includes('unauthorized') ||
           error.message?.includes('authentication')) {
         return res.status(500).json({ 
           error: 'Failed to authenticate with Google Calendar',

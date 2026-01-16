@@ -1273,20 +1273,45 @@ class PaymentService {
     try {
       // 🔐 FIX: Get the profile ID (not auth ID) for RLS policy validation
       // userId parameter is auth.uid(), but RLS policy expects user_profiles.id
+      // ⚠️ IMPORTANT: User can have multiple profiles (e.g., Startup + Mentor roles)
+      // So we need to handle multiple rows, not use .maybeSingle()
       console.log('🔍 createUserSubscription: Received auth userId:', userId);
       
-      const { data: userProfile, error: profileError } = await supabase
+      const { data: userProfiles, error: profileError } = await supabase
         .from('user_profiles')
-        .select('id')
+        .select('id, role')
         .eq('auth_user_id', userId)
-        .maybeSingle();
+        .order('created_at', { ascending: false });
 
-      if (profileError || !userProfile) {
-        throw new Error(`User profile not found for auth_user_id: ${userId}. Error: ${profileError?.message}`);
+      if (profileError || !userProfiles || userProfiles.length === 0) {
+        throw new Error(`No user profile found for auth_user_id: ${userId}. Error: ${profileError?.message}`);
       }
 
-      const profileId = userProfile.id;
-      console.log('✅ Got profile ID:', profileId, 'for auth ID:', userId);
+      // If multiple profiles exist, select based on the plan's user_type
+      let selectedProfile = userProfiles[0];
+      if (userProfiles.length > 1) {
+        console.log('⚠️ Multiple profiles found for auth_user_id:', userId, 'count:', userProfiles.length);
+        console.log('🔍 Plan user_type:', plan.user_type, 'Looking for matching profile role');
+        
+        // Try to match the profile role to the plan's user_type
+        const matchingProfile = userProfiles.find((p: any) => p.role === plan.user_type);
+        if (matchingProfile) {
+          selectedProfile = matchingProfile;
+          console.log('✅ Selected profile matching plan type:', plan.user_type);
+        } else {
+          // Fallback: prefer 'Startup' role if no exact match
+          const startupProfile = userProfiles.find((p: any) => p.role === 'Startup');
+          if (startupProfile) {
+            selectedProfile = startupProfile;
+            console.log('⚠️ No matching profile for plan type, using Startup profile as fallback');
+          } else {
+            console.log('⚠️ No matching profile and no Startup profile, using most recent profile');
+          }
+        }
+      }
+
+      const profileId = selectedProfile.id;
+      console.log('✅ Got profile ID:', profileId, 'for auth ID:', userId, 'Role:', selectedProfile.role, 'Plan type:', plan.user_type);
 
       // Validate plan.id is a valid UUID
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1401,10 +1426,44 @@ class PaymentService {
     try {
       console.log('🔍 Creating trial user subscription...');
       console.log('Plan:', plan);
-      console.log('User ID:', userId);
+      console.log('User ID (auth):', userId);
       console.log('Metadata:', metadata);
 
-      await this.deactivateExistingSubscriptions(userId);
+      // Convert auth ID to profile ID (same as in createUserSubscription)
+      const { data: userProfiles, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('id, role')
+        .eq('auth_user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (profileError || !userProfiles || userProfiles.length === 0) {
+        throw new Error(`No user profile found for auth_user_id: ${userId}. Error: ${profileError?.message}`);
+      }
+
+      let selectedProfile = userProfiles[0];
+      if (userProfiles.length > 1) {
+        console.log('⚠️ Multiple profiles found for trial subscription, count:', userProfiles.length);
+        console.log('🔍 Plan user_type:', plan.user_type, 'Looking for matching profile role');
+        
+        // Try to match the profile role to the plan's user_type
+        const matchingProfile = userProfiles.find((p: any) => p.role === plan.user_type);
+        if (matchingProfile) {
+          selectedProfile = matchingProfile;
+          console.log('✅ Selected profile matching plan type for trial:', plan.user_type);
+        } else {
+          // Fallback: prefer 'Startup' role if no exact match
+          const startupProfile = userProfiles.find((p: any) => p.role === 'Startup');
+          if (startupProfile) {
+            selectedProfile = startupProfile;
+            console.log('⚠️ No matching profile for plan type, using Startup profile as fallback');
+          }
+        }
+      }
+
+      const profileId = selectedProfile.id;
+      console.log('✅ Got profile ID for trial:', profileId, 'Role:', selectedProfile.role, 'Plan type:', plan.user_type);
+
+      await this.deactivateExistingSubscriptions(profileId);
       
       const now = metadata?.trialStart ? new Date(metadata.trialStart) : new Date();
       const trialEnd = (() => {
@@ -1420,7 +1479,7 @@ class PaymentService {
       const trialEndIso = trialEnd.toISOString();
 
       const subscriptionData = {
-        user_id: userId,
+        user_id: profileId,
         plan_id: plan.id,
         status: 'active',
         current_period_start: trialStartIso,

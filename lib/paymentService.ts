@@ -1271,6 +1271,23 @@ class PaymentService {
     taxInfo?: { taxPercentage: number; taxAmount: number; totalAmountWithTax: number }
   ): Promise<UserSubscription> {
     try {
+      // 🔐 FIX: Get the profile ID (not auth ID) for RLS policy validation
+      // userId parameter is auth.uid(), but RLS policy expects user_profiles.id
+      console.log('🔍 createUserSubscription: Received auth userId:', userId);
+      
+      const { data: userProfile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('auth_user_id', userId)
+        .maybeSingle();
+
+      if (profileError || !userProfile) {
+        throw new Error(`User profile not found for auth_user_id: ${userId}. Error: ${profileError?.message}`);
+      }
+
+      const profileId = userProfile.id;
+      console.log('✅ Got profile ID:', profileId, 'for auth ID:', userId);
+
       // Validate plan.id is a valid UUID
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!plan.id || !uuidRegex.test(plan.id)) {
@@ -1280,7 +1297,7 @@ class PaymentService {
       const { data: existing, error: existingError } = await supabase
         .from('user_subscriptions')
         .select('id, has_used_trial')
-        .eq('user_id', userId)
+        .eq('user_id', profileId)
         .eq('plan_id', plan.id)
         .maybeSingle();
 
@@ -1288,7 +1305,7 @@ class PaymentService {
         console.error('Error checking existing subscription before upsert:', existingError);
       }
 
-      await this.deactivateExistingSubscriptions(userId);
+      await this.deactivateExistingSubscriptions(profileId);
 
       const now = new Date();
       const periodEnd = new Date();
@@ -1300,7 +1317,7 @@ class PaymentService {
       }
 
       const subscriptionData: any = {
-        user_id: userId,
+        user_id: profileId,
         plan_id: plan.id,
         status: 'active',
         current_period_start: now.toISOString(),
@@ -1361,7 +1378,7 @@ class PaymentService {
 
       // Record coupon usage if applicable
       if (couponCode) {
-        await this.recordCouponUsage(couponCode, userId, data.id);
+        await this.recordCouponUsage(couponCode, profileId, data.id);
       }
 
       return data;

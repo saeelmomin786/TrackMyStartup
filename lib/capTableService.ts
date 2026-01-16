@@ -1254,6 +1254,59 @@ class CapTableService {
     }
   }
 
+  // =====================================================
+  // GET CURRENT VALUATION (From Most Recent Investment)
+  // =====================================================
+  // This method gets the CURRENT valuation of the startup
+  // by finding the most recent investment's post-money valuation.
+  // This is critical for the startup dashboard to display the correct
+  // "Current Valuation" value based on the most recent funding round.
+  async getCurrentValuation(startupId: number): Promise<number> {
+    console.log('💰 Getting current valuation for startup:', startupId);
+    
+    try {
+      // Try to get the latest post-money valuation from investment records
+      const { data: latestInvestment, error } = await supabase
+        .from('investment_records')
+        .select('post_money_valuation, date')
+        .eq('startup_id', startupId)
+        .not('post_money_valuation', 'is', null)
+        .gt('post_money_valuation', 0)
+        .order('date', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        // PGRST116 means no rows found, which is acceptable
+        console.warn('⚠️ Error fetching latest investment:', error.message);
+      }
+
+      if (latestInvestment?.post_money_valuation && latestInvestment.post_money_valuation > 0) {
+        console.log('✅ Current valuation from investment record:', latestInvestment.post_money_valuation, 'Date:', latestInvestment.date);
+        return latestInvestment.post_money_valuation;
+      }
+
+      // Fallback: get from startups table
+      const { data: startup, error: startupError } = await supabase
+        .from('startups')
+        .select('current_valuation')
+        .eq('id', startupId)
+        .single();
+
+      if (startupError) {
+        console.warn('⚠️ Error fetching startup valuation:', startupError.message);
+        return 0;
+      }
+
+      const valuation = startup?.current_valuation || 0;
+      console.log('✅ Current valuation from startups table:', valuation);
+      return valuation;
+    } catch (error) {
+      console.error('❌ Error getting current valuation:', error);
+      return 0;
+    }
+  }
+
   async getValuationHistoryData(startupId: number): Promise<ValuationHistoryData[]> {
     try {
       const { data, error } = await supabase.rpc('get_valuation_history', {

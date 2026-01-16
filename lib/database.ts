@@ -258,6 +258,113 @@ export const userService = {
       console.error('Error in acceptStartupAdvisorRequest:', error)
       throw error
     }
+  },
+
+  // Reject investment advisor request
+  async rejectInvestmentAdvisorRequest(userId: string) {
+    console.log('Rejecting investment advisor request for user:', userId);
+    try {
+      const currentUser = (await supabase.auth.getUser()).data.user
+
+      // Use RPC function to bypass RLS - create if it doesn't exist
+      const { data: userData, error: userError } = await supabase.rpc(
+        'reject_startup_advisor_request',
+        {
+          p_user_id: userId,
+          p_advisor_id: currentUser?.id
+        }
+      )
+
+      if (userError) {
+        console.error('Error rejecting investment advisor request (RPC):', userError)
+        // If RPC doesn't exist, fall back to direct update
+        console.log('RPC function not found, falling back to direct update');
+        throw userError; // Will be caught and handled below
+      }
+
+      console.log('Investment advisor request rejected successfully:', userData);
+      return userData
+    } catch (error) {
+      // Fallback: Try direct update if RPC doesn't exist
+      console.log('Attempting direct update as fallback');
+      const decisionTimestamp = new Date().toISOString();
+      
+      // Try updating users table
+      const { error: usersError } = await supabase
+        .from('users')
+        .update({
+          advisor_accepted: false,
+          advisor_accepted_date: decisionTimestamp
+        })
+        .eq('id', userId);
+
+      // Try updating user_profiles table
+      const { error: profilesError } = await supabase
+        .from('user_profiles')
+        .update({
+          advisor_accepted: false,
+          advisor_accepted_date: decisionTimestamp
+        })
+        .eq('auth_user_id', userId);
+
+      if (usersError && profilesError) {
+        const errorMessage = usersError?.message || profilesError?.message || 'Unknown database error'
+        throw new Error(`Failed to reject request: ${errorMessage}`)
+      }
+
+      return { success: true }
+    }
+  },
+
+  // Reject startup advisor request
+  async rejectStartupAdvisorRequest(startupId: number, userId: string) {
+    console.log('Rejecting startup advisor request for startup:', startupId, 'user:', userId);
+    try {
+      // Use RPC function to bypass RLS
+      const { data: userData, error: userError } = await supabase
+        .rpc('reject_startup_advisor_request', {
+          p_user_id: userId,
+          p_advisor_id: (await supabase.auth.getUser()).data.user?.id
+        })
+
+      if (userError) {
+        console.error('Error rejecting startup advisor request (RPC):', userError)
+        // Fallback to direct update
+        throw userError;
+      }
+
+      console.log('Startup advisor request rejected successfully:', userData);
+      return userData
+    } catch (error) {
+      // Fallback: Try direct update if RPC doesn't exist
+      console.log('Attempting direct update as fallback');
+      const decisionTimestamp = new Date().toISOString();
+      
+      // Try updating users table
+      const { error: usersError } = await supabase
+        .from('users')
+        .update({
+          advisor_accepted: false,
+          advisor_accepted_date: decisionTimestamp
+        })
+        .eq('id', userId);
+
+      // Try updating user_profiles table  
+      const { error: profilesError } = await supabase
+        .from('user_profiles')
+        .update({
+          advisor_accepted: false,
+          advisor_accepted_date: decisionTimestamp
+        })
+        .eq('auth_user_id', userId);
+
+      if (usersError && profilesError) {
+        const errorMessage = usersError?.message || profilesError?.message || 'Unknown database error'
+        throw new Error(`Failed to reject request: ${errorMessage}`)
+      }
+
+      return { success: true }
+    }
   }
 }
 
@@ -4048,18 +4155,28 @@ export const startupAdditionService = {
   }) {
     console.log('Creating startup addition request:', requestData);
     try {
+      // Validate investment_type matches enum values
+      const validInvestmentTypes = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Bridge'];
+      const investmentType = requestData.investment_type;
+      
+      if (!validInvestmentTypes.includes(investmentType)) {
+        console.warn(`Invalid investment_type: ${investmentType}, defaulting to 'Seed'`);
+        // Default to 'Seed' if invalid
+        requestData.investment_type = 'Seed';
+      }
+
       const { data, error } = await supabase
         .from('startup_addition_requests')
         .insert({
           name: requestData.name,
-          investment_type: requestData.investment_type,
+          investment_type: requestData.investment_type as any, // Cast to enum type
           investment_value: requestData.investment_value,
           equity_allocation: requestData.equity_allocation,
           sector: requestData.sector,
           total_funding: requestData.total_funding,
           total_revenue: requestData.total_revenue,
           registration_date: requestData.registration_date,
-          investor_code: requestData.investor_code,
+          investor_code: requestData.investor_code || null,
           status: requestData.status || 'pending'
         })
         .select()
@@ -4067,7 +4184,16 @@ export const startupAdditionService = {
 
       if (error) {
         console.error('Error creating startup addition request:', error);
-        throw error;
+        // Provide more specific error message
+        if (error.code === '23502') {
+          throw new Error('Missing required field. Please check all required fields are provided.');
+        } else if (error.code === '23505') {
+          throw new Error('A request with these details already exists.');
+        } else if (error.code === 'PGRST116' || error.message?.includes('does not exist')) {
+          throw new Error('Database table not found. Please contact support.');
+        } else {
+          throw new Error(error.message || 'Failed to create startup addition request.');
+        }
       }
 
       console.log('Startup addition request created successfully:', data);

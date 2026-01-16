@@ -1142,48 +1142,39 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     try {
       setIsLoading(true);
 
-      // For both startups and investors, use the underlying auth user id
-      const userId = request.user_id || request.id;
-      if (!userId) {
-        throw new Error('User ID not found for this request');
+      // Optimistically remove from UI immediately
+      const localKey = `${request.type}:${request.id}`;
+      setLocallyRejectedRequestKeys(prev => {
+        const next = new Set(prev);
+        next.add(localKey);
+        return next;
+      });
+
+      if (request.type === 'investor') {
+        // For investors, use the service method similar to accept
+        await (userService as any).rejectInvestmentAdvisorRequest(request.id);
+      } else {
+        // For startup requests, request.id is the startup ID, we need to find the user ID
+        const startup = startups.find(s => s.id === request.id);
+        
+        if (!startup) {
+          throw new Error('Startup not found');
+        }
+        
+        // CRITICAL FIX: For new registrations, user.id is profile ID, but startup.user_id is auth_user_id
+        // Check both user.id (old registrations) and user.auth_user_id (new registrations)
+        const startupUser = users.find(user => 
+          user.role === 'Startup' && 
+          (user.id === startup.user_id || (user as any).auth_user_id === startup.user_id)
+        );
+        if (!startupUser) {
+          throw new Error('Startup user not found');
+        }
+        
+        // Pass both startup ID and user ID to the function (similar to accept)
+        await (userService as any).rejectStartupAdvisorRequest(startup.id, startupUser.id);
       }
-
-       // Optimistically remove from UI immediately
-       const localKey = `${request.type}:${request.id}`;
-       setLocallyRejectedRequestKeys(prev => {
-         const next = new Set(prev);
-         next.add(localKey);
-         return next;
-       });
-
-      const decisionTimestamp = new Date().toISOString();
-
-      // Update legacy `users` table (old registrations)
-      const { error: usersError } = await supabase
-        .from('users')
-        .update({
-          advisor_accepted: false,
-          advisor_accepted_date: decisionTimestamp
-        })
-        .eq('id', userId);
-
-      if (usersError) {
-        console.error('Error rejecting request in users table:', usersError);
-      }
-
-      // Update `user_profiles` table (new registrations)
-      const { error: profilesError } = await supabase
-        .from('user_profiles')
-        .update({
-          advisor_accepted: false,
-          advisor_accepted_date: decisionTimestamp
-        })
-        .eq('auth_user_id', userId);
-
-      if (profilesError) {
-        console.error('Error rejecting request in user_profiles table:', profilesError);
-      }
-
+      
       // Add success notification
       setNotifications(prev => [
         ...prev,
@@ -1195,9 +1186,24 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
       ]);
 
+      // Reload the page after a delay to ensure data is refreshed from the database
+      // This ensures the UI reflects the database state and rejected requests don't reappear
+      // The delay allows the user to see the success message before reload
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+
     } catch (error) {
       console.error('Error rejecting request:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+
+      // Remove from locally rejected keys since the rejection failed
+      const localKey = `${request.type}:${request.id}`;
+      setLocallyRejectedRequestKeys(prev => {
+        const next = new Set(prev);
+        next.delete(localKey);
+        return next;
+      });
 
       setNotifications(prev => [
         ...prev,
@@ -5041,6 +5047,106 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         
         // Pass both startup ID and user ID to the function
         await (userService as any).acceptStartupAdvisorRequest(startup.id, startupUser.id);
+        
+        // After accepting startup request, automatically assign credit and grant premium if credits available
+        // BUT only if startup doesn't already have premium access
+        try {
+          // Get auth user ID (for credit operations - foreign key expects auth.users.id)
+          const authUserId = await getAuthUserId();
+          if (authUserId) {
+            // Use startup.user_id as the startup user ID (this is auth_user_id for both old and new registrations)
+            const startupAuthUserId = startup.user_id;
+            
+            // Simple check: Does startup have active premium subscription?
+            // If YES → Don't deduct credit
+            // If NO → Deduct credit and grant premium
+            const now = new Date();
+            const nowISO = now.toISOString();
+            
+            // Check for active premium subscription
+            const { data: existingSubscriptions, error: subError } = await supabase
+              .from('user_subscriptions')
+              .select('id, status, current_period_end, plan_tier')
+              .eq('user_id', startupAuthUserId)
+              .eq('status', 'active')
+              .gte('current_period_end', nowISO); // Not expired
+            
+            console.log('🔍 Checking for existing premium subscription:', {
+              startupAuthUserId,
+              subscriptionsFound: existingSubscriptions?.length || 0,
+              subscriptions: existingSubscriptions
+            });
+            
+            // Check if any subscription is premium and active (not expired)
+            const hasActivePremium = existingSubscriptions?.some((sub: any) => {
+              const isPremium = sub.plan_tier === 'premium';
+              const isNotExpired = new Date(sub.current_period_end) > now;
+              return isPremium && isNotExpired;
+            }) || false;
+            
+            console.log('🔍 Premium check result:', {
+              hasActivePremium,
+              willDeductCredit: !hasActivePremium
+            });
+            
+            if (hasActivePremium) {
+              // Startup already has active premium - don't deduct credit
+              console.log('ℹ️ Startup already has active premium subscription. No credit deducted.');
+            } else {
+              // Startup doesn't have premium - assign credit if advisor has credits
+              console.log('✅ Startup does NOT have active premium. Proceeding with credit assignment.');
+              
+              const credits = await advisorCreditService.getAdvisorCredits(authUserId);
+              
+              if (credits && credits.credits_available >= 1) {
+                // Automatically assign credit (which grants premium access)
+                console.log('💰 Assigning credit to startup...');
+                const creditResult = await advisorCreditService.assignCredit(
+                  authUserId,
+                  startupAuthUserId,
+                  true // Enable auto-renewal by default
+                );
+                
+                console.log('💰 Credit assignment result:', creditResult);
+                
+                if (creditResult.success) {
+                  // Check if credit was actually deducted (not just auto-renewal update)
+                  if (!creditResult.wasJustUpdatingAutoRenewal) {
+                    console.log('✅ Credit assigned and premium granted automatically on acceptance');
+                    // Update local credits state if available
+                    if (advisorCredits) {
+                      setAdvisorCredits({
+                        ...advisorCredits,
+                        credits_available: advisorCredits.credits_available - 1,
+                        credits_used: advisorCredits.credits_used + 1
+                      });
+                    }
+                    
+                    // Show notification about premium being granted
+                    setNotifications(prev => [...prev, {
+                      id: Date.now().toString(),
+                      message: 'Premium access granted automatically! 1 credit deducted.',
+                      type: 'success',
+                      timestamp: new Date()
+                    }]);
+                  } else {
+                    console.log('✅ Auto-renewal enabled for existing assignment (no credit deducted)');
+                  }
+                } else {
+                  console.log('⚠️ Could not assign credit automatically:', creditResult.error);
+                  // Don't fail the acceptance - just log the warning
+                  // The advisor can manually assign credit later via toggle
+                }
+              } else {
+                console.log('ℹ️ No credits available - startup accepted but premium not granted. Advisor can assign credit later.');
+              }
+            }
+          }
+        } catch (creditError) {
+          console.error('Error assigning credit after acceptance:', creditError);
+          // Don't fail the acceptance if credit assignment fails
+          // The advisor can manually assign credit later
+        }
       }
       
       // Add success notification

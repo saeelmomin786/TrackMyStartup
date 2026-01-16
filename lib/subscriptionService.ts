@@ -11,6 +11,7 @@ export interface UserSubscription {
   plan_id?: string;
   plan_tier: 'free' | 'basic' | 'premium';
   status: 'active' | 'inactive' | 'cancelled' | 'past_due';
+  interval: 'monthly' | 'yearly';
   current_period_start: string;
   current_period_end: string;
   amount: number | null; // Amount in original currency
@@ -70,16 +71,21 @@ export class SubscriptionService {
         return null;
       }
 
-      // If plan_tier is not in user_subscriptions, try to get it from subscription_plans
-      if (!data.plan_tier && data.plan_id) {
-        try {
-          const plan = await this.getSubscriptionPlan(data.plan_id);
-          if (plan) {
-            data.plan_tier = plan.plan_tier;
+      // Ensure plan_tier is set. If missing, try to resolve from plan_id, else default to 'free'.
+      if (!data.plan_tier) {
+        if (data.plan_id) {
+          try {
+            const plan = await this.getSubscriptionPlan(data.plan_id);
+            if (plan) {
+              data.plan_tier = plan.plan_tier;
+            } else {
+              data.plan_tier = 'free';
+            }
+          } catch (planError) {
+            console.warn('Could not fetch plan details:', planError);
+            data.plan_tier = 'free';
           }
-        } catch (planError) {
-          console.warn('Could not fetch plan details:', planError);
-          // Default to 'free' if we can't get plan tier
+        } else {
           data.plan_tier = 'free';
         }
       }
@@ -130,23 +136,59 @@ export class SubscriptionService {
   }
 
   /**
-   * Create or update user subscription
+   * Create or update user subscription (with audit trail)
+   * 
+   * Flow (Option B - Audit Trail):
+   * 1. Mark any existing ACTIVE subscription for this user as INACTIVE
+   * 2. Insert new subscription with status='active'
+   * 
+   * This allows:
+   * - One ACTIVE subscription per user (enforced by partial unique index)
+   * - Full audit trail of past subscriptions (marked as inactive)
+   * - Proper upgrade flow: Basic → Premium (old marked inactive, new inserted)
    */
   async upsertSubscription(subscription: Partial<UserSubscription>): Promise<UserSubscription | null> {
     try {
+      const userId = subscription.user_id;
+      if (!userId) {
+        console.error('upsertSubscription: user_id is required');
+        return null;
+      }
+
+      // STEP 1: Mark any existing ACTIVE subscription as INACTIVE (audit trail)
+      console.log(`📝 Marking existing active subscriptions as inactive for user: ${userId}`);
+      const { error: updateError } = await supabase
+        .from('user_subscriptions')
+        .update({
+          status: 'inactive',
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userId)
+        .eq('status', 'active');
+
+      if (updateError) {
+        console.warn('Warning: Could not mark old subscription as inactive:', updateError);
+        // Don't fail - continue anyway, might just be no existing subscription
+      }
+
+      // STEP 2: Insert new subscription with status='active'
+      console.log(`✨ Inserting new subscription for user: ${userId} with plan: ${subscription.plan_tier}`);
       const { data, error } = await supabase
         .from('user_subscriptions')
-        .upsert(subscription, {
-          onConflict: 'user_id,plan_id'
+        .insert({
+          ...subscription,
+          status: subscription.status || 'active',
+          updated_at: new Date().toISOString()
         })
         .select()
         .single();
 
       if (error) {
-        console.error('Error upserting subscription:', error);
+        console.error('Error inserting new subscription:', error);
         return null;
       }
 
+      console.log(`✅ Subscription created successfully:`, data);
       return data as UserSubscription;
     } catch (error) {
       console.error('Error in upsertSubscription:', error);

@@ -82,7 +82,7 @@ INSERT INTO subscription_plans (
     5.00,
     'EUR',
     'monthly',
-    'Basic plan with portfolio fundraising, grants, investor matching, and CRM - 1 GB storage',
+    'Basic plan with portfolio fundraising, grants, and CRM - 1 GB storage',
     'Startup',
     'Global',
     true,
@@ -92,8 +92,8 @@ INSERT INTO subscription_plans (
         "portfolio_fundraising": true,
         "grants_draft": true,
         "grants_add_to_crm": true,
-        "investor_ai_matching": true,
-        "investor_add_to_crm": true,
+        "investor_ai_matching": false,
+        "investor_add_to_crm": false,
         "crm_access": true,
         "fundraising_active": false
     }'::jsonb

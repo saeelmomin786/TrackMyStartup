@@ -533,6 +533,20 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
               console.warn('Failed to refresh financial records:', refreshError);
             }
 
+            // Generate ledger entries for the new employee from joining date to current date
+            if (created?.id) {
+              try {
+                const joiningDate = created.joiningDate;
+                const currentDate = new Date().toISOString().split('T')[0];
+                console.log('🔄 Auto-generating ledger for new employee:', created.name, 'from', joiningDate, 'to', currentDate);
+                const entriesGenerated = await employeesService.generateEmployeeLedger(created.id, joiningDate, currentDate);
+                console.log('✅ Auto-generated', entriesGenerated, 'ledger entries for new employee');
+              } catch (ledgerError) {
+                console.warn('Failed to auto-generate ledger for new employee:', ledgerError);
+                // Don't throw error here as the employee was created successfully
+              }
+            }
+
             // Reload data
             console.log('🔄 Reloading data...');
             await loadData();
@@ -621,6 +635,18 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
               console.log('Financial records refreshed after salary increment');
             } catch (refreshError) {
               console.warn('Failed to refresh financial records:', refreshError);
+            }
+
+            // Regenerate ledger entries for the employee after increment from joining date to current date
+            try {
+                const currentDate = new Date().toISOString().split('T')[0];
+                const joiningDate = isIncrementModalOpen.joiningDate;
+                console.log('🔄 Auto-regenerating ledger after increment for employee:', isIncrementModalOpen.name, 'from', joiningDate, 'to', currentDate);
+                const entriesGenerated = await employeesService.generateEmployeeLedger(isIncrementModalOpen.id, joiningDate, currentDate);
+                console.log('✅ Auto-regenerated', entriesGenerated, 'ledger entries after increment');
+            } catch (ledgerError) {
+                console.warn('Failed to auto-regenerate ledger after increment:', ledgerError);
+                // Don't throw error here as the increment was added successfully
             }
             
             setIsIncrementModalOpen(null);
@@ -786,6 +812,20 @@ const EmployeesTab: React.FC<EmployeesTabProps> = ({ startup, userRole, isViewOn
             if (finalContractUrl && finalContractUrl !== editingEmployee.contractUrl) {
                 await employeesService.updateEmployee(editingEmployee.id, { contractUrl: finalContractUrl } as any);
             }
+
+            // Regenerate ledger entries for the edited employee from joining date to current date
+            try {
+                const currentDate = new Date().toISOString().split('T')[0];
+                // Use the joining date from the edited employee (could be updated)
+                const joiningDate = editFormData.joiningDate || editingEmployee.joiningDate;
+                console.log('🔄 Auto-regenerating ledger for edited employee:', editingEmployee.name, 'from', joiningDate, 'to', currentDate);
+                const entriesGenerated = await employeesService.generateEmployeeLedger(editingEmployee.id, joiningDate, currentDate);
+                console.log('✅ Auto-regenerated', entriesGenerated, 'ledger entries for edited employee');
+            } catch (ledgerError) {
+                console.warn('Failed to auto-regenerate ledger for edited employee:', ledgerError);
+                // Don't throw error here as the employee was updated successfully
+            }
+
             setEditingEmployee(null);
             setEditContractFile(null);
             setEditContractUrl('');

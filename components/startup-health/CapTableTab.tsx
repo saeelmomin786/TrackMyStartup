@@ -9,7 +9,7 @@ import Modal from '../ui/Modal';
 import DateInput from '../DateInput';
 import CloudDriveInput from '../ui/CloudDriveInput';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Plus, Trash2, Edit, Edit3, Save, X, TrendingUp, Users, DollarSign, PieChart as PieChartIcon, UserPlus, Download, Upload, Check, Eye, RefreshCw, CheckCircle } from 'lucide-react';
+import { Plus, Trash2, Edit, Edit3, Save, X, TrendingUp, Users, DollarSign, PieChart as PieChartIcon, UserPlus, Download, Upload, Check, Eye, RefreshCw, CheckCircle, Lock } from 'lucide-react';
 import PricePerShareInput from './PricePerShareInput';
 import { capTableService } from '../../lib/capTableService';
 import { messageService } from '../../lib/messageService';
@@ -28,6 +28,8 @@ import { formatCurrency, formatCurrencyCompact, getCurrencyForCountry } from '..
 import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
 import { generateInvestorListPDF, generateIndividualInvestorPDF, downloadBlob, InvestorReportData, IndividualInvestorReportData, PDFReportOptions } from '../../lib/pdfGenerator';
 import { testInvestmentOffers } from '../../lib/testInvestmentOffers';
+import { featureAccessService } from '../../lib/featureAccessService';
+import SubscriptionPlansPage from '../SubscriptionPlansPage';
 
 interface CapTableTabProps {
   startup: Startup;
@@ -97,6 +99,26 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [error, setError] = useState<string | null>(null);
     const [esopData, setEsopData] = useState<{esopReservedShares: number, totalShares: number, pricePerShare: number} | null>(null);
     const [currentValuation, setCurrentValuation] = useState<number>(startup.currentValuation || 0);
+    const [hasFundUtilizationReportAccess, setHasFundUtilizationReportAccess] = useState<boolean | null>(null);
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+    
+    // Check feature access for Fund Utilization Report
+    useEffect(() => {
+        const checkAccess = async () => {
+            if (!user?.id) {
+                setHasFundUtilizationReportAccess(false);
+                return;
+            }
+            try {
+                const access = await featureAccessService.canAccessFeature(user.id, 'fund_utilization_report');
+                setHasFundUtilizationReportAccess(access);
+            } catch (error) {
+                console.error('Error checking fund utilization report access:', error);
+                setHasFundUtilizationReportAccess(false);
+            }
+        };
+        checkAccess();
+    }, [user?.id]);
     
     // Debug startup object - FORCE VISIBLE
     // Component initialized successfully
@@ -1673,7 +1695,16 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
             setInvSharesDraft('');
             setInvPricePerShareDraft('');
 
-            // 2) Recompute price per share from latest post-money
+            // 2) Update current valuation from the saved investment's post-money valuation
+            if (savedInvestment?.postMoneyValuation && savedInvestment.postMoneyValuation > 0) {
+                setCurrentValuation(savedInvestment.postMoneyValuation);
+                if (startup) {
+                    startup.currentValuation = savedInvestment.postMoneyValuation;
+                }
+                console.log('✅ Updated current valuation to:', savedInvestment.postMoneyValuation);
+            }
+
+            // 3) Recompute price per share from latest post-money
             try {
                 const latestList = [...(investmentRecords || []), savedInvestment].sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
                 const latest = latestList[0];
@@ -2404,6 +2435,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
 
     // Handle download fund utilization report
     const handleDownloadFundUtilizationReport = async () => {
+        // Check access first
+        if (!hasFundUtilizationReportAccess) {
+            setShowUpgradeModal(true);
+            return;
+        }
+        
         try {
             // Prepare report data for PDF (using plain numbers without currency formatting)
             const reportData: InvestorReportData[] = investmentRecords.map(inv => {
@@ -2446,6 +2483,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
 
     // Handle download individual fund utilization report
     const handleDownloadIndividualFundReport = async (investment: InvestmentRecord) => {
+        // Check access first
+        if (!hasFundUtilizationReportAccess) {
+            setShowUpgradeModal(true);
+            return;
+        }
+        
         try {
             const utilization = calculateInvestorUtilization(investment.investorName, investment.amount);
             
@@ -3793,12 +3836,17 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         size="sm"
                         variant="outline"
                         onClick={handleDownloadFundUtilizationReport}
-                        className="flex items-center gap-2"
+                        disabled={hasFundUtilizationReportAccess === null || !hasFundUtilizationReportAccess}
+                        className={`flex items-center gap-2 ${!hasFundUtilizationReportAccess ? 'opacity-60' : ''}`}
+                        title={!hasFundUtilizationReportAccess ? 'Upgrade to Standard or Premium Plan to unlock this feature' : 'Download Fund Utilization Report'}
                     >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         Download Fund Utilization Report (PDF)
+                        {!hasFundUtilizationReportAccess && (
+                            <Lock className="w-4 h-4" />
+                        )}
                     </Button>
                 </div>
                 <div className="overflow-x-auto">
@@ -3852,8 +3900,9 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                                     size="sm" 
                                                     variant="outline" 
                                                     onClick={() => handleDownloadIndividualFundReport(inv)}
-                                                    className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                                                    title="Download Fund Utilization Report (PDF)"
+                                                    disabled={!hasFundUtilizationReportAccess}
+                                                    className={`text-blue-600 border-blue-300 hover:bg-blue-50 ${!hasFundUtilizationReportAccess ? 'opacity-60' : ''}`}
+                                                    title={!hasFundUtilizationReportAccess ? 'Upgrade to Standard or Premium Plan to unlock this feature' : 'Download Fund Utilization Report (PDF)'}
                                                 >
                                                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -4630,10 +4679,19 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                             proofUrl: editingInvestment.proofOfInvestment
                                         } as any);
 
+                                        // Update current valuation from the updated investment's post-money valuation
+                                        const latestList = [...investmentRecords.map(i => ({...i})), updated].sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                                        const latest = latestList[0];
+                                        if (latest?.postMoneyValuation && latest.postMoneyValuation > 0) {
+                                            setCurrentValuation(latest.postMoneyValuation);
+                                            if (startup) {
+                                                startup.currentValuation = latest.postMoneyValuation;
+                                            }
+                                            console.log('✅ Updated current valuation to:', latest.postMoneyValuation);
+                                        }
+
                                         // Recompute and persist price per share based on latest post-money
                                         try {
-                                            const latestList = [...investmentRecords.map(i => ({...i})), updated].sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                                            const latest = latestList[0];
                                             const totalSharesNow = calculateTotalShares();
                                             const nextPricePerShare = (latest?.postMoneyValuation && totalSharesNow > 0) ? (latest.postMoneyValuation / totalSharesNow) : 0;
                                             if (nextPricePerShare > 0) {
@@ -4660,6 +4718,31 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     </div>
                 )}
             </Modal>
+
+            {/* Upgrade Modal for Fund Utilization Report */}
+            {showUpgradeModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-2 sm:p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+                        <div className="flex items-center justify-between px-4 py-3 border-b">
+                            <h2 className="text-base sm:text-lg font-semibold text-slate-900">
+                                Upgrade to Unlock Fund Utilization Report
+                            </h2>
+                            <button
+                                onClick={() => setShowUpgradeModal(false)}
+                                className="text-slate-500 hover:text-slate-700 text-sm"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                            <SubscriptionPlansPage
+                                userId={user?.id}
+                                onBack={() => setShowUpgradeModal(false)}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
         );

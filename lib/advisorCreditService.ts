@@ -331,6 +331,32 @@ export class AdvisorCreditService {
       }
 
       // No active assignment - need to create new one or reactivate expired one
+      // BUT FIRST: Check if startup already has active premium (from any source)
+      // If yes, don't deduct credit
+      const now = new Date();
+      const nowISO = now.toISOString();
+      
+      // Check for active premium subscription (regardless of who paid)
+      const { data: existingPremiumSubs } = await supabase
+        .from('user_subscriptions')
+        .select('id, status, current_period_end, plan_tier')
+        .eq('user_id', startupUserId)
+        .eq('status', 'active')
+        .eq('plan_tier', 'premium')
+        .gte('current_period_end', nowISO); // Not expired
+      
+      const hasActivePremium = existingPremiumSubs && existingPremiumSubs.length > 0;
+      
+      if (hasActivePremium) {
+        console.log('⚠️ Startup already has active premium subscription. Skipping credit deduction.', {
+          subscriptionsFound: existingPremiumSubs.length
+        });
+        return {
+          success: false,
+          error: 'Startup already has active premium subscription. No credit deducted.'
+        };
+      }
+      
       // Check if advisor has available credits
       const credits = await this.getAdvisorCredits(advisorUserId);
       if (!credits || credits.credits_available < 1) {

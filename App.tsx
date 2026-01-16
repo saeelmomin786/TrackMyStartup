@@ -38,6 +38,7 @@ import PublicAdvisorPage from './components/PublicAdvisorPage';
 import ExploreProfilesPage from './components/ExploreProfilesPage';
 import StartupSubscriptionPage from './components/startup-health/StartupSubscriptionPage';
 import DiagnosticPage from './components/DiagnosticPage';
+import SubscriptionPlansPage from './components/SubscriptionPlansPage';
 
 import { Briefcase, BarChart3, LogOut, UserPlus } from 'lucide-react';
 import LogoTMS from './components/public/logoTMS.svg';
@@ -96,9 +97,9 @@ const App: React.FC = () => {
     
     // If we're on a subdomain and not already on login/reset-password/register/complete-registration
     if (subdomain && !isMainDomain()) {
-      // Allow reset-password, register, and complete-registration pages on subdomains
+      // Allow reset-password, register, complete-registration, and subscription pages on subdomains
       // (needed for invite flows and registration)
-      const allowedPages = ['login', 'reset-password', 'register', 'complete-registration'];
+      const allowedPages = ['login', 'reset-password', 'register', 'complete-registration', 'subscription'];
       
       // If trying to access landing page or any other non-allowed page on subdomain, redirect to login
       if (!currentPageParam || currentPageParam === 'landing' || !allowedPages.includes(currentPageParam)) {
@@ -292,7 +293,7 @@ const App: React.FC = () => {
   });
   const [viewKey, setViewKey] = useState(0); // Force re-render key
   const [forceRender, setForceRender] = useState(0); // Additional force render
-  const [currentPage, setCurrentPage] = useState<'landing' | 'login' | 'register' | 'complete-registration' | 'payment' | 'reset-password'>(() => {
+  const [currentPage, setCurrentPage] = useState<'landing' | 'login' | 'register' | 'complete-registration' | 'payment' | 'reset-password' | 'subscription'>(() => {
     if (typeof window !== 'undefined') {
       const pathname = window.location.pathname;
       const searchParams = new URLSearchParams(window.location.search);
@@ -356,7 +357,7 @@ const App: React.FC = () => {
         return 'reset-password';
       }
       const fromQuery = (getQueryParam('page') as any) || 'landing';
-      const valid = ['landing','login','register','complete-registration','payment','reset-password'];
+      const valid = ['landing','login','register','complete-registration','payment','reset-password','subscription'];
       const page = valid.includes(fromQuery) ? fromQuery : 'landing';
       
       // If on subdomain, don't allow landing page - redirect to login
@@ -421,9 +422,9 @@ const App: React.FC = () => {
   // Handle browser back/forward buttons
   useEffect(() => {
     const handlePopState = () => {
-      const pageParam = getQueryParam('page') as 'landing' | 'login' | 'register' | 'complete-registration' | 'payment' | 'reset-password' | null;
-      if (pageParam) {
-        const valid = ['landing', 'login', 'register', 'complete-registration', 'payment', 'reset-password'];
+        const pageParam = getQueryParam('page') as 'landing' | 'login' | 'register' | 'complete-registration' | 'payment' | 'reset-password' | 'subscription' | null;
+        if (pageParam) {
+          const valid = ['landing', 'login', 'register', 'complete-registration', 'payment', 'reset-password', 'subscription'];
         if (valid.includes(pageParam)) {
           setCurrentPage(pageParam);
         }
@@ -440,6 +441,7 @@ const App: React.FC = () => {
   const [assignedInvestmentAdvisor, setAssignedInvestmentAdvisor] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [subscriptionChecked, setSubscriptionChecked] = useState(false);
 
   // Check Form 2 completion when navigating to dashboard via back button or when accessing dashboard
   useEffect(() => {
@@ -456,6 +458,83 @@ const App: React.FC = () => {
       });
     }
   }, [isAuthenticated, currentUser, currentPage, isLoading]);
+
+  // NEW: Check subscription in background after login (non-blocking)
+  // Shows dashboard immediately, then checks subscription in background
+  // Only redirects to subscription page if user has NO subscription
+  useEffect(() => {
+    const checkSubscriptionAfterLogin = async () => {
+      if (isAuthenticated && currentUser && currentUser.role === 'Startup' && !isLoading) {
+        try {
+          console.log('🔍 Background: Checking subscription for logged-in Startup user...');
+          const { subscriptionService } = await import('./lib/subscriptionService');
+          const subscription = await subscriptionService.getUserSubscription(currentUser.id);
+          
+          if (!subscription) {
+            // No subscription found - redirect to subscription page
+            console.log('❌ No subscription found → redirecting to subscription page');
+            setCurrentPage('subscription');
+            setQueryParam('page', 'subscription', true);
+            return;
+          }
+          
+          // ✅ Subscription found - ensure dashboard is showing with correct URL
+          console.log('✅ Background: Subscription found:', subscription.plan_tier);
+          
+          // Make sure we're on dashboard (currentPage='login') with correct URL param
+          if (currentPage !== 'login') {
+            console.log('🔄 Fixing page: subscription found, updating to dashboard');
+            setCurrentPage('login');
+            setQueryParam('page', 'login', false);
+          }
+        } catch (error) {
+          console.error('❌ Error checking subscription in background:', error);
+          // Error checking subscription - allow dashboard to stay visible
+        }
+      }
+    };
+    
+    // Run check in background without blocking UI
+    if (isAuthenticated && currentUser && currentUser.role === 'Startup' && !isLoading) {
+      checkSubscriptionAfterLogin();
+    }
+  }, [isAuthenticated, currentUser?.id, isLoading]);
+
+  // EXISTING: Check if Startup user has selected a subscription plan (MANDATORY)
+  // This is a secondary check - only fires if we're already on login page
+  // Prevents showing subscription page if user already has a subscription
+  useEffect(() => {
+    const checkSubscriptionSelection = async () => {
+      if (isAuthenticated && currentUser && currentUser.role === 'Startup' && !isLoading && currentPage === 'login') {
+        try {
+          console.log('🔍 Secondary: Checking subscription plan selection for Startup user...');
+          const { subscriptionService } = await import('./lib/subscriptionService');
+          const subscription = await subscriptionService.getUserSubscription(currentUser.id);
+          
+          if (subscription) {
+            // ✅ Subscription found - keep dashboard showing
+            console.log('✅ Secondary: Subscription plan found:', subscription.plan_tier);
+            setSubscriptionChecked(true);
+            return;
+          }
+          
+          // No subscription found - redirect to subscription page
+          console.log('❌ Secondary: No subscription plan found → forcing plan selection');
+          setCurrentPage('subscription');
+          setQueryParam('page', 'subscription', true);
+          setSubscriptionChecked(true);
+        } catch (error) {
+          console.error('❌ Secondary: Error checking subscription:', error);
+          setSubscriptionChecked(true);
+        }
+      } else {
+        setSubscriptionChecked(true);
+      }
+    };
+
+    checkSubscriptionSelection();
+  }, [isAuthenticated, currentUser, currentPage, isLoading]);
+
   const [isProcessingAuthChange, setIsProcessingAuthChange] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
@@ -3233,24 +3312,65 @@ const App: React.FC = () => {
                   console.log('✅ User data refreshed after Form 2 completion:', refreshedUser);
                   setCurrentUser(refreshedUser);
                   setIsAuthenticated(true);
-                  // Directly open dashboard after Form 2, without any payment checks
-                  setCurrentPage('login'); // This will show the main dashboard
+                  // Navigate to subscription page after Form 2 completion
+                  setCurrentPage('subscription');
+                  setQueryParam('page', 'subscription', false);
                 } else {
                   console.error('❌ Failed to refresh user data after Form 2 completion');
                   // Fallback: still try to navigate
                   setIsAuthenticated(true);
-                  setCurrentPage('login');
+                  setCurrentPage('subscription');
+                  setQueryParam('page', 'subscription', false);
                 }
               } catch (error) {
                 console.error('❌ Error refreshing user data after Form 2 completion:', error);
                 // Fallback: still try to navigate
                 setIsAuthenticated(true);
-                setCurrentPage('login');
+                setCurrentPage('subscription');
+                setQueryParam('page', 'subscription', false);
               }
             }}
           />
         </div>
         {/* Footer for complete-registration page */}
+        <Footer />
+      </div>
+    );
+  }
+
+  // Show subscription page after Form 2 completion
+  if (currentPage === 'subscription') {
+    console.log('💳 Showing Subscription Plans Page');
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col">
+        <div className="flex-1">
+          <SubscriptionPlansPage
+            userId={currentUser?.id}
+            onPlanSelected={async (planTier) => {
+              console.log('✅ Plan selected:', planTier);
+              // After plan selection, navigate to dashboard
+              try {
+                const refreshedUser = await authService.getCurrentUser();
+                if (refreshedUser) {
+                  setCurrentUser(refreshedUser);
+                  setIsAuthenticated(true);
+                }
+                setCurrentPage('login'); // Navigate to dashboard
+                setQueryParam('page', 'login', false);
+              } catch (error) {
+                console.error('❌ Error after plan selection:', error);
+                setCurrentPage('login');
+                setQueryParam('page', 'login', false);
+              }
+            }}
+            onBack={() => {
+              // Allow going back to complete-registration if needed
+              setCurrentPage('complete-registration');
+              setQueryParam('page', 'complete-registration', false);
+            }}
+            onLogout={handleLogout}
+          />
+        </div>
         <Footer />
       </div>
     );
@@ -3670,6 +3790,11 @@ const App: React.FC = () => {
       console.log('🔍 Startup user detected:', currentUser.email);
       console.log('🔍 User startup_name:', currentUser.startup_name);
       console.log('🔍 Available startups:', startups.map(s => ({ name: s.name, id: s.id })));
+      
+      // NEW: Check if user has selected a subscription plan (MANDATORY)
+      // This will be checked asynchronously, but we can block rendering if needed
+      // For now, log the check and proceed - subscription page will be enforced by route guard
+      console.log('🔍 Checking subscription status for startup user...');
       
       // Find the user's startup by startup_name from users table
       let userStartup = startups.find(startup => startup.name === currentUser.startup_name);

@@ -144,13 +144,16 @@ async function completeMentorPayment(assignmentId, paymentId, isRazorpay = false
 // Dynamic Razorpay Plan Helper
 // --------------------
 async function getOrCreateRazorpayPlan(planSpec, keys) {
-  const { amountPaise, currency = 'INR', period = 'month', intervalCount = 1, name = 'Startup Plan' } = planSpec || {};
+  const { amountPaise, currency = 'INR', period: rawPeriod = 'monthly', intervalCount = 1, name = 'Startup Plan' } = planSpec || {};
   const { keyId, keySecret } = keys || {};
 
   if (!keyId || !keySecret) throw new Error('Razorpay keys not configured');
   if (!amountPaise || amountPaise <= 0) throw new Error('Invalid amount for plan');
 
-  // Try to find a cached plan
+  // Normalize period: 'month' -> 'monthly', 'year' -> 'yearly'
+  const period = rawPeriod === 'month' ? 'monthly' : rawPeriod === 'year' ? 'yearly' : rawPeriod;
+
+  // Try to find a cached plan first
   try {
     const { data: cached, error: cacheErr } = await supabase
       .from('razorpay_plans_cache')
@@ -160,11 +163,16 @@ async function getOrCreateRazorpayPlan(planSpec, keys) {
       .eq('period', period)
       .eq('interval_count', intervalCount)
       .limit(1)
-      .single();
+      .maybeSingle();
+    
     if (!cacheErr && cached?.plan_id) {
+      console.log(`✅ Found cached Razorpay plan: ${cached.plan_id} for ${amountPaise} ${currency} ${period}`);
       return cached.plan_id;
     }
-  } catch {}
+  } catch (error) {
+    // Cache lookup failed, continue to create plan
+    console.warn('Cache lookup failed:', error);
+  }
 
   const authHeader = "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64");
 
@@ -189,10 +197,11 @@ async function getOrCreateRazorpayPlan(planSpec, keys) {
   }
 
   const plan = await r.json();
+  console.log(`✅ Created new Razorpay plan: ${plan.id} for ${amountPaise} ${currency} ${period}`);
 
-  // Cache it
+  // Cache it with ON CONFLICT handling (unique constraint prevents duplicates)
   try {
-    await supabase
+    const { error: insertError } = await supabase
       .from('razorpay_plans_cache')
       .insert({
         plan_id: plan.id,
@@ -201,8 +210,34 @@ async function getOrCreateRazorpayPlan(planSpec, keys) {
         period,
         interval_count: intervalCount,
         name
-      });
-  } catch {}
+      })
+      .select();
+    
+    if (insertError) {
+      // If duplicate (unique constraint violation), try to fetch existing plan
+      if (insertError.code === '23505') { // Unique violation
+        console.log('⚠️ Plan already cached, fetching existing plan...');
+        const { data: existing } = await supabase
+          .from('razorpay_plans_cache')
+          .select('plan_id')
+          .eq('amount_paise', amountPaise)
+          .eq('currency', currency)
+          .eq('period', period)
+          .eq('interval_count', intervalCount)
+          .limit(1)
+          .maybeSingle();
+        
+        if (existing?.plan_id) {
+          return existing.plan_id;
+        }
+      } else {
+        console.warn('Cache insert failed:', insertError);
+      }
+    }
+  } catch (error) {
+    // Cache insert failed, but plan was created successfully
+    console.warn('Cache insert failed:', error);
+  }
 
   return plan.id;
 }

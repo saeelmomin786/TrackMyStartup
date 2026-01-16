@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import Select from '../ui/Select';
 import { MapPin, CreditCard, CheckCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { generalDataService } from '../../lib/generalDataService';
 
 interface CountryConfirmationModalProps {
   isOpen: boolean;
@@ -15,20 +16,6 @@ interface CountryConfirmationModalProps {
   userCountry?: string;
 }
 
-// Common countries list
-const COUNTRIES = [
-  'India',
-  'United States',
-  'United Kingdom',
-  'Canada',
-  'Australia',
-  'Germany',
-  'France',
-  'Singapore',
-  'United Arab Emirates',
-  'Other'
-];
-
 export default function CountryConfirmationModal({
   isOpen,
   onClose,
@@ -39,8 +26,32 @@ export default function CountryConfirmationModal({
   userCountry
 }: CountryConfirmationModalProps) {
   const [selectedCountry, setSelectedCountry] = useState(userCountry || '');
+  const [countries, setCountries] = useState<string[]>([]);
+  const [loadingCountries, setLoadingCountries] = useState(true);
   const [countryPrice, setCountryPrice] = useState<{ price_inr: number | null; payment_gateway: 'razorpay' | 'stripe' | 'paypal' } | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Load countries from general_data table
+  useEffect(() => {
+    const loadCountries = async () => {
+      try {
+        setLoadingCountries(true);
+        const countryData = await generalDataService.getItemsByCategory('country');
+        const countryNames = countryData.map(country => country.name);
+        setCountries(countryNames);
+      } catch (error) {
+        console.error('Error loading countries:', error);
+        // Fallback to common countries if general_data table fails
+        setCountries(['India', 'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France', 'Singapore', 'United Arab Emirates', 'Other']);
+      } finally {
+        setLoadingCountries(false);
+      }
+    };
+
+    if (isOpen) {
+      loadCountries();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (selectedCountry && isOpen) {
@@ -108,9 +119,10 @@ export default function CountryConfirmationModal({
             id="country-select"
             value={selectedCountry}
             onChange={(e) => setSelectedCountry(e.target.value)}
+            disabled={loadingCountries}
           >
-            <option value="">Select a country</option>
-            {COUNTRIES.map(country => (
+            <option value="">{loadingCountries ? 'Loading countries...' : 'Select a country'}</option>
+            {countries.map(country => (
               <option key={country} value={country}>{country}</option>
             ))}
           </Select>

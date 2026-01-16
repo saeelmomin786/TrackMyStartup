@@ -15,40 +15,50 @@ export interface PlanConfig {
 export const PLAN_CONFIGS: Record<'free' | 'basic' | 'premium', PlanConfig> = {
   free: {
     id: 'free',
-    name: 'Free Plan',
+    name: 'Basic Plan',
     price_eur: 0,
     storage_mb: 100,
     features: [
-      'Dashboard Access',
       'Financial Tracking',
       'Compliance Management',
-      'Profile Management'
+      'ESOP and employee Management',
+      'Equity Allocation/Cap table Management'
     ],
     restrictedFeatures: [
+      'Auto-Generated Grant & Investment Utilization Report',
       'Portfolio Fundraising',
-      'Grants Draft + CRM',
+      'Grants Draft Assistant',
+      'Grant CRM',
       'AI Investor Matching',
-      'CRM Access',
-      'Active Fundraising'
+      'Investor CRM',
+      'Fundraising Portfolio',
+      'Portfolio promotion to investors',
+      'Portfolio promotion through angel network',
+      'Part of Investments by Track My Startup Program'
     ]
   },
   basic: {
     id: 'basic',
-    name: 'Basic Plan',
+    name: 'Standard Plan',
     price_eur: 5,
     storage_mb: 1024, // 1 GB
     features: [
-      'Dashboard Access',
       'Financial Tracking',
       'Compliance Management',
-      'Profile Management',
-      'Grants Draft + CRM',
-      'AI Investor Matching',
-      'CRM Access'
+      'ESOP and employee Management',
+      'Equity Allocation/Cap table Management',
+      'Portfolio Fundraising',
+      'Grants Draft Assistant',
+      'Auto-Generated Grant & Investment Utilization Report',
+      'Grant CRM'
     ],
     restrictedFeatures: [
-      'Portfolio Fundraising', // NOT in Basic, only Premium
-      'Active Fundraising' // NOT in Basic, only Premium
+      'AI Investor Matching',
+      'Investor CRM',
+      'Fundraising Portfolio',
+      'Portfolio promotion to investors',
+      'Portfolio promotion through angel network',
+      'Part of Investments by Track My Startup Program'
     ]
   },
   premium: {
@@ -57,12 +67,20 @@ export const PLAN_CONFIGS: Record<'free' | 'basic' | 'premium', PlanConfig> = {
     price_eur: 20,
     storage_mb: 10240, // 10 GB
     features: [
-      'All Features Included',
-      'Portfolio Fundraising', // Included in Premium
-      'Grants Draft + CRM',
+      'Financial Tracking',
+      'Compliance Management',
+      'ESOP and employee Management',
+      'Equity Allocation/Cap table Management',
+      'Portfolio Fundraising',
+      'Grants Draft Assistant',
+      'Auto-Generated Grant & Investment Utilization Report',
+      'Grant CRM',
       'AI Investor Matching',
-      'CRM Access',
-      'Active Fundraising' // Included in Premium
+      'Investor CRM',
+      'Fundraising Portfolio',
+      'Portfolio promotion to investors',
+      'Portfolio promotion through angel network',
+      'Part of Investments by Track My Startup Program'
     ],
     restrictedFeatures: []
   }

@@ -410,7 +410,7 @@ function CurrentSubscriptionCard({
       <Card>
         <div className="p-6">
           <h2 className="text-xl font-bold text-slate-900 mb-4">Current Subscription</h2>
-          <p className="text-gray-600 mb-4">You're currently on the Free Plan.</p>
+          <p className="text-gray-600 mb-4">You're currently on the Basic Plan.</p>
           <Button onClick={onViewPlans} className="flex items-center">
             <TrendingUp className="h-4 w-4 mr-2" />
             View Plans & Subscribe
@@ -421,8 +421,8 @@ function CurrentSubscriptionCard({
   }
 
   const planNames = {
-    free: 'Free Plan',
-    basic: 'Basic Plan',
+    free: 'Basic Plan',
+    basic: 'Standard Plan',
     premium: 'Premium Plan'
   };
 
@@ -1033,7 +1033,7 @@ function PlanManagementCard({
         <div className="p-6">
           <h2 className="text-xl font-bold text-slate-900 mb-4">Plan Management</h2>
           <div className="text-center py-8">
-            <p className="text-gray-600 mb-4">You're currently on the Free Plan.</p>
+            <p className="text-gray-600 mb-4">You're currently on the Basic Plan.</p>
             {canManagePayments && (
               <Button onClick={onViewPlans} className="flex items-center mx-auto">
                 <TrendingUp className="h-4 w-4 mr-2" />
@@ -1047,8 +1047,8 @@ function PlanManagementCard({
   }
 
   const planNames = {
-    free: 'Free Plan',
-    basic: 'Basic Plan',
+    free: 'Basic Plan',
+    basic: 'Standard Plan',
     premium: 'Premium Plan'
   };
 

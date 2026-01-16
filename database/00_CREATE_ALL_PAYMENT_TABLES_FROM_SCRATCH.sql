@@ -323,13 +323,14 @@ INSERT INTO plan_features (plan_tier, feature_name, is_enabled) VALUES
 ('free', 'investor_ai_matching', false),
 ('free', 'investor_add_to_crm', false),
 ('free', 'crm_access', false),
-('free', 'fundraising_active', false)
+('free', 'fundraising_active', false),
+('free', 'fund_utilization_report', false)
 ON CONFLICT (plan_tier, feature_name) 
 DO UPDATE SET 
     is_enabled = EXCLUDED.is_enabled,
     updated_at = NOW();
 
--- Basic Plan Features
+-- Basic Plan Features (Standard Plan)
 INSERT INTO plan_features (plan_tier, feature_name, is_enabled) VALUES
 ('basic', 'dashboard', true),
 ('basic', 'financials', true),
@@ -338,10 +339,11 @@ INSERT INTO plan_features (plan_tier, feature_name, is_enabled) VALUES
 ('basic', 'portfolio_fundraising', true),
 ('basic', 'grants_draft', true),
 ('basic', 'grants_add_to_crm', true),
-('basic', 'investor_ai_matching', true),
-('basic', 'investor_add_to_crm', true),
+('basic', 'investor_ai_matching', false), -- Premium only
+('basic', 'investor_add_to_crm', false), -- Premium only
 ('basic', 'crm_access', true),
-('basic', 'fundraising_active', false)
+('basic', 'fundraising_active', false),
+('basic', 'fund_utilization_report', true) -- Available in Standard and Premium
 ON CONFLICT (plan_tier, feature_name) 
 DO UPDATE SET 
     is_enabled = EXCLUDED.is_enabled,
@@ -359,7 +361,8 @@ INSERT INTO plan_features (plan_tier, feature_name, is_enabled) VALUES
 ('premium', 'investor_ai_matching', true),
 ('premium', 'investor_add_to_crm', true),
 ('premium', 'crm_access', true),
-('premium', 'fundraising_active', true)
+('premium', 'fundraising_active', true),
+('premium', 'fund_utilization_report', true) -- Available in Standard and Premium
 ON CONFLICT (plan_tier, feature_name) 
 DO UPDATE SET 
     is_enabled = EXCLUDED.is_enabled,

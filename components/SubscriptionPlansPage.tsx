@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { subscriptionService } from '../lib/subscriptionService';
+import { authService } from '../lib/auth';
 import { countryPriceService } from '../lib/countryPriceService';
 import { selectPaymentGateway, getUserCountry } from '../lib/paymentGatewaySelector';
 import { PLAN_CONFIGS, getPlanConfig, formatStorage } from '../lib/subscriptionPlanConfig';
 import Card from './ui/Card';
 import Button from './ui/Button';
-import { Check, Sparkles, Crown, Zap, ArrowRight, ArrowLeft, Shield, TrendingUp, Users, FileText, Globe, Lock } from 'lucide-react';
+import { Check, Sparkles, Crown, Zap, ArrowRight, ArrowLeft, Shield, TrendingUp, Users, FileText, Globe, Lock, LogOut } from 'lucide-react';
 import { messageService } from '../lib/messageService';
 import CountryConfirmationModal from './startup-health/CountryConfirmationModal';
 import PaymentPage from './PaymentPage';
@@ -15,6 +16,7 @@ interface SubscriptionPlansPageProps {
   userId?: string;
   onPlanSelected?: (planTier: 'free' | 'basic' | 'premium') => void;
   onBack?: () => void;
+  onLogout?: () => void;
 }
 
 interface PlanDisplay {
@@ -31,9 +33,9 @@ interface PlanDisplay {
   gradient: string;
 }
 
-export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }: SubscriptionPlansPageProps) {
+export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack, onLogout }: SubscriptionPlansPageProps) {
   const [plans, setPlans] = useState<PlanDisplay[]>([]);
-  const [currentPlan, setCurrentPlan] = useState<'free' | 'basic' | 'premium'>('free');
+  const [currentPlan, setCurrentPlan] = useState<'free' | 'basic' | 'premium' | null>(null);
   const [userCountry, setUserCountry] = useState<string | null>(null);
   const [authUserId, setAuthUserId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
@@ -42,24 +44,35 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
   const [pendingPlan, setPendingPlan] = useState<'basic' | 'premium' | null>(null);
   const [showPaymentPage, setShowPaymentPage] = useState(false);
 
-  // Get auth_user_id
+  // Get profile id (preferred) or fallback to auth user id
   useEffect(() => {
-    const getAuthUserId = async () => {
+    const resolveUserId = async () => {
       try {
+        // Try to get the mapped profile (this returns profile id as `id`)
+        const profile = await authService.getCurrentUser(true);
+        if (profile?.id) {
+          setAuthUserId(profile.id);
+          return;
+        }
+
+        // Fallback: try Supabase auth user id (auth_user_id)
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser?.id) {
           setAuthUserId(authUser.id);
-        } else if (userId) {
-          setAuthUserId(userId);
+          return;
         }
-      } catch (error) {
-        console.error('Error getting auth user ID:', error);
+
+        // Final fallback: use passed-in userId prop (might already be a profile id)
         if (userId) {
           setAuthUserId(userId);
         }
+      } catch (error) {
+        console.error('Error resolving user/profile id for subscription page:', error);
+        if (userId) setAuthUserId(userId);
       }
     };
-    getAuthUserId();
+
+    resolveUserId();
   }, [userId]);
 
   // Load user's current plan and country
@@ -117,7 +130,7 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
         storage_mb: config.storage_mb,
         features: config.features,
         restrictedFeatures: config.restrictedFeatures,
-        isPopular: tier === 'basic',
+        isPopular: tier === 'premium',
         icon: tier === 'free' ? <Zap className="w-6 h-6" /> : tier === 'basic' ? <Sparkles className="w-6 h-6" /> : <Crown className="w-6 h-6" />,
         color: tier === 'free' ? 'slate' : tier === 'basic' ? 'blue' : 'amber',
         gradient: tier === 'free' 
@@ -137,7 +150,36 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
     console.log('userId prop:', userId);
     
     if (planTier === 'free') {
-      // Free plan - just set it
+      // Free plan - save to database
+      try {
+        const finalUserId = authUserId || userId;
+        if (!finalUserId) {
+          console.error('No user ID available for free plan');
+          alert('Please log in to continue');
+          return;
+        }
+
+        console.log('💾 Saving free plan to database for user:', finalUserId);
+        
+        // Save free plan subscription
+        await subscriptionService.upsertSubscription({
+          user_id: finalUserId,
+          plan_tier: 'free',
+          status: 'active',
+          interval: 'yearly',
+          current_period_start: new Date().toISOString(),
+          current_period_end: new Date(Date.now() + 365*24*60*60*1000).toISOString(), // 1 year
+          amount: 0,
+          currency: 'EUR'
+        });
+        
+        console.log('✅ Free plan saved successfully');
+      } catch (error) {
+        console.error('❌ Error saving free plan:', error);
+        alert('Error saving plan. Please try again.');
+        return;
+      }
+      
       if (onPlanSelected) {
         onPlanSelected('free');
       }
@@ -253,18 +295,39 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 mb-4">
-            Choose Your Plan
-          </h1>
-          <p className="text-xl text-slate-600 max-w-2xl mx-auto">
-            Select the perfect plan for your startup. All plans include core features with varying storage and premium capabilities.
-          </p>
+        {/* Header with logout button */}
+        <div className="relative mb-12">
+          {onLogout && (
+            <div className="absolute top-0 right-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onLogout}
+                className="flex items-center gap-2 text-slate-600 hover:text-slate-800"
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          )}
+          <div className="text-center">
+            <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 mb-4">
+              Choose Your Plan
+            </h1>
+            <p className="text-xl text-slate-600 max-w-2xl mx-auto">
+              Select the perfect plan for your startup. All plans include core features with varying storage and premium capabilities.
+            </p>
+            <div className="mt-4 inline-block bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+              <p className="text-sm text-amber-800">
+                <span className="font-semibold">Required:</span> You must select a plan to continue
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Current Plan Badge */}
-        {currentPlan !== 'free' && (
+        {currentPlan && currentPlan !== 'free' && (
           <div className="text-center mb-8">
             <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-full px-4 py-2">
               <Check className="w-5 h-5 text-emerald-600" />
@@ -321,15 +384,7 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
                   <h3 className="text-2xl font-bold text-slate-900 mb-2">{plan.name}</h3>
                   <div className="flex items-baseline gap-2">
                     <span className="text-4xl font-bold text-slate-900">{formatPrice(plan)}</span>
-                    {plan.tier !== 'free' && (
-                      <span className="text-slate-600">/month</span>
-                    )}
                   </div>
-                  {plan.price_inr && plan.tier !== 'free' && (
-                    <p className="text-sm text-slate-600 mt-2">
-                      Your bank will convert to your local currency
-                    </p>
-                  )}
                 </div>
 
                 {/* Storage */}
@@ -345,12 +400,18 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
                 <div className="mb-6">
                   <h4 className="text-sm font-semibold text-slate-700 mb-3">Included Features:</h4>
                   <ul className="space-y-2">
-                    {plan.features.map((feature, index) => (
-                      <li key={index} className="flex items-start gap-2">
-                        <Check className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-sm text-slate-700">{feature}</span>
-                      </li>
-                    ))}
+                    {plan.features.map((feature, index) => {
+                      const isLastFeature = index === plan.features.length - 1;
+                      const isPremiumBoldFeature = plan.tier === 'premium' && isLastFeature && feature.includes('Part of Investments');
+                      return (
+                        <li key={index} className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                          <span className={`text-sm text-slate-700 ${isPremiumBoldFeature ? 'font-bold' : ''}`}>
+                            {feature}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
 
@@ -373,12 +434,17 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
                 <div className="mt-6">
                   {isCurrentPlan ? (
                     <Button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handlePlanSelect(plan.tier);
+                      }}
                       variant="secondary"
                       className="w-full"
-                      disabled
+                      type="button"
                     >
                       <Check className="w-4 h-4 mr-2" />
-                      Current Plan
+                      Continue with Current Plan
                     </Button>
                   ) : (
                     <Button
@@ -421,8 +487,8 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
               <thead>
                 <tr className="border-b border-slate-200">
                   <th className="text-left py-3 px-4 font-semibold text-slate-700">Feature</th>
-                  <th className="text-center py-3 px-4 font-semibold text-slate-700">Free</th>
-                  <th className="text-center py-3 px-4 font-semibold text-blue-600">Basic</th>
+                  <th className="text-center py-3 px-4 font-semibold text-slate-700">Basic</th>
+                  <th className="text-center py-3 px-4 font-semibold text-blue-600">Standard</th>
                   <th className="text-center py-3 px-4 font-semibold text-amber-600">Premium</th>
                 </tr>
               </thead>
@@ -434,8 +500,32 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
                   <td className="py-3 px-4 text-center">10 GB</td>
                 </tr>
                 <tr>
-                  <td className="py-3 px-4 text-slate-700">Dashboard Access</td>
+                  <td className="py-3 px-4 text-slate-700">Financial Tracking</td>
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">Compliance Management</td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">ESOP and employee Management</td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">Equity Allocation/Cap table Management</td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">Auto-Generated Grant & Investment Utilization Report</td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
                 </tr>
@@ -446,7 +536,13 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3 px-4 text-slate-700">Grants Draft + CRM</td>
+                  <td className="py-3 px-4 text-slate-700">Grants Draft Assistant</td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">Grant CRM</td>
                   <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
@@ -454,17 +550,35 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack }
                 <tr>
                   <td className="py-3 px-4 text-slate-700">AI Investor Matching</td>
                   <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
-                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
-                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
-                </tr>
-                <tr>
-                  <td className="py-3 px-4 text-slate-700">CRM Access</td>
                   <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">Investor CRM</td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3 px-4 text-slate-700">Active Fundraising</td>
+                  <td className="py-3 px-4 text-slate-700">Fundraising Portfolio</td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">Portfolio promotion to investors</td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">Portfolio promotion through angel network</td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
+                  <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 text-slate-700">Part of Investments by Track My Startup Program</td>
                   <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
                   <td className="py-3 px-4 text-center"><Lock className="w-5 h-5 text-slate-400 mx-auto" /></td>
                   <td className="py-3 px-4 text-center"><Check className="w-5 h-5 text-emerald-600 mx-auto" /></td>

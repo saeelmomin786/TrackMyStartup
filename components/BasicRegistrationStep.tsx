@@ -51,6 +51,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
   const [otpCode, setOtpCode] = useState('');
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   
   // Role selection state
   const [availableRoles, setAvailableRoles] = useState<string[]>(['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Mentor']);
@@ -262,6 +263,13 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
     // Check if email already exists before proceeding
     if (emailValidation.exists) {
       setError('This email is already registered. Please sign in instead.');
+      setIsLoading(false);
+      return;
+    }
+
+    // Check if terms and conditions are accepted
+    if (!acceptedTerms) {
+      setError('Please accept the Terms and Conditions to continue');
       setIsLoading(false);
       return;
     }
@@ -676,11 +684,35 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
           </div>
         )}
 
+        {/* Terms and Conditions Checkbox - Only show for normal registration */}
+        {!isAddingProfile && (
+          <div className="flex items-start">
+            <input
+              type="checkbox"
+              id="acceptTerms"
+              checked={acceptedTerms}
+              onChange={(e) => setAcceptedTerms(e.target.checked)}
+              className="mt-1 h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+            />
+            <label htmlFor="acceptTerms" className="ml-2 text-sm text-slate-700">
+              I have read and agree to the{' '}
+              <a
+                href="/terms-conditions"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-brand-primary hover:text-brand-secondary underline"
+              >
+                Terms and Conditions
+              </a>
+            </label>
+          </div>
+        )}
+
         {/* Submit Button */}
         <Button
           type="submit"
           className="w-full"
-          disabled={isLoading || (!isAddingProfile && emailValidation.exists)}
+          disabled={isLoading || (!isAddingProfile && (emailValidation.exists || !acceptedTerms))}
         >
           {isLoading 
             ? (isAddingProfile ? 'Creating Profile...' : 'Creating Account...') 

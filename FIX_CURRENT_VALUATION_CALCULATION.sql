@@ -36,7 +36,7 @@ BEGIN
     
     -- Only proceed if startup exists
     IF startup_exists THEN
-        -- Calculate new total shares
+        -- Calculate new total shares (including ALL share types)
         new_total_shares := (
             COALESCE((
                 SELECT SUM(shares) 
@@ -46,6 +46,21 @@ BEGIN
             COALESCE((
                 SELECT SUM(shares) 
                 FROM investment_records 
+                WHERE startup_id = target_startup_id
+            ), 0) +
+            COALESCE((
+                SELECT SUM(shares) 
+                FROM mentor_equity_records 
+                WHERE startup_id = target_startup_id
+            ), 0) +
+            COALESCE((
+                SELECT SUM(number_of_shares) 
+                FROM employees 
+                WHERE startup_id = target_startup_id
+            ), 0) +
+            COALESCE((
+                SELECT SUM(shares) 
+                FROM recognition_records 
                 WHERE startup_id = target_startup_id
             ), 0) +
             COALESCE((

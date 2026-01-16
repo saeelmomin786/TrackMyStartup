@@ -4,6 +4,7 @@ import { paymentService } from '../lib/paymentService';
 import { countryPriceService } from '../lib/countryPriceService';
 import { selectPaymentGateway, getUserCountry } from '../lib/paymentGatewaySelector';
 import { subscriptionService } from '../lib/subscriptionService';
+import { generalDataService } from '../lib/generalDataService';
 import PaymentSuccess from './PaymentSuccess';
 import Card from './ui/Card';
 import Button from './ui/Button';
@@ -26,23 +27,11 @@ interface PaymentPageProps {
   onBack?: () => void;
 }
 
-// Common countries list
-const COUNTRIES = [
-  'India',
-  'United States',
-  'United Kingdom',
-  'Canada',
-  'Australia',
-  'Germany',
-  'France',
-  'Singapore',
-  'United Arab Emirates',
-  'Other'
-];
-
 export default function PaymentPage({ planTier, userId, onPaymentSuccess, onBack }: PaymentPageProps) {
   const [userCountry, setUserCountry] = useState<string | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string>('');
+  const [countries, setCountries] = useState<string[]>([]);
+  const [loadingCountries, setLoadingCountries] = useState(true);
   const [countryPrice, setCountryPrice] = useState<{
     price_eur: number;
     price_inr: number | null;
@@ -58,6 +47,26 @@ export default function PaymentPage({ planTier, userId, onPaymentSuccess, onBack
   const [paidCurrency, setPaidCurrency] = useState<string>('EUR');
 
   // const navigate = useNavigate(); // Commented out - use window.location if router not available
+
+  // Load countries from general_data table
+  useEffect(() => {
+    const loadCountries = async () => {
+      try {
+        setLoadingCountries(true);
+        const countryData = await generalDataService.getItemsByCategory('country');
+        const countryNames = countryData.map(country => country.name);
+        setCountries(countryNames);
+      } catch (error) {
+        console.error('Error loading countries:', error);
+        // Fallback to common countries if general_data table fails
+        setCountries(['India', 'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France', 'Singapore', 'United Arab Emirates', 'Other']);
+      } finally {
+        setLoadingCountries(false);
+      }
+    };
+
+    loadCountries();
+  }, []);
 
   // Get auth_user_id
   useEffect(() => {
@@ -511,10 +520,10 @@ export default function PaymentPage({ planTier, userId, onPaymentSuccess, onBack
               <Select
                 value={selectedCountry}
                 onChange={(e) => handleCountryChange(e.target.value)}
-                disabled={processing}
+                disabled={processing || loadingCountries}
               >
-                <option value="">Select your country</option>
-                {COUNTRIES.map(country => (
+                <option value="">{loadingCountries ? 'Loading countries...' : 'Select your country'}</option>
+                {countries.map(country => (
                   <option key={country} value={country}>
                     {country}
                   </option>

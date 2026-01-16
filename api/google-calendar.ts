@@ -500,17 +500,34 @@ async function handleRefreshToken(req: VercelRequest, res: VercelResponse) {
 
 // Get App Account Access Token (using refresh token)
 async function getAppAccountAccessToken(): Promise<string> {
-  const refreshToken = process.env.GOOGLE_APP_ACCOUNT_REFRESH_TOKEN;
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_APP_ACCOUNT_REFRESH_TOKEN?.trim();
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 
   if (!refreshToken) {
     throw new Error('GOOGLE_APP_ACCOUNT_REFRESH_TOKEN not configured. Please set it in Vercel environment variables.');
   }
 
+  // Validate refresh token format
+  if (!refreshToken.startsWith('1//') && !refreshToken.startsWith('1/')) {
+    console.warn('Refresh token format warning: Should start with "1//" or "1/". Current format:', refreshToken.substring(0, 10) + '...');
+  }
+
   if (!clientId || !clientSecret) {
     throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured.');
   }
+
+  // Log configuration (without sensitive data)
+  console.log('OAuth configuration check:', {
+    hasRefreshToken: !!refreshToken,
+    refreshTokenLength: refreshToken.length,
+    refreshTokenStart: refreshToken.substring(0, 10) + '...',
+    hasClientId: !!clientId,
+    clientIdLength: clientId?.length || 0,
+    hasClientSecret: !!clientSecret,
+    clientSecretLength: clientSecret?.length || 0,
+    hasRedirectUri: !!process.env.GOOGLE_REDIRECT_URI
+  });
 
   const oauth2Client = new google.auth.OAuth2(
     clientId,
@@ -528,32 +545,62 @@ async function getAppAccountAccessToken(): Promise<string> {
 
     return credentials.access_token;
   } catch (error: any) {
-    // Handle invalid_grant error specifically (expired/revoked token)
-    const isInvalidGrant = error.message?.includes('invalid_grant') || 
-                          error.error === 'invalid_grant' ||
-                          error.response?.data?.error === 'invalid_grant';
+    // Log the FULL error structure for debugging
+    console.error('Full error object in getAppAccountAccessToken:', JSON.stringify({
+      message: error.message,
+      error: error.error,
+      code: error.code,
+      status: error.status,
+      statusText: error.statusText,
+      response: {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        headers: error.response?.headers
+      },
+      config: {
+        url: error.config?.url,
+        method: error.config?.method
+      }
+    }, null, 2));
     
-    // Handle unauthorized_client error (OAuth credentials don't match refresh token)
-    const isUnauthorizedClient = error.message?.includes('unauthorized_client') || 
-                                 error.error === 'unauthorized_client' ||
-                                 error.response?.data?.error === 'unauthorized_client';
+    // Extract error code from various possible locations
+    const errorCode = error.response?.data?.error || 
+                     error.error || 
+                     error.code ||
+                     (error.message?.toLowerCase().includes('invalid_grant') ? 'invalid_grant' : null) ||
+                     (error.message?.toLowerCase().includes('unauthorized_client') ? 'unauthorized_client' : null);
     
-    if (isInvalidGrant) {
-      const errorDescription = error.response?.data?.error_description || 
-                              error.message || 
-                              'Token has been expired or revoked';
-      throw new Error(`Refresh token expired or revoked: ${errorDescription}. Please get a new refresh token from Google OAuth Playground.`);
+    const errorDescription = error.response?.data?.error_description || 
+                            error.response?.data?.error ||
+                            error.message;
+    
+    // Check for common error patterns
+    const isInvalidGrant = errorCode === 'invalid_grant' ||
+                          error.message?.toLowerCase().includes('invalid_grant') ||
+                          error.message?.toLowerCase().includes('token has been expired') ||
+                          error.message?.toLowerCase().includes('token has been revoked');
+    
+    const isUnauthorizedClient = errorCode === 'unauthorized_client' ||
+                                error.message?.toLowerCase().includes('unauthorized_client') ||
+                                error.message?.toLowerCase().includes('unauthorized');
+    
+    // Check for 400 Bad Request (often means invalid_grant or unauthorized_client)
+    const is400Error = error.status === 400 || error.response?.status === 400;
+    
+    if (isInvalidGrant || (is400Error && !isUnauthorizedClient && !errorCode)) {
+      const desc = errorDescription || 'Token has been expired or revoked';
+      throw new Error(`Refresh token expired or revoked: ${desc}. Please get a new refresh token from Google OAuth Playground using the SAME OAuth Client ID and Secret that are currently set in Vercel.`);
     }
     
     if (isUnauthorizedClient) {
-      const errorDescription = error.response?.data?.error_description || 
-                              error.message || 
-                              'OAuth client credentials do not match the refresh token';
-      throw new Error(`OAuth client mismatch: ${errorDescription}. The GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET don't match the refresh token. Please ensure the refresh token was generated with the same OAuth credentials, or get a new refresh token.`);
+      const desc = errorDescription || 'OAuth client credentials do not match the refresh token';
+      throw new Error(`OAuth client mismatch: ${desc}. The GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Vercel don't match the refresh token. Make sure you generated the refresh token using the SAME OAuth credentials that are currently in Vercel, or update Vercel with the OAuth credentials that match your refresh token.`);
     }
     
-    // Re-throw other errors
-    throw error;
+    // Re-throw other errors with more context
+    const errorMsg = errorDescription || error.message || 'Unknown error';
+    throw new Error(`Failed to get access token: ${errorMsg} (Error code: ${errorCode || 'unknown'}, Status: ${error.status || error.response?.status || 'unknown'})`);
   }
 }
 

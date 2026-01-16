@@ -46,11 +46,37 @@ export class FeatureAccessService {
     try {
       const now = new Date().toISOString();
       
+      // Convert auth_user_id to profile_ids (same as subscriptionService)
+      let profileIds: string[] = [];
+      const { data: directProfile, error: directError } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('id', userId)
+        .limit(1)
+        .maybeSingle();
+      
+      if (!directError && directProfile) {
+        profileIds = [directProfile.id];
+      } else {
+        const { data: userProfiles, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('id')
+          .eq('auth_user_id', userId);
+
+        if (!profileError && userProfiles && userProfiles.length > 0) {
+          profileIds = userProfiles.map(p => p.id);
+        } else {
+          // No profiles found, user is on free plan
+          const planTier = 'free';
+          return await this.checkFeatureForTier(planTier, featureName);
+        }
+      }
+      
       // Get user's active subscription with period check
       const { data: subscription, error: subError } = await supabase
         .from('user_subscriptions')
         .select('plan_id, status, current_period_end, grace_period_ends_at')
-        .eq('user_id', userId)
+        .in('user_id', profileIds)
         .in('status', ['active', 'past_due'])
         .order('current_period_start', { ascending: false })
         .limit(1)
@@ -152,11 +178,36 @@ export class FeatureAccessService {
     try {
       const now = new Date().toISOString();
       
+      // Convert auth_user_id to profile_ids (same as subscriptionService)
+      let profileIds: string[] = [];
+      const { data: directProfile, error: directError } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('id', userId)
+        .limit(1)
+        .maybeSingle();
+      
+      if (!directError && directProfile) {
+        profileIds = [directProfile.id];
+      } else {
+        const { data: userProfiles, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('id')
+          .eq('auth_user_id', userId);
+
+        if (!profileError && userProfiles && userProfiles.length > 0) {
+          profileIds = userProfiles.map(p => p.id);
+        } else {
+          // No profiles found, user is on free plan
+          return 'free';
+        }
+      }
+      
       // Get user's active subscription with period check
       const { data: subscription, error: subError } = await supabase
         .from('user_subscriptions')
         .select('plan_id, status, current_period_end, grace_period_ends_at')
-        .eq('user_id', userId)
+        .in('user_id', profileIds)
         .in('status', ['active', 'past_due'])
         .order('current_period_start', { ascending: false })
         .limit(1)
@@ -207,12 +258,37 @@ export class FeatureAccessService {
 
   /**
    * Get user's subscription details
-   * @param userId - User ID
+   * @param userId - User ID (can be auth_user_id or profile_id)
    * @returns Subscription details or null
    */
   async getUserSubscription(userId: string): Promise<any | null> {
     try {
       const now = new Date().toISOString();
+      
+      // Convert auth_user_id to profile_ids (same as subscriptionService)
+      let profileIds: string[] = [];
+      const { data: directProfile, error: directError } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('id', userId)
+        .limit(1)
+        .maybeSingle();
+      
+      if (!directError && directProfile) {
+        profileIds = [directProfile.id];
+      } else {
+        const { data: userProfiles, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('id')
+          .eq('auth_user_id', userId);
+
+        if (!profileError && userProfiles && userProfiles.length > 0) {
+          profileIds = userProfiles.map(p => p.id);
+        } else {
+          // No profiles found
+          return null;
+        }
+      }
       
       // Get subscription with period end check
       const { data, error } = await supabase
@@ -230,7 +306,7 @@ export class FeatureAccessService {
             features
           )
         `)
-        .eq('user_id', userId)
+        .in('user_id', profileIds)
         .in('status', ['active', 'past_due'])
         .gt('current_period_end', now) // Period not expired
         .order('current_period_start', { ascending: false })

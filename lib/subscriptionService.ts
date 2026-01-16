@@ -52,12 +52,12 @@ export class SubscriptionService {
    */
   async getUserSubscription(userId: string): Promise<UserSubscription | null> {
     try {
-      // ⚠️ CRITICAL: Convert auth_user_id to profile_id for subscription lookup
+      // ⚠️ CRITICAL: Handle both auth_user_id and profile_id inputs
       // Subscriptions are stored with user_id = profile_id (not auth_user_id)
       console.log('🔍 getUserSubscription: Received userId:', userId);
       
-      // Check if this userId exists as a profile_id directly
-      let profileId = userId;
+      // Step 1: Check if this userId is already a profile_id
+      let profileIds: string[] = [];
       const { data: directProfile, error: directError } = await supabase
         .from('user_profiles')
         .select('id')
@@ -66,32 +66,31 @@ export class SubscriptionService {
         .maybeSingle();
       
       if (!directError && directProfile) {
-        // userId is already a profile_id
-        profileId = directProfile.id;
-        console.log('✅ userId is profile_id:', profileId);
+        // userId is already a profile_id - use it directly
+        profileIds = [directProfile.id];
+        console.log('✅ userId is profile_id:', directProfile.id);
       } else {
-        // userId might be auth_user_id, convert to profile_id
+        // Step 2: userId might be auth_user_id - get ALL profiles
         const { data: userProfiles, error: profileError } = await supabase
           .from('user_profiles')
-          .select('id, role')
+          .select('id')
           .eq('auth_user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(1);
+          .order('created_at', { ascending: false });
 
         if (!profileError && userProfiles && userProfiles.length > 0) {
-          profileId = userProfiles[0].id;
-          console.log('✅ Converted auth_user_id to profile_id:', profileId);
+          profileIds = userProfiles.map(p => p.id);
+          console.log('✅ Found', profileIds.length, 'profiles for auth_user_id, checking all for subscription');
         } else {
-          console.warn('⚠️ Could not convert userId to profileId, using as-is:', userId);
-          profileId = userId;
+          console.warn('⚠️ Could not find any profiles for userId:', userId);
+          return null;
         }
       }
 
-      // First, get the subscription without join (to avoid 406 errors)
+      // Step 3: Check ALL profiles for an active subscription
       const { data, error } = await supabase
         .from('user_subscriptions')
         .select('*')
-        .eq('user_id', profileId)
+        .in('user_id', profileIds)
         .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1)
@@ -103,7 +102,8 @@ export class SubscriptionService {
       }
 
       if (!data) {
-        // No subscription found - user is on free plan
+        // No subscription found on any profile - user is on free plan
+        console.log('❌ No active subscription found for any profile');
         return null;
       }
 

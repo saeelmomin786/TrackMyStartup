@@ -96,14 +96,14 @@ export class PaymentHistoryService {
     try {
       console.log('🔍 PaymentHistoryService.getPaymentHistory - userId:', userId);
       
-      // Convert auth_user_id to profile_id if needed
-      const profileId = await this.convertAuthIdToProfileId(userId);
-      console.log('✅ Using profileId for query:', profileId);
+      // NOTE: payment_transactions are stored with user_id = auth_user_id (NOT profile_id)
+      // So we query with userId directly without conversion
+      console.log('✅ Querying payment_transactions with userId:', userId);
       
       const { data, error } = await supabase
         .from('payment_transactions')
         .select('*')
-        .eq('user_id', profileId)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(limit);
 

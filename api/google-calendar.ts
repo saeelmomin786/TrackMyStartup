@@ -168,20 +168,48 @@ async function handleGenerateMeetLink(req: VercelRequest, res: VercelResponse) {
       console.error('Error generating Meet link with app account OAuth:', error);
       console.error('Error details:', {
         message: error.message,
+        error: error.error,
+        responseError: error.response?.data?.error,
+        responseErrorDescription: error.response?.data?.error_description,
         stack: error.stack,
         hasRefreshToken: !!appAccountRefreshToken
       });
-      // Fall through to service account fallback (though it won't work for Meet links)
+      
+      // Check for invalid_grant in multiple places (message, error property, response data)
+      const isInvalidGrant = error.message?.includes('invalid_grant') || 
+                            error.message?.includes('expired') || 
+                            error.message?.includes('revoked') ||
+                            error.error === 'invalid_grant' ||
+                            error.response?.data?.error === 'invalid_grant';
+      
+      // If it's a token/auth error, don't fall back - return error immediately
+      // Service accounts can't create Meet links anyway
+      if (isInvalidGrant || 
+          error.message?.includes('token') ||
+          error.message?.includes('authentication')) {
+        const errorDescription = error.response?.data?.error_description || 
+                                error.message || 
+                                'Token has been expired or revoked';
+        return res.status(500).json({ 
+          error: 'Refresh token expired or revoked',
+          details: errorDescription,
+          hint: 'Please get a new refresh token from Google OAuth Playground and update GOOGLE_APP_ACCOUNT_REFRESH_TOKEN in Vercel environment variables. See SETUP_APP_ACCOUNT_FOR_MEET_LINKS.md for instructions.'
+        });
+      }
+      
+      // For other errors, fall through to service account fallback (though it won't work for Meet links)
     }
   }
 
   // Fallback: Try Service Account (will likely fail for Meet links, but provide better error)
+  // Note: Service accounts CANNOT create Meet links, so this is just for better error messaging
   const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   
   if (!serviceAccountKey) {
     return res.status(500).json({ 
-      error: 'Neither GOOGLE_APP_ACCOUNT_REFRESH_TOKEN nor GOOGLE_SERVICE_ACCOUNT_KEY is configured. Please set at least one.',
-      hint: 'Set GOOGLE_APP_ACCOUNT_REFRESH_TOKEN for Meet link generation, or GOOGLE_SERVICE_ACCOUNT_KEY for basic event creation.'
+      error: 'Unable to generate Google Meet link',
+      details: 'GOOGLE_APP_ACCOUNT_REFRESH_TOKEN is required for Meet link generation, but authentication failed. Service accounts cannot create Meet links.',
+      hint: 'Please get a new refresh token from Google OAuth Playground and update GOOGLE_APP_ACCOUNT_REFRESH_TOKEN in Vercel environment variables.'
     });
   }
 
@@ -464,14 +492,31 @@ async function getAppAccountAccessToken(): Promise<string> {
     process.env.GOOGLE_REDIRECT_URI
   );
 
-  oauth2Client.setCredentials({ refresh_token: refreshToken });
-  const { credentials } = await oauth2Client.refreshAccessToken();
+  try {
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    const { credentials } = await oauth2Client.refreshAccessToken();
 
-  if (!credentials.access_token) {
-    throw new Error('Failed to get access token from refresh token');
+    if (!credentials.access_token) {
+      throw new Error('Failed to get access token from refresh token');
+    }
+
+    return credentials.access_token;
+  } catch (error: any) {
+    // Handle invalid_grant error specifically (expired/revoked token)
+    // Check both error.message and error.response.data.error
+    const isInvalidGrant = error.message?.includes('invalid_grant') || 
+                          error.error === 'invalid_grant' ||
+                          error.response?.data?.error === 'invalid_grant';
+    
+    if (isInvalidGrant) {
+      const errorDescription = error.response?.data?.error_description || 
+                              error.message || 
+                              'Token has been expired or revoked';
+      throw new Error(`Refresh token expired or revoked: ${errorDescription}. Please get a new refresh token from Google OAuth Playground.`);
+    }
+    // Re-throw other errors
+    throw error;
   }
-
-  return credentials.access_token;
 }
 
 // Create Google Calendar Event using App Account OAuth (with Meet Links!)
@@ -626,8 +671,17 @@ async function handleCreateEventServiceAccount(req: VercelRequest, res: VercelRe
       });
       
       // If it's a token-related error, don't fall back - return error immediately
+      if (error.message?.includes('invalid_grant') || 
+          error.message?.includes('expired') || 
+          error.message?.includes('revoked')) {
+        return res.status(500).json({ 
+          error: 'Refresh token expired or revoked',
+          details: error.message || 'The refresh token has been expired or revoked',
+          hint: 'Please get a new refresh token from Google OAuth Playground and update GOOGLE_APP_ACCOUNT_REFRESH_TOKEN in Vercel environment variables. See SETUP_APP_ACCOUNT_FOR_MEET_LINKS.md for instructions.'
+        });
+      }
+      
       if (error.message?.includes('token') || 
-          error.message?.includes('invalid_grant') ||
           error.message?.includes('unauthorized') ||
           error.message?.includes('authentication')) {
         return res.status(500).json({ 

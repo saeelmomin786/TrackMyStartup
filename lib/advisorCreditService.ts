@@ -185,7 +185,7 @@ export class AdvisorCreditService {
   ): Promise<boolean> {
     try {
       // Use backend API endpoint - it uses service role key to bypass REST API restrictions
-      const response = await fetch('/api/advisor-credits/add', {
+      const response = await fetch('/api/advisor/credits/add', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

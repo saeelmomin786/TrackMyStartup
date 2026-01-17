@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Bell, HelpCircle, LogOut, Edit3, Shield, RefreshCw, Camera, Image } from 'lucide-react';
 import Button from './ui/Button';
 import EditProfileModal from './EditProfileModal';
-// PaymentSection removed
-// SubscriptionSummaryCards removed
+// PaymentSection removed - SUBSCRIPTION INFO ONLY SHOWN IN STARTUP DASHBOARD (StartupHealthView/AccountTab)
+// SubscriptionSummaryCards removed - SUBSCRIPTION INFO ONLY SHOWN IN STARTUP DASHBOARD
+// NOTE: This ProfilePage is used by ALL roles (Mentor, Admin, Investor, etc.)
+// Subscription/Billing should NEVER appear here - subscription display is RESTRICTED TO STARTUP ROLE ONLY
 import { authService } from '../lib/auth';
 import { AuthUser } from '../lib/auth';
 

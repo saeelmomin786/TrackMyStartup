@@ -3,8 +3,8 @@ import { ArrowLeft, User, Bell, HelpCircle, Edit3, Shield, RefreshCw, Building2 
 import Button from './ui/Button';
 import EditProfileModal from './EditProfileModal';
 import AccountTab from './startup-health/AccountTab';
-// PaymentSection removed
-// SubscriptionSummaryCards removed
+// AccountTab ONLY shown for Startup role - includes subscription billing information
+// NOTE: This ProfilePage is STARTUP-SPECIFIC and shows billing/subscription through AccountTab
 import { authService } from '../lib/auth';
 import { AuthUser } from '../lib/auth';
 import { Startup } from '../types';

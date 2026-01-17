@@ -300,6 +300,13 @@ export class AdvisorCreditService {
 
   /**
    * Assign credit to startup
+   * 
+   * IMPORTANT: startupUserId should be auth_user_id (not profile_id)
+   * - advisor_credit_assignments table uses startup_user_id = auth_user_id
+   * - user_subscriptions table uses user_id = profile_id
+   * - But we need auth_user_id to create the assignment record
+   * 
+   * If a profile_id is passed, we'll need to convert it (handled in calling code)
    */
   async assignCredit(
     advisorUserId: string,
@@ -307,9 +314,29 @@ export class AdvisorCreditService {
     enableAutoRenewal: boolean = true
   ): Promise<{ success: boolean; assignmentId?: string; error?: string; wasJustUpdatingAutoRenewal?: boolean }> {
     try {
+      // Convert startup profile_id to auth_user_id if needed
+      // The startupUserId might be passed as profile_id from frontend
+      // We need auth_user_id for advisor_credit_assignments table
+      let startupAuthUserId = startupUserId;
+      
+      // Try to get the auth_user_id from the startup profile
+      const { data: startupProfile } = await supabase
+        .from('user_profiles')
+        .select('auth_user_id')
+        .eq('id', startupUserId)
+        .maybeSingle();
+      
+      if (startupProfile?.auth_user_id) {
+        startupAuthUserId = startupProfile.auth_user_id;
+        console.log('🔄 Converted startup profile_id to auth_user_id:', {
+          profileId: startupUserId,
+          authUserId: startupAuthUserId
+        });
+      }
+
       // Check if there's already an active assignment FIRST
       // If there is, we don't need credits - just update auto-renewal
-      const existingAssignment = await this.getActiveAssignment(advisorUserId, startupUserId);
+      const existingAssignment = await this.getActiveAssignment(advisorUserId, startupAuthUserId);
       if (existingAssignment) {
         // If there's an active assignment, just enable auto-renewal (no credit needed)
         const { error: updateError } = await supabase
@@ -339,10 +366,11 @@ export class AdvisorCreditService {
       const nowISO = now.toISOString();
       
       // Check for active premium subscription (regardless of who paid)
+      // This uses profile_id which is correct for user_subscriptions table
       const { data: existingPremiumSubs } = await supabase
         .from('user_subscriptions')
         .select('id, status, current_period_end, plan_tier')
-        .eq('user_id', startupUserId)
+        .eq('user_id', startupUserId)  // user_subscriptions.user_id is profile_id
         .eq('status', 'active')
         .eq('plan_tier', 'premium')
         .gte('current_period_end', nowISO); // Not expired
@@ -370,11 +398,12 @@ export class AdvisorCreditService {
 
       // Check if there's an expired assignment - reuse it instead of creating new
       // (The unique constraint prevents multiple assignments per advisor-startup pair)
+      // This uses auth_user_id which is correct for advisor_credit_assignments table
       const { data: expiredAssignment } = await supabase
         .from('advisor_credit_assignments')
         .select('*')
         .eq('advisor_user_id', advisorUserId)
-        .eq('startup_user_id', startupUserId)
+        .eq('startup_user_id', startupAuthUserId)  // Use auth_user_id
         .in('status', ['expired', 'cancelled'])
         .order('assigned_at', { ascending: false })
         .limit(1)
@@ -407,11 +436,12 @@ export class AdvisorCreditService {
         assignmentError = updateError;
       } else {
         // Create new credit assignment
+        // advisor_credit_assignments table uses startup_user_id = auth_user_id
         const { data: newAssignment, error: insertError } = await supabase
           .from('advisor_credit_assignments')
           .insert({
             advisor_user_id: advisorUserId,
-            startup_user_id: startupUserId,
+            startup_user_id: startupAuthUserId,  // Use auth_user_id
             start_date: startDate.toISOString(),
             end_date: endDate.toISOString(),
             status: 'active',
@@ -471,6 +501,8 @@ export class AdvisorCreditService {
       }
 
       // Create/update subscription for startup
+      // startupUserId = profile_id (for user_subscriptions.user_id)
+      // advisorUserId = auth_user_id (for user_subscriptions.paid_by_advisor_id)
       const subscriptionResult = await this.createStartupSubscription(
         startupUserId,
         advisorUserId,
@@ -523,6 +555,9 @@ export class AdvisorCreditService {
 
   /**
    * Create or update startup subscription
+   * 
+   * @param startupUserId - profile_id (for user_subscriptions.user_id column)
+   * @param advisorUserId - auth_user_id (for user_subscriptions.paid_by_advisor_id column)
    */
   private async createStartupSubscription(
     startupUserId: string,

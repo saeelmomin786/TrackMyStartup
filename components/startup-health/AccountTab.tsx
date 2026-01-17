@@ -1,4 +1,9 @@
 import React, { useState, useEffect } from 'react';
+// ⚠️ CRITICAL: This AccountTab component is STARTUP-SPECIFIC
+// It should ONLY be shown for Startup users in StartupHealthView
+// Subscription/Billing information is RESTRICTED to Startup role ONLY
+// This component should NEVER be accessible to Mentor, Admin, Investor, or other roles
+
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { 

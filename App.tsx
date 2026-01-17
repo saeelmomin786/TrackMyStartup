@@ -3312,22 +3312,31 @@ const App: React.FC = () => {
                   console.log('✅ User data refreshed after Form 2 completion:', refreshedUser);
                   setCurrentUser(refreshedUser);
                   setIsAuthenticated(true);
-                  // Navigate to subscription page after Form 2 completion
-                  setCurrentPage('subscription');
-                  setQueryParam('page', 'subscription', false);
+                  
+                  // ⚠️ CRITICAL: ONLY show subscription page for Startup users
+                  // Other roles (Mentor, Admin, Investor, etc.) should go directly to dashboard
+                  if (refreshedUser.role === 'Startup') {
+                    console.log('✅ Startup user - navigating to subscription page for plan selection');
+                    setCurrentPage('subscription');
+                    setQueryParam('page', 'subscription', false);
+                  } else {
+                    console.log('✅ Non-Startup user (role:', refreshedUser.role, ') - navigating directly to dashboard');
+                    setCurrentPage('login');
+                    setQueryParam('page', 'login', false);
+                  }
                 } else {
                   console.error('❌ Failed to refresh user data after Form 2 completion');
-                  // Fallback: still try to navigate
+                  // Fallback: go to dashboard, let role check handle it
                   setIsAuthenticated(true);
-                  setCurrentPage('subscription');
-                  setQueryParam('page', 'subscription', false);
+                  setCurrentPage('login');
+                  setQueryParam('page', 'login', false);
                 }
               } catch (error) {
                 console.error('❌ Error refreshing user data after Form 2 completion:', error);
-                // Fallback: still try to navigate
+                // Fallback: go to dashboard, let role check handle it
                 setIsAuthenticated(true);
-                setCurrentPage('subscription');
-                setQueryParam('page', 'subscription', false);
+                setCurrentPage('login');
+                setQueryParam('page', 'login', false);
               }
             }}
           />

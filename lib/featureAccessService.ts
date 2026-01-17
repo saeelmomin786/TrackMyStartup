@@ -206,16 +206,22 @@ export class FeatureAccessService {
       // Get user's active subscription with period check
       const { data: subscription, error: subError } = await supabase
         .from('user_subscriptions')
-        .select('plan_id, status, current_period_end, grace_period_ends_at')
+        .select('plan_id, plan_tier, status, current_period_end, grace_period_ends_at')
         .in('user_id', profileIds)
         .in('status', ['active', 'past_due'])
         .order('current_period_start', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (subError || !subscription || !subscription.plan_id) {
+      if (subError || !subscription) {
         // No active subscription = free plan
         return 'free';
+      }
+
+      // If subscription has plan_tier directly (advisor-paid), use it immediately
+      if (subscription.plan_tier && subscription.plan_tier !== 'free') {
+        console.log('✅ Using plan_tier from subscription:', subscription.plan_tier);
+        return subscription.plan_tier as 'free' | 'basic' | 'premium';
       }
 
       // Check if subscription period has ended
@@ -238,18 +244,22 @@ export class FeatureAccessService {
         }
       }
 
-      // Get plan tier from subscription_plans table
-      const { data: plan, error: planError } = await supabase
-        .from('subscription_plans')
-        .select('plan_tier')
-        .eq('id', subscription.plan_id)
-        .single();
+      // Get plan tier from subscription_plans table (fallback if plan_tier not in subscription)
+      if (subscription.plan_id) {
+        const { data: plan, error: planError } = await supabase
+          .from('subscription_plans')
+          .select('plan_tier')
+          .eq('id', subscription.plan_id)
+          .single();
 
-      if (planError || !plan) {
-        return 'free';
+        if (planError || !plan) {
+          return subscription.plan_tier || 'free';
+        }
+
+        return (plan.plan_tier as 'free' | 'basic' | 'premium') || 'free';
       }
 
-      return (plan.plan_tier as 'free' | 'basic' | 'premium') || 'free';
+      return subscription.plan_tier || 'free';
     } catch (error) {
       console.error('Error in getUserPlanTierFallback:', error);
       return 'free';

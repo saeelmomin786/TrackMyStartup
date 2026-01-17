@@ -477,17 +477,19 @@ export class AdvisorCreditService {
         };
       }
 
-      // Deduct credit from advisor
-      const { error: deductError } = await supabase
-        .from('advisor_credits')
-        .update({
-          credits_available: credits.credits_available - 1,
-          credits_used: credits.credits_used + 1
-        })
-        .eq('advisor_user_id', advisorUserId);
+      // Deduct credit from advisor using SAFE atomic function
+      // This function uses a transaction lock to prevent race conditions
+      // and ensures credits never go negative
+      const { data: deductResult, error: deductError } = await supabase.rpc(
+        'deduct_advisor_credit_safe',
+        {
+          p_advisor_user_id: advisorUserId,
+          p_amount_to_deduct: 1
+        }
+      );
 
-      if (deductError) {
-        console.error('Error deducting credit:', deductError);
+      if (deductError || !deductResult || !deductResult[0]?.success) {
+        console.error('Error deducting credit:', deductError || deductResult[0]?.error_message);
         // Rollback assignment
         await supabase
           .from('advisor_credit_assignments')
@@ -496,9 +498,14 @@ export class AdvisorCreditService {
         
         return {
           success: false,
-          error: 'Failed to deduct credit.'
+          error: deductResult?.[0]?.error_message || 'Failed to deduct credit. Ensure you have sufficient credits.'
         };
       }
+
+      console.log('✅ Credit deducted safely:', {
+        creditsBefore: deductResult[0].credits_before,
+        creditsAfter: deductResult[0].credits_after
+      });
 
       // Create/update subscription for startup
       // startupUserId = profile_id (for user_subscriptions.user_id)

@@ -184,13 +184,15 @@ export class AdvisorCreditService {
     paymentTransactionId: string
   ): Promise<boolean> {
     try {
-      // Use backend API endpoint - it uses service role key to bypass REST API restrictions
-      const response = await fetch('/api/advisor/credits/add', {
+      // Use consolidated payment/verify endpoint for advisor credits
+      // Consolidated endpoint at /api/payment/verify handles both payment verification and credit addition
+      const response = await fetch('/api/payment/verify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          endpoint: 'advisor-credits-add',
           advisor_user_id: advisorUserId,
           credits_to_add: creditsToAdd,
           amount_paid: amountPaid,

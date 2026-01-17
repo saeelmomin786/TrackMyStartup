@@ -6,6 +6,101 @@ function json(res: VercelResponse, status: number, data: unknown): void {
   res.status(status).json(data);
 }
 
+async function addAdvisorCredits(
+  supabase: ReturnType<typeof createClient>,
+  advisorUserId: string,
+  creditsToAdd: number,
+  amountPaid: number,
+  currency: string,
+  paymentGateway: string,
+  paymentTransactionId: string
+): Promise<{ success: boolean; error?: string; credits?: any }> {
+  try {
+    console.log('🔄 Adding credits via RPC for advisor:', advisorUserId);
+
+    // Call RPC function to increment credits
+    const { data: incrementedCredits, error: rpcError } = await supabase.rpc('increment_advisor_credits', {
+      p_advisor_user_id: advisorUserId,
+      p_credits_to_add: creditsToAdd,
+      p_amount_paid: amountPaid,
+      p_currency: currency
+    });
+
+    if (rpcError) {
+      console.error('❌ RPC Error adding credits:', {
+        code: rpcError.code,
+        message: rpcError.message,
+        details: rpcError.details,
+        hint: rpcError.hint
+      });
+
+      // Try to record failed purchase for audit
+      try {
+        await supabase
+          .from('credit_purchase_history')
+          .insert({
+            advisor_user_id: advisorUserId,
+            credits_purchased: creditsToAdd,
+            amount_paid: amountPaid,
+            currency: currency,
+            payment_gateway: paymentGateway,
+            payment_transaction_id: paymentTransactionId,
+            status: 'failed',
+            metadata: {
+              error: rpcError.message,
+              code: rpcError.code
+            }
+          });
+      } catch (historyError) {
+        console.error('Could not record failed purchase history:', historyError);
+      }
+
+      return { 
+        success: false,
+        error: rpcError.message
+      };
+    }
+
+    console.log('✅ Credits incremented successfully:', incrementedCredits);
+
+    // Record purchase history (success)
+    const { error: historyError } = await supabase
+      .from('credit_purchase_history')
+      .insert({
+        advisor_user_id: advisorUserId,
+        credits_purchased: creditsToAdd,
+        amount_paid: amountPaid,
+        currency: currency,
+        payment_gateway: paymentGateway,
+        payment_transaction_id: paymentTransactionId,
+        status: 'completed',
+        metadata: {
+          credits_available: incrementedCredits?.credits_available,
+          credits_used: incrementedCredits?.credits_used,
+          credits_purchased: incrementedCredits?.credits_purchased
+        }
+      });
+
+    if (historyError) {
+      console.error('⚠️ Warning: Could not record purchase history:', historyError);
+      // Don't fail - credits were added successfully
+    } else {
+      console.log('✅ Purchase history recorded');
+    }
+
+    return { 
+      success: true,
+      credits: incrementedCredits
+    };
+  } catch (error: any) {
+    console.error('❌ Error in addAdvisorCredits:', error);
+    return { 
+      success: false,
+      error: error.message 
+    };
+  }
+}
+
 async function completeMentorPayment(
   supabase: ReturnType<typeof createClient>,
   assignmentId: number,
@@ -55,6 +150,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
+    // ADVISOR CREDITS ENDPOINT
+    // Handle advisor credit addition (consolidated from /api/advisor/credits/add)
+    if (req.body.endpoint === 'advisor-credits-add' || req.body.advisor_user_id) {
+      const {
+        advisor_user_id,
+        credits_to_add,
+        amount_paid,
+        currency,
+        payment_gateway,
+        payment_transaction_id
+      } = req.body;
+
+      // Validate required fields
+      if (!advisor_user_id || !credits_to_add || !amount_paid || !currency || !payment_gateway || !payment_transaction_id) {
+        console.error('Missing required fields for advisor credits:', {
+          has_advisor_user_id: !!advisor_user_id,
+          has_credits_to_add: !!credits_to_add,
+          has_amount_paid: !!amount_paid,
+          has_currency: !!currency,
+          has_payment_gateway: !!payment_gateway,
+          has_payment_transaction_id: !!payment_transaction_id
+        });
+        return json(res, 400, {
+          error: 'Missing required fields',
+          required: ['advisor_user_id', 'credits_to_add', 'amount_paid', 'currency', 'payment_gateway', 'payment_transaction_id']
+        });
+      }
+
+      // Initialize Supabase
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+
+      if (!supabaseUrl || !supabaseServiceKey) {
+        return json(res, 500, { error: 'Server configuration error' });
+      }
+
+      const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      const result = await addAdvisorCredits(
+        supabase,
+        advisor_user_id,
+        credits_to_add,
+        amount_paid,
+        currency,
+        payment_gateway,
+        payment_transaction_id
+      );
+
+      if (!result.success) {
+        return json(res, 500, { 
+          error: 'Failed to add credits',
+          details: result.error
+        });
+      }
+
+      return json(res, 200, {
+        success: true,
+        credits: result.credits,
+        message: `Successfully added ${credits_to_add} credits to advisor account`
+      });
+    }
+
+    // PAYMENT VERIFICATION ENDPOINTS
     const { provider } = req.body as { provider?: 'razorpay' | 'paypal' };
 
     // Auto-detect provider from request body

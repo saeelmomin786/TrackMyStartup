@@ -1,7 +1,8 @@
--- Allows startup owners to view investor due diligence requests via RPC (RLS-safe)
+-- Allows startup owners to view due diligence requests (from investors, advisors, etc.) via RPC (RLS-safe)
 
 -- Function: get_due_diligence_requests_for_startup(p_startup_id TEXT)
--- Returns rows with investor name/email even with RLS enabled on due_diligence_requests
+-- Returns rows with investor/advisor name/email even with RLS enabled on due_diligence_requests
+-- FIXED: Now returns ALL requests for the startup, including from investment advisors
 
 CREATE OR REPLACE FUNCTION public.get_due_diligence_requests_for_startup(
   p_startup_id TEXT
@@ -97,5 +98,38 @@ $$;
 
 REVOKE ALL ON FUNCTION public.reject_due_diligence_for_startup(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.reject_due_diligence_for_startup(UUID) TO authenticated;
+
+-- Revoke a due diligence access if caller owns the startup
+-- Sets status to 'revoked' so user must request again
+CREATE OR REPLACE FUNCTION public.revoke_due_diligence_access_for_startup(
+  p_request_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_startup_owner UUID;
+BEGIN
+  -- Ensure the caller owns the startup associated with the request
+  SELECT s.user_id INTO v_startup_owner
+  FROM public.due_diligence_requests r
+  JOIN public.startups s ON s.id::text = r.startup_id
+  WHERE r.id = p_request_id;
+
+  IF v_startup_owner IS NULL OR v_startup_owner <> auth.uid() THEN
+    RETURN FALSE;
+  END IF;
+
+  UPDATE public.due_diligence_requests
+  SET status = 'revoked'
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.revoke_due_diligence_access_for_startup(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.revoke_due_diligence_access_for_startup(UUID) TO authenticated;
 
 

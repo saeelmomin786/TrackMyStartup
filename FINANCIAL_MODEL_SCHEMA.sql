@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS due_diligence_requests (
     startup_id VARCHAR(255) NOT NULL,
     amount DECIMAL(10,2) NOT NULL DEFAULT 150.00,
     currency VARCHAR(3) DEFAULT 'EUR',
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'completed', 'failed')),
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'completed', 'failed', 'revoked')),
     payment_intent_id VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     completed_at TIMESTAMP WITH TIME ZONE

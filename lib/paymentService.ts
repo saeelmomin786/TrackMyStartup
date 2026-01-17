@@ -1735,22 +1735,25 @@ class PaymentService {
     return Array.isArray(data) && data.length > 0;
   }
 
-  // Create pending request only if one doesn't already exist
+  // Create pending request only if one doesn't already exist (allows new request if previous was revoked/failed)
   async createPendingDueDiligenceIfNeeded(userId: string, startupId: string): Promise<any> {
     // CRITICAL FIX: Use auth.uid() instead of profile ID for RLS policies
     const { data: { user: authUser } } = await supabase.auth.getUser();
     const authUserId = authUser?.id || userId;
     
+    // Only check for existing PENDING requests (allows new request if revoked, failed, or completed)
     const { data: existing, error: checkError } = await supabase
       .from('due_diligence_requests')
       .select('id, status')
       .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
       .eq('startup_id', String(startupId))
-      .in('status', ['pending'])
+      .in('status', ['pending', 'completed', 'paid']) // Don't allow duplicate active requests
       .limit(1);
+    
     if (!checkError && Array.isArray(existing) && existing.length > 0) {
       return existing[0];
     }
+    // If previous request was revoked/failed, create a new one
     return this.createDueDiligenceRequest(userId, String(startupId)); // This will also use auth.uid() internally
   }
 
@@ -1772,6 +1775,18 @@ class PaymentService {
     });
     if (error) {
       console.error('Error rejecting due diligence:', error);
+      return false;
+    }
+    return !!data;
+  }
+
+  // Revoke due diligence access (for startup use) - marks as revoked
+  async revokeDueDiligenceAccess(requestId: string): Promise<boolean> {
+    const { data, error } = await supabase.rpc('revoke_due_diligence_access_for_startup', {
+      p_request_id: requestId
+    });
+    if (error) {
+      console.error('Error revoking due diligence access:', error);
       return false;
     }
     return !!data;

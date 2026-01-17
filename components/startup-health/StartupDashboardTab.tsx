@@ -9,7 +9,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import CloudDriveInput from '../ui/CloudDriveInput';
 import ComplianceSubmissionButton from '../ComplianceSubmissionButton';
-import { DollarSign, Zap, TrendingUp, Download, Check, X, FileText, MessageCircle, Calendar, ChevronDown, CheckCircle, Clock, XCircle, Trash2 } from 'lucide-react';
+import { DollarSign, Zap, TrendingUp, Download, Check, X, FileText, MessageCircle, Calendar, ChevronDown, CheckCircle, Clock, XCircle, Trash2, Lock } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { investmentService } from '../../lib/investmentService';
 import { investmentService as databaseInvestmentService } from '../../lib/database';
@@ -1154,6 +1154,17 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       messageService.success('Request Rejected', 'Due diligence request rejected.', 3000);
     } else {
       messageService.error('Rejection Failed', 'Could not reject the request.');
+    }
+  };
+
+  // Revoke due diligence access - stops access and requires new request
+  const revokeDiligenceAccess = async (requestId: string) => {
+    const ok = await paymentService.revokeDueDiligenceAccess(requestId);
+    if (ok) {
+      setDiligenceRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'revoked' } : r));
+      messageService.success('Access Revoked', 'Investor will need to request access again to re-gain permissions.', 3000);
+    } else {
+      messageService.error('Revoke Failed', 'Could not revoke due diligence access.');
     }
   };
 
@@ -2416,6 +2427,8 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                           ? 'bg-green-100 text-green-800'
                           : r.status === 'pending'
                           ? 'bg-yellow-100 text-yellow-800'
+                          : r.status === 'revoked'
+                          ? 'bg-orange-100 text-orange-800'
                           : 'bg-red-100 text-red-800'
                       }`}
                     >
@@ -2441,6 +2454,15 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                           <X className="h-4 w-4 mr-1" /> Reject
                         </Button>
                       </div>
+                    ) : r.status === 'completed' ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-orange-300 text-orange-600 hover:bg-orange-50"
+                        onClick={() => revokeDiligenceAccess(r.id)}
+                      >
+                        <Lock className="h-4 w-4 mr-1" /> Stop Access
+                      </Button>
                     ) : (
                       <span className="text-slate-400">No actions</span>
                     )}

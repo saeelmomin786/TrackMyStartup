@@ -1288,10 +1288,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         .select('startup_id, status')
         .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .eq('startup_id', String(startupId))
-        .in('status', ['pending', 'approved', 'completed'])
+        .in('status', ['pending', 'completed', 'paid'])
         .maybeSingle();
       
-      if (data && (data.status === 'approved' || data.status === 'completed')) {
+      if (data && (data.status === 'completed' || data.status === 'paid')) {
         setApprovedDueDiligenceStartups(prev => new Set([...prev, Number(data.startup_id)]));
       }
       
@@ -1350,10 +1350,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         .select('startup_id, status')
         .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .eq('startup_id', String(startupId))
-        .in('status', ['pending', 'approved', 'completed'])
+        .in('status', ['pending', 'completed', 'paid'])
         .maybeSingle();
       
-      if (data && (data.status === 'approved' || data.status === 'completed')) {
+      if (data && (data.status === 'completed' || data.status === 'paid')) {
         setApprovedDueDiligenceStartups(prev => new Set([...prev, Number(data.startup_id)]));
         // If immediately approved, open dashboard
         setTimeout(() => {
@@ -2638,7 +2638,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           .from('due_diligence_requests')
           .select('startup_id, status')
           .eq('user_id', authUser.id)  // Use auth.uid() instead of currentUser.id
-          .in('status', ['pending', 'approved', 'completed']);
+          .in('status', ['pending', 'completed', 'paid']);
         if (error) throw error;
 
         const allIds = new Set<number>();
@@ -2647,7 +2647,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           const startupId = Number(record.startup_id);
           if (!Number.isNaN(startupId)) {
             allIds.add(startupId);
-            if (record.status === 'approved' || record.status === 'completed') {
+            if (record.status === 'completed' || record.status === 'paid') {
               approvedIds.add(startupId);
             }
           }
@@ -6277,10 +6277,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         .select('startup_id, status')
         .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
         .eq('startup_id', String(startup.id))
-        .in('status', ['pending', 'approved', 'completed'])
+        .in('status', ['pending', 'completed', 'paid'])
         .maybeSingle();
       
-      if (data && (data.status === 'approved' || data.status === 'completed')) {
+      if (data && (data.status === 'completed' || data.status === 'paid')) {
         setApprovedDueDiligenceStartups(prev => new Set([...prev, Number(data.startup_id)]));
         setNotifications(prev => [...prev, {
           id: Date.now().toString(),

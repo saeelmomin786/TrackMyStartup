@@ -962,7 +962,7 @@ class PaymentService {
         throw new Error('Missing PayPal order ID for payment verification');
       }
       
-      const response = await fetch(`/api/payment/verify`, {
+      const response = await fetch(`/api/razorpay/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1033,7 +1033,7 @@ class PaymentService {
       
       const subscriptionId = paymentResponse.paypal_subscription_id || context?.paypalSubscriptionId;
       
-      const response = await fetch(`/api/payment/verify`, {
+      const response = await fetch(`/api/razorpay/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1182,7 +1182,7 @@ class PaymentService {
         has_signature: !!paymentResponse.razorpay_signature
       });
       
-      const response = await fetch(`/api/payment/verify`, {
+      const response = await fetch(`/api/razorpay/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1344,6 +1344,7 @@ class PaymentService {
       const subscriptionData: any = {
         user_id: profileId,
         plan_id: plan.id,
+        plan_tier: plan.plan_tier, // ← BUGFIX: Set plan_tier from plan object
         status: 'active',
         current_period_start: now.toISOString(),
         current_period_end: periodEnd.toISOString(),

@@ -1132,6 +1132,61 @@ app.post('/api/razorpay/verify', async (req, res) => {
 
       // 2) Create subscription record if we have context
       if (user_id && plan_id) {
+        // 🔐 BUGFIX: Convert auth_user_id to profile_id
+        // user_id from frontend is auth.uid(), but user_subscriptions table uses profile_id
+        console.log('[verify] 🔍 Converting auth_user_id to profile_id...');
+        console.log('[verify] Received user_id (auth_user_id):', user_id);
+        
+        // Get all profiles for this auth user
+        const { data: userProfiles, error: profilesError } = await supabase
+          .from('user_profiles')
+          .select('id, role')
+          .eq('auth_user_id', user_id)
+          .order('created_at', { ascending: false });
+        
+        if (profilesError || !userProfiles || userProfiles.length === 0) {
+          console.error('[verify] ❌ No user profiles found for auth_user_id:', user_id);
+          console.error('[verify] Error:', profilesError);
+          return res.json({ 
+            success: false, 
+            error: 'User profile not found',
+            message: 'Payment verified but subscription not created - profile missing'
+          });
+        }
+
+        // Try to match profile role to plan user_type
+        // First, get the plan's user_type
+        let planUserType = 'Startup'; // default
+        if (plan_id) {
+          try {
+            const { data: planData } = await supabase
+              .from('subscription_plans')
+              .select('user_type')
+              .eq('id', plan_id)
+              .maybeSingle();
+            
+            if (planData?.user_type) {
+              planUserType = planData.user_type;
+              console.log('[verify] Plan user_type:', planUserType);
+            }
+          } catch (e) {
+            console.warn('[verify] Could not fetch plan user_type, using default:', e);
+          }
+        }
+
+        // Find matching profile
+        let selectedProfile = userProfiles[0];
+        const matchingProfile = userProfiles.find(p => p.role === planUserType);
+        if (matchingProfile) {
+          selectedProfile = matchingProfile;
+          console.log('[verify] ✅ Selected profile matching plan type:', planUserType);
+        } else if (userProfiles.length > 1) {
+          console.warn('[verify] ⚠️ No profile matches plan type:', planUserType, '- using most recent profile');
+        }
+        
+        const profileId = selectedProfile.id;
+        console.log('[verify] ✅ Found profile_id:', profileId, 'Role:', selectedProfile.role);
+        
         const now = new Date();
         const periodEnd = new Date(now);
         if ((interval || 'monthly') === 'yearly') {
@@ -1169,8 +1224,9 @@ app.post('/api/razorpay/verify', async (req, res) => {
         }
 
         const subInsert = {
-          user_id,
+          user_id: profileId, // ← Use profile_id, not auth_user_id
           plan_id,
+          plan_tier: planTier, // ← ADD: Set plan_tier from lookup
           status: 'active',
           current_period_start: now.toISOString(),
           current_period_end: periodEnd.toISOString(),

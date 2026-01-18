@@ -148,11 +148,10 @@ const MentorPaymentPage: React.FC<MentorPaymentPageProps> = ({
             handler: async (response: any) => {
               try {
                 // Verify payment
-                const verifyResponse = await fetch('/api/payment/verify', {
+                const verifyResponse = await fetch('/api/razorpay/verify', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    provider: 'razorpay',
                     razorpay_order_id: response.razorpay_order_id,
                     razorpay_payment_id: response.razorpay_payment_id,
                     razorpay_signature: response.razorpay_signature,
@@ -271,13 +270,12 @@ const MentorPaymentPage: React.FC<MentorPaymentPageProps> = ({
                 const order = await actions.order.capture();
                 
                 // Verify payment with backend to ensure proper database updates
-                const verifyResponse = await fetch('/api/payment/verify', {
+                const verifyResponse = await fetch('/api/paypal/verify', {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
                   },
                   body: JSON.stringify({
-                    provider: 'paypal',
                     paypal_order_id: order.id,
                     assignment_id: assignmentId
                   }),

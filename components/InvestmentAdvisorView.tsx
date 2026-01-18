@@ -2036,11 +2036,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           handler: async (response: any) => {
             try {
               // Verify payment and add credits
-              const verifyResponse = await fetch('/api/payment/verify', {
+              const verifyResponse = await fetch('/api/razorpay/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  provider: 'razorpay',
                   razorpay_order_id: response.razorpay_order_id,
                   razorpay_payment_id: response.razorpay_payment_id,
                   razorpay_signature: response.razorpay_signature
@@ -2458,7 +2457,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     try {
       const result = await advisorAddedStartupService.sendInviteToTMS(
         startupId,
-        currentUser.id,
+        startupUser?.id || '',
         advisorCode
       );
       
@@ -2964,49 +2963,102 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       }
 
       try {
-        // Get all startup user IDs from myStartups and advisorAddedStartups
-        const startupUserIds: string[] = [];
+        // DEBUG: Check current logged-in user and their role
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const { data: profiles } = await supabase
+          .from('user_profiles')
+          .select('id, auth_user_id, email, role, name')
+          .eq('auth_user_id', authUser?.id);
         
-        // TMS startups
+        // If multiple profiles exist, prioritize Investment Advisor role
+        const currentProfile = profiles?.find(p => p.role === 'Investment Advisor') || profiles?.[0];
+        
+        console.log('🔍 DEBUG: Current logged-in user in app:', {
+          authUserId: authUser?.id,
+          email: authUser?.email,
+          totalProfiles: profiles?.length || 0,
+          allRoles: profiles?.map(p => p.role) || [],
+          selectedProfileId: currentProfile?.id,
+          selectedProfileRole: currentProfile?.role,
+          selectedProfileName: currentProfile?.name,
+          hasInvestmentAdvisorRole: currentProfile?.role === 'Investment Advisor'
+        });
+
+        // CRITICAL FIX: startups.user_id stores auth_user_id, but user_subscriptions.user_id stores profile_id
+        // We need to query user_profiles to get Startup profile_ids for subscription lookups
+        const startupAuthUserIds: string[] = [];
+        const authToStartupMap = new Map<string, any>(); // Map auth_user_id → startup object
+        
+        // Collect all startup auth_user_ids
         myStartups.forEach(startup => {
-          // CRITICAL FIX: For new registrations, user.id is profile ID, but startup.user_id is auth_user_id
-          const startupUser = users.find(u => 
-            u.role === 'Startup' && 
-            (u.id === startup.user_id || (u as any).auth_user_id === startup.user_id)
-          );
-          if (startupUser?.id) {
-            startupUserIds.push(startupUser.id);
+          if (startup.user_id) {
+            startupAuthUserIds.push(startup.user_id);
+            authToStartupMap.set(startup.user_id, startup);
           }
         });
         
-        // Advisor-added startups
         advisorAddedStartups.forEach(startup => {
           if (startup.is_on_tms && startup.tms_startup_id) {
             const tmsStartup = startups.find(s => s.id === startup.tms_startup_id);
-            if (tmsStartup) {
-              // CRITICAL FIX: For new registrations, user.id is profile ID, but startup.user_id is auth_user_id
-              const startupUser = users.find(u => 
-                u.role === 'Startup' && 
-                (u.id === tmsStartup.user_id || (u as any).auth_user_id === tmsStartup.user_id)
-              );
-              if (startupUser?.id) {
-                startupUserIds.push(startupUser.id);
-              }
+            if (tmsStartup?.user_id) {
+              startupAuthUserIds.push(tmsStartup.user_id);
+              authToStartupMap.set(tmsStartup.user_id, tmsStartup);
             }
           }
         });
-
-        if (startupUserIds.length === 0) {
+        
+        console.log('🔍 DEBUG: Startup auth_user_ids collected:', {
+          count: startupAuthUserIds.length,
+          ids: startupAuthUserIds
+        });
+        
+        if (startupAuthUserIds.length === 0) {
+          console.log('⚠️ DEBUG: No startup user IDs, skipping subscription query');
           setStartupSelfPaidSubscriptions(new Map());
           return;
         }
 
-        // Check subscriptions for these startups
+        // Query user_profiles to convert auth_user_id → profile_id for Startup role
+        const { data: startupProfiles, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('id, auth_user_id')
+          .eq('role', 'Startup')
+          .in('auth_user_id', startupAuthUserIds);
+
+        if (profileError) {
+          console.error('Error loading startup profiles:', profileError);
+          setStartupSelfPaidSubscriptions(new Map());
+          return;
+        }
+
+        const profileIds = startupProfiles?.map(p => p.id) || [];
+        const authToProfileMap = new Map(startupProfiles?.map(p => [p.auth_user_id, p.id]) || []);
+        
+        console.log('🔍 DEBUG: Startup profiles fetched:', {
+          count: startupProfiles?.length || 0,
+          profileIds: profileIds,
+          authToProfileMapping: Array.from(authToProfileMap.entries())
+        });
+
+        if (profileIds.length === 0) {
+          console.log('⚠️ DEBUG: No startup profiles found');
+          setStartupSelfPaidSubscriptions(new Map());
+          return;
+        }
+
+        // Query subscriptions using Startup profile_ids
         const { data: subscriptions, error } = await supabase
           .from('user_subscriptions')
-          .select('user_id, paid_by_advisor_id, status, current_period_end')
-          .in('user_id', startupUserIds)
-          .eq('status', 'active');
+          .select('user_id, paid_by_advisor_id, status, current_period_end, plan_tier')
+          .in('user_id', profileIds)
+          .eq('status', 'active')
+          .eq('plan_tier', 'premium');
+
+        console.log('🔍 DEBUG: Subscription query result:', {
+          error: error,
+          count: subscriptions?.length || 0,
+          subscriptions: subscriptions
+        });
 
         if (error) {
           console.error('Error loading startup subscriptions:', error);
@@ -3014,17 +3066,41 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           return;
         }
 
-        // Find startups with self-paid subscriptions (paid_by_advisor_id IS NULL and still active)
+        // Build Map: key = startup auth_user_id (for lookup), value = subscription info
         const selfPaidMap = new Map<string, { expiryDate: string; status: string }>();
         const now = new Date();
         
         subscriptions?.forEach(sub => {
+          // Convert profile_id back to auth_user_id for Map key (startup.user_id is auth_user_id)
+          const authUserId = startupProfiles?.find(p => p.id === sub.user_id)?.auth_user_id;
+          
+          if (!authUserId) {
+            console.log('⚠️ DEBUG: Could not find auth_user_id for profile_id:', sub.user_id);
+            return;
+          }
+
+          console.log('🔍 DEBUG: Processing subscription:', {
+            subscription_user_id_profile: sub.user_id,
+            resolved_auth_user_id: authUserId,
+            paid_by_advisor_id: sub.paid_by_advisor_id,
+            is_self_paid: sub.paid_by_advisor_id === null,
+            expiry: sub.current_period_end,
+            is_active: new Date(sub.current_period_end) > now
+          });
+
           if (sub.paid_by_advisor_id === null && new Date(sub.current_period_end) > now) {
-            selfPaidMap.set(sub.user_id, {
+            selfPaidMap.set(authUserId, {
               expiryDate: new Date(sub.current_period_end).toLocaleDateString(),
               status: sub.status
             });
+            console.log('✅ DEBUG: Added to Map (auth_user_id key):', authUserId);
           }
+        });
+
+        console.log('🔍 DEBUG: Final Map state:', {
+          size: selfPaidMap.size,
+          keys: Array.from(selfPaidMap.keys()),
+          entries: Array.from(selfPaidMap.entries())
         });
 
         setStartupSelfPaidSubscriptions(selfPaidMap);
@@ -9378,7 +9454,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   {/* TMS Startups */}
                   {myStartups.map((startup) => {
                     const startupUser = users.find(u => u.role === 'Startup' && u.id === startup.user_id);
-                    const startupUserId = startupUser?.id || '';
+                    const startupUserId = startup.user_id || '';  // Use auth_user_id because Map is now keyed by auth_user_id
                     const premiumStatus = startupUserId ? getPremiumStatusForStartup(startupUserId) : { status: 'No Premium', autoRenewal: false, isActive: false, isSelfPaid: false };
                     const isToggling = togglingStartups.has(startupUserId);
                     const hasActivePremium = premiumStatus.status === 'Premium Active' && premiumStatus.isSelfPaid !== true;
@@ -9534,8 +9610,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                       if (startup.is_on_tms && startup.tms_startup_id) {
                         const tmsStartup = startups.find(s => s.id === startup.tms_startup_id);
                         if (tmsStartup) {
-                          const startupUser = users.find(u => u.role === 'Startup' && u.id === tmsStartup.user_id);
-                          startupUserId = startupUser?.id || '';
+                          startupUserId = tmsStartup.user_id || '';  // Use auth_user_id from startup.user_id
                         }
                       }
                       

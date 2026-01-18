@@ -86,6 +86,7 @@ export class AdvisorCreditService {
         .from('advisor_credits')
         .select('*')
         .eq('advisor_user_id', advisorUserId)
+        .limit(1)
         .maybeSingle();
 
       // Add timeout to prevent hanging (5 seconds)
@@ -184,15 +185,13 @@ export class AdvisorCreditService {
     paymentTransactionId: string
   ): Promise<boolean> {
     try {
-      // Use consolidated payment/verify endpoint for advisor credits
-      // Consolidated endpoint at /api/payment/verify handles both payment verification and credit addition
-      const response = await fetch('/api/payment/verify', {
+      // Call the dedicated advisor credits endpoint
+      const response = await fetch('/api/advisor-credits/add', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          endpoint: 'advisor-credits-add',
           advisor_user_id: advisorUserId,
           credits_to_add: creditsToAdd,
           amount_paid: amountPaid,
@@ -317,21 +316,51 @@ export class AdvisorCreditService {
       // Convert startup profile_id to auth_user_id if needed
       // The startupUserId might be passed as profile_id from frontend
       // We need auth_user_id for advisor_credit_assignments table
-      let startupAuthUserId = startupUserId;
       
-      // Try to get the auth_user_id from the startup profile
+      // IMPORTANT: We need to determine if startupUserId is a profile_id or auth_user_id
+      // Try to find it as a profile_id FIRST
+      let startupProfileId = startupUserId;
+      let startupAuthUserId: string | null = null;
+      
+      // Attempt 1: Treat startupUserId as profile_id and get auth_user_id
       const { data: startupProfile } = await supabase
         .from('user_profiles')
-        .select('auth_user_id')
+        .select('id, auth_user_id')
         .eq('id', startupUserId)
         .maybeSingle();
       
       if (startupProfile?.auth_user_id) {
+        startupProfileId = startupProfile.id;
         startupAuthUserId = startupProfile.auth_user_id;
-        console.log('🔄 Converted startup profile_id to auth_user_id:', {
-          profileId: startupUserId,
+        console.log('✅ Found startup profile with profile_id:', {
+          profileId: startupProfileId,
           authUserId: startupAuthUserId
         });
+      } else {
+        // Attempt 2: Maybe startupUserId IS the auth_user_id, find the profile
+        const { data: profileByAuth } = await supabase
+          .from('user_profiles')
+          .select('id, auth_user_id')
+          .eq('auth_user_id', startupUserId)
+          .eq('role', 'Startup')
+          .maybeSingle();
+        
+        if (profileByAuth?.auth_user_id) {
+          startupProfileId = profileByAuth.id;
+          startupAuthUserId = profileByAuth.auth_user_id;
+          console.log('✅ Found startup profile with auth_user_id:', {
+            profileId: startupProfileId,
+            authUserId: startupAuthUserId
+          });
+        }
+      }
+      
+      // If we still can't find the startup, return error
+      if (!startupAuthUserId) {
+        return {
+          success: false,
+          error: `Could not find startup profile for ID: ${startupUserId}. Please ensure the startup exists in the system.`
+        };
       }
 
       // Check if there's already an active assignment FIRST
@@ -366,11 +395,11 @@ export class AdvisorCreditService {
       const nowISO = now.toISOString();
       
       // Check for active premium subscription (regardless of who paid)
-      // This uses profile_id which is correct for user_subscriptions table
+      // user_subscriptions.user_id stores auth_user_id, NOT profile_id
       const { data: existingPremiumSubs } = await supabase
         .from('user_subscriptions')
         .select('id, status, current_period_end, plan_tier')
-        .eq('user_id', startupUserId)  // user_subscriptions.user_id is profile_id
+        .eq('user_id', startupAuthUserId)  // ← FIX: Use auth_user_id, not profile_id!
         .eq('status', 'active')
         .eq('plan_tier', 'premium')
         .gte('current_period_end', nowISO); // Not expired
@@ -508,10 +537,12 @@ export class AdvisorCreditService {
       });
 
       // Create/update subscription for startup
-      // startupUserId = profile_id (for user_subscriptions.user_id)
+      // startupProfileId = profile_id (for user_subscriptions.user_id)
+      // startupAuthUserId = auth_user_id (for advisor_credit_assignments.startup_user_id)
       // advisorUserId = auth_user_id (for user_subscriptions.paid_by_advisor_id)
       const subscriptionResult = await this.createStartupSubscription(
-        startupUserId,
+        startupProfileId,
+        startupAuthUserId,
         advisorUserId,
         startDate,
         endDate,
@@ -563,17 +594,22 @@ export class AdvisorCreditService {
   /**
    * Create or update startup subscription
    * 
-   * @param startupUserId - profile_id (for user_subscriptions.user_id column)
+   * @param startupProfileId - profile_id (for reference, might not be needed)
+   * @param startupAuthUserId - auth_user_id (for user_subscriptions.user_id column due to RLS)
    * @param advisorUserId - auth_user_id (for user_subscriptions.paid_by_advisor_id column)
    */
   private async createStartupSubscription(
-    startupUserId: string,
+    startupProfileId: string,
+    startupAuthUserId: string,
     advisorUserId: string,
     startDate: Date,
     endDate: Date,
     assignmentId: string
   ): Promise<{ success: boolean; subscriptionId?: string; error?: string }> {
     try {
+      // startupAuthUserId and startupProfileId are already validated from assignCredit()
+      // In this deployment user_subscriptions.user_id stores profile_id (not auth_user_id)
+
       // Get Premium plan
       const { data: premiumPlan, error: planError } = await supabase
         .from('subscription_plans')
@@ -595,7 +631,7 @@ export class AdvisorCreditService {
       const { data: existingSubscription } = await supabase
         .from('user_subscriptions')
         .select('id')
-        .eq('user_id', startupUserId)
+        .eq('user_id', startupProfileId) // using profile_id here
         .eq('status', 'active')
         .maybeSingle();
 
@@ -630,11 +666,11 @@ export class AdvisorCreditService {
 
         subscriptionId = updated.id;
       } else {
-        // Create new subscription
+        // Create new subscription with auth_user_id (not profile_id!)
         const { data: newSubscription, error: insertError } = await supabase
           .from('user_subscriptions')
           .insert({
-            user_id: startupUserId,
+            user_id: startupProfileId,  // Store profile_id in this deployment
             plan_id: premiumPlan.id,
             plan_tier: 'premium',
             paid_by_advisor_id: advisorUserId,

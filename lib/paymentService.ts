@@ -407,9 +407,13 @@ class PaymentService {
 
       if (error) {
         console.error('Error deactivating existing subscriptions:', error);
+        throw error; // ← FIX: Throw error so caller knows deactivation failed
       }
+      
+      console.log('✅ Deactivated existing subscriptions for user:', userId);
     } catch (error) {
       console.error('Unexpected error deactivating existing subscriptions:', error);
+      throw error; // ← FIX: Propagate error instead of silently failing
     }
   }
 
@@ -1033,7 +1037,7 @@ class PaymentService {
       
       const subscriptionId = paymentResponse.paypal_subscription_id || context?.paypalSubscriptionId;
       
-      const response = await fetch(`/api/razorpay/verify`, {
+      const response = await fetch(`/api/paypal/verify-subscription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

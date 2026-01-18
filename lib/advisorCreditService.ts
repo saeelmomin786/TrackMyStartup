@@ -399,7 +399,7 @@ export class AdvisorCreditService {
       const { data: existingPremiumSubs } = await supabase
         .from('user_subscriptions')
         .select('id, status, current_period_end, plan_tier')
-        .eq('user_id', startupAuthUserId)  // ← FIX: Use auth_user_id, not profile_id!
+        .eq('user_id', startupProfileId) // Use profile_id which is stored in user_subscriptions.user_id
         .eq('status', 'active')
         .eq('plan_tier', 'premium')
         .gte('current_period_end', nowISO); // Not expired
@@ -536,7 +536,7 @@ export class AdvisorCreditService {
         creditsAfter: deductResult[0].credits_after
       });
 
-      // Create/update subscription for startup
+      // Create/update subscription for startup via backend (service role)
       // startupProfileId = profile_id (for user_subscriptions.user_id)
       // startupAuthUserId = auth_user_id (for advisor_credit_assignments.startup_user_id)
       // advisorUserId = auth_user_id (for user_subscriptions.paid_by_advisor_id)
@@ -607,96 +607,44 @@ export class AdvisorCreditService {
     assignmentId: string
   ): Promise<{ success: boolean; subscriptionId?: string; error?: string }> {
     try {
-      // startupAuthUserId and startupProfileId are already validated from assignCredit()
-      // In this deployment user_subscriptions.user_id stores profile_id (not auth_user_id)
+      // Call backend endpoint that runs with service role to bypass RLS safely
+      const response = await fetch('/api/advisor-credits/create-startup-subscription', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          startup_profile_id: startupProfileId,
+          startup_auth_user_id: startupAuthUserId,
+          advisor_user_id: advisorUserId,
+          assignment_id: assignmentId,
+          start_date: startDate.toISOString(),
+          end_date: endDate.toISOString()
+        })
+      });
 
-      // Get Premium plan
-      const { data: premiumPlan, error: planError } = await supabase
-        .from('subscription_plans')
-        .select('id, price, currency, plan_tier')
-        .eq('plan_tier', 'premium')
-        .eq('user_type', 'Startup')
-        .eq('interval', 'monthly')
-        .eq('is_active', true)
-        .maybeSingle();
-
-      if (planError || !premiumPlan) {
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to create startup subscription via server:', errorText);
         return {
           success: false,
-          error: 'Premium plan not found.'
+          error: 'Failed to create subscription.'
         };
       }
 
-      // Check if startup already has a subscription
-      const { data: existingSubscription } = await supabase
-        .from('user_subscriptions')
-        .select('id')
-        .eq('user_id', startupProfileId) // using profile_id here
-        .eq('status', 'active')
-        .maybeSingle();
+      const result = await response.json();
 
-      let subscriptionId: string;
-
-      if (existingSubscription) {
-        // Update existing subscription
-        const { data: updated, error: updateError } = await supabase
-          .from('user_subscriptions')
-          .update({
-            plan_id: premiumPlan.id,
-            plan_tier: 'premium',
-            paid_by_advisor_id: advisorUserId,
-            status: 'active',
-            current_period_start: startDate.toISOString(),
-            current_period_end: endDate.toISOString(),
-            amount: premiumPlan.price,
-            currency: premiumPlan.currency,
-            interval: 'monthly',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingSubscription.id)
-          .select()
-          .single();
-
-        if (updateError) {
-          return {
-            success: false,
-            error: 'Failed to update subscription.'
-          };
-        }
-
-        subscriptionId = updated.id;
-      } else {
-        // Create new subscription with auth_user_id (not profile_id!)
-        const { data: newSubscription, error: insertError } = await supabase
-          .from('user_subscriptions')
-          .insert({
-            user_id: startupProfileId,  // Store profile_id in this deployment
-            plan_id: premiumPlan.id,
-            plan_tier: 'premium',
-            paid_by_advisor_id: advisorUserId,
-            status: 'active',
-            current_period_start: startDate.toISOString(),
-            current_period_end: endDate.toISOString(),
-            amount: premiumPlan.price,
-            currency: premiumPlan.currency,
-            interval: 'monthly'
-          })
-          .select()
-          .single();
-
-        if (insertError) {
-          return {
-            success: false,
-            error: 'Failed to create subscription.'
-          };
-        }
-
-        subscriptionId = newSubscription.id;
+      if (!result?.success || !result?.subscriptionId) {
+        console.error('Server did not return subscriptionId:', result);
+        return {
+          success: false,
+          error: 'Failed to create subscription.'
+        };
       }
 
       return {
         success: true,
-        subscriptionId
+        subscriptionId: result.subscriptionId
       };
     } catch (error) {
       console.error('Error in createStartupSubscription:', error);
@@ -1137,6 +1085,49 @@ export class AdvisorCreditService {
         };
       }
 
+      // 🔥 FIX: Add initial credits immediately instead of waiting for webhook
+      // This allows advisors to use credits right away
+      if (subscription && subscription.id) {
+        console.log('✅ Subscription created, adding initial credits immediately...');
+        
+        try {
+          // Add initial credits for the first billing cycle
+          const creditsAdded = await this.addCredits(
+            advisorUserId,
+            plan.credits_per_month,
+            plan.price_per_month,
+            plan.currency,
+            razorpaySubscriptionId ? 'razorpay' : 'payaid',
+            razorpaySubscriptionId || paypalSubscriptionId || `initial_sub_${subscription.id}`
+          );
+          
+          if (creditsAdded) {
+            console.log('✅ Initial credits added successfully, updating subscription...');
+            
+            // Update subscription to mark that initial credits were added
+            const { error: updateError } = await supabase
+              .from('advisor_credit_subscriptions')
+              .update({
+                billing_cycle_count: 1,  // Mark first cycle as completed
+                total_paid: plan.price_per_month,  // Record initial payment
+                last_billing_date: new Date().toISOString()
+              })
+              .eq('id', subscription.id);
+            
+            if (updateError) {
+              console.error('⚠️ Failed to update subscription after adding credits:', updateError);
+            } else {
+              console.log('✅ Subscription updated with initial payment details');
+            }
+          } else {
+            console.warn('⚠️ Failed to add initial credits. Webhooks will add them later.');
+          }
+        } catch (creditError) {
+          console.error('⚠️ Error adding initial credits:', creditError);
+          console.log('Subscription created but credits will be added by webhook');
+        }
+      }
+
       return {
         success: true,
         subscriptionId: subscription.id
@@ -1230,6 +1221,20 @@ export class AdvisorCreditService {
       if (subError || !subscription) {
         console.error('Subscription not found for payment:', subError);
         return false;
+      }
+
+      // 🔥 IDEMPOTENCY CHECK: Prevent double credit addition
+      // Check if credits were already added for this transaction
+      const { data: existingHistory } = await supabase
+        .from('credit_purchase_history')
+        .select('id')
+        .eq('advisor_user_id', subscription.advisor_user_id)
+        .eq('payment_transaction_id', transactionId)
+        .maybeSingle();
+      
+      if (existingHistory) {
+        console.log('⚠️ Credits already added for transaction:', transactionId, '- skipping to prevent duplicate');
+        return true; // Already processed, return success
       }
 
       // Calculate next billing period

@@ -1246,6 +1246,11 @@ app.post('/api/razorpay/verify', async (req, res) => {
               const { data: updatedSub, error: updateErr } = await supabase
                 .from('user_subscriptions')
                 .update({
+                  plan_id: plan_id,
+                  plan_tier: planTier,
+                  amount: planAmount,
+                  currency: planCurrency,
+                  interval: interval || 'monthly',
                   razorpay_subscription_id: razorpay_subscription_id || null,
                   payment_gateway: 'razorpay',
                   autopay_enabled: !!razorpay_subscription_id,

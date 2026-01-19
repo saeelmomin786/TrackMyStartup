@@ -1867,21 +1867,21 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   }}
                   disabled={!canEdit || validationStatus === 'approved'}
                   className={`font-semibold ${
-                    validationStatus === 'approved' 
-                      ? 'bg-green-600 hover:bg-green-700 text-white cursor-not-allowed' 
+                    validationStatus === 'approved'
+                      ? 'bg-green-600 hover:bg-green-700 text-white cursor-not-allowed'
                       : validationStatus === 'pending'
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                      ? 'bg-green-600 hover:bg-green-700 text-white'
                       : 'bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200'
                   }`}
                 >
                   {validationStatus === 'approved' 
-                    ? 'TMS Validation Verified' 
+                    ? 'Participation Verified by TMS' 
                     : validationStatus === 'pending'
-                    ? 'TMS Validation Requested'
-                    : 'TMS Validation'}
+                    ? 'Participation Requested'
+                    : 'Participate in Investment by TrackMyStartup'}
                 </Button>
                 <p className="text-xs text-slate-600">
-                  We verify your profile and due diligence by TMS team. You will be shown to investors in the verified profile section.
+                  We verify your profile and due diligence by TMS team. You will be shown to investors in the verified profile section. Success fees (0-5%) are charged after successful investment.
                 </p>
               </div>
             </div>

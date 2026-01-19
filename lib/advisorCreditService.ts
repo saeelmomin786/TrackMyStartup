@@ -185,13 +185,14 @@ export class AdvisorCreditService {
     paymentTransactionId: string
   ): Promise<boolean> {
     try {
-      // Call the dedicated advisor credits endpoint
-      const response = await fetch('/api/advisor-credits/add', {
+      // Call the unified payment verification endpoint which handles advisor credits
+      const response = await fetch('/api/payment/verify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          endpoint: 'advisor-credits-add',
           advisor_user_id: advisorUserId,
           credits_to_add: creditsToAdd,
           amount_paid: amountPaid,

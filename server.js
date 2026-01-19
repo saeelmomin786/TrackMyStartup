@@ -1223,83 +1223,18 @@ app.post('/api/razorpay/verify', async (req, res) => {
           }
         }
 
-        // ✅ CRITICAL FIX: Deactivate existing active subscriptions before inserting new one
-        // This prevents violating the unique constraint idx_user_subscriptions_user_id_active_unique
-        console.log('[verify] Checking for existing active subscriptions for user:', profileId);
-        const { data: existingSubs, error: existingSubsErr } = await supabase
+        // ✅ SIMPLIFIED: Deactivate all existing active subscriptions
+        console.log('[verify] Deactivating existing subscriptions for user:', profileId);
+        const { error: deactivateErr } = await supabase
           .from('user_subscriptions')
-          .select('id, plan_tier, status, razorpay_subscription_id')
+          .update({ status: 'inactive' })
           .eq('user_id', profileId)
           .eq('status', 'active');
 
-        if (existingSubsErr) {
-          console.warn('[verify] Could not check existing subscriptions:', existingSubsErr);
-        } else if (existingSubs && existingSubs.length > 0) {
-          console.log(`[verify] Found ${existingSubs.length} existing active subscription(s), processing...`);
-          
-          for (const existingSub of existingSubs) {
-            // Check if this is an incomplete subscription (no payment details)
-            if (!existingSub.razorpay_subscription_id) {
-              console.log('[verify] Found incomplete subscription (no payment details), updating with current payment info');
-              
-              // UPDATE the incomplete subscription instead of creating a duplicate
-              const { data: updatedSub, error: updateErr } = await supabase
-                .from('user_subscriptions')
-                .update({
-                  plan_id: plan_id,
-                  plan_tier: planTier,
-                  amount: planAmount,
-                  currency: planCurrency,
-                  interval: interval || 'monthly',
-                  razorpay_subscription_id: razorpay_subscription_id || null,
-                  payment_gateway: 'razorpay',
-                  autopay_enabled: !!razorpay_subscription_id,
-                  mandate_status: razorpay_subscription_id ? 'active' : null,
-                  billing_cycle_count: 1,
-                  total_paid: initialPaymentAmount,
-                  last_billing_date: now.toISOString(),
-                  next_billing_date: periodEnd.toISOString(),
-                  updated_at: now.toISOString()
-                })
-                .eq('id', existingSub.id)
-                .select()
-                .single();
-              
-              if (updateErr) {
-                console.error('[verify] Error updating incomplete subscription:', updateErr);
-              } else {
-                console.log('[verify] ✅ Updated incomplete subscription with payment details');
-                // Continue to link payment transaction if needed
-                if (paymentRow && updatedSub) {
-                  const { error: updatePaymentErr } = await supabase
-                    .from('payment_transactions')
-                    .update({ subscription_id: updatedSub.id })
-                    .eq('id', paymentRow.id);
-                  
-                  if (!updatePaymentErr) {
-                    console.log('[verify] ✅ Payment transaction linked to updated subscription');
-                  }
-                }
-                return res.json({ success: true, subscription: updatedSub, message: 'Updated incomplete subscription with payment details' });
-              }
-            } else {
-              // This is a complete subscription - deactivate it before creating new one
-              console.log('[verify] Deactivating existing complete subscription:', existingSub.id);
-              const { error: deactivateErr } = await supabase
-                .from('user_subscriptions')
-                .update({
-                  status: 'inactive',
-                  updated_at: now.toISOString()
-                })
-                .eq('id', existingSub.id);
-              
-              if (deactivateErr) {
-                console.warn('[verify] Could not deactivate existing subscription:', deactivateErr);
-              } else {
-                console.log('[verify] ✅ Deactivated existing subscription');
-              }
-            }
-          }
+        if (deactivateErr) {
+          console.warn('[verify] Could not deactivate existing subscriptions:', deactivateErr);
+        } else {
+          console.log('[verify] ✅ Deactivated existing subscriptions');
         }
 
         const subInsert = {
@@ -1605,21 +1540,21 @@ app.post('/api/advisor-credits/create-startup-subscription', async (req, res) =>
       return res.status(400).json({ error: 'Premium plan not found' });
     }
 
-    // Check for existing active subscription (profile_id stored in user_id)
-    const { data: existingActive, error: existingErr } = await supabase
+    // ✅ SIMPLIFIED: Deactivate all existing active subscriptions, then create new one
+    // This matches the approach used in payment verification
+    const { error: deactivateErr } = await supabase
       .from('user_subscriptions')
-      .select('id')
+      .update({ status: 'inactive' })
       .eq('user_id', startup_profile_id)
-      .eq('status', 'active')
-      .maybeSingle();
+      .eq('status', 'active');
 
-    if (existingErr) {
-      console.error('Error checking existing subscription:', existingErr);
-      return res.status(500).json({ error: 'Failed to check existing subscription' });
+    if (deactivateErr) {
+      console.warn('Could not deactivate existing subscriptions:', deactivateErr);
     }
 
     const now = new Date();
-    const updatePayload = {
+    const insertPayload = {
+      user_id: startup_profile_id,
       plan_id: premiumPlan.id,
       plan_tier: 'premium',
       paid_by_advisor_id: advisor_user_id,
@@ -1629,44 +1564,23 @@ app.post('/api/advisor-credits/create-startup-subscription', async (req, res) =>
       amount: premiumPlan.price,
       currency: premiumPlan.currency,
       interval: 'monthly',
-      updated_at: now.toISOString(),
+      is_in_trial: false,
+      payment_gateway: 'advisor_credit',
+      autopay_enabled: false,
     };
 
-    let subscriptionId;
+    const { data: inserted, error: insertErr } = await supabase
+      .from('user_subscriptions')
+      .insert(insertPayload)
+      .select()
+      .single();
 
-    if (existingActive) {
-      const { data: updated, error: updateErr } = await supabase
-        .from('user_subscriptions')
-        .update(updatePayload)
-        .eq('id', existingActive.id)
-        .select()
-        .single();
-
-      if (updateErr) {
-        console.error('Error updating subscription for startup:', updateErr);
-        return res.status(500).json({ error: 'Failed to update subscription' });
-      }
-
-      subscriptionId = updated.id;
-    } else {
-      const insertPayload = {
-        ...updatePayload,
-        user_id: startup_profile_id,
-      };
-
-      const { data: inserted, error: insertErr } = await supabase
-        .from('user_subscriptions')
-        .insert(insertPayload)
-        .select()
-        .single();
-
-      if (insertErr) {
-        console.error('Error creating subscription for startup:', insertErr);
-        return res.status(500).json({ error: 'Failed to create subscription' });
-      }
-
-      subscriptionId = inserted.id;
+    if (insertErr) {
+      console.error('Error creating subscription for startup:', insertErr);
+      return res.status(500).json({ error: 'Failed to create subscription' });
     }
+
+    const subscriptionId = inserted.id;
 
     // Optionally store linkage metadata (non-blocking)
     if (assignment_id) {

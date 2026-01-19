@@ -392,11 +392,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
             periodEnd.setMonth(periodEnd.getMonth() + 1);
           }
 
+          // ✅ SIMPLIFIED: Deactivate all existing subscriptions, then create new one
+          // This works for both incomplete and complete subscriptions
+          await supabase
+            .from('user_subscriptions')
+            .update({ status: 'inactive' })
+            .eq('user_id', user_id)
+            .eq('status', 'active');
+
           const { data: subRow } = await supabase
             .from('user_subscriptions')
             .insert({
               user_id,
               plan_id,
+              plan_tier: planTier,
               status: 'active',
               current_period_start: now.toISOString(),
               current_period_end: periodEnd.toISOString(),
@@ -404,10 +413,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
               currency: currency || planData?.currency || 'INR',
               interval: interval || 'monthly',
               is_in_trial: false,
-              razorpay_subscription_id: razorpay_subscription_id || null,  // ✅ FIX: Make optional
+              razorpay_subscription_id: razorpay_subscription_id || null,
               payment_gateway: 'razorpay',
-              autopay_enabled: !!razorpay_subscription_id,  // ✅ FIX: Only true if subscription ID exists
-              mandate_status: razorpay_subscription_id ? 'active' : null,  // ✅ FIX: Only set if subscription ID exists
+              autopay_enabled: !!razorpay_subscription_id,
+              mandate_status: razorpay_subscription_id ? 'active' : null,
               billing_cycle_count: 1,
               total_paid: finalAmount,
               last_billing_date: now.toISOString(),

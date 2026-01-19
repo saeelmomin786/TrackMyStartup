@@ -770,12 +770,6 @@ function PaymentHistorySection({
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-slate-900">Payment History</h2>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-          </div>
         </div>
 
         {payments.length === 0 ? (
@@ -791,7 +785,6 @@ function PaymentHistorySection({
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Type</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Cycle</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Status</th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -833,11 +826,6 @@ function PaymentHistorySection({
                             Pending
                           </span>
                         )}
-                      </td>
-                      <td className="py-3 px-4 text-sm">
-                        <Button variant="outline" size="sm">
-                          <Download className="h-4 w-4" />
-                        </Button>
                       </td>
                     </tr>
                   ))}

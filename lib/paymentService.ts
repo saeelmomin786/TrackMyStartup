@@ -582,6 +582,7 @@ class PaymentService {
               } : undefined;
               
               // Verify the first payment with tax information
+              // Backend creates subscription with razorpay_subscription_id and autopay_enabled
               await this.verifyPayment(
                 paymentResponseForVerification,
                 plan,
@@ -591,11 +592,8 @@ class PaymentService {
                 { finalAmount, interval: plan.interval, planName: plan.name, razorpaySubscriptionId: razorpaySubscription.id, country }
               );
               
-              // Update subscription with Razorpay subscription ID and enable autopay
-              await this.attachRazorpaySubscriptionId(userId, razorpaySubscription.id);
-              
-              // Enable autopay in database
-              await this.enableAutopayForSubscription(userId, razorpaySubscription.id);
+              // ✅ Backend already set razorpay_subscription_id and autopay_enabled during verification
+              // No need to update again - backend handles everything
               
               // Wait a moment for Supabase to commit the transaction
               await new Promise(resolve => setTimeout(resolve, 500));
@@ -1000,10 +998,10 @@ class PaymentService {
       console.log('Verification result:', verificationResult);
       
       if (verificationResult.success) {
-        console.log('✅ PayPal payment verified successfully, creating subscription...');
-        // Create user subscription with tax information
-        await this.createUserSubscription(plan, userId, couponCode, taxInfo);
-        console.log('✅ User subscription created successfully');
+        console.log('✅ PayPal payment verified successfully');
+        // ✅ Backend already created subscription with gateway IDs during verification
+        // No need to create again - would cause duplicate/deactivation
+        console.log('✅ Subscription created by backend');
         return true;
       } else {
         console.error('❌ PayPal payment verification failed:', verificationResult);
@@ -1071,14 +1069,10 @@ class PaymentService {
       console.log('Verification result:', verificationResult);
       
       if (verificationResult.success) {
-        console.log('✅ PayPal subscription verified successfully, creating subscription...');
-        // Create user subscription with tax information and PayPal subscription ID
-        await this.createUserSubscription(plan, userId, couponCode, taxInfo);
-        
-        // Attach PayPal subscription ID
-        await this.attachPayPalSubscriptionId(userId, subscriptionId!);
-        
-        console.log('✅ User subscription created successfully with autopay');
+        console.log('✅ PayPal subscription verified successfully');
+        // ✅ Backend already created subscription with PayPal subscription ID during verification
+        // No need to create again or attach ID - backend handles everything
+        console.log('✅ Subscription created by backend with autopay enabled');
         return true;
       } else {
         console.error('❌ PayPal subscription verification failed:', verificationResult);
@@ -1222,10 +1216,10 @@ class PaymentService {
       console.log('Verification result:', verificationResult);
       
       if (verificationResult.success) {
-        console.log('✅ Payment verified successfully, creating subscription...');
-        // Create user subscription with tax information
-        await this.createUserSubscription(plan, userId, couponCode, taxInfo);
-        console.log('✅ User subscription created successfully');
+        console.log('✅ Payment verified successfully');
+        // ✅ Backend already created subscription with gateway IDs during verification
+        // No need to create again - would cause duplicate/deactivation
+        console.log('✅ Subscription created by backend with autopay enabled');
         return true;
       } else {
         console.error('❌ Payment verification failed:', verificationResult);

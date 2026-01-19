@@ -964,7 +964,7 @@ class PaymentService {
         throw new Error('Missing PayPal order ID for payment verification');
       }
       
-      const response = await fetch(`/api/razorpay/verify`, {
+      const response = await fetch(`/api/payment/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1180,7 +1180,7 @@ class PaymentService {
         has_signature: !!paymentResponse.razorpay_signature
       });
       
-      const response = await fetch(`/api/razorpay/verify`, {
+      const response = await fetch(`/api/payment/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

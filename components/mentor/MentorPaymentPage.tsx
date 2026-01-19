@@ -148,7 +148,7 @@ const MentorPaymentPage: React.FC<MentorPaymentPageProps> = ({
             handler: async (response: any) => {
               try {
                 // Verify payment
-                const verifyResponse = await fetch('/api/razorpay/verify', {
+                const verifyResponse = await fetch('/api/payment/verify', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({

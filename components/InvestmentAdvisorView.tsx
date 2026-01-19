@@ -2036,7 +2036,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           handler: async (response: any) => {
             try {
               // Verify payment and add credits
-              const verifyResponse = await fetch('/api/razorpay/verify', {
+              const verifyResponse = await fetch('/api/payment/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

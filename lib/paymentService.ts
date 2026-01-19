@@ -664,12 +664,13 @@ class PaymentService {
   // Create PayPal order (for one-time payments)
   private async createPayPalOrder(amount: number, currency: string = 'EUR'): Promise<string> {
     try {
-      const response = await fetch(`/api/paypal/create-order`, {
+      const response = await fetch(`/api/payment/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          endpoint: 'paypal-create-order',
           amount: amount.toFixed(2),
           currency: currency,
         }),
@@ -690,7 +691,7 @@ class PaymentService {
   // Create PayPal subscription (for recurring payments with autopay)
   private async createPayPalSubscription(plan: SubscriptionPlan, userId: string, finalAmount: number): Promise<string> {
     try {
-      console.log('📞 [PayPal] Calling /api/paypal/create-subscription with:', {
+      console.log('📞 [PayPal] Calling /api/payment/verify with paypal-create-subscription:', {
         user_id: userId,
         final_amount: finalAmount,
         interval: plan.interval,
@@ -698,12 +699,13 @@ class PaymentService {
         currency: plan.currency || 'EUR',
       });
       
-      const response = await fetch(`/api/paypal/create-subscription`, {
+      const response = await fetch(`/api/payment/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          endpoint: 'paypal-create-subscription',
           user_id: userId,
           final_amount: finalAmount,
           interval: plan.interval,

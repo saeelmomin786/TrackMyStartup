@@ -307,6 +307,191 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       });
     }
 
+    // PAYPAL ORDER CREATION (consolidated from /api/paypal/create-order)
+    if (req.body.endpoint === 'paypal-create-order') {
+      const { amount, currency } = req.body;
+
+      if (!amount || !currency) {
+        return json(res, 400, { error: 'Missing amount or currency' });
+      }
+
+      const clientId = process.env.VITE_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID;
+      const clientSecret = process.env.VITE_PAYPAL_CLIENT_SECRET || process.env.PAYPAL_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        return json(res, 500, { error: 'PayPal credentials not configured' });
+      }
+
+      const isProduction =
+        process.env.PAYPAL_ENVIRONMENT === 'production' ||
+        process.env.VITE_PAYPAL_ENVIRONMENT === 'production';
+      const baseUrl = isProduction ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+
+      try {
+        // Get access token
+        const tokenResponse = await fetch(`${baseUrl}/v1/oauth2/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+          },
+          body: 'grant_type=client_credentials',
+        });
+
+        if (!tokenResponse.ok) {
+          return json(res, 500, { error: 'Failed to get PayPal access token' });
+        }
+
+        const tokenData = (await tokenResponse.json()) as { access_token: string };
+        const accessToken = tokenData.access_token;
+
+        // Create order
+        const orderResponse = await fetch(`${baseUrl}/v2/checkout/orders`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            intent: 'CAPTURE',
+            purchase_units: [
+              {
+                amount: {
+                  currency_code: currency,
+                  value: amount.toFixed(2),
+                },
+              },
+            ],
+          }),
+        });
+
+        if (!orderResponse.ok) {
+          return json(res, 500, { error: 'Failed to create PayPal order' });
+        }
+
+        const orderData = (await orderResponse.json()) as { id: string };
+        return json(res, 200, { orderId: orderData.id });
+      } catch (error) {
+        console.error('PayPal order creation error:', error);
+        return json(res, 500, { error: 'Failed to create order' });
+      }
+    }
+
+    // PAYPAL SUBSCRIPTION CREATION (consolidated from /api/paypal/create-subscription)
+    if (req.body.endpoint === 'paypal-create-subscription') {
+      const { user_id, final_amount, interval, plan_name, currency } = req.body;
+
+      if (!user_id || !final_amount || !interval || !plan_name || !currency) {
+        return json(res, 400, { error: 'Missing required fields' });
+      }
+
+      const clientId = process.env.VITE_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID;
+      const clientSecret = process.env.VITE_PAYPAL_CLIENT_SECRET || process.env.PAYPAL_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        return json(res, 500, { error: 'PayPal credentials not configured' });
+      }
+
+      const isProduction =
+        process.env.PAYPAL_ENVIRONMENT === 'production' ||
+        process.env.VITE_PAYPAL_ENVIRONMENT === 'production';
+      const baseUrl = isProduction ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+
+      try {
+        // Get access token
+        const tokenResponse = await fetch(`${baseUrl}/v1/oauth2/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+          },
+          body: 'grant_type=client_credentials',
+        });
+
+        if (!tokenResponse.ok) {
+          return json(res, 500, { error: 'Failed to get PayPal access token' });
+        }
+
+        const tokenData = (await tokenResponse.json()) as { access_token: string };
+        const accessToken = tokenData.access_token;
+
+        // Create billing plan
+        const planResponse = await fetch(`${baseUrl}/v1/billing/plans`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            product_id: process.env.PAYPAL_PRODUCT_ID || 'PROD_DEFAULT',
+            name: plan_name,
+            description: `${plan_name} subscription`,
+            billing_cycles: [
+              {
+                frequency: {
+                  interval_unit: interval === 'yearly' ? 'YEAR' : 'MONTH',
+                  interval_count: 1,
+                },
+                tenure_type: 'REGULAR',
+                sequence: 1,
+                total_cycles: 0, // Infinite
+                pricing_scheme: {
+                  fixed_price: {
+                    value: final_amount.toFixed(2),
+                    currency_code: currency,
+                  },
+                },
+              },
+            ],
+            payment_preferences: {
+              auto_bill_amount: 'YES',
+              setup_fee: {
+                value: '0.00',
+                currency_code: currency,
+              },
+            },
+          }),
+        });
+
+        if (!planResponse.ok) {
+          return json(res, 500, { error: 'Failed to create billing plan' });
+        }
+
+        const planData = (await planResponse.json()) as { id: string };
+
+        // Create subscription
+        const subscriptionResponse = await fetch(`${baseUrl}/v1/billing/subscriptions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            plan_id: planData.id,
+            subscriber: {
+              email_address: user_id,
+            },
+            application_context: {
+              brand_name: 'Track My Startup',
+              user_action: 'SUBSCRIBE_NOW',
+              return_url: `${process.env.VITE_APP_URL || 'http://localhost:3000'}/payment/callback?provider=paypal`,
+              cancel_url: `${process.env.VITE_APP_URL || 'http://localhost:3000'}/payment/cancel`,
+            },
+          }),
+        });
+
+        if (!subscriptionResponse.ok) {
+          return json(res, 500, { error: 'Failed to create subscription' });
+        }
+
+        const subscriptionData = (await subscriptionResponse.json()) as { id: string };
+        return json(res, 200, { subscriptionId: subscriptionData.id });
+      } catch (error) {
+        console.error('PayPal subscription creation error:', error);
+        return json(res, 500, { error: 'Failed to create subscription' });
+      }
+    }
+
     // PAYMENT VERIFICATION ENDPOINTS
     const { provider } = req.body as { provider?: 'razorpay' | 'paypal' };
 

@@ -296,8 +296,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         .single();
 
       if (insertErr) {
-        console.error('Error creating subscription for startup:', insertErr);
-        return json(res, 500, { error: 'Failed to create subscription' });
+        console.error('Error creating subscription for startup:', {
+          code: insertErr.code,
+          message: insertErr.message,
+          details: insertErr.details,
+          hint: insertErr.hint,
+          payload: insertPayload
+        });
+        return json(res, 500, { 
+          error: 'Failed to create subscription',
+          details: insertErr.message,
+          code: insertErr.code
+        });
       }
 
       return json(res, 200, {

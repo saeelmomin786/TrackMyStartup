@@ -342,6 +342,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       // Some payments come through without subscription ID but still need subscriptions created
       if (user_id && plan_id) {
         try {
+          // 🔐 CRITICAL BUGFIX: Convert auth_user_id to profile_id
+          // user_id from frontend is auth.uid(), but user_subscriptions table uses profile_id
+          console.log('[verify] 🔍 Converting auth_user_id to profile_id...');
+          console.log('[verify] Received user_id (might be auth_user_id):', user_id);
+          
+          // Try to get profile - first check if user_id is already a profile_id
+          let finalUserId = user_id;
+          const { data: directProfile } = await supabase
+            .from('user_profiles')
+            .select('id, auth_user_id, role')
+            .eq('id', user_id)
+            .maybeSingle();
+          
+          if (directProfile) {
+            // user_id is already a profile_id
+            console.log('[verify] ✅ user_id is already profile_id:', user_id);
+            finalUserId = directProfile.id;
+          } else {
+            // user_id might be auth_user_id, try to find profile by auth_user_id
+            const { data: userProfiles, error: profilesError } = await supabase
+              .from('user_profiles')
+              .select('id, role')
+              .eq('auth_user_id', user_id)
+              .order('created_at', { ascending: false });
+            
+            if (profilesError || !userProfiles || userProfiles.length === 0) {
+              console.error('[verify] ❌ No user profiles found for auth_user_id:', user_id);
+              return json(res, 400, {
+                success: false,
+                error: 'User profile not found',
+                message: 'Payment verified but subscription not created - profile missing'
+              });
+            }
+
+            // Use the first profile (most recent)
+            finalUserId = userProfiles[0].id;
+            console.log('[verify] ✅ Converted auth_user_id to profile_id:', finalUserId);
+          }
+
           // Get plan_tier from plan_id
           let planTier = 'free';
           const { data: planData } = await supabase
@@ -362,7 +401,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           const { data: paymentRow } = await supabase
             .from('payment_transactions')
             .insert({
-              user_id,
+              user_id: finalUserId,
               payment_gateway: 'razorpay',
               gateway_order_id: razorpay_subscription_id,
               gateway_payment_id: razorpay_payment_id,
@@ -397,13 +436,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           await supabase
             .from('user_subscriptions')
             .update({ status: 'inactive' })
-            .eq('user_id', user_id)
+            .eq('user_id', finalUserId)
             .eq('status', 'active');
 
           const { data: subRow } = await supabase
             .from('user_subscriptions')
             .insert({
-              user_id,
+              user_id: finalUserId,
               plan_id,
               plan_tier: planTier,
               status: 'active',

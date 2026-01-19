@@ -214,6 +214,99 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       });
     }
 
+    // CREATE STARTUP SUBSCRIPTION (paid by advisor credits)
+    if (req.body.endpoint === 'create-startup-subscription') {
+      const {
+        startup_profile_id,
+        startup_auth_user_id,
+        advisor_user_id,
+        assignment_id,
+        start_date,
+        end_date
+      } = req.body;
+
+      if (!startup_profile_id || !advisor_user_id || !start_date || !end_date) {
+        return json(res, 400, { error: 'Missing required fields' });
+      }
+
+      const startDate = new Date(start_date);
+      const endDate = new Date(end_date);
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+        return json(res, 400, { error: 'Invalid start_date or end_date' });
+      }
+
+      // Initialize Supabase
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+
+      if (!supabaseUrl || !supabaseServiceKey) {
+        return json(res, 500, { error: 'Server configuration error' });
+      }
+
+      const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      // Fetch premium monthly startup plan
+      const { data: premiumPlan, error: planError } = await supabase
+        .from('subscription_plans')
+        .select('id, price, currency, interval, plan_tier, user_type')
+        .eq('plan_tier', 'premium')
+        .eq('user_type', 'Startup')
+        .eq('interval', 'monthly')
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (planError || !premiumPlan) {
+        console.error('Premium plan lookup failed:', planError);
+        return json(res, 400, { error: 'Premium plan not found' });
+      }
+
+      // Deactivate all existing active subscriptions, then create new one
+      const { error: deactivateErr } = await supabase
+        .from('user_subscriptions')
+        .update({ status: 'inactive' })
+        .eq('user_id', startup_profile_id)
+        .eq('status', 'active');
+
+      if (deactivateErr) {
+        console.warn('Could not deactivate existing subscriptions:', deactivateErr);
+      }
+
+      const insertPayload = {
+        user_id: startup_profile_id,
+        plan_id: premiumPlan.id,
+        plan_tier: 'premium',
+        paid_by_advisor_id: advisor_user_id,
+        status: 'active',
+        current_period_start: startDate.toISOString(),
+        current_period_end: endDate.toISOString(),
+        amount: premiumPlan.price,
+        currency: premiumPlan.currency,
+        interval: 'monthly',
+        is_in_trial: false,
+        payment_gateway: 'advisor_credit',
+        autopay_enabled: false,
+      };
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from('user_subscriptions')
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      if (insertErr) {
+        console.error('Error creating subscription for startup:', insertErr);
+        return json(res, 500, { error: 'Failed to create subscription' });
+      }
+
+      return json(res, 200, {
+        success: true,
+        subscriptionId: inserted.id,
+        message: 'Subscription created successfully'
+      });
+    }
+
     // PAYMENT VERIFICATION ENDPOINTS
     const { provider } = req.body as { provider?: 'razorpay' | 'paypal' };
 

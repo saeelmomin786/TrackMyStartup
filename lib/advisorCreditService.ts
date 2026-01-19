@@ -608,13 +608,14 @@ export class AdvisorCreditService {
     assignmentId: string
   ): Promise<{ success: boolean; subscriptionId?: string; error?: string }> {
     try {
-      // Call backend endpoint that runs with service role to bypass RLS safely
-      const response = await fetch('/api/advisor-credits/create-startup-subscription', {
+      // Call unified payment verification endpoint which handles startup subscriptions
+      const response = await fetch('/api/payment/verify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          endpoint: 'create-startup-subscription',
           startup_profile_id: startupProfileId,
           startup_auth_user_id: startupAuthUserId,
           advisor_user_id: advisorUserId,

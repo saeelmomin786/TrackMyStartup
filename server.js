@@ -5413,6 +5413,96 @@ async function handleSubscriptionCharged(subscription) {
     console.log('Subscription details:', subDetails);
 
     const userIdFromNotes = subDetails?.notes?.user_id || subscription?.notes?.user_id || null;
+    
+    // 🔥 FIX: Check if this is an advisor credit subscription first
+    const { data: advisorSub } = await supabase
+      .from('advisor_credit_subscriptions')
+      .select('*')
+      .eq('razorpay_subscription_id', subscription.id)
+      .eq('status', 'active')
+      .maybeSingle();
+    
+    if (advisorSub) {
+      console.log('✅ This is an advisor credit subscription renewal');
+      
+      // Extract payment info
+      const chargeAmount = subDetails.plan.amount / 100; // Convert from paise
+      const currency = subDetails.plan.currency || 'INR';
+      const paymentId = subDetails.latest_invoice?.payment_id || subscription.id + '_' + Date.now();
+      
+      // Calculate next billing period
+      const now = new Date();
+      const currentPeriodEnd = new Date(advisorSub.current_period_end);
+      const nextPeriodEnd = new Date(currentPeriodEnd);
+      nextPeriodEnd.setMonth(nextPeriodEnd.getMonth() + 1);
+      
+      // Update subscription with new billing cycle
+      const { error: updateError } = await supabase
+        .from('advisor_credit_subscriptions')
+        .update({
+          current_period_start: currentPeriodEnd.toISOString(),
+          current_period_end: nextPeriodEnd.toISOString(),
+          next_billing_date: nextPeriodEnd.toISOString(),
+          last_billing_date: now.toISOString(),
+          billing_cycle_count: (advisorSub.billing_cycle_count || 0) + 1,
+          total_paid: (advisorSub.total_paid || 0) + chargeAmount,
+          updated_at: now.toISOString()
+        })
+        .eq('id', advisorSub.id);
+      
+      if (updateError) {
+        console.error('❌ Error updating advisor credit subscription:', updateError);
+        return;
+      }
+      
+      console.log('✅ Advisor credit subscription updated, now adding credits...');
+      
+      // Add credits using RPC function
+      const { data: incrementedCredits, error: rpcError } = await supabase.rpc('increment_advisor_credits', {
+        p_advisor_user_id: advisorSub.advisor_user_id,
+        p_credits_to_add: advisorSub.credits_per_month,
+        p_amount_paid: chargeAmount,
+        p_currency: currency
+      });
+      
+      if (rpcError) {
+        console.error('❌ Error adding credits via RPC:', rpcError);
+        return;
+      }
+      
+      console.log('✅ Credits added successfully:', incrementedCredits);
+      
+      // Record in purchase history
+      const { error: historyError } = await supabase
+        .from('credit_purchase_history')
+        .insert({
+          advisor_user_id: advisorSub.advisor_user_id,
+          credits_purchased: advisorSub.credits_per_month,
+          amount_paid: chargeAmount,
+          currency: currency,
+          payment_gateway: 'razorpay',
+          payment_transaction_id: paymentId,
+          status: 'completed',
+          metadata: {
+            subscription_id: advisorSub.id,
+            billing_cycle: advisorSub.billing_cycle_count + 1,
+            payment_type: 'subscription',
+            purchase_type: 'subscription',
+            credits_available: incrementedCredits?.credits_available,
+            credits_used: incrementedCredits?.credits_used
+          }
+        });
+      
+      if (historyError) {
+        console.error('❌ Error recording purchase history:', historyError);
+      } else {
+        console.log('✅ Purchase history recorded for advisor credit renewal');
+      }
+      
+      return; // Exit early - advisor subscription handled
+    }
+    
+    // If not advisor subscription, continue with regular user subscription logic
     const resolved = await resolveUserSubscriptionRecord({
       razorpaySubscriptionId: subscription.id,
       userId: userIdFromNotes

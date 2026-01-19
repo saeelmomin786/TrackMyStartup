@@ -152,7 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     // ADVISOR CREDITS ENDPOINT
     // Handle advisor credit addition (consolidated from /api/advisor/credits/add)
-    if (req.body.endpoint === 'advisor-credits-add' || req.body.advisor_user_id) {
+    if (req.body.endpoint === 'advisor-credits-add') {
       const {
         advisor_user_id,
         credits_to_add,

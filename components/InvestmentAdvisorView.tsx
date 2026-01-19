@@ -1858,6 +1858,16 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             }]);
           }
         } else {
+          // Reload assignments to sync with database state (in case rollback happened)
+          const assignments = await advisorCreditService.getAdvisorAssignments(authUserId);
+          const assignmentsMap = new Map<string, CreditAssignment>();
+          assignments.forEach(a => assignmentsMap.set(a.startup_user_id, a));
+          setCreditAssignments(assignmentsMap);
+
+          // Reload credits as well (credit should be refunded)
+          const credits = await advisorCreditService.getAdvisorCredits(authUserId);
+          setAdvisorCredits(credits);
+
           alert(result.error || 'Failed to assign credit. Please ensure you have available credits.');
         }
       } else {

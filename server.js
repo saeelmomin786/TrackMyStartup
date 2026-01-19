@@ -6717,6 +6717,67 @@ function getRelatedEntityId(path, startupIds, applicationIds) {
 }
 
 // --------------------
+// Payment Verification Alias (Frontend uses /api/payment/verify, local server has /api/razorpay/verify)
+// --------------------
+// Simple approach: re-register the route at /api/payment/verify by making a proxy handler
+app.post('/api/payment/verify', async (req, res) => {
+  console.log('📍 [Alias] /api/payment/verify → /api/razorpay/verify');
+  // Create a temporary request wrapper
+  const tempReq = Object.create(req);
+  const tempRes = Object.create(res);
+  
+  // Forward to our internal verification logic
+  // We'll just create a simple proxy by re-calling the same code
+  try {
+    const { 
+      razorpay_payment_id, 
+      razorpay_order_id, 
+      razorpay_subscription_id,
+      razorpay_signature,
+      assignment_id,
+      user_id,
+      plan_id,
+      amount,
+      currency = 'INR',
+      tax_percentage,
+      tax_amount,
+      total_amount_with_tax,
+      interval,
+      country
+    } = req.body;
+
+    // Simply redirect to the razorpay verify endpoint by calling its route
+    // We'll send a POST request to ourselves
+    const internalRes = await fetch('http://localhost:3001/api/razorpay/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        razorpay_payment_id,
+        razorpay_order_id,
+        razorpay_subscription_id,
+        razorpay_signature,
+        assignment_id,
+        user_id,
+        plan_id,
+        amount,
+        currency,
+        tax_percentage,
+        tax_amount,
+        total_amount_with_tax,
+        interval,
+        country
+      })
+    });
+
+    const data = await internalRes.json();
+    res.status(internalRes.status).json(data);
+  } catch (error) {
+    console.error('❌ [Alias] Error forwarding to razorpay verify:', error);
+    res.status(500).json({ error: 'Payment verification failed' });
+  }
+});
+
+// --------------------
 // Start Server
 // --------------------
 const port = process.env.PORT || 3001;

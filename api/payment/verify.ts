@@ -285,7 +285,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         currency: premiumPlan.currency,
         interval: 'monthly',
         is_in_trial: false,
-        payment_gateway: 'advisor_credit',
+        payment_gateway: 'payaid', // Use payaid so it passes the payment_gateway check constraint
         autopay_enabled: false,
       };
 

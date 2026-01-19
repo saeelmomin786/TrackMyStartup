@@ -338,7 +338,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
 
       // Handle subscription payment persistence (if user_id and plan_id provided)
-      if (user_id && plan_id && razorpay_subscription_id) {
+      // ✅ FIX: Remove razorpay_subscription_id requirement - it's optional
+      // Some payments come through without subscription ID but still need subscriptions created
+      if (user_id && plan_id) {
         try {
           // Get plan_tier from plan_id
           let planTier = 'free';
@@ -402,10 +404,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
               currency: currency || planData?.currency || 'INR',
               interval: interval || 'monthly',
               is_in_trial: false,
-              razorpay_subscription_id,
+              razorpay_subscription_id: razorpay_subscription_id || null,  // ✅ FIX: Make optional
               payment_gateway: 'razorpay',
-              autopay_enabled: true,
-              mandate_status: 'active',
+              autopay_enabled: !!razorpay_subscription_id,  // ✅ FIX: Only true if subscription ID exists
+              mandate_status: razorpay_subscription_id ? 'active' : null,  // ✅ FIX: Only set if subscription ID exists
               billing_cycle_count: 1,
               total_paid: finalAmount,
               last_billing_date: now.toISOString(),

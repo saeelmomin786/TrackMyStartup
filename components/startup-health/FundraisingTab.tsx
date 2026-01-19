@@ -1774,6 +1774,11 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     if (file) {
                       setPitchDeckFile(file);
                       handleChange('pitchDeckUrl', '');
+                      messageService.success(
+                        'File Selected',
+                        `Pitch deck "${file.name}" selected. Click "Save Funding Details" to upload.`,
+                        3000
+                      );
                     } else {
                       setPitchDeckFile(null);
                     }
@@ -1804,6 +1809,11 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     if (file) {
                       setLogoFile(file);
                       handleChange('logoUrl', '');
+                      messageService.success(
+                        'File Selected',
+                        `Company logo "${file.name}" selected. Click "Save Funding Details" to upload.`,
+                        3000
+                      );
                     } else {
                       setLogoFile(null);
                     }
@@ -1827,6 +1837,11 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     if (file) {
                       setBusinessPlanFile(file);
                       handleChange('businessPlanUrl', '');
+                      messageService.success(
+                        'File Selected',
+                        `Business plan "${file.name}" selected. Click "Save Funding Details" to upload.`,
+                        3000
+                      );
                     } else {
                       setBusinessPlanFile(null);
                     }

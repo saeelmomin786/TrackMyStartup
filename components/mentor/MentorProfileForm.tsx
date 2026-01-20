@@ -1396,7 +1396,7 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
             {(profile.fee_type === 'Fees' || profile.fee_type === 'Stock Options' || profile.fee_type === 'Hybrid') && (
               <Select
                 label="Currency"
-                value={profile.fee_currency || 'USD'}
+                value={profile.fee_currency || 'INR'}
                 onChange={(e) => handleChange('fee_currency', e.target.value)}
                 disabled={!isEditing || isViewOnly}
               >

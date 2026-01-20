@@ -24,6 +24,22 @@ const COLORS = ['#1e40af', '#1d4ed8', '#3b82f6', '#16a34a', '#dc2626', '#ea580c'
 
 const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isViewOnly = false }) => {
   const startupCurrency = useStartupCurrency(startup);
+  
+  // Log startup data to verify subsidiaries and internationalOps are loaded
+  useEffect(() => {
+    console.log('🏢 FinancialsTab received startup data:', {
+      id: startup.id,
+      name: startup.name,
+      country: startup.country_of_registration || startup.country,
+      hasSubsidiaries: !!startup.subsidiaries,
+      subsidiariesCount: startup.subsidiaries?.length || 0,
+      subsidiaries: startup.subsidiaries,
+      hasInternationalOps: !!startup.internationalOps,
+      internationalOpsCount: startup.internationalOps?.length || 0,
+      internationalOps: startup.internationalOps
+    });
+  }, [startup.id]);
+  
   const [filters, setFilters] = useState<FinancialFilters>({ 
     entity: 'all', 
     year: 'all' // Changed from new Date().getFullYear() to 'all' to show all years by default
@@ -65,7 +81,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
   // Form states
   const [formState, setFormState] = useState({
     date: '',
-    entity: 'Parent Company',
+    entity: `Parent Company${startup.country_of_registration || startup.country ? ` (${startup.country_of_registration || startup.country})` : ''}`,
     description: '',
     vertical: '',
     amount: '',
@@ -282,7 +298,43 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       setExpenses(expensesData);
       setRevenues(revenuesData);
       setSummary(summaryData);
-      setEntities(entitiesData);
+      
+      // Generate entities dynamically from profile data (Parent Company + Subsidiaries + International Operations)
+      const generatedEntities: string[] = [];
+      
+      // Always add Parent Company with country
+      const parentCountry = startup.country_of_registration || startup.country || '';
+      generatedEntities.push(`Parent Company${parentCountry ? ` (${parentCountry})` : ''}`);
+      
+      // Add subsidiaries if they exist
+      if (startup.subsidiaries && Array.isArray(startup.subsidiaries)) {
+        startup.subsidiaries.forEach((sub: any, index: number) => {
+          const subCountry = sub.country || '';
+          generatedEntities.push(`Subsidiary ${index}${subCountry ? ` (${subCountry})` : ''}`);
+        });
+      }
+      
+      // Add international operations if they exist
+      if (startup.internationalOps && Array.isArray(startup.internationalOps)) {
+        startup.internationalOps.forEach((op: any, index: number) => {
+          const opCountry = op.country || '';
+          generatedEntities.push(`International Operation ${index}${opCountry ? ` (${opCountry})` : ''}`);
+        });
+      }
+      
+      // Merge with entities from financial records (to show any legacy data)
+      const allEntities = [...new Set([...generatedEntities, ...entitiesData])];
+      
+      console.log('🏢 Generated entities:', {
+        parentCountry,
+        subsidiaries: startup.subsidiaries?.length || 0,
+        internationalOps: startup.internationalOps?.length || 0,
+        generatedEntities,
+        existingEntities: entitiesData,
+        mergedEntities: allEntities
+      });
+      
+      setEntities(allEntities);
       setVerticals(verticalsData);
       
       // Generate years from account creation to current year
@@ -435,7 +487,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
       // Reset form
       setFormState({
         date: '',
-        entity: 'Parent Company',
+        entity: `Parent Company${startup.country_of_registration || startup.country ? ` (${startup.country_of_registration || startup.country})` : ''}`,
         description: '',
         vertical: '',
         amount: '',
@@ -925,7 +977,9 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                 {entities.length > 0 ? entities.map(entity => (
                   <option key={entity} value={entity}>{entity}</option>
                 )) : (
-                  <option value="Parent Company">Parent Company</option>
+                  <option value={`Parent Company${startup.country_of_registration || startup.country ? ` (${startup.country_of_registration || startup.country})` : ''}`}>
+                    Parent Company{startup.country_of_registration || startup.country ? ` (${startup.country_of_registration || startup.country})` : ''}
+                  </option>
                 )}
               </Select>
               <div className="md:col-span-2">
@@ -1110,7 +1164,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                   setIsAddModalOpen(false);
                   setFormState({
                     date: '',
-                    entity: 'Parent Company',
+                    entity: `Parent Company${startup.country_of_registration || startup.country ? ` (${startup.country_of_registration || startup.country})` : ''}`,
                     description: '',
                     vertical: '',
                     amount: '',
@@ -1325,7 +1379,9 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({ startup, userRole, isView
                   {entities.length > 0 ? entities.map(entity => (
                     <option key={entity} value={entity}>{entity}</option>
                   )) : (
-                    <option value="Parent Company">Parent Company</option>
+                    <option value={`Parent Company${startup.country_of_registration || startup.country ? ` (${startup.country_of_registration || startup.country})` : ''}`}>
+                      Parent Company{startup.country_of_registration || startup.country ? ` (${startup.country_of_registration || startup.country})` : ''}
+                    </option>
                   )}
                 </Select>
                 <div className="md:col-span-2">

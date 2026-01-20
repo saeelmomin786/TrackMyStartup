@@ -15,6 +15,12 @@
       ]
     }
   ],
+  "crons": [
+    {
+      "path": "/api/cron/auto-renew-advisor-credits",
+      "schedule": "0 0 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/",

@@ -1742,6 +1742,8 @@ const App: React.FC = () => {
             totalRevenue: Number(row.total_revenue) || 0,
             registrationDate: row.registration_date || '', // Map registration_date to registrationDate
             currency: row.currency || undefined, // Will be set from profile if not in startup table
+            country_of_registration: row.country_of_registration || row.country,
+            country: row.country,
             founders: []
           } as any;
           // Load profile data to ensure currency and other profile fields are available
@@ -1751,6 +1753,15 @@ const App: React.FC = () => {
             if (profileData) {
               // Update startup with profile data including currency
               mappedStartup.profile = profileData;
+              // Add subsidiaries and international operations directly to startup object
+              mappedStartup.subsidiaries = profileData.subsidiaries || [];
+              mappedStartup.internationalOps = profileData.internationalOps || [];
+              console.log('✅ Subsidiaries loaded in initial fetch:', {
+                subsidiariesCount: profileData.subsidiaries?.length || 0,
+                internationalOpsCount: profileData.internationalOps?.length || 0,
+                subsidiaries: profileData.subsidiaries,
+                internationalOps: profileData.internationalOps
+              });
               // Priority: startup.currency > profile.currency > USD
               if (!mappedStartup.currency) {
                 mappedStartup.currency = profileData.currency || 'USD';
@@ -2468,6 +2479,9 @@ const App: React.FC = () => {
         pitchVideoUrl: fundraisingRow?.pitch_video_url || undefined,
         // Add profile data for ComplianceTab and ProfileTab
         profile: profileData,
+        // Add subsidiaries and international operations directly to startup object
+        subsidiaries: mappedSubsidiaries,
+        internationalOps: mappedInternationalOps,
         // Add direct profile fields for compatibility with components that check startup.country_of_registration
         country_of_registration: fetchedStartup.country_of_registration || fetchedStartup.country,
         company_type: fetchedStartup.company_type,

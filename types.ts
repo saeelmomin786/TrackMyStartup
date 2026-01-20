@@ -97,6 +97,10 @@ export interface Startup {
   esopReservedShares?: number; // Number of shares reserved for ESOP
   totalShares?: number; // Total number of shares issued
   pricePerShare?: number; // Current price per share
+  subsidiaries?: Subsidiary[]; // Subsidiaries with country and company type
+  internationalOps?: InternationalOp[]; // International operations
+  country_of_registration?: string; // Country where startup is registered
+  country?: string; // Alternative country field
 }
 
 export interface NewInvestment {

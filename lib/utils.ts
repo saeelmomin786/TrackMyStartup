@@ -467,7 +467,10 @@ export function normalizeCountryNameForDisplay(countryCodeOrName: string | null 
  * @returns The country code (e.g., "IN", "US") or null if not found
  */
 export function getCountryCodeFromName(countryName: string | null | undefined): string | null {
-  if (!countryName) return null;
+  // Gracefully handle null/undefined to avoid runtime trim() errors
+  if (!countryName || typeof countryName !== 'string') {
+    return null;
+  }
   
   // Country code to full name mapping (reverse lookup)
   const codeToNameMap: Record<string, string> = {

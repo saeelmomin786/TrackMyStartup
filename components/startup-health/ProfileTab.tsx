@@ -763,6 +763,9 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ startup, userRole, onProfileUpd
                             company_type: updatedProfile.companyType,
                             registration_date: updatedProfile.registrationDate,
                             currency: updatedProfile.currency, // Add currency directly to startup object
+                            // Add subsidiaries and internationalOps at top level so FinancialsTab can access them
+                            subsidiaries: updatedProfile.subsidiaries || [],
+                            internationalOps: updatedProfile.internationalOps || [],
                             profile: {
                                 country: updatedProfile.country,
                                 companyType: updatedProfile.companyType,

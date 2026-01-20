@@ -336,9 +336,14 @@ const FundraisingCRM = React.forwardRef<{
   }) => {
     // If investorData is provided, auto-add to CRM
     if (investorData) {
+      const safeName = (investorData.name || '').trim();
+      if (!safeName) {
+        messageService.warning('Required Fields', 'Please provide investor name.', 3000);
+        return;
+      }
       const newInvestor: InvestorCRM = {
         id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: investorData.name.trim(),
+        name: safeName,
         email: investorData.email || undefined, // Optional - no auto-generation
         status: 'to_be_contacted',
         amount: undefined,

@@ -1611,14 +1611,20 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   country: subsidiary.country,
                   company_type: subsidiary.companyType,
                   registration_date: subsidiary.registrationDate,
-                  ca_code: subsidiary.caCode || null,
-                  cs_code: subsidiary.csCode || null
+                  ca_service_code: subsidiary.caCode || null,
+                  cs_service_code: subsidiary.csCode || null
                 }));
 
               if (subsidiariesData.length > 0) {
-                await authService.supabase
+                const { error: subsidiariesError } = await authService.supabase
                   .from('subsidiaries')
                   .insert(subsidiariesData);
+                
+                if (subsidiariesError) {
+                  console.error('❌ Error saving subsidiaries:', subsidiariesError);
+                } else {
+                  console.log('✅ Subsidiaries saved successfully:', subsidiariesData.length);
+                }
               }
             }
 

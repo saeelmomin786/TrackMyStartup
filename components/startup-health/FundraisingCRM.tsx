@@ -6,6 +6,7 @@ import Modal from '../ui/Modal';
 import { Plus, Search, MoreVertical, Settings, HelpCircle, X, User, Calendar, DollarSign, FileText, ChevronRight, Edit2 } from 'lucide-react';
 import { messageService } from '../../lib/messageService';
 import { incubationProgramsService } from '../../lib/incubationProgramsService';
+import { fundraisingCRMService } from '../../lib/fundraisingCRMService';
 import { AddIncubationProgramData } from '../../types';
 import { featureAccessService } from '../../lib/featureAccessService';
 import SubscriptionPlansPage from '../SubscriptionPlansPage';
@@ -129,25 +130,56 @@ const FundraisingCRM = React.forwardRef<{
   const getDefaultStatusId = (columns: CRMStatusColumn[] = statusColumns) =>
     columns[0]?.id || DEFAULT_STATUS_COLUMNS[0].id;
 
-  const persistStatusColumns = (columns: CRMStatusColumn[]) => {
+  const persistStatusColumns = async (columns: CRMStatusColumn[]) => {
     setStatusColumns(columns);
-    localStorage.setItem(`crm_status_columns_${startupId}`, JSON.stringify(columns));
+    try {
+      // Delete all existing columns first
+      const existingColumns = await fundraisingCRMService.getColumns(startupId);
+      await Promise.all(existingColumns.map(col => fundraisingCRMService.deleteColumn(col.id)));
+      
+      // Insert new columns
+      for (let i = 0; i < columns.length; i++) {
+        await fundraisingCRMService.addColumn(startupId, {
+          label: columns[i].label,
+          color: columns[i].color,
+          position: i
+        });
+      }
+    } catch (error) {
+      console.error('Error persisting status columns:', error);
+      messageService.error('Save Failed', 'Could not save column configuration.', 3000);
+    }
   };
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(`crm_status_columns_${startupId}`);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setStatusColumns(parsed);
-          return;
+    const loadColumns = async () => {
+      try {
+        const columns = await fundraisingCRMService.getColumns(startupId);
+        if (columns.length > 0) {
+          const mappedColumns = columns.map(col => ({
+            id: col.id,
+            label: col.label,
+            color: col.color
+          }));
+          setStatusColumns(mappedColumns);
+        } else {
+          // No columns in DB, use defaults and save them
+          setStatusColumns(DEFAULT_STATUS_COLUMNS);
+          // Save default columns to database
+          for (let i = 0; i < DEFAULT_STATUS_COLUMNS.length; i++) {
+            await fundraisingCRMService.addColumn(startupId, {
+              label: DEFAULT_STATUS_COLUMNS[i].label,
+              color: DEFAULT_STATUS_COLUMNS[i].color,
+              position: i
+            });
+          }
         }
+      } catch (error) {
+        console.error('Error loading status columns:', error);
+        setStatusColumns(DEFAULT_STATUS_COLUMNS);
       }
-    } catch (error) {
-      console.error('Error loading status columns:', error);
-    }
-    setStatusColumns(DEFAULT_STATUS_COLUMNS);
+    };
+    loadColumns();
   }, [startupId]);
   
   // Legacy investors state for backward compatibility
@@ -191,6 +223,57 @@ const FundraisingCRM = React.forwardRef<{
     };
     checkAccess();
   }, [userId]);
+  
+  // ONE-TIME MIGRATION: Migrate data from localStorage to database
+  useEffect(() => {
+    const migrateLocalStorageData = async () => {
+      const migrationKey = `crm_migrated_${startupId}`;
+      const alreadyMigrated = localStorage.getItem(migrationKey);
+      
+      if (alreadyMigrated === 'true') {
+        return; // Already migrated
+      }
+      
+      try {
+        // Check if there's any data to migrate
+        const columnsStored = localStorage.getItem(`crm_status_columns_${startupId}`);
+        const investorsStored = localStorage.getItem(`crm_investors_${startupId}`);
+        const programsMetadataStored = localStorage.getItem(`crm_programs_${startupId}`);
+        
+        if (!columnsStored && !investorsStored && !programsMetadataStored) {
+          // No data to migrate
+          localStorage.setItem(migrationKey, 'true');
+          return;
+        }
+        
+        const columns = columnsStored ? JSON.parse(columnsStored) : null;
+        const investors = investorsStored ? JSON.parse(investorsStored) : null;
+        const programsMetadata = programsMetadataStored ? JSON.parse(programsMetadataStored) : null;
+        
+        // Perform migration
+        const result = await fundraisingCRMService.migrateFromLocalStorage(startupId, {
+          columns,
+          investors,
+          programsMetadata
+        });
+        
+        if (result.success) {
+          console.log('✅ CRM data migrated successfully from localStorage to database');
+          localStorage.setItem(migrationKey, 'true');
+          // Optionally clear old localStorage data
+          // localStorage.removeItem(`crm_status_columns_${startupId}`);
+          // localStorage.removeItem(`crm_investors_${startupId}`);
+          // localStorage.removeItem(`crm_programs_${startupId}`);
+        } else {
+          console.warn('⚠️ CRM migration failed:', result.message);
+        }
+      } catch (error) {
+        console.error('Error migrating CRM data:', error);
+      }
+    };
+    
+    migrateLocalStorageData();
+  }, [startupId]);
   
   // Grant/Incubation Program modal states
   const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
@@ -376,40 +459,74 @@ const FundraisingCRM = React.forwardRef<{
   const loadCRMItems = async () => {
     try {
       const fallbackStatus = getDefaultStatusId();
-      // Load investors from localStorage
-      const investorsStored = localStorage.getItem(`crm_investors_${startupId}`);
-      const investors: InvestorCRM[] = investorsStored ? JSON.parse(investorsStored).map((inv: any) => ({ ...inv, type: 'investor' as const })) : [];
+      
+      // Load investors from database
+      const investorsFromDB = await fundraisingCRMService.getInvestors(startupId);
+      const investors: InvestorCRM[] = [];
+      
+      for (const inv of investorsFromDB) {
+        // Load metadata for each investor
+        const metadataList = await fundraisingCRMService.getMetadata(startupId, inv.id, 'investor');
+        const metadata = metadataList[0] || null;
+        
+        // Load attachments
+        const attachments = await fundraisingCRMService.getAttachments(startupId, inv.id, 'investor');
+        
+        investors.push({
+          id: inv.id,
+          name: inv.name,
+          email: inv.email,
+          status: metadata?.status || fallbackStatus,
+          amount: inv.amount?.toString(),
+          priority: metadata?.priority || 'medium',
+          pitchDeckUrl: inv.pitchDeckUrl,
+          notes: metadata?.notes,
+          approach: metadata?.approach,
+          firstContact: metadata?.firstContact,
+          tags: metadata?.tags,
+          attachments: attachments.length > 0 ? attachments.map(a => ({ id: a.id, title: a.title, url: a.url })) : undefined,
+          createdAt: inv.createdAt,
+          type: 'investor' as const
+        });
+      }
       
       // Load programs from database
       const programs = await incubationProgramsService.getIncubationPrograms(startupId);
-      const programCRMItems: ProgramCRM[] = programs.map(prog => ({
-        id: `program_${prog.id}`,
-        programName: prog.programName,
-        programType: prog.programType,
-        status: fallbackStatus, // Default status, can be stored separately
-        priority: 'medium' as const,
-        notes: prog.description,
-        startDate: prog.startDate || undefined, // Optional - can be undefined
-        endDate: prog.endDate || undefined, // Optional - can be undefined
-        description: prog.description,
-        mentorName: prog.mentorName,
-        mentorEmail: prog.mentorEmail,
-        programUrl: prog.programUrl,
-        createdAt: prog.createdAt,
-        type: 'program' as const,
-      }));
+      const programCRMItems: ProgramCRM[] = [];
       
-      // Also load program CRM metadata from localStorage
-      const programsMetadataStored = localStorage.getItem(`crm_programs_${startupId}`);
-      const programsMetadata: Record<string, Partial<ProgramCRM>> = programsMetadataStored ? JSON.parse(programsMetadataStored) : {};
+      for (const prog of programs) {
+        const programId = `program_${prog.id}`;
+        
+        // Load metadata for each program
+        const metadataList = await fundraisingCRMService.getMetadata(startupId, programId, 'program');
+        const metadata = metadataList[0] || null;
+        
+        // Load attachments
+        const attachments = await fundraisingCRMService.getAttachments(startupId, programId, 'program');
+        
+        programCRMItems.push({
+          id: programId,
+          programName: prog.programName,
+          programType: prog.programType,
+          status: metadata?.status || fallbackStatus,
+          priority: metadata?.priority || 'medium',
+          approach: metadata?.approach,
+          firstContact: metadata?.firstContact,
+          notes: metadata?.notes || prog.description,
+          startDate: prog.startDate || undefined,
+          endDate: prog.endDate || undefined,
+          description: prog.description,
+          mentorName: prog.mentorName,
+          mentorEmail: prog.mentorEmail,
+          programUrl: prog.programUrl,
+          tags: metadata?.tags,
+          attachments: attachments.length > 0 ? attachments.map(a => ({ id: a.id, title: a.title, url: a.url })) : undefined,
+          createdAt: prog.createdAt,
+          type: 'program' as const
+        });
+      }
       
-      // Merge program data with metadata
-      const mergedPrograms = programCRMItems.map(prog => {
-        const metadata = programsMetadata[prog.id] || {};
-        return { ...prog, ...metadata };
-      });
-      
-      setCrmItems([...investors, ...mergedPrograms]);
+      setCrmItems([...investors, ...programCRMItems]);
     } catch (error) {
       console.error('Error loading CRM items:', error);
     }
@@ -417,12 +534,31 @@ const FundraisingCRM = React.forwardRef<{
 
   const saveInvestors = async (updatedInvestors: InvestorCRM[]) => {
     try {
-      const investorsWithoutType = updatedInvestors.map(({ type, ...rest }) => rest);
-      localStorage.setItem(`crm_investors_${startupId}`, JSON.stringify(investorsWithoutType));
-      
-      // Update CRM items
+      // Update CRM items immediately for UI responsiveness
       const programs = crmItems.filter(item => item.type === 'program');
       setCrmItems([...updatedInvestors, ...programs]);
+      
+      // Save to database in the background
+      for (const inv of updatedInvestors) {
+        await fundraisingCRMService.updateInvestor(inv.id, {
+          name: inv.name,
+          email: inv.email,
+          amount: inv.amount ? parseFloat(inv.amount) : undefined,
+          pitchDeckUrl: inv.pitchDeckUrl
+        });
+        
+        // Update metadata
+        await fundraisingCRMService.upsertMetadata(startupId, {
+          itemId: inv.id,
+          itemType: 'investor',
+          status: inv.status,
+          priority: inv.priority,
+          approach: inv.approach,
+          firstContact: inv.firstContact,
+          notes: inv.notes,
+          tags: inv.tags || []
+        });
+      }
     } catch (error) {
       console.error('Error saving investors:', error);
       messageService.error('Save Failed', 'Could not save investor data.', 3000);
@@ -431,12 +567,19 @@ const FundraisingCRM = React.forwardRef<{
 
   const saveProgramsMetadata = async (programId: string, metadata: Partial<ProgramCRM>) => {
     try {
-      const programsMetadataStored = localStorage.getItem(`crm_programs_${startupId}`);
-      const programsMetadata: Record<string, Partial<ProgramCRM>> = programsMetadataStored ? JSON.parse(programsMetadataStored) : {};
-      programsMetadata[programId] = { ...programsMetadata[programId], ...metadata };
-      localStorage.setItem(`crm_programs_${startupId}`, JSON.stringify(programsMetadata));
+      // Update metadata in database
+      await fundraisingCRMService.upsertMetadata(startupId, {
+        itemId: programId,
+        itemType: 'program',
+        status: metadata.status || 'to_be_contacted',
+        priority: metadata.priority || 'medium',
+        approach: metadata.approach,
+        firstContact: metadata.firstContact,
+        notes: metadata.notes,
+        tags: metadata.tags || []
+      });
       
-      // Update CRM items
+      // Update CRM items for immediate UI feedback
       setCrmItems(prev => prev.map(item => 
         item.id === programId ? { ...item, ...metadata } : item
       ));
@@ -494,136 +637,198 @@ const FundraisingCRM = React.forwardRef<{
 
   const searchPlaceholder = activeCrmTab === 'investor' ? 'Search investors' : 'Search programs';
 
-  const handleAddInvestor = (investorData?: {
+  const handleAddInvestor = async (investorData?: {
     name: string;
     email?: string;
     website?: string;
     linkedin?: string;
   }) => {
-    // If investorData is provided, auto-add to CRM
-    if (investorData) {
-      const safeName = (investorData.name || '').trim();
-      if (!safeName) {
-        messageService.warning('Required Fields', 'Please provide investor name.', 3000);
+    try {
+      // If investorData is provided, auto-add to CRM
+      if (investorData) {
+        const safeName = (investorData.name || '').trim();
+        if (!safeName) {
+          messageService.warning('Required Fields', 'Please provide investor name.', 3000);
+          return;
+        }
+        
+        // Save to database
+        const savedInvestor = await fundraisingCRMService.addInvestor(startupId, {
+          name: safeName,
+          email: investorData.email || undefined
+        });
+        
+        // Save metadata
+        const notes = investorData.website || investorData.linkedin 
+          ? `Website: ${investorData.website || ''}\nLinkedIn: ${investorData.linkedin || ''}` 
+          : undefined;
+          
+        await fundraisingCRMService.upsertMetadata(startupId, {
+          itemId: savedInvestor.id,
+          itemType: 'investor',
+          status: getDefaultStatusId(),
+          priority: 'medium',
+          notes
+        });
+        
+        // Reload CRM items
+        await loadCRMItems();
+        messageService.success('Investor Added', `${safeName} has been added to your CRM.`, 3000);
+        
+        // Call callback if provided
+        if (onInvestorAdded) {
+          const newInvestor: InvestorCRM = {
+            id: savedInvestor.id,
+            name: savedInvestor.name,
+            email: savedInvestor.email,
+            status: getDefaultStatusId(),
+            amount: undefined,
+            priority: 'medium',
+            pitchDeckUrl: savedInvestor.pitchDeckUrl,
+            notes,
+            approach: undefined,
+            firstContact: undefined,
+            tags: undefined,
+            createdAt: savedInvestor.createdAt,
+            type: 'investor'
+          };
+          onInvestorAdded(newInvestor);
+        }
         return;
       }
-      const newInvestor: InvestorCRM = {
-        id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: safeName,
-        email: investorData.email || undefined, // Optional - no auto-generation
-        status: getDefaultStatusId(),
-        amount: undefined,
-        priority: 'medium',
-        pitchDeckUrl: undefined,
-        notes: investorData.website || investorData.linkedin ? `Website: ${investorData.website || ''}\nLinkedIn: ${investorData.linkedin || ''}` : undefined,
-        approach: undefined,
-        firstContact: undefined,
-        tags: undefined,
-        createdAt: new Date().toISOString(),
-        type: 'investor',
-      };
 
-      const updated = [...investors, newInvestor];
-      saveInvestors(updated);
-      messageService.success('Investor Added', `${newInvestor.name} has been added to your CRM.`, 3000);
+      // Normal form submission
+      if (!formData.name.trim()) {
+        messageService.warning('Required Fields', 'Please fill in investor name.', 3000);
+        return;
+      }
+
+      // Save investor to database
+      const savedInvestor = await fundraisingCRMService.addInvestor(startupId, {
+        name: formData.name.trim(),
+        email: formData.email?.trim() || undefined,
+        amount: formData.amount ? parseFloat(formData.amount) : undefined,
+        pitchDeckUrl: formData.pitchDeckUrl || undefined
+      });
+      
+      // Save metadata
+      await fundraisingCRMService.upsertMetadata(startupId, {
+        itemId: savedInvestor.id,
+        itemType: 'investor',
+        status: formData.status,
+        priority: formData.priority,
+        approach: formData.approach || undefined,
+        firstContact: formData.firstContact || undefined,
+        notes: formData.notes || undefined,
+        tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+      });
+      
+      // Save attachment if provided
+      if (formData.attachmentUrl.trim()) {
+        await fundraisingCRMService.addAttachment(startupId, {
+          itemId: savedInvestor.id,
+          itemType: 'investor',
+          title: formData.attachmentTitle.trim() || 'Attachment',
+          url: formData.attachmentUrl.trim()
+        });
+      }
+      
+      // Reload CRM items
+      await loadCRMItems();
+      setIsAddModalOpen(false);
+      resetForm();
+      messageService.success('Investor Added', `${savedInvestor.name} has been added to your CRM.`, 3000);
       
       // Call callback if provided
       if (onInvestorAdded) {
+        const newInvestor: InvestorCRM = {
+          id: savedInvestor.id,
+          name: savedInvestor.name,
+          email: savedInvestor.email,
+          status: formData.status,
+          amount: formData.amount || undefined,
+          priority: formData.priority,
+          pitchDeckUrl: savedInvestor.pitchDeckUrl,
+          notes: formData.notes || undefined,
+          approach: formData.approach || undefined,
+          firstContact: formData.firstContact || undefined,
+          tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+          createdAt: savedInvestor.createdAt,
+          type: 'investor'
+        };
         onInvestorAdded(newInvestor);
       }
-      return;
-    }
-
-    // Normal form submission
-    if (!formData.name.trim()) {
-      messageService.warning('Required Fields', 'Please fill in investor name.', 3000);
-      return;
-    }
-
-    const attachments = formData.attachmentUrl.trim()
-      ? [{ id: `att_${Date.now()}`, title: formData.attachmentTitle.trim() || 'Attachment', url: formData.attachmentUrl.trim() }]
-      : undefined;
-
-    const newInvestor: InvestorCRM = {
-      id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: formData.name.trim(),
-      email: formData.email?.trim() || undefined,
-      status: formData.status,
-      amount: formData.amount || undefined,
-      priority: formData.priority,
-      pitchDeckUrl: formData.pitchDeckUrl || undefined,
-      notes: formData.notes || undefined,
-      approach: formData.approach || undefined,
-      firstContact: formData.firstContact || undefined,
-      tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
-      attachments,
-      createdAt: new Date().toISOString(),
-      type: 'investor',
-    };
-
-    const updated = [...investors, newInvestor];
-    saveInvestors(updated);
-    setIsAddModalOpen(false);
-    resetForm();
-    messageService.success('Investor Added', `${newInvestor.name} has been added to your CRM.`, 3000);
-    
-    // Call callback if provided
-    if (onInvestorAdded) {
-      onInvestorAdded(newInvestor);
+    } catch (error) {
+      console.error('Error adding investor:', error);
+      messageService.error('Failed', 'Could not add investor. Please try again.', 3000);
     }
   };
 
-  const handleUpdateInvestor = () => {
+  const handleUpdateInvestor = async () => {
     if (!selectedItem || selectedItem.type !== 'investor') return;
 
-    const existingAttachments = selectedItem.attachments || [];
-    const nextAttachments = formData.attachmentUrl.trim()
-      ? [...existingAttachments, { id: `att_${Date.now()}`, title: formData.attachmentTitle.trim() || 'Attachment', url: formData.attachmentUrl.trim() }]
-      : existingAttachments;
-
-      const updated = investors.map(inv =>
-        inv.id === selectedItem.id
-          ? {
-              ...inv,
-              name: formData.name.trim(),
-              email: formData.email?.trim() || undefined,
-              status: formData.status,
-              amount: formData.amount || undefined,
-              priority: formData.priority,
-              pitchDeckUrl: formData.pitchDeckUrl || undefined,
-              notes: formData.notes || undefined,
-              approach: formData.approach || undefined,
-              firstContact: formData.firstContact || undefined,
-              tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
-              attachments: nextAttachments,
-            }
-          : inv
-      );
-
-    saveInvestors(updated);
-    setIsEditModalOpen(false);
-    setSelectedItem(null);
-    resetForm();
-    messageService.success('Updated', 'Investor details updated successfully.', 3000);
+    try {
+      // Update investor in database
+      await fundraisingCRMService.updateInvestor(selectedItem.id, {
+        name: formData.name.trim(),
+        email: formData.email?.trim() || undefined,
+        amount: formData.amount ? parseFloat(formData.amount) : undefined,
+        pitchDeckUrl: formData.pitchDeckUrl || undefined
+      });
+      
+      // Update metadata
+      await fundraisingCRMService.upsertMetadata(startupId, {
+        itemId: selectedItem.id,
+        itemType: 'investor',
+        status: formData.status,
+        priority: formData.priority,
+        approach: formData.approach || undefined,
+        firstContact: formData.firstContact || undefined,
+        notes: formData.notes || undefined,
+        tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+      });
+      
+      // Add new attachment if provided
+      if (formData.attachmentUrl.trim()) {
+        await fundraisingCRMService.addAttachment(startupId, {
+          itemId: selectedItem.id,
+          itemType: 'investor',
+          title: formData.attachmentTitle.trim() || 'Attachment',
+          url: formData.attachmentUrl.trim()
+        });
+      }
+      
+      // Reload CRM items
+      await loadCRMItems();
+      setIsEditModalOpen(false);
+      setSelectedItem(null);
+      resetForm();
+      messageService.success('Updated', 'Investor details updated successfully.', 3000);
+    } catch (error) {
+      console.error('Error updating investor:', error);
+      messageService.error('Failed', 'Could not update investor.', 3000);
+    }
   };
 
-  const handleDeleteItem = (id: string, type: 'investor' | 'program') => {
+  const handleDeleteItem = async (id: string, type: 'investor' | 'program') => {
     if (!confirm(`Are you sure you want to remove this ${type} from CRM?`)) return;
     
-    if (type === 'investor') {
-      const updated = investors.filter(inv => inv.id !== id);
-      saveInvestors(updated);
-      messageService.success('Removed', 'Investor removed from CRM.', 2000);
-    } else {
-      // For programs, we can remove from CRM tracking but keep in database
-      const updated = crmItems.filter(item => item.id !== id);
-      setCrmItems(updated);
-      // Also remove from metadata
-      const programsMetadataStored = localStorage.getItem(`crm_programs_${startupId}`);
-      const programsMetadata: Record<string, Partial<ProgramCRM>> = programsMetadataStored ? JSON.parse(programsMetadataStored) : {};
-      delete programsMetadata[id];
-      localStorage.setItem(`crm_programs_${startupId}`, JSON.stringify(programsMetadata));
-      messageService.success('Removed', 'Program removed from CRM tracking.', 2000);
+    try {
+      if (type === 'investor') {
+        // Delete from database
+        await fundraisingCRMService.deleteInvestor(id);
+        // Metadata and attachments will be cascade deleted by DB
+        await loadCRMItems();
+        messageService.success('Removed', 'Investor removed from CRM.', 2000);
+      } else {
+        // For programs, only remove metadata (keep program in incubation_programs table)
+        await fundraisingCRMService.deleteMetadata(id, 'program');
+        await loadCRMItems();
+        messageService.success('Removed', 'Program removed from CRM tracking.', 2000);
+      }
+    } catch (error) {
+      console.error('Error deleting item:', error);
+      messageService.error('Failed', 'Could not remove item.', 3000);
     }
   };
 

@@ -283,7 +283,7 @@ const App: React.FC = () => {
   };
 
   const deleteCookie = (name: string) => {
-    document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;`;
+    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
   };
 
   // Initialize view from cookie or default to dashboard
@@ -990,8 +990,6 @@ const App: React.FC = () => {
       }
     };
 
-    initializeAuth();
-
     // Visibility/focus handlers: DISABLED to prevent reload on tab switch
     // The old version didn't refresh on tab switch - only on actual long absences
     // We'll keep the tracking but not trigger refresh automatically
@@ -1021,46 +1019,6 @@ const App: React.FC = () => {
     document.addEventListener('visibilitychange', visibilityHandler);
     window.addEventListener('focus', debouncedFocus);
     window.addEventListener('blur', onBlur);
-
-    // Mobile-safe: proactively check for an existing session and set a
-    // conservative fallback to avoid premature redirects on slower devices.
-    let __initialLoadTimeout: any = null;
-    (async () => {
-      try {
-        const { data } = await authService.supabase.auth.getSession();
-        if (!data?.session) {
-          // Recheck once after a brief delay before scheduling final fallback
-          setTimeout(async () => {
-            try {
-              const again = await authService.supabase.auth.getSession();
-              if (again.data?.session) return; // session appeared; let listener handle it
-              __initialLoadTimeout = setTimeout(() => {
-                if (isMounted && !isAuthenticatedRef.current && !currentUserRef.current) {
-                  // Don't redirect if user is on reset-password page (might be invite flow)
-                  const isResetPasswordPage = currentPage === 'reset-password' || 
-                                             window.location.href.includes('reset-password') ||
-                                             getQueryParam('page') === 'reset-password';
-                  const hasAdvisorCode = getQueryParam('advisorCode');
-                  
-                  if (isResetPasswordPage && hasAdvisorCode) {
-                    // This is an invite flow - don't redirect, let user enter OTP
-                    console.log('📧 Invite flow detected, skipping auto-redirect to login');
-                    setIsLoading(false);
-                    return;
-                  }
-                  
-                  setIsLoading(false);
-                  // Don't redirect if user is on public pages (landing, login, register, reset-password)
-                  if (currentPage !== 'login' && currentPage !== 'register' && currentPage !== 'landing' && !isResetPasswordPage) {
-                    setCurrentPage('login');
-                  }
-                }
-              }, 20000); // 20s final fallback for mobile
-            } catch {}
-          }, 2000); // 2s recheck window
-        }
-      } catch {}
-    })();
 
     // Track if we received any auth event on first load
     let __initialAuthEventReceived = false;
@@ -1604,37 +1562,12 @@ const App: React.FC = () => {
     // After listener is attached, kick off initialization (prevents mobile race)
     initializeAuth();
 
-    // Fallback: if no auth event arrives shortly but a session exists, bootstrap manually
-    setTimeout(async () => {
-      try {
-        if (!__initialAuthEventReceived && !isAuthenticatedRef.current) {
-          const { data } = await authService.supabase.auth.getSession();
-          if (data?.session) {
-            try {
-              const completeUser = await authService.getCurrentUser();
-              if (completeUser) {
-                setCurrentUser(completeUser);
-                setIsAuthenticated(true);
-                setIsLoading(false);
-                if (!hasInitialDataLoadedRef.current) {
-                  fetchData().catch(() => {});
-                }
-              }
-            } catch (e) {
-              // ignore; normal flow will handle later
-            }
-          }
-        }
-      } catch {}
-    }, 2000);
-
     return () => {
       isMounted = false;
       subscription?.unsubscribe();
       document.removeEventListener('visibilitychange', visibilityHandler);
       window.removeEventListener('focus', debouncedFocus);
       window.removeEventListener('blur', onBlur);
-      if (__initialLoadTimeout) clearTimeout(__initialLoadTimeout);
     };
   }, []);
 
@@ -1858,7 +1791,10 @@ const App: React.FC = () => {
            startupPromise,
            investmentService.getNewInvestments(),
          userService.getStartupAdditionRequests(),
-         userService.getAllUsers(),
+         // Fetch all users if user is Admin or Investment Advisor (advisors need users to match startups with their profiles)
+         (currentUserRef.current?.role === 'Admin' || currentUserRef.current?.role === 'Investment Advisor') 
+           ? userService.getAllUsers() 
+           : Promise.resolve([]),
          verificationService.getVerificationRequests(),
          currentUserRef.current?.role === 'Investor' 
            ? investmentService.getUserInvestmentOffers(currentUserRef.current.email)

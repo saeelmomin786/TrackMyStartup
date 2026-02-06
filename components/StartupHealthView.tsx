@@ -1209,19 +1209,11 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                         .limit(1)
                         .maybeSingle();
                     
-                    // If not found in user_profiles, try users table (old registrations)
-                    if (!profileData) {
-                        const { data: userData } = await supabase
-                            .from('users')
-                            .select('investment_advisor_code_entered')
-                            .eq('id', user.id)
-                            .maybeSingle();
-                        
-                        if (userData) {
-                            setUserInvestmentAdvisorCode(userData.investment_advisor_code_entered);
-                        }
-                    } else {
+                    if (profileData) {
                         setUserInvestmentAdvisorCode(profileData.investment_advisor_code_entered);
+                    } else {
+                        console.warn('⚠️ No profile data found for auth user; advisor code unavailable');
+                        setUserInvestmentAdvisorCode('');
                     }
                 } catch (error) {
                     console.error('Error refreshing startup/user data:', error);
@@ -1307,27 +1299,12 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             o.startupName === currentStartup.name
         );
         
-        // Debug logging
-        if (process.env.NODE_ENV === 'development') {
-            console.log('🔍 StartupHealthView - Filtering offer:', {
-                offerId: o.id,
-                offerStartupId: o.startupId,
-                offerStartupName: o.startupName,
-                currentStartupId: currentStartup.id,
-                currentStartupName: currentStartup.name,
-                matches: matches,
-                stage: (o as any).stage
-            });
-        }
-        
         return matches;
     });
 
     // Keep local offers in sync when props change
     useEffect(() => {
         if (investmentOffers && investmentOffers.length > 0) {
-            console.log('🔍 StartupHealthView - Investment offers prop changed:', investmentOffers);
-            console.log('🔍 StartupHealthView - Offers count:', investmentOffers.length);
             setLocalOffers(investmentOffers);
         }
     }, [investmentOffers]);
@@ -1867,16 +1844,8 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         let cancelled = false;
         const shouldFetch = (investmentOffers?.length || 0) === 0 && currentStartup?.id;
         
-        console.log('🔍 StartupHealthView - Fallback fetch check:', {
-            investmentOffersLength: investmentOffers?.length || 0,
-            currentStartupId: currentStartup?.id,
-            shouldFetch: shouldFetch
-        });
-        
         if (shouldFetch) {
-            console.log('🔍 StartupHealthView - Fetching offers for startup:', currentStartup.id);
             investmentService.getOffersForStartup(currentStartup.id).then(rows => {
-                console.log('🔍 StartupHealthView - Fetched offers:', rows);
                 if (!cancelled) setLocalOffers(rows as any);
             }).catch((error) => {
                 console.error('🔍 StartupHealthView - Error fetching offers:', error);

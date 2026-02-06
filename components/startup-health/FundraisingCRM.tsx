@@ -5,17 +5,49 @@ import Input from '../ui/Input';
 import Modal from '../ui/Modal';
 import { Plus, Search, MoreVertical, Settings, HelpCircle, X, User, Calendar, DollarSign, FileText, ChevronRight, Edit2 } from 'lucide-react';
 import { messageService } from '../../lib/messageService';
-import { supabase } from '../../lib/supabase';
 import { incubationProgramsService } from '../../lib/incubationProgramsService';
 import { AddIncubationProgramData } from '../../types';
 import { featureAccessService } from '../../lib/featureAccessService';
 import SubscriptionPlansPage from '../SubscriptionPlansPage';
 
+type CRMStatusId = string;
+
+type CRMStatusColumn = {
+  id: CRMStatusId;
+  label: string;
+  color: string;
+};
+
+type CRMAttachment = {
+  id: string;
+  title: string;
+  url: string;
+};
+
+const DEFAULT_STATUS_COLUMNS: CRMStatusColumn[] = [
+  { id: 'to_be_contacted', label: 'To be contacted', color: 'bg-slate-100' },
+  { id: 'reached_out', label: 'Reached out', color: 'bg-blue-50' },
+  { id: 'in_progress', label: 'In progress', color: 'bg-yellow-50' },
+  { id: 'committed', label: 'Committed', color: 'bg-green-50' },
+  { id: 'not_happening', label: 'Not happening', color: 'bg-red-50' },
+];
+
+const STATUS_COLOR_CHOICES = [
+  'bg-slate-100',
+  'bg-blue-50',
+  'bg-yellow-50',
+  'bg-green-50',
+  'bg-red-50',
+  'bg-indigo-50',
+  'bg-purple-50',
+  'bg-orange-50',
+];
+
 interface InvestorCRM {
   id: string;
   name: string;
   email?: string; // Optional
-  status: 'to_be_contacted' | 'reached_out' | 'in_progress' | 'committed' | 'not_happening';
+  status: CRMStatusId;
   amount?: string;
   priority: 'low' | 'medium' | 'high';
   pitchDeckUrl?: string;
@@ -23,6 +55,7 @@ interface InvestorCRM {
   approach?: string;
   firstContact?: string;
   tags?: string[];
+  attachments?: CRMAttachment[];
   createdAt: string;
   type: 'investor';
 }
@@ -31,7 +64,7 @@ interface ProgramCRM {
   id: string;
   programName: string;
   programType: 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp';
-  status: 'to_be_contacted' | 'reached_out' | 'in_progress' | 'committed' | 'not_happening';
+  status: CRMStatusId;
   priority: 'low' | 'medium' | 'high';
   notes?: string;
   approach?: string;
@@ -43,6 +76,7 @@ interface ProgramCRM {
   mentorEmail?: string;
   programUrl?: string;
   tags?: string[];
+  attachments?: CRMAttachment[];
   createdAt: string;
   type: 'program';
 }
@@ -61,14 +95,6 @@ interface FundraisingCRMProps {
     linkedin?: string;
   }) => void;
 }
-
-const STATUS_COLUMNS = [
-  { id: 'to_be_contacted', label: 'To be contacted', color: 'bg-slate-100' },
-  { id: 'reached_out', label: 'Reached out', color: 'bg-blue-50' },
-  { id: 'in_progress', label: 'In progress', color: 'bg-yellow-50' },
-  { id: 'committed', label: 'Committed', color: 'bg-green-50' },
-  { id: 'not_happening', label: 'Not happening', color: 'bg-red-50' },
-] as const;
 
 const PRIORITY_COLORS = {
   low: 'bg-slate-100 text-slate-700',
@@ -89,9 +115,64 @@ const FundraisingCRM = React.forwardRef<{
   const [isAddingProgram, setIsAddingProgram] = useState(false);
   const [hasCrmAccess, setHasCrmAccess] = useState<boolean | null>(null);
   const [showPlans, setShowPlans] = useState(false);
+  const [activeCrmTab, setActiveCrmTab] = useState<'investor' | 'program'>('investor');
+  const [statusColumns, setStatusColumns] = useState<CRMStatusColumn[]>(DEFAULT_STATUS_COLUMNS);
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [newStatusName, setNewStatusName] = useState('');
+  const [newStatusColor, setNewStatusColor] = useState<string>(STATUS_COLOR_CHOICES[0]);
+  const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
+  const [editColumnName, setEditColumnName] = useState('');
+  const [editColumnColor, setEditColumnColor] = useState('');
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [quickNoteText, setQuickNoteText] = useState('');
+
+  const getDefaultStatusId = (columns: CRMStatusColumn[] = statusColumns) =>
+    columns[0]?.id || DEFAULT_STATUS_COLUMNS[0].id;
+
+  const persistStatusColumns = (columns: CRMStatusColumn[]) => {
+    setStatusColumns(columns);
+    localStorage.setItem(`crm_status_columns_${startupId}`, JSON.stringify(columns));
+  };
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`crm_status_columns_${startupId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setStatusColumns(parsed);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error loading status columns:', error);
+    }
+    setStatusColumns(DEFAULT_STATUS_COLUMNS);
+  }, [startupId]);
   
   // Legacy investors state for backward compatibility
   const investors = crmItems.filter(item => item.type === 'investor') as InvestorCRM[];
+  const investorCount = useMemo(() => crmItems.filter(item => item.type === 'investor').length, [crmItems]);
+  const programCount = useMemo(() => crmItems.filter(item => item.type === 'program').length, [crmItems]);
+
+  useEffect(() => {
+    const validStatuses = new Set(statusColumns.map(col => col.id));
+    const fallbackStatus = getDefaultStatusId(statusColumns);
+
+    setCrmItems(prev =>
+      prev.map(item =>
+        validStatuses.has(item.status) ? item : { ...item, status: fallbackStatus }
+      )
+    );
+
+    setFormData(prev =>
+      validStatuses.has(prev.status) ? prev : { ...prev, status: fallbackStatus }
+    );
+
+    setProgramFormData(prev =>
+      validStatuses.has(prev.status) ? prev : { ...prev, status: fallbackStatus }
+    );
+  }, [statusColumns]);
   
   // Check CRM access
   useEffect(() => {
@@ -116,7 +197,7 @@ const FundraisingCRM = React.forwardRef<{
   const [programFormData, setProgramFormData] = useState({
     programName: '',
     programType: 'Grant' as 'Grant' | 'Incubation' | 'Acceleration' | 'Mentorship' | 'Bootcamp',
-    status: 'to_be_contacted' as 'to_be_contacted' | 'reached_out' | 'in_progress' | 'committed' | 'not_happening',
+    status: getDefaultStatusId(),
     priority: 'medium' as 'low' | 'medium' | 'high',
     approach: '',
     firstContact: '',
@@ -128,13 +209,15 @@ const FundraisingCRM = React.forwardRef<{
     mentorEmail: '',
     programUrl: '',
     tags: '',
+    attachmentTitle: '',
+    attachmentUrl: '',
   });
 
   // Form state for investors
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    status: 'to_be_contacted' as InvestorCRM['status'],
+    status: getDefaultStatusId(),
     amount: '',
     priority: 'medium' as InvestorCRM['priority'],
     pitchDeckUrl: '',
@@ -142,6 +225,8 @@ const FundraisingCRM = React.forwardRef<{
     approach: '',
     firstContact: '',
     tags: '',
+    attachmentTitle: '',
+    attachmentUrl: '',
   });
 
   useEffect(() => {
@@ -159,6 +244,7 @@ const FundraisingCRM = React.forwardRef<{
     try {
       // Determine program type - default to Grant if not specified
       const programType = programData.programType || 'Grant';
+      const fallbackStatus = getDefaultStatusId();
       
       // Save to database
       const addProgramData: AddIncubationProgramData = {
@@ -176,7 +262,7 @@ const FundraisingCRM = React.forwardRef<{
         id: `program_${savedProgram.id}`,
         programName: savedProgram.programName,
         programType: savedProgram.programType,
-        status: 'to_be_contacted',
+        status: fallbackStatus,
         priority: 'medium',
         approach: undefined,
         firstContact: undefined,
@@ -194,7 +280,7 @@ const FundraisingCRM = React.forwardRef<{
       
       // Save CRM metadata
       await saveProgramsMetadata(programCRMItem.id, {
-        status: 'to_be_contacted',
+        status: fallbackStatus,
         priority: 'medium',
       });
       
@@ -217,8 +303,79 @@ const FundraisingCRM = React.forwardRef<{
     }
   }), [investors, startupId]);
 
+  const slugifyStatus = (label: string) =>
+    label
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || `custom_${Date.now()}`;
+
+  const handleAddStatusColumn = () => {
+    if (!hasCrmAccess) {
+      setShowPlans(true);
+      return;
+    }
+    const trimmed = newStatusName.trim();
+    if (!trimmed) {
+      messageService.warning('Column name required', 'Please enter a column name.', 2500);
+      return;
+    }
+
+    const baseId = slugifyStatus(trimmed);
+    let uniqueId = baseId;
+    let counter = 1;
+    while (statusColumns.some(col => col.id === uniqueId)) {
+      uniqueId = `${baseId}_${counter++}`;
+    }
+
+    const nextColor = newStatusColor || STATUS_COLOR_CHOICES[0];
+    const updated = [...statusColumns, { id: uniqueId, label: trimmed, color: nextColor }];
+    persistStatusColumns(updated);
+    setNewStatusName('');
+    setNewStatusColor(STATUS_COLOR_CHOICES[updated.length % STATUS_COLOR_CHOICES.length]);
+    messageService.success('Column added', `${trimmed} created for CRM.`, 2000);
+  };
+
+  const handleRemoveStatusColumn = (id: CRMStatusId) => {
+    if (!hasCrmAccess) {
+      setShowPlans(true);
+      return;
+    }
+    if (statusColumns.length <= 1) {
+      messageService.warning('Cannot remove column', 'At least one column is required.', 2500);
+      return;
+    }
+
+    const filtered = statusColumns.filter(col => col.id !== id);
+    const fallbackStatus = getDefaultStatusId(filtered);
+
+    setCrmItems(prev =>
+      prev.map(item => (item.status === id ? { ...item, status: fallbackStatus } : item))
+    );
+    setFormData(prev => (prev.status === id ? { ...prev, status: fallbackStatus } : prev));
+    setProgramFormData(prev =>
+      prev.status === id ? { ...prev, status: fallbackStatus } : prev
+    );
+
+    const updatedInvestors = investors.map(inv =>
+      inv.status === id ? { ...inv, status: fallbackStatus } : inv
+    );
+    saveInvestors(updatedInvestors);
+
+    const affectedPrograms = crmItems.filter(
+      item => item.type === 'program' && item.status === id
+    );
+    Promise.all(
+      affectedPrograms.map(prog => saveProgramsMetadata(prog.id, { status: fallbackStatus }))
+    ).catch(error => console.error('Error updating program statuses on column removal:', error));
+
+    persistStatusColumns(filtered);
+    messageService.success('Column removed', 'Items moved to the first column.', 2000);
+  };
+
   const loadCRMItems = async () => {
     try {
+      const fallbackStatus = getDefaultStatusId();
       // Load investors from localStorage
       const investorsStored = localStorage.getItem(`crm_investors_${startupId}`);
       const investors: InvestorCRM[] = investorsStored ? JSON.parse(investorsStored).map((inv: any) => ({ ...inv, type: 'investor' as const })) : [];
@@ -229,7 +386,7 @@ const FundraisingCRM = React.forwardRef<{
         id: `program_${prog.id}`,
         programName: prog.programName,
         programType: prog.programType,
-        status: 'to_be_contacted' as const, // Default status, can be stored separately
+        status: fallbackStatus, // Default status, can be stored separately
         priority: 'medium' as const,
         notes: prog.description,
         startDate: prog.startDate || undefined, // Optional - can be undefined
@@ -299,34 +456,43 @@ const FundraisingCRM = React.forwardRef<{
           item.notes?.toLowerCase().includes(query) ||
           item.tags?.some(tag => tag.toLowerCase().includes(query))
         );
-      } else {
-        return (
-          item.programName.toLowerCase().includes(query) ||
-          item.description?.toLowerCase().includes(query) ||
-          item.mentorName?.toLowerCase().includes(query) ||
-          item.mentorEmail?.toLowerCase().includes(query) ||
-          item.notes?.toLowerCase().includes(query) ||
-          item.tags?.some(tag => tag.toLowerCase().includes(query))
-        );
       }
+      return (
+        item.programName.toLowerCase().includes(query) ||
+        item.description?.toLowerCase().includes(query) ||
+        item.mentorName?.toLowerCase().includes(query) ||
+        item.mentorEmail?.toLowerCase().includes(query) ||
+        item.notes?.toLowerCase().includes(query) ||
+        item.tags?.some(tag => tag.toLowerCase().includes(query))
+      );
     });
   }, [crmItems, searchQuery]);
 
+  const displayedItems = useMemo(() => {
+    const typeFilter = activeCrmTab === 'investor' ? 'investor' : 'program';
+    return filteredCRMItems.filter(item => item.type === typeFilter);
+  }, [filteredCRMItems, activeCrmTab]);
+
   const itemsByStatus = useMemo(() => {
-    const grouped: Record<string, CRMItem[]> = {
-      to_be_contacted: [],
-      reached_out: [],
-      in_progress: [],
-      committed: [],
-      not_happening: [],
-    };
-    filteredCRMItems.forEach(item => {
-      if (grouped[item.status]) {
-        grouped[item.status].push(item);
-      }
+    const grouped: Record<string, CRMItem[]> = {};
+    const fallbackStatus = getDefaultStatusId();
+
+    statusColumns.forEach(column => {
+      grouped[column.id] = [];
     });
+
+    displayedItems.forEach(item => {
+      const targetStatus = grouped[item.status] ? item.status : fallbackStatus;
+      if (!grouped[targetStatus]) {
+        grouped[targetStatus] = [];
+      }
+      grouped[targetStatus].push(item);
+    });
+
     return grouped;
-  }, [filteredCRMItems]);
+  }, [displayedItems, statusColumns]);
+
+  const searchPlaceholder = activeCrmTab === 'investor' ? 'Search investors' : 'Search programs';
 
   const handleAddInvestor = (investorData?: {
     name: string;
@@ -345,7 +511,7 @@ const FundraisingCRM = React.forwardRef<{
         id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         name: safeName,
         email: investorData.email || undefined, // Optional - no auto-generation
-        status: 'to_be_contacted',
+        status: getDefaultStatusId(),
         amount: undefined,
         priority: 'medium',
         pitchDeckUrl: undefined,
@@ -374,6 +540,10 @@ const FundraisingCRM = React.forwardRef<{
       return;
     }
 
+    const attachments = formData.attachmentUrl.trim()
+      ? [{ id: `att_${Date.now()}`, title: formData.attachmentTitle.trim() || 'Attachment', url: formData.attachmentUrl.trim() }]
+      : undefined;
+
     const newInvestor: InvestorCRM = {
       id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
@@ -386,6 +556,7 @@ const FundraisingCRM = React.forwardRef<{
       approach: formData.approach || undefined,
       firstContact: formData.firstContact || undefined,
       tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+      attachments,
       createdAt: new Date().toISOString(),
       type: 'investor',
     };
@@ -405,6 +576,11 @@ const FundraisingCRM = React.forwardRef<{
   const handleUpdateInvestor = () => {
     if (!selectedItem || selectedItem.type !== 'investor') return;
 
+    const existingAttachments = selectedItem.attachments || [];
+    const nextAttachments = formData.attachmentUrl.trim()
+      ? [...existingAttachments, { id: `att_${Date.now()}`, title: formData.attachmentTitle.trim() || 'Attachment', url: formData.attachmentUrl.trim() }]
+      : existingAttachments;
+
       const updated = investors.map(inv =>
         inv.id === selectedItem.id
           ? {
@@ -419,6 +595,7 @@ const FundraisingCRM = React.forwardRef<{
               approach: formData.approach || undefined,
               firstContact: formData.firstContact || undefined,
               tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+              attachments: nextAttachments,
             }
           : inv
       );
@@ -454,7 +631,7 @@ const FundraisingCRM = React.forwardRef<{
     setFormData({
       name: '',
       email: '',
-      status: 'to_be_contacted',
+      status: getDefaultStatusId(),
       amount: '',
       priority: 'medium',
       pitchDeckUrl: '',
@@ -462,6 +639,8 @@ const FundraisingCRM = React.forwardRef<{
       approach: '',
       firstContact: '',
       tags: '',
+      attachmentTitle: '',
+      attachmentUrl: '',
     });
   };
 
@@ -479,6 +658,8 @@ const FundraisingCRM = React.forwardRef<{
         approach: item.approach || '',
         firstContact: item.firstContact || '',
         tags: item.tags?.join(', ') || '',
+        attachmentTitle: item.attachments?.[0]?.title || '',
+        attachmentUrl: item.attachments?.[0]?.url || '',
       });
       setIsAddingProgram(false);
       setIsEditModalOpen(true);
@@ -498,6 +679,8 @@ const FundraisingCRM = React.forwardRef<{
         mentorEmail: item.mentorEmail || '',
         programUrl: item.programUrl || '',
         tags: item.tags?.join(', ') || '',
+        attachmentTitle: item.attachments?.[0]?.title || '',
+        attachmentUrl: item.attachments?.[0]?.url || '',
       });
       setIsAddingProgram(false);
       setIsProgramModalOpen(true);
@@ -566,6 +749,11 @@ const FundraisingCRM = React.forwardRef<{
       return;
     }
 
+    const hasNewAttachment = programFormData.attachmentUrl.trim().length > 0;
+    const programAttachments = hasNewAttachment
+      ? [{ id: `att_${Date.now()}`, title: programFormData.attachmentTitle.trim() || 'Attachment', url: programFormData.attachmentUrl.trim() }]
+      : (selectedItem && selectedItem.type === 'program' ? selectedItem.attachments : undefined);
+
     try {
       if (isAddingProgram) {
         // Save to database (dates are optional now)
@@ -599,6 +787,7 @@ const FundraisingCRM = React.forwardRef<{
           mentorEmail: savedProgram.mentorEmail,
           programUrl: savedProgram.programUrl,
           tags: programFormData.tags ? programFormData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+          attachments: programAttachments,
           createdAt: savedProgram.createdAt,
           type: 'program',
         };
@@ -611,6 +800,7 @@ const FundraisingCRM = React.forwardRef<{
           firstContact: programFormData.firstContact || undefined,
           notes: programFormData.notes || undefined,
           tags: programFormData.tags ? programFormData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+          ...(programAttachments ? { attachments: programAttachments } : {}),
         });
         
         // Add to CRM items
@@ -642,6 +832,7 @@ const FundraisingCRM = React.forwardRef<{
           firstContact: programFormData.firstContact || undefined,
           notes: programFormData.notes || undefined,
           tags: programFormData.tags ? programFormData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+          ...(programAttachments ? { attachments: programAttachments } : {}),
         });
         
         // Reload CRM items
@@ -653,7 +844,7 @@ const FundraisingCRM = React.forwardRef<{
       setProgramFormData({
         programName: '',
         programType: 'Grant',
-        status: 'to_be_contacted',
+        status: getDefaultStatusId(),
         priority: 'medium',
         approach: '',
         firstContact: '',
@@ -665,6 +856,8 @@ const FundraisingCRM = React.forwardRef<{
         mentorEmail: '',
         programUrl: '',
         tags: '',
+        attachmentTitle: '',
+        attachmentUrl: '',
       });
       setSelectedItem(null);
     } catch (error) {
@@ -677,103 +870,140 @@ const FundraisingCRM = React.forwardRef<{
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2 text-sm text-slate-600">
-          <span className="font-medium">FUNDRAISING</span>
-          <ChevronRight className="h-4 w-4" />
-          <span className="font-semibold text-slate-900">CRM</span>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span className="font-medium">FUNDRAISING</span>
+            <ChevronRight className="h-4 w-4" />
+            <span className="font-semibold text-slate-900">CRM</span>
+          </div>
+          <div className="inline-flex bg-slate-100 rounded-full p-1 text-sm">
+            <button
+              className={`px-3 py-1.5 rounded-full font-medium transition ${activeCrmTab === 'investor' ? 'bg-white shadow text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}
+              onClick={() => setActiveCrmTab('investor')}
+            >
+              Investors ({investorCount})
+            </button>
+            <button
+              className={`px-3 py-1.5 rounded-full font-medium transition ${activeCrmTab === 'program' ? 'bg-white shadow text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}
+              onClick={() => setActiveCrmTab('program')}
+            >
+              Programs ({programCount})
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input
               type="text"
-              placeholder="Search in CRM"
+              placeholder={searchPlaceholder}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="pl-10 pr-4 py-2 w-48"
             />
           </div>
-          <div className="relative group">
-            <Button
-              onClick={() => {
-                if (!hasCrmAccess) {
-                  // Open subscription plans when CRM is locked
-                  setShowPlans(true);
-                  return;
-                }
-                resetForm();
-                setIsAddModalOpen(true);
-              }}
-              variant="primary"
-              size="sm"
-              className={`${hasCrmAccess ? 'bg-slate-900 hover:bg-slate-800' : 'opacity-60 bg-gray-600'}`}
-              title={!hasCrmAccess ? 'Premium Feature - Click to upgrade and add investors to CRM' : 'Add investor'}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add investor
-            </Button>
-            {!hasCrmAccess && (
-              <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
-                <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
-                  Premium Feature - Upgrade to unlock
-                  <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
+          <Button
+            onClick={() => {
+              if (!hasCrmAccess) {
+                setShowPlans(true);
+                return;
+              }
+              setIsStatusModalOpen(true);
+            }}
+            variant="primary"
+            size="sm"
+            className={`${hasCrmAccess ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'opacity-60 bg-gray-600 text-white'}`}
+            title={!hasCrmAccess ? 'Premium Feature - Click to upgrade and customize CRM columns' : 'Customize CRM columns'}
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Customize columns
+          </Button>
+          {activeCrmTab === 'investor' ? (
+            <div className="relative group">
+              <Button
+                onClick={() => {
+                  if (!hasCrmAccess) {
+                    setShowPlans(true);
+                    return;
+                  }
+                  resetForm();
+                  setIsAddModalOpen(true);
+                }}
+                variant="primary"
+                size="sm"
+                className={`${hasCrmAccess ? 'bg-slate-900 hover:bg-slate-800' : 'opacity-60 bg-gray-600'}`}
+                title={!hasCrmAccess ? 'Premium Feature - Click to upgrade and add investors to CRM' : 'Add investor'}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add investor
+              </Button>
+              {!hasCrmAccess && (
+                <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
+                  <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                    Premium Feature - Upgrade to unlock
+                    <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-          <div className="relative group">
-            <Button
-              onClick={() => {
-                if (!hasCrmAccess) {
-                  // Open subscription plans when CRM is locked
-                  setShowPlans(true);
-                  return;
-                }
-                setProgramFormData({
-                  programName: '',
-                  programType: 'Grant',
-                  status: 'to_be_contacted',
-                  priority: 'medium',
-                  approach: '',
-                  firstContact: '',
-                  notes: '',
-                  startDate: '',
-                  endDate: '',
-                  description: '',
-                  mentorName: '',
-                  mentorEmail: '',
-                  programUrl: '',
-                  tags: '',
-                });
-                setIsAddingProgram(true);
-                setIsProgramModalOpen(true);
-              }}
-              variant="primary"
-              size="sm"
-              className={`${hasCrmAccess ? 'bg-blue-600 hover:bg-blue-700' : 'opacity-60 bg-gray-600'}`}
-              title={!hasCrmAccess ? 'Premium Feature - Click to upgrade and add programs to CRM' : 'Add grant/incubation program'}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add grant/incubation program
-            </Button>
-            {!hasCrmAccess && (
-              <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
-                <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
-                  Premium Feature - Upgrade to unlock
-                  <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
+              )}
+            </div>
+          ) : (
+            <div className="relative group">
+              <Button
+                onClick={() => {
+                  if (!hasCrmAccess) {
+                    setShowPlans(true);
+                    return;
+                  }
+                  setProgramFormData({
+                    programName: '',
+                    programType: 'Grant',
+                    status: getDefaultStatusId(),
+                    priority: 'medium',
+                    approach: '',
+                    firstContact: '',
+                    notes: '',
+                    startDate: '',
+                    endDate: '',
+                    description: '',
+                    mentorName: '',
+                    mentorEmail: '',
+                    programUrl: '',
+                    tags: '',
+                    attachmentTitle: '',
+                    attachmentUrl: '',
+                  });
+                  setIsAddingProgram(true);
+                  setIsProgramModalOpen(true);
+                }}
+                variant="primary"
+                size="sm"
+                className={`${hasCrmAccess ? 'bg-blue-600 hover:bg-blue-700' : 'opacity-60 bg-gray-600'}`}
+                title={!hasCrmAccess ? 'Premium Feature - Click to upgrade and add programs to CRM' : 'Add grant/incubation program'}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add grant/incubation program
+              </Button>
+              {!hasCrmAccess && (
+                <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
+                  <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                    Premium Feature - Upgrade to unlock
+                    <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
           <div className="text-sm text-slate-600">
-            {crmItems.length} {crmItems.length === 1 ? 'item' : 'items'} in CRM ({investors.length} investors, {crmItems.filter(i => i.type === 'program').length} programs)
+            {activeCrmTab === 'investor'
+              ? `${investorCount} ${investorCount === 1 ? 'investor' : 'investors'} in CRM`
+              : `${programCount} ${programCount === 1 ? 'program' : 'programs'} in CRM`}
           </div>
         </div>
       </div>
 
       {/* Kanban Board */}
       <div className="flex gap-4 overflow-x-auto pb-4">
-        {STATUS_COLUMNS.map(column => {
+        {statusColumns.map(column => {
           const columnItems = itemsByStatus[column.id] || [];
           return (
             <div
@@ -884,7 +1114,7 @@ const FundraisingCRM = React.forwardRef<{
                         disabled={!hasCrmAccess}
                         title={!hasCrmAccess ? 'Premium Feature - Upgrade to update status' : 'Update status'}
                       >
-                        {STATUS_COLUMNS.map(col => (
+                        {statusColumns.map(col => (
                           <option key={col.id} value={col.id}>
                             {col.label}
                           </option>
@@ -918,7 +1148,88 @@ const FundraisingCRM = React.forwardRef<{
                           ))}
                         </div>
                       )}
+                      {item.attachments && item.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {item.attachments.map(att => (
+                            <a
+                              key={att.id}
+                              href={att.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100 text-xs text-slate-700 hover:bg-slate-200"
+                            >
+                              <FileText className="h-3 w-3" />
+                              <span className="truncate max-w-[120px]">{att.title || 'Attachment'}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </div>
+                    {editingNoteId === item.id ? (
+                      <div className="mt-2 space-y-1">
+                        <textarea
+                          value={quickNoteText}
+                          onChange={e => setQuickNoteText(e.target.value)}
+                          placeholder="Add a quick note..."
+                          className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary resize-none"
+                          rows={2}
+                          onClick={e => e.stopPropagation()}
+                        />
+                        <div className="flex gap-1">
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (item.type === 'investor') {
+                                const updated = investors.map(inv =>
+                                  inv.id === item.id ? { ...inv, notes: quickNoteText } : inv
+                                );
+                                saveInvestors(updated);
+                              } else {
+                                saveProgramsMetadata(item.id, { notes: quickNoteText });
+                              }
+                              setEditingNoteId(null);
+                              setQuickNoteText('');
+                            }}
+                            className="px-2 py-0.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setEditingNoteId(null);
+                              setQuickNoteText('');
+                            }}
+                            className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-xs hover:bg-slate-300"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        {item.notes && (
+                          <p className="text-xs text-slate-600 line-clamp-2 mb-1">{item.notes}</p>
+                        )}
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            if (!hasCrmAccess) {
+                              messageService.warning('Premium Feature', 'Upgrade to edit notes.', 3000);
+                              return;
+                            }
+                            setEditingNoteId(item.id);
+                            setQuickNoteText(item.notes || '');
+                          }}
+                          className={`text-xs ${hasCrmAccess ? 'text-blue-600 hover:text-blue-700' : 'text-gray-400 cursor-not-allowed'} flex items-center gap-1`}
+                          disabled={!hasCrmAccess}
+                        >
+                          <FileText className="h-3 w-3" />
+                          {item.notes ? 'Edit note' : 'Add note'}
+                        </button>
+                      </div>
+                    )}
                   </Card>
                 ))}
               </div>
@@ -926,6 +1237,150 @@ const FundraisingCRM = React.forwardRef<{
           );
         })}
       </div>
+
+      {/* Customize Status Columns Modal */}
+      <Modal
+        isOpen={isStatusModalOpen}
+        onClose={() => {
+          setIsStatusModalOpen(false);
+          setNewStatusName('');
+          setNewStatusColor(STATUS_COLOR_CHOICES[0]);
+        }}
+        title="Customize CRM columns"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Add, edit, or remove CRM columns. Removing a column moves its cards into the first column.
+          </p>
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {statusColumns.map((col, idx) => (
+              <div key={col.id} className="flex items-center justify-between border border-slate-200 rounded-md px-3 py-2 bg-white">
+                {editingColumnId === col.id ? (
+                  <div className="flex-1 flex items-center gap-3">
+                    <select
+                      value={editColumnColor}
+                      onChange={e => setEditColumnColor(e.target.value)}
+                      className="w-20 rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-primary"
+                    >
+                      {STATUS_COLOR_CHOICES.map(color => (
+                        <option key={color} value={color}>
+                          {color.replace('bg-', '').replace('-50', '')}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={editColumnName}
+                      onChange={e => setEditColumnName(e.target.value)}
+                      className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-primary"
+                      placeholder="Column name"
+                    />
+                    <button
+                      onClick={() => {
+                        if (!editColumnName.trim()) {
+                          messageService.warning('Name required', 'Please enter a column name.', 2000);
+                          return;
+                        }
+                        const updated = statusColumns.map(c =>
+                          c.id === col.id ? { ...c, label: editColumnName.trim(), color: editColumnColor } : c
+                        );
+                        persistStatusColumns(updated);
+                        setEditingColumnId(null);
+                        messageService.success('Updated', 'Column updated successfully.', 2000);
+                      }}
+                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => setEditingColumnId(null)}
+                      className="px-2 py-1 bg-slate-200 text-slate-700 rounded text-xs hover:bg-slate-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <span className={`w-4 h-4 rounded-full border border-slate-200 ${col.color}`}></span>
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">{col.label}</div>
+                        <div className="text-xs text-slate-500">{col.id}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">{itemsByStatus[col.id]?.length || 0} cards</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEditingColumnId(col.id);
+                          setEditColumnName(col.label);
+                          setEditColumnColor(col.color);
+                        }}
+                        className="text-blue-600 hover:text-blue-700"
+                        title="Edit column"
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={statusColumns.length <= 1}
+                        onClick={() => handleRemoveStatusColumn(col.id)}
+                        className="text-red-600 hover:text-red-700 disabled:text-slate-400"
+                        title={statusColumns.length <= 1 ? 'At least one column is required' : 'Remove column'}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="border-t border-slate-200 pt-3 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Column name</label>
+                <Input
+                  type="text"
+                  placeholder="e.g., Warm lead, Negotiation"
+                  value={newStatusName}
+                  onChange={e => setNewStatusName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Column color</label>
+                <select
+                  value={newStatusColor}
+                  onChange={e => setNewStatusColor(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary"
+                >
+                  {STATUS_COLOR_CHOICES.map(color => (
+                    <option key={color} value={color}>
+                      {color.replace('bg-', '').replace('-50', '')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-500">Removing a column automatically moves its cards to the first column.</p>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleAddStatusColumn}
+                className="bg-slate-900 hover:bg-slate-800"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add column
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       {/* Subscription Plans Modal for locked CRM actions */}
       {showPlans && (
@@ -989,7 +1444,7 @@ const FundraisingCRM = React.forwardRef<{
                 onChange={e => setFormData({ ...formData, status: e.target.value as InvestorCRM['status'] })}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary"
               >
-                {STATUS_COLUMNS.map(col => (
+                {statusColumns.map(col => (
                   <option key={col.id} value={col.id}>
                     {col.label}
                   </option>
@@ -1027,6 +1482,26 @@ const FundraisingCRM = React.forwardRef<{
               onChange={e => setFormData({ ...formData, pitchDeckUrl: e.target.value })}
             />
             <p className="text-xs text-slate-500 mt-1">Paste a link to your pitch deck</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Attachment name</label>
+              <Input
+                type="text"
+                placeholder="Term sheet, Doc link"
+                value={formData.attachmentTitle}
+                onChange={e => setFormData({ ...formData, attachmentTitle: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Attachment URL</label>
+              <Input
+                type="url"
+                placeholder="https://..."
+                value={formData.attachmentUrl}
+                onChange={e => setFormData({ ...formData, attachmentUrl: e.target.value })}
+              />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
@@ -1118,7 +1593,7 @@ const FundraisingCRM = React.forwardRef<{
                 onChange={e => setFormData({ ...formData, status: e.target.value as InvestorCRM['status'] })}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary"
               >
-                {STATUS_COLUMNS.map(col => (
+                {statusColumns.map(col => (
                   <option key={col.id} value={col.id}>
                     {col.label}
                   </option>
@@ -1153,6 +1628,24 @@ const FundraisingCRM = React.forwardRef<{
               value={formData.pitchDeckUrl}
               onChange={e => setFormData({ ...formData, pitchDeckUrl: e.target.value })}
             />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Attachment name</label>
+              <Input
+                type="text"
+                value={formData.attachmentTitle}
+                onChange={e => setFormData({ ...formData, attachmentTitle: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Attachment URL</label>
+              <Input
+                type="url"
+                value={formData.attachmentUrl}
+                onChange={e => setFormData({ ...formData, attachmentUrl: e.target.value })}
+              />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
@@ -1212,7 +1705,7 @@ const FundraisingCRM = React.forwardRef<{
           setProgramFormData({
             programName: '',
             programType: 'Grant',
-            status: 'to_be_contacted',
+            status: getDefaultStatusId(),
             priority: 'medium',
             approach: '',
             firstContact: '',
@@ -1224,6 +1717,8 @@ const FundraisingCRM = React.forwardRef<{
             mentorEmail: '',
             programUrl: '',
             tags: '',
+            attachmentTitle: '',
+            attachmentUrl: '',
           });
         }}
         title={isAddingProgram ? "Add Grant/Incubation Program" : "Edit Grant/Incubation Program"}
@@ -1261,7 +1756,7 @@ const FundraisingCRM = React.forwardRef<{
                 onChange={e => setProgramFormData({ ...programFormData, status: e.target.value as any })}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary"
               >
-                {STATUS_COLUMNS.map(col => (
+                {statusColumns.map(col => (
                   <option key={col.id} value={col.id}>
                     {col.label}
                   </option>
@@ -1339,6 +1834,26 @@ const FundraisingCRM = React.forwardRef<{
             />
             <p className="text-xs text-slate-500 mt-1">Link to the program website or application page</p>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Attachment name</label>
+              <Input
+                type="text"
+                placeholder="Brochure, Doc link"
+                value={programFormData.attachmentTitle}
+                onChange={e => setProgramFormData({ ...programFormData, attachmentTitle: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Attachment URL</label>
+              <Input
+                type="url"
+                placeholder="https://..."
+                value={programFormData.attachmentUrl}
+                onChange={e => setProgramFormData({ ...programFormData, attachmentUrl: e.target.value })}
+              />
+            </div>
+          </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
             <textarea
@@ -1384,7 +1899,7 @@ const FundraisingCRM = React.forwardRef<{
               setProgramFormData({
                 programName: '',
                 programType: 'Grant',
-                status: 'to_be_contacted',
+                status: getDefaultStatusId(),
                 priority: 'medium',
                 approach: '',
                 firstContact: '',
@@ -1396,6 +1911,8 @@ const FundraisingCRM = React.forwardRef<{
                 mentorEmail: '',
                 programUrl: '',
                 tags: '',
+                attachmentTitle: '',
+                attachmentUrl: '',
               });
             }}>
               Cancel

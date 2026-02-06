@@ -79,37 +79,21 @@ export const userService = {
   async getAllUsers(): Promise<any[]> {
     console.log('Fetching all users...');
     try {
-      // Fetch from both users table (old registrations) and user_profiles table (new registrations)
-      const [usersData, profilesData] = await Promise.all([
-        supabase
-          .from('users')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('user_profiles')
-          .select('*')
-          .order('created_at', { ascending: false })
-      ]);
+      // Fetch from user_profiles table only (users table has been removed)
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      const usersError = usersData.error;
-      const profilesError = profilesData.error;
-
-      if (usersError) {
-        console.error('Error fetching users:', usersError);
-      }
       if (profilesError) {
         console.error('Error fetching user_profiles:', profilesError);
+        return [];
       }
 
-      // Combine both arrays, mapping user_profiles to match users structure
-      const users = (usersData.data || []).map(user => ({
-        ...user,
-        source: 'users'
-      }));
-
-      const profiles = (profilesData.data || []).map(profile => ({
-        id: profile.auth_user_id, // Use auth_user_id as id for compatibility
-        auth_user_id: profile.auth_user_id, // Keep auth_user_id for reference
+      // Map user_profiles to match expected user structure
+      const profiles = (profilesData || []).map(profile => ({
+        id: profile.id,
+        auth_user_id: profile.auth_user_id,
         email: profile.email,
         name: profile.name,
         role: profile.role,
@@ -124,29 +108,12 @@ export const userService = {
         updated_at: profile.updated_at,
         source: 'user_profiles'
       }));
-
-      // Merge: prefer user_profiles over users for same auth_user_id
-      const mergedUsers = new Map();
-      
-      // Add users first
-      users.forEach(user => {
-        mergedUsers.set(user.id, user);
-      });
-
-      // Add/override with user_profiles (new registrations take precedence)
-      profiles.forEach(profile => {
-        mergedUsers.set(profile.id, profile);
-      });
-
-      const allUsers = Array.from(mergedUsers.values());
       
       console.log('Users fetched successfully:', {
-        fromUsers: users.length,
-        fromUserProfiles: profiles.length,
-        total: allUsers.length
+        fromUserProfiles: profiles.length
       });
       
-      return allUsers;
+      return profiles;
     } catch (error) {
       console.error('Error in getAllUsers:', error);
       return [];
@@ -221,17 +188,27 @@ export const userService = {
   async acceptStartupAdvisorRequest(startupId: number, userId: string) {
     console.log('Accepting startup advisor request for startup:', startupId, 'user:', userId);
     try {
+      const advisorId = (await supabase.auth.getUser()).data.user?.id;
+
       // Use the SECURITY DEFINER function to bypass RLS
       const { data: userData, error: userError } = await supabase
         .rpc('accept_startup_advisor_request', {
           p_user_id: userId,
-          p_advisor_id: (await supabase.auth.getUser()).data.user?.id,
+          p_advisor_id: advisorId,
           p_financial_matrix: null
-        })
+        });
 
       if (userError) {
-        console.error('Error updating user advisor acceptance:', userError)
-        throw userError
+        console.error('Error updating user advisor acceptance:', {
+          rpc: 'accept_startup_advisor_request',
+          message: userError.message,
+          code: (userError as any)?.code,
+          details: (userError as any)?.details,
+          hint: (userError as any)?.hint,
+          userId,
+          advisorId
+        });
+        throw userError;
       }
 
       // Create or update the investment advisor relationship
@@ -800,11 +777,18 @@ export const investmentService = {
   // Create investment offer
   async createInvestmentOffer(offerData: {
     investor_email: string
+    investor_name?: string
+    investor_id?: string
     startup_name: string
-    investment_id: number  // This is the new_investments.id
+    startup_id?: number
+    investment_id: number  // This is the new_investments.id (or startup id initially)
     offer_amount: number
     equity_percentage: number
     currency?: string
+    upfront_fee?: number | null
+    success_fee?: number | null
+    notes?: string | null
+    investment_advisor_code?: string
     co_investment_opportunity_id?: number  // For co-investment offers
   }) {
     console.log('Creating investment offer with data:', offerData);
@@ -819,14 +803,18 @@ export const investmentService = {
     let checkError = null;
     
     try {
-      const result = await supabase
-      .from('new_investments')
-      .select('id')
-      .eq('id', offerData.investment_id)
-      .single();
-    
-      investmentCheck = result.data;
-      checkError = result.error;
+      if (offerData.investment_id != null) {
+        const result = await supabase
+          .from('new_investments')
+          .select('id')
+          .eq('id', offerData.investment_id)
+          .single();
+        investmentCheck = result.data;
+        checkError = result.error;
+      } else {
+        checkError = new Error('missing investment_id');
+        investmentCheck = null;
+      }
     } catch (err) {
       checkError = err;
     }
@@ -834,15 +822,20 @@ export const investmentService = {
     // Also check if this ID is actually a startup ID (for backward compatibility)
     let isStartupId = false;
     if (checkError || !investmentCheck) {
-      const { data: startupCheck } = await supabase
-        .from('startups')
-        .select('id, name')
-        .eq('id', offerData.investment_id)
-        .single();
-      
-      if (startupCheck) {
+      if (offerData.startup_id != null) {
         isStartupId = true;
-        console.log('Investment ID is actually a startup ID, will create/find corresponding investment record');
+        offerData.investment_id = Number(offerData.startup_id);
+        console.log('Using provided startup_id as investment_id for mapping:', offerData.investment_id);
+      } else if (offerData.investment_id != null) {
+        const { data: startupCheck } = await supabase
+          .from('startups')
+          .select('id, name')
+          .eq('id', offerData.investment_id)
+          .single();
+        if (startupCheck) {
+          isStartupId = true;
+          console.log('Investment ID is actually a startup ID, will create/find corresponding investment record');
+        }
       }
     }
     
@@ -863,14 +856,20 @@ export const investmentService = {
         let startupData = null;
         let startupError = null;
         
-        if (isStartupId) {
-          // If the investment_id is actually a startup ID, use it directly
+        if (isStartupId && offerData.investment_id != null) {
           const result = await supabase
             .from('startups')
             .select('id, name, sector, registration_date, compliance_status, created_at')
             .eq('id', offerData.investment_id)
             .single();
-          
+          startupData = result.data;
+          startupError = result.error;
+        } else if (offerData.startup_id != null) {
+          const result = await supabase
+            .from('startups')
+            .select('id, name, sector, registration_date, compliance_status, created_at')
+            .eq('id', offerData.startup_id)
+            .single();
           startupData = result.data;
           startupError = result.error;
         } else {
@@ -880,7 +879,6 @@ export const investmentService = {
             .select('id, name, sector, registration_date, compliance_status, created_at')
             .eq('name', offerData.startup_name)
             .single();
-          
           startupData = result.data;
           startupError = result.error;
         }
@@ -1081,57 +1079,70 @@ export const investmentService = {
       
       return formattedOffer;
     } else {
-      // Regular investment offer - use the existing flow
-      console.log('🔄 Creating regular investment offer using investment_offers table');
-      
-      const rpcParams = {
-        p_investor_email: offerData.investor_email,
-        p_startup_name: offerData.startup_name,
-        p_offer_amount: Number(offerData.offer_amount),
-        p_equity_percentage: Number(offerData.equity_percentage),
-        p_currency: offerData.currency || 'USD',
-        p_startup_id: null as number | null,
-        p_investment_id: offerData.investment_id != null ? Number(offerData.investment_id) : null as number | null,
-        p_co_investment_opportunity_id: null as number | null
-      };
-      
-      console.log('🔍 Calling create_investment_offer_with_fee with params:', JSON.stringify(rpcParams, null, 2));
-      
-      const { data, error } = await supabase.rpc('create_investment_offer_with_fee', rpcParams);
+      // Regular investment offer - direct insert with RLS-compatible fields
+      console.log('🔄 Creating regular investment offer via direct insert with fees');
 
-      if (error) {
-        console.error('❌ Error creating investment offer:', error);
-        console.error('❌ Error message:', error.message);
-        throw error;
+      // Determine investor_id (prefer provided, else current auth user)
+      let investorId = offerData.investor_id;
+      if (!investorId) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          investorId = user?.id || undefined;
+        } catch (e) {
+          console.warn('⚠️ Unable to read auth user for investor_id:', e);
+        }
       }
-      
-      // Get the created offer
-      const { data: createdOffer, error: fetchError } = await supabase
-        .from('investment_offers')
-        .select('*')
-        .eq('id', data)
-        .single();
-      
-      if (fetchError) {
-        console.error('Error fetching created offer:', fetchError);
-        throw fetchError;
-      }
-      
-      console.log('Investment offer created successfully:', createdOffer);
-      
-      // Ensure the returned data has proper formatting
-      const formattedOffer = {
-        ...createdOffer,
-        offer_amount: Number(createdOffer?.offer_amount) || 0,
-        equity_percentage: Number(createdOffer?.equity_percentage) || 0,
-        created_at: createdOffer?.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString()
+
+      const insertPayload: any = {
+        investor_email: offerData.investor_email,
+        investor_name: offerData.investor_name || null,
+        investor_id: investorId,
+        startup_name: offerData.startup_name,
+        startup_id: offerData.startup_id ?? null,
+        investment_id: offerData.investment_id != null ? Number(offerData.investment_id) : null,
+        offer_amount: Number(offerData.offer_amount),
+        equity_percentage: Number(offerData.equity_percentage),
+        currency: offerData.currency || 'USD',
+        upfront_fee: offerData.upfront_fee != null ? Number(offerData.upfront_fee) : null,
+        success_fee: offerData.success_fee != null ? Number(offerData.success_fee) : null,
+        notes: offerData.notes ?? null,
+        investment_advisor_code: offerData.investment_advisor_code ?? null,
+        investor_advisor_approval_status: 'approved',
+        investor_advisor_approval_at: new Date().toISOString(),
+        wants_co_investment: false,
+        // Maintain created_by as same as investor for audit
+        created_by: investorId ?? null
       };
-      
-      // Regular offer flow - trigger flow logic to set proper initial stage and status
-      if (createdOffer?.id) {
-        await this.handleInvestmentFlow(createdOffer.id);
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('investment_offers')
+        .insert(insertPayload)
+        .select('*')
+        .single();
+
+      if (insertError) {
+        console.error('❌ Error inserting investment offer:', insertError);
+        throw insertError;
       }
-      
+
+      console.log('✅ Investment offer inserted successfully:', inserted);
+
+      const formattedOffer = {
+        ...inserted,
+        offer_amount: Number(inserted?.offer_amount) || 0,
+        equity_percentage: Number(inserted?.equity_percentage) || 0,
+        created_at: inserted?.created_at ? new Date(inserted.created_at).toISOString() : new Date().toISOString()
+      };
+
+      // Trigger flow logic to set proper initial stage and status, if applicable
+      if (inserted?.id) {
+        try {
+          await this.handleInvestmentFlow(inserted.id);
+        } catch (flowErr) {
+          console.warn('⚠️ handleInvestmentFlow failed (non-blocking):', flowErr);
+        }
+      }
+
       return formattedOffer;
     }
   },
@@ -1213,10 +1224,10 @@ export const investmentService = {
             // Get startup user information using user_id
             console.log('🔍 Fetching user by user_id:', offer.startup.user_id);
             const { data: startupUserData, error: userError } = await supabase
-              .from('users')
-              .select('id, email, name, investment_advisor_code')
-              .eq('id', offer.startup.user_id)
-              .single();
+              .from('user_profiles')
+              .select('auth_user_id, email, name, investment_advisor_code')
+              .eq('auth_user_id', offer.startup.user_id)
+              .maybeSingle();
 
             if (!userError && startupUserData) {
               offer.startup.startup_user = startupUserData;
@@ -1234,18 +1245,27 @@ export const investmentService = {
         // Always try fallback method
         try {
           console.log('🔍 Trying fallback method for startup_name:', offer.startup_name);
-          const { data: fallbackUserData, error: fallbackError } = await supabase
-            .from('users')
-            .select('id, email, name, investment_advisor_code')
-            .eq('startup_name', offer.startup_name)
-            .eq('role', 'Startup')
-            .single();
+          const { data: startupRow, error: startupNameError } = await supabase
+            .from('startups')
+            .select('user_id')
+            .eq('name', offer.startup_name)
+            .maybeSingle();
 
-          if (!fallbackError && fallbackUserData) {
-            offer.startup.startup_user = fallbackUserData;
-            console.log('🔍 ✅ Added startup user data via fallback for offer:', offer.id, fallbackUserData);
+          if (!startupNameError && startupRow?.user_id) {
+            const { data: fallbackUserData, error: fallbackError } = await supabase
+              .from('user_profiles')
+              .select('auth_user_id, email, name, investment_advisor_code')
+              .eq('auth_user_id', startupRow.user_id)
+              .maybeSingle();
+
+            if (!fallbackError && fallbackUserData) {
+              offer.startup.startup_user = fallbackUserData;
+              console.log('🔍 ✅ Added startup user data via fallback for offer:', offer.id, fallbackUserData);
+            } else {
+              console.log('🔍 ❌ No startup user found via fallback for:', offer.startup_name, fallbackError);
+            }
           } else {
-            console.log('🔍 ❌ No startup user found via fallback for:', offer.startup_name, fallbackError);
+            console.log('🔍 ❌ No startup user_id found via name lookup for:', offer.startup_name, startupNameError);
           }
         } catch (err) {
           console.log('🔍 ❌ Error in fallback method for offer:', offer.id, err);
@@ -2321,17 +2341,8 @@ export const investmentService = {
         const startupAdvisorStatus = offer.startup_advisor_approval_status;
         const startupHasAdvisor = offer.startup?.investment_advisor_code;
         
-        console.log('🔍 Filtering offer for startup visibility:', {
-          offerId: offer.id,
-          stage,
-          investorAdvisorStatus,
-          startupAdvisorStatus,
-          startupHasAdvisor
-        });
-        
         // Stage 3: Always visible - ready for startup review
         if (stage >= 3) {
-          console.log('✅ Offer at stage 3+, visible to startup');
           return true;
         }
         
@@ -2340,16 +2351,13 @@ export const investmentService = {
         if (stage === 1) {
           // If investor advisor approval is pending, don't show to startup yet
           if (investorAdvisorStatus === 'pending') {
-            console.log('❌ Offer at stage 1 waiting for investor advisor approval, NOT visible to startup');
             return false;
           }
           // If investor advisor approval is 'not_required' or 'approved', it's visible
           if (investorAdvisorStatus === 'not_required' || investorAdvisorStatus === 'approved') {
-            console.log('✅ Offer at stage 1 with investor advisor status:', investorAdvisorStatus, 'visible to startup');
             return true;
           }
           // Default: don't show if status is unclear
-          console.log('⚠️ Offer at stage 1 with unclear status:', investorAdvisorStatus, 'NOT visible');
           return false;
         }
         
@@ -2358,26 +2366,22 @@ export const investmentService = {
         if (stage === 2) {
           // If startup has advisor and approval is pending, don't show to startup yet
           if (startupHasAdvisor && startupAdvisorStatus === 'pending') {
-            console.log('❌ Offer at stage 2 waiting for startup advisor approval, NOT visible to startup');
             return false;
           }
           // If startup has no advisor OR advisor has approved, it's visible
           if (!startupHasAdvisor || startupAdvisorStatus === 'approved') {
-            console.log('✅ Offer at stage 2 with startup advisor status:', startupAdvisorStatus, 'visible to startup');
           return true;
           }
           // Default: don't show if status is unclear
-          console.log('⚠️ Offer at stage 2 with unclear status:', startupAdvisorStatus, 'NOT visible');
           return false;
         }
         
         return false;
       });
 
-      console.log('🔍 Total offers fetched:', data?.length || 0);
-      console.log('🔍 Visible offers after filtering:', visibleOffers.length);
-      console.log('🔍 Raw offers data:', data);
-      console.log('🔍 Filtered visible offers:', visibleOffers);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('📊 Offers visible after filtering:', visibleOffers.length, 'of', data?.length);
+      }
 
       // Get unique investor emails to fetch their names and advisor status
       const investorEmails = [...new Set((visibleOffers || []).map(offer => offer.investor_email))];
@@ -2387,7 +2391,7 @@ export const investmentService = {
       
       if (investorEmails.length > 0) {
         const { data: usersData, error: usersError } = await supabase
-          .from('users')
+          .from('user_profiles')
           .select('email, name, investment_advisor_code')
           .in('email', investorEmails);
         
@@ -2404,20 +2408,13 @@ export const investmentService = {
         }
       }
 
-      // Debug: Log raw data from database
-      if (visibleOffers && visibleOffers.length > 0) {
-        console.log('🔍 Raw startup offers data from database:', visibleOffers[0]);
-        console.log('🔍 Raw offer amount:', visibleOffers[0].offer_amount);
-        console.log('🔍 Raw equity percentage:', visibleOffers[0].equity_percentage);
-        console.log('🔍 Raw investor email:', visibleOffers[0].investor_email);
-        console.log('🔍 Raw investor name:', visibleOffers[0].investor_name);
-        console.log('🔍 Raw stage:', visibleOffers[0].stage);
-        console.log('🔍 Raw currency:', visibleOffers[0].currency);
-        console.log('🔍 Raw status:', visibleOffers[0].status);
-        console.log('🔍 Raw created_at:', visibleOffers[0].created_at);
-        console.log('🔍 Investor emails to fetch:', investorEmails);
-        console.log('🔍 Investor names mapping:', investorNames);
-        console.log('🔍 Users query result:', users);
+      // Debug: Log raw data from database (development mode only)
+      if (process.env.NODE_ENV === 'development' && visibleOffers && visibleOffers.length > 0) {
+        console.log('📊 First offer mapped:', {
+          investorName: visibleOffers[0].investor_name,
+          amount: visibleOffers[0].offer_amount,
+          equity: visibleOffers[0].equity_percentage
+        });
       }
 
       const mapped = (visibleOffers || []).map((offer: any) => {
@@ -2452,20 +2449,6 @@ export const investmentService = {
           investor_advisor_approval_status: offer.investor_advisor_approval_status,
           startup_advisor_approval_status: offer.startup_advisor_approval_status
         };
-        
-        // Debug: Log mapped offer
-        console.log('🔍 Mapped startup offer:', {
-          id: mappedOffer.id,
-          investorName: mappedOffer.investorName,
-          investorAdvisorCode: mappedOffer.investorAdvisorCode,
-          investorEmail: mappedOffer.investorEmail,
-          offerAmount: mappedOffer.offerAmount,
-          equityPercentage: mappedOffer.equityPercentage,
-          currency: mappedOffer.currency,
-          stage: mappedOffer.stage,
-          status: mappedOffer.status,
-          createdAt: mappedOffer.createdAt
-        });
         
         return mappedOffer;
       });
@@ -3238,10 +3221,10 @@ export const investmentService = {
         // Fetch lead investor data directly to ensure we have the latest advisor code
         // This is more reliable than relying on the join which might not work correctly
         const { data: leadInvestorUser, error: userError } = await supabase
-          .from('users')
-          .select('id, email, name, investment_advisor_code, investment_advisor_code_entered')
-          .eq('id', opportunity.listed_by_user_id)
-          .single();
+          .from('user_profiles')
+          .select('auth_user_id, email, name, investment_advisor_code, investment_advisor_code_entered')
+          .eq('auth_user_id', opportunity.listed_by_user_id)
+          .maybeSingle();
         
         if (userError || !leadInvestorUser) {
           console.error('❌ Error fetching lead investor user data:', userError);
@@ -3658,93 +3641,62 @@ export const investmentService = {
           const startupAdvisorStatus = opp.startup_advisor_approval_status;
           const startupHasAdvisor = opp.startup?.investment_advisor_code;
           
-          console.log('🔍 Filtering co-investment opportunity for startup visibility:', {
-            opportunityId: opp.id,
-            stage,
-            leadInvestorAdvisorStatus,
-            startupAdvisorStatus,
-            startupHasAdvisor
-          });
-          
           // Stage 3: Always visible - ready for startup review
-          // IMPORTANT: Stage 3 means all advisor approvals are done, ready for startup to review
           if (stage >= 3) {
-            console.log('✅ Co-investment opportunity at stage 3+, visible to startup:', {
-              opportunityId: opp.id,
-              stage,
-              leadInvestorAdvisorStatus,
-              startupAdvisorStatus,
-              startupApprovalStatus: opp.startup_approval_status
-            });
             return { opp, visible: true };
           }
           
           // Stage 1: Only show if lead investor advisor has approved OR lead investor has no advisor
-          // DON'T show opportunities that are waiting for lead investor advisor approval
-          // IMPORTANT: Even if status is 'not_required', we need to verify the lead investor actually has no advisor
           if (stage === 1) {
             // If lead investor advisor approval is pending, don't show to startup yet
             if (leadInvestorAdvisorStatus === 'pending') {
-              console.log('❌ Co-investment opportunity at stage 1 waiting for lead investor advisor approval, NOT visible to startup');
               return { opp, visible: false };
             }
             
-            // If status is 'approved', it means advisor approved and we should have moved past stage 1
-            // This shouldn't happen, but if it does, show it
+            // If status is 'approved', show it
             if (leadInvestorAdvisorStatus === 'approved') {
-              console.log('⚠️ Co-investment opportunity at stage 1 with approved status (unexpected), visible to startup');
               return { opp, visible: true };
             }
             
-            // If status is 'not_required', we need to verify the lead investor actually has no advisor
-            // Fetch the lead investor data to verify
+            // If status is 'not_required', verify the lead investor actually has no advisor
             if (leadInvestorAdvisorStatus === 'not_required') {
               try {
                 const { data: leadInvestor } = await supabase
-                  .from('users')
+                  .from('user_profiles')
                   .select('id, investment_advisor_code, investment_advisor_code_entered')
                   .eq('id', opp.listed_by_user_id)
-                  .single();
+                  .maybeSingle();
                 
                 const hasAdvisor = leadInvestor?.investment_advisor_code_entered || leadInvestor?.investment_advisor_code;
                 
                 if (hasAdvisor) {
-                  // Lead investor has advisor but status is 'not_required' - this is incorrect
-                  // The opportunity should be pending advisor approval, so don't show it
-                  console.log('❌ Co-investment opportunity at stage 1: Lead investor has advisor but status is "not_required" (incorrect state), NOT visible to startup');
+                  // Lead investor has advisor but status is 'not_required' - incorrect state
                   return { opp, visible: false };
                 } else {
                   // Lead investor truly has no advisor, so it's visible
-                  console.log('✅ Co-investment opportunity at stage 1: Lead investor has no advisor, visible to startup');
                   return { opp, visible: true };
                 }
               } catch (verifyError) {
                 console.error('❌ Error verifying lead investor advisor status:', verifyError);
-                // On error, be conservative and don't show it
                 return { opp, visible: false };
               }
             }
             
             // Default: don't show if status is unclear or null
-            console.log('⚠️ Co-investment opportunity at stage 1 with unclear status:', leadInvestorAdvisorStatus, 'NOT visible');
             return { opp, visible: false };
           }
           
           // Stage 2: Only show if startup advisor has approved OR startup has no advisor
-          // DON'T show opportunities that are waiting for startup advisor approval
           if (stage === 2) {
             // If startup has advisor and approval is pending, don't show to startup yet
             if (startupHasAdvisor && startupAdvisorStatus === 'pending') {
-              console.log('❌ Co-investment opportunity at stage 2 waiting for startup advisor approval, NOT visible to startup');
               return { opp, visible: false };
             }
             // If startup has no advisor OR advisor has approved, it's visible
             if (!startupHasAdvisor || startupAdvisorStatus === 'approved') {
-              console.log('✅ Co-investment opportunity at stage 2 with startup advisor status:', startupAdvisorStatus, 'visible to startup');
               return { opp, visible: true };
             }
             // Default: don't show if status is unclear
-            console.log('⚠️ Co-investment opportunity at stage 2 with unclear status:', startupAdvisorStatus, 'NOT visible');
             return { opp, visible: false };
           }
           
@@ -3757,15 +3709,12 @@ export const investmentService = {
         .filter(result => result.visible)
         .map(result => result.opp);
 
-      console.log('🔍 Total co-investment opportunities fetched:', data?.length || 0);
-      console.log('🔍 Visible co-investment opportunities after filtering:', filtered.length);
-      console.log('🔍 Filtered visible opportunities:', filtered.map(o => ({
-        id: o.id,
-        stage: o.stage,
-        leadInvestorAdvisorStatus: o.lead_investor_advisor_approval_status,
-        startupAdvisorStatus: o.startup_advisor_approval_status,
-        startupApprovalStatus: o.startup_approval_status
-      })));
+      if (process.env.NODE_ENV === 'development') {
+        console.log('📦 Co-investment opportunities:', {
+          total: data?.length || 0,
+          visible: filtered.length
+        });
+      }
 
       // Additional logging for debugging (only log once per unique set of opportunities)
       if (filtered.length === 0 && data && data.length > 0) {

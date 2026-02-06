@@ -1,0 +1,138 @@
+MANUAL FIX FOR VIEW BUTTON - FacilitatorView.tsx
+
+==============================================================
+PROBLEM: View button is nested inside a <span> tag and not showing responses
+==============================================================
+
+LOCATION: Line 6747-6759 in FacilitatorView.tsx
+
+CURRENT CODE (BROKEN):
+----------------------
+<span className={`text-xs font-medium ${isSubmitted ? 'text-green-600' : 'text-slate-500'}`}>
+  {isSubmitted ? 'Submitted' : 'Pending'}
+  {isSubmitted && (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() => loadStartupResponses(mandateStatusModalOpen, startupId)}
+      className="text-blue-600 border-blue-600 hover:bg-blue-50 h-6"
+    >
+      View
+    </Button>
+  )}
+</span>
+
+
+REPLACE WITH (FIXED):
+---------------------
+<span className={`text-xs font-medium ${isSubmitted ? 'text-green-600' : 'text-slate-500'}`}>
+  {isSubmitted ? 'Submitted' : 'Pending'}
+</span>
+{isSubmitted && (
+  <Button
+    size="sm"
+    variant="outline"
+    onClick={() => {
+      console.log('🔍 Viewing responses for startup:', startupId, 'mandate:', mandateStatusModalOpen);
+      loadStartupResponses(mandateStatusModalOpen, startupId);
+    }}
+    className="text-blue-600 border-blue-600 hover:bg-blue-50 h-6 ml-2"
+  >
+    View
+  </Button>
+)}
+
+==============================================================
+ADD DEBUG LOGGING TO loadStartupResponses
+==============================================================
+
+LOCATION: Line 1087 in FacilitatorView.tsx
+
+ADD THESE console.log statements:
+
+const loadStartupResponses = async (mandateId: string, startupId: number) => {
+  try {
+    console.log('📋 START: Loading responses for mandate:', mandateId, 'startup:', startupId);
+    console.log('📋 Facilitator ID:', facilitatorId);
+    
+    const mandate = reportMandates.find(m => m.id === mandateId);
+    if (!mandate) {
+      console.log('❌ Mandate not found:', mandateId);
+      return;
+    }
+
+    console.log('📋 Mandate found:', mandate);
+    const questionIds = mandate.questionIds || [];
+    console.log('📝 Question IDs from mandate:', questionIds);
+    
+    if (questionIds.length === 0) {
+      console.log('⚠️ No questions in mandate');
+      ... rest of code
+    }
+  
+    const { data: questionRows, error: qError } = await supabase
+      .from('application_question_bank')
+      .select('id, question_text')
+      .in('id', questionIds);
+
+    console.log('❓ Fetched questions:', questionRows);
+    console.log('❌ Question fetch error:', qError);
+
+    ... rest of existing code ...
+
+    const { data: responses, error: responseError } = await supabase
+      .from('program_tracking_responses')
+      .select('question_id, answer_text, created_at')
+      .eq('startup_id', startupId)
+      .eq('facilitator_id', facilitatorId)
+      .in('question_id', questionIds);
+
+    console.log('💬 Fetched responses from DB:', responses);
+    console.log('❌ Response fetch error:', responseError);
+    console.log('🔑 Query params:', { startupId, facilitatorId, questionIds });
+
+    if (responses) {
+      const merged = responses.map((response: any) => ({
+        ...response,
+        question_text: questionMap.get(String(response.question_id)) || 'Question'
+      }));
+
+      console.log('✅ Merged responses with questions:', merged);
+      console.log('✅ Setting state with key:', `${mandateId}-${startupId}`);
+
+      setMandateResponses(prev => ({
+        ...prev,
+        [`${mandateId}-${startupId}`]: merged
+      }));
+    } else {
+      console.log('⚠️ No responses found or responses is null');
+    }
+
+    console.log('🎯 Setting modal state - Mandate:', mandateId, 'Startup:', startupId);
+    setViewResponsesMandateId(mandateId);
+    setViewResponsesStartupId(startupId);
+    
+    console.log('✅ END: loadStartupResponses completed');
+  } catch (error) {
+    console.error('💥 FATAL ERROR in loadStartupResponses:', error);
+    messageService.error('Error', 'Failed to load responses');
+  }
+};
+
+==============================================================
+AFTER APPLYING THESE FIXES:
+==============================================================
+
+1. Click the View button
+2. Open browser Developer Tools (F12)
+3. Check the Console tab
+4. You should see logs like:
+   - 📋 START: Loading responses for mandate: ...
+   - 📝 Question IDs from mandate: [...]
+   - 💬 Fetched responses from DB: [...]
+   - ✅ Merged responses with questions: [...]
+
+5. If you see "⚠️ No responses found", that means the startup hasn't actually filled out the form yet
+6. If you see errors, the logs will show exactly what's failing
+
+==============================================================

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Startup, InvestmentOffer } from '../../types';
 import { DashboardMetricsService, DashboardMetrics } from '../../lib/dashboardMetricsService';
@@ -16,7 +16,9 @@ import { investmentService as databaseInvestmentService } from '../../lib/databa
 import StartupMessagingModal from './StartupMessagingModal';
 import StartupContractModal from './StartupContractModal';
 import InvestorContactDetailsModal from './InvestorContactDetailsModal';
+import { Form2SubmissionModal } from '../Form2SubmissionModal';
 import Modal from '../ui/Modal';
+import { questionBankService, OpportunityQuestion } from '../../lib/questionBankService';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import { capTableService } from '../../lib/capTableService';
@@ -81,6 +83,11 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [fundUsageData, setFundUsageData] = useState<any[]>([]);
   
+  // Guards to prevent repeated loads
+  const isLoadingDashboardRef = useRef(false);
+  const isLoadingOffersRef = useRef(false);
+  const lastStartupIdRef = useRef<number | null>(null);
+  
   // Enhanced dashboard state
   const [selectedYear, setSelectedYear] = useState<number | 'all'>('all');
   const [selectedMonth, setSelectedMonth] = useState<string>('');
@@ -92,11 +99,25 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
 
   // Due Diligence Requests (investor → startup)
   const [diligenceRequests, setDiligenceRequests] = useState<any[]>([]);
+  const [facilitatorDiligenceRequests, setFacilitatorDiligenceRequests] = useState<any[]>([]);
   
   // Offers Received states
   const [offersReceived, setOffersReceived] = useState<OfferReceived[]>([]);
   const [isAcceptingOffer, setIsAcceptingOffer] = useState(false);
   const [offerFilter, setOfferFilter] = useState<'all' | 'investment' | 'incubation'>('all');
+  
+  // Incubation Programs section states (separate from Offers Received)
+  const [incubationPrograms, setIncubationPrograms] = useState<any[]>([]);
+  const [form2Requests, setForm2Requests] = useState<any[]>([]);
+  const [incubationFilter, setIncubationFilter] = useState<'all' | 'pending' | 'accepted' | 'form2_pending'>('all');
+  
+  // Form 2 Submission Modal states
+  const [isForm2ModalOpen, setIsForm2ModalOpen] = useState(false);
+  const [selectedForm2Data, setSelectedForm2Data] = useState<{
+    applicationId: string;
+    opportunityId: string;
+    opportunityName: string;
+  } | null>(null);
   
   // Messaging modal states
   const [isMessagingModalOpen, setIsMessagingModalOpen] = useState(false);
@@ -123,7 +144,20 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [recAmount, setRecAmount] = useState<string>('');
   const [recEquity, setRecEquity] = useState<string>('');
   const [recPostMoney, setRecPostMoney] = useState<string>('');
+  const [recAgreementFile, setRecAgreementFile] = useState<File | null>(null);
   const [totalSharesForCalc, setTotalSharesForCalc] = useState<number>(0);
+  
+  // Program Tracking Questions Modal states
+  const [isTrackingQuestionsModalOpen, setIsTrackingQuestionsModalOpen] = useState(false);
+  const [selectedProgramForTracking, setSelectedProgramForTracking] = useState<{
+    facilitatorId: string;
+    programName: string;
+    facilitatorName: string;
+  } | null>(null);
+  const [trackingQuestions, setTrackingQuestions] = useState<OpportunityQuestion[]>([]);
+  const [trackingResponses, setTrackingResponses] = useState<Map<string, string>>(new Map());
+  const [isLoadingTrackingQuestions, setIsLoadingTrackingQuestions] = useState(false);
+  const [isSavingTrackingResponses, setIsSavingTrackingResponses] = useState(false);
   
   // Compliance data state
   const [complianceData, setComplianceData] = useState<{
@@ -225,6 +259,14 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
 
   useEffect(() => {
     const loadDashboardData = async () => {
+      // Prevent concurrent loads
+      if (isLoadingDashboardRef.current || lastStartupIdRef.current === startup.id) {
+        return;
+      }
+      
+      isLoadingDashboardRef.current = true;
+      lastStartupIdRef.current = startup.id;
+      
       try {
         setIsLoading(true);
         
@@ -250,10 +292,14 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                 return recordDate < earliestDate ? record : earliest;
               });
               registrationYear = new Date(earliestRecord.date).getFullYear();
-              console.log('📅 Dashboard: No registration date found, using earliest financial record year:', registrationYear);
+              if (process.env.NODE_ENV === 'development') {
+                console.log('📅 Dashboard: Using earliest financial record year:', registrationYear);
+              }
             } else {
               registrationYear = new Date().getFullYear();
-              console.log('📅 Dashboard: No registration date or financial records, using current year:', registrationYear);
+              if (process.env.NODE_ENV === 'development') {
+                console.log('📅 Dashboard: Using current year:', registrationYear);
+              }
             }
           } catch (error) {
             console.error('Error fetching financial records for year generation:', error);
@@ -270,7 +316,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         }
         setAvailableYears(years);
         
-        console.log('📅 Dashboard: Generated years from', registrationYear, 'to', currentYear, ':', years);
+        if (process.env.NODE_ENV === 'development') {
+          console.log('📅 Dashboard: Generated years from', registrationYear, 'to', currentYear, ':', years);
+        }
         
         // Ensure selectedYear is within available years (default to 'all')
         if (selectedYear !== 'all' && !years.includes(selectedYear)) {
@@ -359,79 +407,43 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         console.error('Error loading dashboard data:', error);
       } finally {
         setIsLoading(false);
+        isLoadingDashboardRef.current = false;
       }
     };
 
     loadDashboardData();
+    // Always load offers directly to ensure consistent formatting and visibility
     loadOffersReceived();
   }, [startup.id]); // Only depend on startup.id, not selectedYear to avoid double loading
 
-  // Refresh offers when offers prop changes
-  useEffect(() => {
-    if (offers && offers.length > 0) {
-      console.log('🔄 Startup Dashboard: Offers prop changed, refreshing offers received');
-      loadOffersReceived();
-    }
-  }, [offers]);
-
-  // Force refresh offers when component becomes visible
-  useEffect(() => {
-    console.log('🔄 Startup Dashboard: Component mounted/updated, refreshing offers received');
-    loadOffersReceived();
-  }, [startup.id]);
-
-  // Add a global refresh mechanism
-  useEffect(() => {
-    const handleOfferUpdate = () => {
-      console.log('🔄 Startup Dashboard: Global offer update detected, refreshing offers received');
-      loadOffersReceived();
-    };
-
-    // Listen for custom events that indicate offers have been updated
-    window.addEventListener('offerUpdated', handleOfferUpdate);
-    window.addEventListener('offerStageUpdated', handleOfferUpdate);
-
-    return () => {
-      window.removeEventListener('offerUpdated', handleOfferUpdate);
-      window.removeEventListener('offerStageUpdated', handleOfferUpdate);
-    };
-  }, []);
-
-  // Add debugging for offers filtering
-  useEffect(() => {
-    console.log('🔍 Startup Dashboard: Offers prop changed, debugging filtering');
-    console.log('🔍 Total offers received:', offers?.length || 0);
-    console.log('🔍 Current startup ID:', startup?.id);
-    console.log('🔍 Startup name:', startup?.name);
-    
-    if (offers && offers.length > 0) {
-      console.log('🔍 Sample offer data:', {
-        id: offers[0].id,
-        startupId: offers[0].startupId,
-        startupName: offers[0].startupName,
-        investorName: offers[0].investorName,
-        stage: (offers[0] as any).stage
-      });
-    }
-  }, [offers, startup?.id]);
+  // REMOVED: Duplicate useEffect that was causing infinite loop
+  // Offers are now loaded only once on mount if not provided via props
 
   const loadFinancialDataForYear = async (year: number | 'all') => {
     try {
-      console.log('🔄 Dashboard: Loading financial data for year:', year, 'startup:', startup.id);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💾 Loading financial data for year:', year);
+      }
       // When 'all' is selected, don't pass year filter to get all records
       const filters = year === 'all' ? {} : { year };
       const allRecords = await financialsService.getFinancialRecords(startup.id, filters);
-      console.log('📊 Dashboard: Records loaded for year', year, ':', allRecords.length, 'records');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💾 Records loaded:', allRecords.length);
+      }
       
       if (allRecords.length === 0) {
-        console.warn('⚠️ Dashboard: No financial records found for year', year);
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('No financial records found for year', year);
+        }
       } else {
-        console.log('📊 Dashboard: Sample records:', allRecords.slice(0, 3).map(r => ({
-          date: r.date,
-          type: r.record_type,
-          amount: r.amount,
-          year: new Date(r.date).getFullYear()
-        })));
+        if (process.env.NODE_ENV === 'development') {
+          console.log('💾 Sample records:', allRecords.slice(0, 3).map(r => ({
+            date: r.date,
+            type: r.record_type,
+            amount: r.amount,
+            year: new Date(r.date).getFullYear()
+          })));
+        }
       }
       
       // Generate monthly revenue vs expenses data
@@ -583,7 +595,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       setDailyData(finalDailyData);
       
       // If no data found for the month, show a message
-      if (finalDailyData.length === 0) {
+      if (finalDailyData.length === 0 && process.env.NODE_ENV === 'development') {
         console.log(`No financial data found for ${month} ${year}`);
       }
       
@@ -595,17 +607,20 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
 
   // Load offers received
   const loadOffersReceived = async () => {
-    console.log('🚀 loadOffersReceived function called!');
     if (!startup?.id) return;
+    // Prevent overlapping fetches that can race and clear state
+    if (isLoadingOffersRef.current) return;
+    isLoadingOffersRef.current = true;
     
     try {
-      console.log('🔍 Loading offers for startup ID:', startup.id);
-      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔍 Loading offers for startup ID:', startup.id);
+      }
       // Fetch offers directly from database using the correct service
-      console.log('🔍 Startup ID type:', typeof startup.id, 'Value:', startup.id);
       const investmentOffers = await databaseInvestmentService.getOffersForStartup(Number(startup.id));
-      console.log('💰 Investment offers from database:', investmentOffers);
-      console.log('💰 Investment offers count:', investmentOffers?.length || 0);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💰 Investment offers count:', investmentOffers?.length || 0);
+      }
       
       // Fetch all opportunity applications for this startup with proper joins
       let allApplications = [];
@@ -615,9 +630,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           .from('opportunity_applications')
           .select('*, diligence_status, diligence_urls, created_at')
           .eq('startup_id', startup.id);
-        
-        console.log('🔍 Simple query result:', simpleData);
-        console.log('🔍 Simple query error:', simpleError);
         
         if (simpleError) {
           console.error('Error with simple query:', simpleError);
@@ -634,10 +646,96 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             .from('incubation_opportunities')
             .select(`id, program_name, facilitator_id, facilitator_code`)
             .in('id', opportunityIds);
+          
           if (!oppError && opportunities) {
+            console.log('📋 Opportunities fetched:', opportunities.length);
+            console.log('📋 Sample opportunity data:', opportunities.slice(0, 1).map(o => ({
+              id: o.id,
+              program_name: o.program_name,
+              facilitator_id: o.facilitator_id,
+              facilitator_code: o.facilitator_code
+            })));
+            
+            // Extract unique facilitator IDs
+            const facilitatorIds = opportunities
+              .map(opp => opp.facilitator_id)
+              .filter(Boolean);
+            
+            console.log('🔑 Extracted facilitator IDs to fetch:', facilitatorIds);
+            
+            let facilitatorProfiles: { [key: string]: any } = {};
+            
+            // If we have facilitator IDs, try to fetch their profiles
+            if (facilitatorIds.length > 0) {
+              console.log('🔍 Attempting to fetch profiles for facilitator IDs:', facilitatorIds);
+              
+              try {
+                // Fetch from user_profiles which has center_name and facilitator_code
+                // Note: facilitator_id in incubation_opportunities stores auth_user_id, not user_profiles.id
+                const { data: profiles, error: profileError } = await supabase
+                  .from('user_profiles')
+                  .select('id, auth_user_id, center_name, facilitator_code, firm_name, email')
+                  .in('auth_user_id', facilitatorIds);
+                
+                console.log('📥 User profiles query result:', {
+                  error: profileError,
+                  profilesCount: profiles?.length,
+                  profiles: profiles?.map(p => ({
+                    id: p.id,
+                    center_name: p.center_name,
+                    facilitator_code: p.facilitator_code
+                  }))
+                });
+                
+                if (profileError) {
+                  console.warn('⚠️ Error fetching user_profiles:', profileError);
+                  // Continue without profiles - will use fallback names
+                } else if (profiles) {
+                  profiles.forEach(profile => {
+                    // Store by auth_user_id since that's what facilitator_id contains
+                    facilitatorProfiles[profile.auth_user_id] = profile;
+                  });
+                  
+                  if (process.env.NODE_ENV === 'development') {
+                    console.log('👤 Facilitator Profiles Fetched:', {
+                      count: profiles.length,
+                      sample: profiles.slice(0, 2).map(p => ({
+                        id: p.id,
+                        center_name: p.center_name,
+                        facilitator_code: p.facilitator_code,
+                        firm_name: p.firm_name
+                      }))
+                    });
+                  }
+                }
+              } catch (profileErr) {
+                console.error('Exception fetching facilitator profiles:', profileErr);
+              }
+            }
+            
+            // Enrich allApplications with opportunity data and facilitator profiles
             allApplications = allApplications.map(app => {
               const opportunity = opportunities.find(opp => opp.id === app.opportunity_id);
-              return opportunity ? { ...app, incubation_opportunities: opportunity } : app;
+              if (opportunity) {
+                const facilitatorProfile = facilitatorProfiles[opportunity.facilitator_id];
+                console.log('🔗 Matching for opportunity:', {
+                  opportunity_id: opportunity.id,
+                  facilitator_id: opportunity.facilitator_id,
+                  profile_found: !!facilitatorProfile,
+                  profile_data: facilitatorProfile ? {
+                    center_name: facilitatorProfile.center_name,
+                    facilitator_code: facilitatorProfile.facilitator_code
+                  } : null
+                });
+                return {
+                  ...app,
+                  incubation_opportunities: {
+                    ...opportunity,
+                    facilitator_profile: facilitatorProfile || null
+                  }
+                };
+              }
+              return app;
             });
           }
         }
@@ -647,195 +745,84 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         allApplications = [];
       }
       
+      // Initialize facilitatorData to store enriched opportunity information
+      let facilitatorData: { [key: string]: any } = {};
+      
       // Note: incubation_applications table doesn't exist (404 error)
       // All applications are in opportunity_applications table
       
-      // Debug: Log all applications to see what we're getting
-      console.log('🔍 All applications fetched:', allApplications);
-      console.log('🔍 Application count:', allApplications.length);
-      
-      // Log diligence_status for each application
-      allApplications.forEach((app, index) => {
-        console.log(`🔍 App ${index + 1} (${app.id}): diligence_status = "${app.diligence_status}"`);
-      });
-      
-      // Log each application in detail
-      allApplications.forEach((app, index) => {
-        console.log(`🔍 Application ${index + 1}:`, {
-          id: app.id,
-          allKeys: Object.keys(app),
-          type: app.type,
-          opportunity_type: app.opportunity_type,
-          program_type: app.program_type,
-          application_type: app.application_type,
-          status: app.status,
-          organization_name: app.organization_name,
-          facilitator_name: app.facilitator_name,
-          startup_id: app.startup_id
-        });
-        
-        // Log the actual field names to see what's available
-        console.log(`🔍 Application ${index + 1} field names:`, Object.keys(app));
-        console.log(`🔍 Application ${index + 1} field names (expanded):`, JSON.stringify(Object.keys(app), null, 2));
-        
-        // Log the full application object to see all data
-        console.log(`🔍 Application ${index + 1} full data:`, app);
-        console.log(`🔍 Application ${index + 1} full data (expanded):`, JSON.stringify(app, null, 2));
-        
-        // Log each field individually to see actual values
-        console.log(`🔍 Application ${index + 1} individual fields:`);
-        Object.keys(app).forEach(key => {
-          console.log(`  ${key}:`, app[key]);
-        });
-      });
-      
-      // Note: We're only showing properly resolved offers with facilitator names
-      
-      // Since all applications appear to be incubation-related (they have agreement_url, pitch_deck_url, etc.)
-      // and the database joins are failing, let's treat them all as incubation applications
-      // and try to fetch facilitator names using a simpler approach
-      
-      console.log('🔍 Treating all applications as incubation applications since they have incubation-related fields');
-      
-      // Try to fetch facilitator names for each opportunity_id
-      const opportunityIds = allApplications.map(app => app.opportunity_id).filter(Boolean);
-      console.log('🔍 Opportunity IDs to fetch:', opportunityIds);
-      
-      let facilitatorData = {};
+      // Enrich applications with facilitator data from the incubation_opportunities table joins
+      const opportunityIds = allApplications.map(app => app.incubation_opportunities?.id).filter(Boolean);
       if (opportunityIds.length > 0) {
-        try {
-          // Try a simple query to get facilitator data
-          const { data: facilitators, error: facilitatorError } = await supabase
-            .from('incubation_opportunities')
-            .select('id, facilitator_id, facilitator_code, program_name')
-            .in('id', opportunityIds);
-          
-          console.log('🔍 Facilitators query result:', facilitators);
-          console.log('🔍 Facilitators query error:', facilitatorError);
-          
-          if (!facilitatorError && facilitators) {
-            // Now try to get user names for each facilitator
-            const facilitatorIds = facilitators.map(f => f.facilitator_id).filter(Boolean);
-            console.log('🔍 Facilitator IDs to fetch:', facilitatorIds);
-            
-            if (facilitatorIds.length > 0) {
-              // CRITICAL FIX: users table removed, use user_profiles instead
-              // facilitatorIds are auth_user_id, so query by auth_user_id
-              const { data: users, error: usersError } = await supabase
-                .from('user_profiles')
-                .select('auth_user_id, name, facilitator_code')
-                .in('auth_user_id', facilitatorIds);
-              
-              console.log('🔍 Users query result:', users);
-              console.log('🔍 Users query error:', usersError);
-              
-              if (!usersError && users) {
-                // Create a mapping of facilitator_id to user data
-                // CRITICAL FIX: user_profiles uses auth_user_id, not id
-                const userMap = {};
-                users.forEach(user => {
-                  userMap[user.auth_user_id] = user;  // Use auth_user_id as key
-                });
-                
-                // Combine facilitator and user data
-                facilitators.forEach(facilitator => {
-                  const user = userMap[facilitator.facilitator_id];  // facilitator_id is auth_user_id
-                  facilitatorData[facilitator.id] = {
-                    ...facilitator,
-                    user: user
-                  };
-                });
-                
-                console.log('🔍 Combined facilitator data:', facilitatorData);
-                console.log('🔍 Facilitator data keys:', Object.keys(facilitatorData));
-                console.log('🔍 Facilitator data values:', Object.values(facilitatorData));
-                
-                // Debug each facilitator entry
-                Object.entries(facilitatorData).forEach(([key, value]: [string, any]) => {
-                  console.log(`🔍 Facilitator ${key}:`, {
-                    id: value.id,
-                    program_name: value.program_name,
-                    facilitator_id: value.facilitator_id,
-                    facilitator_code: value.facilitator_code,
-                    user: value.user
-                  });
-                });
-              }
-            }
+        allApplications.forEach(app => {
+          if (app.incubation_opportunities) {
+            facilitatorData[app.opportunity_id] = app.incubation_opportunities;
           }
-        } catch (err) {
-          console.error('Error fetching facilitator data:', err);
+        });
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('📋 Facilitator Data Enrichment:', {
+            totalApplications: allApplications.length,
+            applicationsWithFacilitatorData: Object.keys(facilitatorData).length,
+            sampleFacilitatorInfo: Object.entries(facilitatorData).slice(0, 1).reduce((acc, [id, info]) => ({
+              ...acc,
+              [id]: {
+                program_name: info.program_name,
+                opportunity_facilitator_id: info.facilitator_id,
+                opportunity_facilitator_code: info.facilitator_code,
+                facilitator_profile_center_name: info.facilitator_profile?.center_name,
+                facilitator_profile_firm: info.facilitator_profile?.firm_name,
+                facilitator_profile_code: info.facilitator_profile?.facilitator_code,
+                facilitator_profile_email: info.facilitator_profile?.email,
+                user_name: info.user?.name
+              }
+            }), {})
+          });
         }
       }
       
-      // All applications are treated as incubation applications
-      // Filter out withdrawn applications
-      console.log('🔍 Before filtering - All applications:', allApplications.map(app => ({ id: app.id, status: app.status })));
-      const incubationApplications = allApplications.filter(app => {
-        const isNotWithdrawn = app.status !== 'withdrawn';
-        console.log(`🔍 Filtering app ${app.id}: status=${app.status}, isNotWithdrawn=${isNotWithdrawn}`);
-        return isNotWithdrawn;
-      });
-      // Identify applications with an active diligence workflow
+      // Identify applications with an active diligence workflow FIRST
       const diligenceApplications = allApplications.filter((app: any) => {
         const status = typeof app?.diligence_status === 'string' 
           ? app.diligence_status.toLowerCase() 
           : null;
-        const include = status === 'requested' || status === 'approved';
-        console.log(`🔍 Diligence filter app ${app.id}: diligence_status="${app.diligence_status}", status="${status}", include=${include}`);
-        return include;
+        return status === 'requested' || status === 'approved';
       });
       
-      console.log('🔍 Diligence applications found:', diligenceApplications.length);
-      console.log('🔍 Diligence applications:', diligenceApplications.map(app => ({ id: app.id, diligence_status: app.diligence_status })));
+      // Then filter incubation applications, EXCLUDING any with active diligence workflows
+      const diligenceAppIds = new Set(diligenceApplications.map(app => app.id));
+      const incubationApplications = allApplications.filter(app => {
+        const isNotWithdrawn = app.status !== 'withdrawn';
+        const isNotInDiligence = !diligenceAppIds.has(app.id);
+        return isNotWithdrawn && isNotInDiligence;
+      });
       
-      // Additional debugging for diligence flow
-      if (diligenceApplications.length > 0) {
-        console.log('✅ DILIGENCE FLOW: Found diligence applications!');
-        diligenceApplications.forEach((app, index) => {
-          console.log(`✅ DILIGENCE FLOW: App ${index + 1}:`, {
-            id: app.id,
-            diligence_status: app.diligence_status,
-            diligence_urls: app.diligence_urls,
-            status: app.status
-          });
-        });
-      } else {
-        console.log('❌ DILIGENCE FLOW: No diligence applications found');
-        console.log('❌ DILIGENCE FLOW: All applications:', allApplications.map(app => ({
-          id: app.id,
-          status: app.status,
-          diligence_status: app.diligence_status
-        })));
+      if (process.env.NODE_ENV === 'development' && diligenceApplications.length > 0) {
+        console.log('✅ DILIGENCE FLOW: Found diligence applications:', diligenceApplications.length);
       }
-      
-      console.log('🔍 Incubation applications found:', incubationApplications.length);
-      console.log('🔍 Diligence applications found:', diligenceApplications.length);
-      console.log('🔍 After filtering - Incubation applications:', incubationApplications.map(app => ({ id: app.id, status: app.status })));
       
       // Transform incubation applications into OfferReceived format
       const incubationOffers: OfferReceived[] = incubationApplications.map((app: any) => {
         // Use the fetched facilitator data to get facilitator name
         const facilitatorInfo = facilitatorData[app.opportunity_id];
-        console.log(`🔍 Processing app ${app.id} with opportunity_id ${app.opportunity_id}:`, facilitatorInfo);
         
-        const fromName = facilitatorInfo?.user?.name || 
-                        facilitatorInfo?.user?.facilitator_code ||
+        // Priority: center_name > firm_name > facilitator_code > program_name
+        const fromName = facilitatorInfo?.facilitator_profile?.center_name || 
+                        facilitatorInfo?.facilitator_profile?.firm_name ||
+                        facilitatorInfo?.facilitator_profile?.facilitator_code ||
+                        facilitatorInfo?.user?.name || 
                         facilitatorInfo?.facilitator_code ||
                         facilitatorInfo?.program_name ||
                         `Application ${app.id.slice(0, 8)}`;
         
-        console.log(`🔍 Resolved name for app ${app.id}:`, fromName);
-        console.log(`🔍 Available facilitator info:`, {
-          user_name: facilitatorInfo?.user?.name,
-          user_facilitator_code: facilitatorInfo?.user?.facilitator_code,
-          facilitator_code: facilitatorInfo?.facilitator_code,
-          program_name: facilitatorInfo?.program_name
-        });
-        
         // Get program name from facilitator data
         const programName = facilitatorInfo?.program_name || 
                            'Incubation Program';
+        
+        // Get facilitator code from profile or fallback to opportunity field
+        const facilitatorCode = facilitatorInfo?.facilitator_profile?.facilitator_code ||
+                               facilitatorInfo?.facilitator_code ||
+                               app.id.toString();
         
         return {
           id: `incubation_${app.id}`,
@@ -843,7 +830,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           type: 'Incubation' as const,
           offerDetails: app.status === 'accepted' ? 'Accepted into Program' : `Incubation program: ${programName}`,
           status: app.status as 'pending' | 'accepted' | 'rejected',
-          code: facilitatorInfo?.facilitator_code || app.id.toString(),
+          code: facilitatorCode,
           agreementUrl: app.agreement_url,
           contractUrl: app.contract_url,
           applicationId: app.id,
@@ -857,10 +844,20 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       const diligenceOffers: OfferReceived[] = diligenceApplications.map((app: any) => {
         // Use the fetched facilitator data to get facilitator name
         const facilitatorInfo = facilitatorData[app.opportunity_id];
-        const fromName = facilitatorInfo?.user?.name || 
+        
+        // Priority: center_name > firm_name > facilitator_code > program_name
+        const fromName = facilitatorInfo?.facilitator_profile?.center_name || 
+                        facilitatorInfo?.facilitator_profile?.firm_name ||
+                        facilitatorInfo?.facilitator_profile?.facilitator_code ||
+                        facilitatorInfo?.user?.name || 
                         facilitatorInfo?.facilitator_code ||
                         facilitatorInfo?.program_name ||
                         'Unknown Organization';
+        
+        // Get facilitator code from profile or fallback to opportunity field
+        const facilitatorCode = facilitatorInfo?.facilitator_profile?.facilitator_code ||
+                               facilitatorInfo?.facilitator_code ||
+                               app.id.toString();
         
         return {
           id: `diligence_${app.id}`,
@@ -868,35 +865,13 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           type: 'Due Diligence' as const,
           offerDetails: app.diligence_status === 'requested' ? 'Due diligence access requested' : 'Due diligence access granted',
           status: app.diligence_status === 'approved' ? 'accepted' : (app.diligence_status === 'requested' ? 'pending' : 'rejected'),
-          code: facilitatorInfo?.facilitator_code || app.id.toString(),
+          code: facilitatorCode,
           agreementUrl: app.agreement_url,
           applicationId: app.id,
           createdAt: app.created_at,
           diligenceUrls: app.diligence_urls || []
         };
       });
-      
-      // Debug: Log investment offers data
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔍 StartupDashboardTab - Investment offers received:', investmentOffers);
-        console.log('🔍 StartupDashboardTab - Current startup ID:', startup.id);
-        console.log('🔍 StartupDashboardTab - Current startup name:', startup.name);
-        if (investmentOffers && investmentOffers.length > 0) {
-          console.log('🔍 First offer details:', {
-            id: investmentOffers[0].id,
-            startupId: investmentOffers[0].startupId,
-            startupName: investmentOffers[0].startupName,
-            investorName: investmentOffers[0].investorName,
-            investorEmail: investmentOffers[0].investorEmail,
-            offerAmount: investmentOffers[0].offerAmount,
-            equityPercentage: investmentOffers[0].equityPercentage,
-            currency: (investmentOffers[0] as any).currency,
-            stage: (investmentOffers[0] as any).stage,
-            status: investmentOffers[0].status,
-            createdAt: investmentOffers[0].createdAt
-          });
-        }
-      }
 
       // Transform investment offers into OfferReceived format
       const investmentOffersFormatted: OfferReceived[] = (investmentOffers || []).map((offer: any) => {
@@ -910,18 +885,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         // Ensure we have valid numbers for amount and equity
         const amount = Number(offer.offerAmount || offer.amount) || 0;
         const equityPercentage = Number(offer.equityPercentage || offer.equity_percentage) || 0;
-        
-        console.log('🔍 Processing investment offer:', {
-          id: offer.id,
-          investorName,
-          investorEmail: offer.investorEmail,
-          amount,
-          equityPercentage,
-          currency: (offer as any).currency,
-          stage: (offer as any).stage,
-          status: offer.status,
-          rawOffer: offer
-        });
         
         // Get currency from offer or use startup currency
         const offerCurrency = (offer as any).currency || startupCurrency || 'USD';
@@ -1023,7 +986,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       // IMPORTANT: Only show offers that have passed Investor Advisor and Lead Investor approval
       let coInvestmentOffersFormatted: OfferReceived[] = [];
       try {
-        console.log('🔍 Fetching co-investment offers for startup:', startup.id);
         // Fetch co-investment offers that have passed investor advisor and lead investor approval
         // Only show offers that are ready for startup approval or already accepted/rejected by startup
         const { data: coInvestmentOffersData, error: coInvestmentOffersError } = await supabase
@@ -1044,10 +1006,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           .in('status', ['pending_startup_approval', 'accepted', 'rejected'])
           .order('created_at', { ascending: false });
 
-        if (coInvestmentOffersError) {
-          console.error('❌ Error fetching co-investment offers:', coInvestmentOffersError);
-        } else {
-          console.log('✅ Fetched co-investment offers:', coInvestmentOffersData?.length || 0);
+        if (!coInvestmentOffersError) {
           coInvestmentOffersFormatted = (coInvestmentOffersData || []).map((offer: any) => {
             const investorName = offer.investor?.name || offer.investor_name || offer.investor_email || 'Unknown Investor';
             const amount = Number(offer.offer_amount) || 0;
@@ -1078,19 +1037,116 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         console.error('❌ Error loading co-investment offers:', err);
       }
       
-      // Combine all offers - only include properly resolved offers
-      const allOffers = [...incubationOffers, ...diligenceOffers, ...investmentOffersFormatted, ...coInvestmentOpportunitiesFormatted, ...coInvestmentOffersFormatted];
-      console.log('🎯 Combined offers array:', allOffers);
-      console.log('🎯 Incubation offers:', incubationOffers);
-      console.log('🎯 Diligence offers:', diligenceOffers);
-      console.log('🎯 Investment offers:', investmentOffersFormatted);
-      console.log('🎯 Co-investment opportunities:', coInvestmentOpportunitiesFormatted);
-      console.log('🎯 Co-investment offers (actual offers):', coInvestmentOffersFormatted);
-      console.log('🎯 Total offers count:', allOffers.length);
+      // Store facilitator diligence applications separately (don't include in offers)
+      setFacilitatorDiligenceRequests(diligenceApplications);
+
+      // Store incubation programs separately for dedicated Incubation Programs section
+      // Load Form 2 requests for each incubation application
+      const incubationProgramsWithForm2 = await Promise.all(
+        incubationApplications.map(async (app: any) => {
+          const facilitatorInfo = facilitatorData[app.opportunity_id];
+          const programName = facilitatorInfo?.program_name || 'Incubation Program';
+          
+          // DEBUG: Log facilitator info
+          console.log(`🔍 APP ${app.id}: facilitator_id="${facilitatorInfo?.facilitator_id}" program_name="${programName}"`);
+          
+          // Extract facilitator name with better fallback logic
+          let facilitatorName = 'Unknown Facilitator';
+          
+          // Try multiple sources for facilitator name
+          if (facilitatorInfo?.user?.name) {
+            facilitatorName = facilitatorInfo.user.name;
+          } else if (facilitatorInfo?.facilitator_profile?.center_name) {
+            // Use center_name from facilitator profile
+            facilitatorName = facilitatorInfo.facilitator_profile.center_name;
+          } else if (facilitatorInfo?.facilitator_profile?.firm_name) {
+            // Fallback to firm_name
+            facilitatorName = facilitatorInfo.facilitator_profile.firm_name;
+          } else if (facilitatorInfo?.center_name) {
+            // Direct center_name from opportunity data
+            facilitatorName = facilitatorInfo.center_name;
+          } else if (facilitatorInfo?.facilitator_code) {
+            // If facilitator_code exists, use it
+            facilitatorName = facilitatorInfo.facilitator_code;
+          } else if (facilitatorInfo?.program_name) {
+            // Use program name as last resort - extract organization name from it
+            // e.g., "Investments by Track My Startup, real investor access, zero retainer" → "Track My Startup"
+            const programName = facilitatorInfo.program_name;
+            const matches = programName.match(/(?:by\s+)?([A-Za-z\s&,\.]+?)(?:\s*,|$)/);
+            if (matches && matches[1]) {
+              facilitatorName = matches[1].trim();
+            } else {
+              facilitatorName = programName.split(',')[0].trim();
+            }
+          }
+          
+          // Check if Form 2 has been requested
+          const form2Data = {
+            requested: app.form2_requested || false,
+            status: app.form2_status || 'not_requested',
+            requestedAt: app.form2_requested_at,
+            submittedAt: app.form2_submitted_at
+          };
+          
+          const facilitatorId = facilitatorInfo?.facilitator_id || facilitatorInfo?.user?.id || '';
+          
+          // DEBUG: Log the extracted values
+          console.log(`✅ STARTUP PROGRAM: facilitatorId="${facilitatorId}" programName="${programName}"`);
+          
+          return {
+            id: app.id,
+            applicationId: app.id,
+            programName: programName,
+            facilitatorName: facilitatorName,
+            facilitatorId: facilitatorId,
+            facilitatorCode: facilitatorInfo?.facilitator_profile?.facilitator_code || facilitatorInfo?.facilitator_code || '',
+            status: app.status as 'pending' | 'accepted' | 'rejected',
+            createdAt: app.created_at,
+            agreementUrl: app.agreement_url,
+            contractUrl: app.contract_url,
+            isShortlisted: app.is_shortlisted || false,
+            form2: form2Data,
+            opportunityId: app.opportunity_id
+          };
+        })
+      );
+      
+      setIncubationPrograms(incubationProgramsWithForm2);
+      
+      if (process.env.NODE_ENV === 'development' && incubationProgramsWithForm2.length > 0) {
+        console.log('🎯 Incubation Programs Mapped:', incubationProgramsWithForm2.map(prog => ({
+          programName: prog.programName,
+          facilitatorName: prog.facilitatorName,
+          facilitatorCode: prog.facilitatorCode,
+          status: prog.status
+        })));
+      }
+      
+      // Filter Form 2 requests that are pending submission
+      const pendingForm2 = incubationProgramsWithForm2.filter(
+        prog => prog.form2.requested && prog.form2.status === 'pending'
+      );
+      setForm2Requests(pendingForm2);
+
+      // Combine all offers - only include properly resolved offers (EXCLUDE diligenceOffers and incubationOffers)
+      // Incubation programs now have their own section
+      const allOffers = [...investmentOffersFormatted, ...coInvestmentOpportunitiesFormatted, ...coInvestmentOffersFormatted];
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('📦 Combined offers:', {
+          incubationPrograms: incubationProgramsWithForm2.length,
+          form2Pending: pendingForm2.length,
+          investment: investmentOffersFormatted.length,
+          coInvestmentOpp: coInvestmentOpportunitiesFormatted.length,
+          coInvestmentOffers: coInvestmentOffersFormatted.length,
+          diligence: diligenceApplications.length,
+          totalOffers: allOffers.length
+        });
+      }
       
       // If no offers found, show a debug message
-      if (allOffers.length === 0) {
-        console.log('⚠️ No offers found for startup:', startup.id);
+      if (allOffers.length === 0 && incubationProgramsWithForm2.length === 0 && process.env.NODE_ENV === 'development') {
+        console.log('⚠️ No offers or programs found for startup:', startup.id);
         console.log('⚠️ Investment offers from service:', investmentOffers);
         console.log('⚠️ All applications from database:', allApplications);
       }
@@ -1100,6 +1156,8 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     } catch (err) {
       console.error('Error loading offers received:', err);
       setOffersReceived([]);
+    } finally {
+      isLoadingOffersRef.current = false;
     }
   };
 
@@ -1120,7 +1178,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         );
         return;
       }
-      // Reload offers; backend trigger will grant dashboard access
+
       await loadOffersReceived();
       messageService.success(
         'Diligence Accepted',
@@ -1132,6 +1190,103 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       messageService.error(
         'Diligence Failed',
         'Failed to accept due diligence request.'
+      );
+    }
+  };
+
+  // Handler functions for facilitator diligence requests
+  const handleAcceptFacilitatorDiligence = async (applicationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('opportunity_applications')
+        .update({ diligence_status: 'approved', updated_at: new Date().toISOString() })
+        .eq('id', applicationId);
+      
+      if (error) {
+        console.error('Error approving facilitator diligence:', error);
+        messageService.error(
+          'Approval Failed',
+          'Failed to approve due diligence request.'
+        );
+        return;
+      }
+      
+      // Reload data
+      await loadOffersReceived();
+      messageService.success(
+        'Diligence Approved',
+        'Facilitator has been granted access to your data.',
+        3000
+      );
+    } catch (e) {
+      console.error('Failed to approve facilitator diligence:', e);
+      messageService.error(
+        'Approval Failed',
+        'Failed to approve due diligence request.'
+      );
+    }
+  };
+
+  const handleRejectFacilitatorDiligence = async (applicationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('opportunity_applications')
+        .update({ diligence_status: 'none', updated_at: new Date().toISOString() })
+        .eq('id', applicationId);
+      
+      if (error) {
+        console.error('Error rejecting facilitator diligence:', error);
+        messageService.error(
+          'Rejection Failed',
+          'Failed to reject due diligence request.'
+        );
+        return;
+      }
+      
+      // Reload data
+      await loadOffersReceived();
+      messageService.success(
+        'Request Rejected',
+        'Due diligence request has been rejected.',
+        3000
+      );
+    } catch (e) {
+      console.error('Failed to reject facilitator diligence:', e);
+      messageService.error(
+        'Rejection Failed',
+        'Failed to reject due diligence request.'
+      );
+    }
+  };
+
+  const handleRevokeFacilitatorDiligence = async (applicationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('opportunity_applications')
+        .update({ diligence_status: 'none', updated_at: new Date().toISOString() })
+        .eq('id', applicationId);
+      
+      if (error) {
+        console.error('Error revoking facilitator diligence:', error);
+        messageService.error(
+          'Revocation Failed',
+          'Failed to revoke access.'
+        );
+        return;
+      }
+      
+      // Reload data
+      await loadOffersReceived();
+      messageService.success(
+        'Access Revoked',
+        'Facilitator access has been revoked.',
+        3000
+      );
+    } catch (e) {
+      console.error('Failed to revoke facilitator diligence:', e);
+      messageService.error(
+        'Revocation Failed',
+        'Failed to revoke access.'
       );
     }
   };
@@ -1176,19 +1331,111 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       link.href = agreementUrl;
       link.download = `facilitation-agreement-${Date.now()}.pdf`;
       link.target = '_blank';
-      link.rel = 'noopener noreferrer';
+      rel: 'noopener noreferrer';
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      console.log('✅ Agreement download initiated');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Agreement download initiated');
+      }
     } catch (err) {
       console.error('Error downloading agreement:', err);
       messageService.error(
         'Download Failed',
         'Failed to download agreement. Please try again.'
       );
+    }
+  };
+
+  const handleOpenTrackingQuestions = async (facilitatorId: string, programName: string, facilitatorName: string) => {
+    setIsLoadingTrackingQuestions(true);
+    setSelectedProgramForTracking({ facilitatorId, programName, facilitatorName });
+    setIsTrackingQuestionsModalOpen(true);
+
+    try {
+      // DEBUG: Log the parameters being passed to the service
+      console.log(`🎯 TRACKING QUESTIONS HANDLER - facilitatorId: "${facilitatorId}" | programName: "${programName}" | facilitatorName: "${facilitatorName}"`);
+
+      // Get configured questions for this program
+      const questions = await questionBankService.getProgramTrackingQuestions(facilitatorId, programName);
+      
+      // DEBUG: Log what we got back
+      console.log(`✅ RECEIVED ${questions?.length || 0} QUESTIONS from database for facilitatorId="${facilitatorId}" programName="${programName}"`);
+
+      setTrackingQuestions(questions);
+
+      // Get existing responses
+      const responses = await questionBankService.getProgramTrackingResponses(
+        startup.id,
+        facilitatorId,
+        programName
+      );
+      
+      // DEBUG: Log responses
+      console.log(`✅ RECEIVED ${responses?.length || 0} RESPONSES from database`);
+      
+      const responseMap = new Map<string, string>();
+      responses.forEach(r => {
+        responseMap.set(r.questionId, r.answerText);
+      });
+      setTrackingResponses(responseMap);
+    } catch (error) {
+      console.error('❌ Error loading tracking questions:', error);
+      messageService.error('Error', 'Failed to load tracking questions.');
+      setTrackingQuestions([]);
+      setTrackingResponses(new Map());
+    } finally {
+      setIsLoadingTrackingQuestions(false);
+    }
+  };
+
+  const handleSaveTrackingResponses = async () => {
+    if (!selectedProgramForTracking) return;
+
+    setIsSavingTrackingResponses(true);
+    try {
+      // Validate required questions are answered
+      const unansweredRequired = trackingQuestions.filter(q => 
+        q.isRequired && !trackingResponses.get(q.questionId)?.trim()
+      );
+
+      if (unansweredRequired.length > 0) {
+        messageService.warning(
+          'Required Questions',
+          `Please answer all required questions (${unansweredRequired.length} remaining).`
+        );
+        return;
+      }
+
+      // Save all responses
+      const savePromises = Array.from(trackingResponses.entries()).map(
+        ([questionId, answerText]) => {
+          if (!answerText.trim()) return Promise.resolve();
+          
+          return questionBankService.saveProgramTrackingResponse(
+            startup.id,
+            selectedProgramForTracking.facilitatorId,
+            selectedProgramForTracking.programName,
+            questionId,
+            answerText
+          );
+        }
+      );
+
+      await Promise.all(savePromises);
+
+      messageService.success(
+        'Responses Saved',
+        'Your tracking responses have been saved successfully.'
+      );
+      setIsTrackingQuestionsModalOpen(false);
+    } catch (error) {
+      console.error('Error saving tracking responses:', error);
+      messageService.error('Error', 'Failed to save responses. Please try again.');
+    } finally {
+      setIsSavingTrackingResponses(false);
     }
   };
 
@@ -1206,11 +1453,12 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     if (!offer.investmentOfferId) return;
     
     try {
-      console.log('💰 Accepting investment offer:', offer.investmentOfferId);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💰 Accepting investment offer:', offer.investmentOfferId);
+      }
       
       // Use the proper database function that updates both status and stage
       const result = await databaseInvestmentService.approveStartupOffer(offer.investmentOfferId, 'approve');
-      console.log('✅ Investment offer accepted:', result);
       
       messageService.success(
         'Offer Accepted',
@@ -1270,11 +1518,12 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     if (!offer.investmentOfferId) return;
     
     try {
-      console.log('💰 Rejecting investment offer:', offer.investmentOfferId);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💰 Rejecting investment offer:', offer.investmentOfferId);
+      }
       
       // Use the proper database function that updates both status and stage
       const result = await databaseInvestmentService.approveStartupOffer(offer.investmentOfferId, 'reject');
-      console.log('✅ Investment offer rejected:', result);
       
       await loadOffersReceived();
       
@@ -1456,8 +1705,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         console.error('❌ Error approving co-investment offer:', error);
         throw error;
       }
-
-      console.log('✅ Co-investment offer accepted:', data);
       
       messageService.success(
         'Co-Investment Offer Accepted',
@@ -1492,8 +1739,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         console.error('❌ Error rejecting co-investment offer:', error);
         throw error;
       }
-
-      console.log('✅ Co-investment offer rejected:', data);
       
       messageService.success(
         'Co-Investment Offer Rejected',
@@ -1690,7 +1935,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       const investmentAmount = Number(form.get('rec-amount') || recAmount || 0);
       const equityAllocated = Number(form.get('rec-equity') || recEquity || 0);
       const postMoneyValuation = Number(form.get('rec-postmoney') || recPostMoney || 0);
-      const agreementFile = (e.currentTarget.elements.namedItem('rec-agreement') as HTMLInputElement)?.files?.[0] || null;
+      const agreementFile = recAgreementFile; // Use file from state instead of form
+
+      console.log('📄 Agreement file from state:', agreementFile ? { name: agreementFile.name, size: agreementFile.size } : 'No file');
 
       // Minimal inline upsert via recognitionService
       const { recognitionService } = await import('../../lib/recognitionService');
@@ -2409,16 +2656,23 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Investor</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">From</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-slate-200">
+              {/* Investor Due Diligence Requests */}
               {diligenceRequests.map(r => (
                 <tr key={r.id}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
                     {r.investor?.name || 'Investor'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                      Investor
+                    </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     <span
@@ -2469,9 +2723,72 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                   </td>
                 </tr>
               ))}
-              {diligenceRequests.length === 0 && (
+              {/* Facilitator Due Diligence Requests */}
+              {facilitatorDiligenceRequests.map((app: any) => {
+                const facilitatorInfo = app.incubation_opportunities;
+                const fromName = facilitatorInfo?.program_name || 'Facilitator';
+                
+                return (
+                  <tr key={`facilitator_${app.id}`}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                      {fromName}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        Facilitator
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          app.diligence_status === 'approved'
+                            ? 'bg-green-100 text-green-800'
+                            : app.diligence_status === 'requested'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}
+                      >
+                        {app.diligence_status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {app.diligence_status === 'requested' ? (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            onClick={() => handleAcceptFacilitatorDiligence(app.id)}
+                          >
+                            <Check className="h-4 w-4 mr-1" /> Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-red-300 text-red-600 hover:bg-red-50"
+                            onClick={() => handleRejectFacilitatorDiligence(app.id)}
+                          >
+                            <X className="h-4 w-4 mr-1" /> Reject
+                          </Button>
+                        </div>
+                      ) : app.diligence_status === 'approved' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-orange-300 text-orange-600 hover:bg-orange-50"
+                          onClick={() => handleRevokeFacilitatorDiligence(app.id)}
+                        >
+                          <Lock className="h-4 w-4 mr-1" /> Revoke Access
+                        </Button>
+                      ) : (
+                        <span className="text-slate-400">No actions</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {diligenceRequests.length === 0 && facilitatorDiligenceRequests.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-6 py-8 text-center text-slate-500">
+                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
                     No due diligence requests yet.
                   </td>
                 </tr>
@@ -2483,10 +2800,10 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
 
       
 
-      {/* Offers Received Section */}
+      {/* Offers Received Section - Investment offers only */}
       <div className="space-y-3 sm:space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <h3 className="text-base sm:text-lg font-semibold text-slate-700">Offers Received</h3>
+          <h3 className="text-base sm:text-lg font-semibold text-slate-700">Investment Offers</h3>
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -2503,14 +2820,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
               className="text-xs"
             >
               Investment Offers
-            </Button>
-            <Button
-              size="sm"
-              variant={offerFilter === 'incubation' ? 'default' : 'outline'}
-              onClick={() => setOfferFilter('incubation')}
-              className="text-xs"
-            >
-              Incubation Offers
             </Button>
                       </div>
                     </div>
@@ -2731,26 +3040,280 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                       {isViewOnly ? (
                         <div className="space-y-2">
                           <p className="text-sm">
-                            {offerFilter === 'all' && "No offers or programs received yet."}
+                            {offerFilter === 'all' && "No investment offers received yet."}
                             {offerFilter === 'investment' && "No investment offers received yet."}
-                            {offerFilter === 'incubation' && "No incubation offers received yet."}
                           </p>
                           <p className="text-xs text-slate-400">
-                            {offerFilter === 'all' && "This startup hasn't applied to any incubation programs or received investment offers."}
-                            {offerFilter === 'investment' && "This startup hasn't received any investment offers yet."}
-                            {offerFilter === 'incubation' && "This startup hasn't applied to any incubation programs yet."}
+                            This startup hasn't received any investment offers yet.
                           </p>
                         </div>
                       ) : (
-                        offerFilter === 'all' ? "No offers received yet." :
-                        offerFilter === 'investment' ? "No investment offers received yet." :
-                        "No incubation offers received yet."
+                        "No investment offers received yet."
                       )}
                     </td>
                   </tr>
                 )}
                   </tbody>
                 </table>
+          </div>
+        </Card>
+      </div>
+
+      {/* Incubation Programs Section - Dedicated section for all incubation-related items */}
+      <div className="space-y-3 sm:space-y-4 mt-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <h3 className="text-base sm:text-lg font-semibold text-slate-700">Incubation Programs</h3>
+            {form2Requests.length > 0 && (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                {form2Requests.length} Form 2 Pending
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant={incubationFilter === 'all' ? 'default' : 'outline'}
+              onClick={() => setIncubationFilter('all')}
+              className="text-xs"
+            >
+              All
+            </Button>
+            <Button
+              size="sm"
+              variant={incubationFilter === 'pending' ? 'default' : 'outline'}
+              onClick={() => setIncubationFilter('pending')}
+              className="text-xs"
+            >
+              Pending
+            </Button>
+            <Button
+              size="sm"
+              variant={incubationFilter === 'accepted' ? 'default' : 'outline'}
+              onClick={() => setIncubationFilter('accepted')}
+              className="text-xs"
+            >
+              Accepted
+            </Button>
+            {form2Requests.length > 0 && (
+              <Button
+                size="sm"
+                variant={incubationFilter === 'form2_pending' ? 'default' : 'outline'}
+                onClick={() => setIncubationFilter('form2_pending')}
+                className="text-xs bg-amber-500 hover:bg-amber-600 text-white border-amber-600"
+              >
+                Form 2 Pending
+              </Button>
+            )}
+          </div>
+        </div>
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Program Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Facilitator</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Form 2</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-slate-200">
+                {incubationPrograms
+                  .filter(prog => {
+                    if (incubationFilter === 'all') return true;
+                    if (incubationFilter === 'pending') return prog.status === 'pending';
+                    if (incubationFilter === 'accepted') return prog.status === 'accepted';
+                    if (incubationFilter === 'form2_pending') return prog.form2.requested && prog.form2.status === 'pending';
+                    return true;
+                  })
+                  .map(prog => (
+                  <tr key={prog.id} className={prog.form2.requested && prog.form2.status === 'pending' ? 'bg-amber-50' : ''}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                      <div className="flex items-center gap-2">
+                        {prog.programName}
+                        {prog.isShortlisted && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                            ⭐ Shortlisted
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                      {prog.facilitatorName}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        prog.status === 'accepted' 
+                          ? 'bg-green-100 text-green-800' 
+                          : prog.status === 'pending'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {prog.status === 'accepted' && '✓ Accepted'}
+                        {prog.status === 'pending' && '⏳ Pending'}
+                        {prog.status === 'rejected' && '✗ Rejected'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {!prog.form2.requested ? (
+                        <span className="text-slate-400">Not Requested</span>
+                      ) : prog.form2.status === 'pending' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                          📝 Submission Required
+                        </span>
+                      ) : prog.form2.status === 'submitted' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          📤 Submitted
+                        </span>
+                      ) : prog.form2.status === 'under_review' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          🔍 Under Review
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <div className="flex flex-col gap-2">
+                        {/* Form 2 - Fill Form button */}
+                        {prog.form2.requested && prog.form2.status === 'pending' && (
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setSelectedForm2Data({
+                                applicationId: prog.applicationId,
+                                opportunityId: prog.opportunityId, // Fixed: use prog.opportunityId not prog.id
+                                opportunityName: prog.programName,
+                              });
+                              setIsForm2ModalOpen(true);
+                            }}
+                            className="flex items-center gap-1 bg-amber-600 hover:bg-amber-700 text-white"
+                          >
+                            <FileText className="h-4 w-4" />
+                            Fill Form 2
+                          </Button>
+                        )}
+                        
+                        {/* Upload Agreement (for accepted programs) */}
+                        {prog.status === 'accepted' && !prog.contractUrl && (
+                          <Button 
+                            size="sm"
+                            onClick={() => {
+                              // Use existing recognition modal
+                              setRecognitionFormState({
+                                programName: prog.programName,
+                                facilitatorName: prog.facilitatorName,
+                                facilitatorCode: prog.facilitatorCode,
+                                applicationId: prog.applicationId
+                              });
+                              setIsRecognitionModalOpen(true);
+                            }}
+                            className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+                          >
+                            <FileText className="h-4 w-4" />
+                            Upload Agreement
+                          </Button>
+                        )}
+                        
+                        {/* Download Agreement */}
+                        {prog.status === 'accepted' && (prog.contractUrl || prog.agreementUrl) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDownloadAgreement((prog.contractUrl || prog.agreementUrl)!)}
+                            className="flex items-center gap-1 text-blue-600 border-blue-300 hover:bg-blue-50"
+                          >
+                            <Download className="h-4 w-4" />
+                            {prog.contractUrl ? 'Download Uploaded Agreement' : 'Download Agreement'}
+                          </Button>
+                        )}
+                        
+                        {/* Message Facilitation Center */}
+                        <Button 
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedOfferForMessaging({
+                              id: `incubation_${prog.id}`,
+                              from: prog.facilitatorName,
+                              type: 'Incubation',
+                              offerDetails: prog.programName,
+                              status: prog.status,
+                              code: prog.facilitatorCode,
+                              applicationId: prog.applicationId,
+                              createdAt: prog.createdAt,
+                              programName: prog.programName,
+                              facilitatorName: prog.facilitatorName
+                            });
+                            setIsMessagingModalOpen(true);
+                          }}
+                          className="flex items-center gap-1 text-slate-600 border-slate-300 hover:bg-slate-50"
+                        >
+                          <MessageCircle className="h-4 w-4" />
+                          Message Facilitator
+                        </Button>
+                        
+                        {/* Tracking Questions - Only for accepted programs */}
+                        {prog.status === 'accepted' && prog.facilitatorId && (
+                          <Button 
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              console.log('📍 Button clicked - Tracking Questions with:', {
+                                facilitatorId: prog.facilitatorId,
+                                programName: prog.programName,
+                                facilitatorName: prog.facilitatorName
+                              });
+                              handleOpenTrackingQuestions(
+                                prog.facilitatorId,
+                                prog.programName,
+                                prog.facilitatorName
+                              );
+                            }}
+                            className="flex items-center gap-1 text-purple-600 border-purple-300 hover:bg-purple-50"
+                          >
+                            <FileText className="h-4 w-4" />
+                            Tracking Questions
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {incubationPrograms.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                      {isViewOnly ? (
+                        <div className="space-y-2">
+                          <p className="text-sm">No incubation programs found.</p>
+                          <p className="text-xs text-slate-400">
+                            This startup hasn't applied to any incubation programs yet.
+                          </p>
+                        </div>
+                      ) : (
+                        "You haven't applied to any incubation programs yet."
+                      )}
+                    </td>
+                  </tr>
+                )}
+                {incubationPrograms.length > 0 && 
+                 incubationPrograms.filter(prog => {
+                    if (incubationFilter === 'all') return true;
+                    if (incubationFilter === 'pending') return prog.status === 'pending';
+                    if (incubationFilter === 'accepted') return prog.status === 'accepted';
+                    if (incubationFilter === 'form2_pending') return prog.form2.requested && prog.form2.status === 'pending';
+                    return true;
+                  }).length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                      No programs match the selected filter.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </Card>
       </div>
@@ -2800,6 +3363,24 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         />
       )}
 
+      {/* Form 2 Submission Modal */}
+      {selectedForm2Data && (
+        <Form2SubmissionModal
+          isOpen={isForm2ModalOpen}
+          onClose={() => {
+            setIsForm2ModalOpen(false);
+            setSelectedForm2Data(null);
+          }}
+          applicationId={selectedForm2Data.applicationId}
+          opportunityId={selectedForm2Data.opportunityId}
+          opportunityName={selectedForm2Data.opportunityName}
+          onSuccess={() => {
+            // Reload incubation programs to refresh Form 2 status
+            loadOffersReceived();
+          }}
+        />
+      )}
+
       {/* Recognition / Incubation Entry Modal */}
       <Modal 
         isOpen={isRecognitionModalOpen}
@@ -2834,12 +3415,11 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             <CloudDriveInput
               value=""
               onChange={(url) => {
-                const hiddenInput = document.getElementById('rec-agreement-url') as HTMLInputElement;
-                if (hiddenInput) hiddenInput.value = url;
+                console.log('📎 Cloud drive URL received:', url);
               }}
               onFileSelect={(file) => {
-                const fileInput = document.getElementById('rec-agreement') as HTMLInputElement;
-                if (fileInput) fileInput.files = [file];
+                console.log('📎 File selected for recognition agreement:', file.name);
+                setRecAgreementFile(file);
               }}
               placeholder="Paste your cloud drive link here..."
               label="Upload Signed Agreement"
@@ -2990,6 +3570,201 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             <p>No details available</p>
           </div>
         )}
+      </Modal>
+
+      {/* Tracking Questions Modal */}
+      <Modal
+        isOpen={isTrackingQuestionsModalOpen}
+        onClose={() => {
+          setIsTrackingQuestionsModalOpen(false);
+          setSelectedProgramForTracking(null);
+          setTrackingQuestions([]);
+          setTrackingResponses(new Map());
+        }}
+        title={`Program Tracking Questions - ${selectedProgramForTracking?.programName || ''}`}
+        size="large"
+      >
+        <div className="space-y-6">
+          {/* Program Info Banner */}
+          <div className="bg-purple-50 border border-purple-200 rounded-md p-4">
+            <p className="text-sm text-purple-800">
+              <strong>{selectedProgramForTracking?.facilitatorName}</strong> has configured tracking questions for this program. 
+              Please provide your responses below. These help the facilitator track your progress and provide better support.
+            </p>
+          </div>
+
+          {isLoadingTrackingQuestions ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-3"></div>
+              <p className="text-slate-500">Loading questions...</p>
+            </div>
+          ) : trackingQuestions.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-slate-500 mb-2">No tracking questions configured yet.</p>
+              <p className="text-xs text-slate-400">
+                The facilitator hasn't set up any tracking questions for this program.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {trackingQuestions.map((q, index) => {
+                const question = q.question;
+                if (!question) return null;
+
+                const currentAnswer = trackingResponses.get(q.questionId) || '';
+
+                return (
+                  <div key={q.questionId} className="border-b pb-6 last:border-b-0">
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      {index + 1}. {question.questionText}
+                      {q.isRequired && <span className="text-red-500 ml-1">*</span>}
+                    </label>
+
+                    {/* Render input based on question type */}
+                    {question.questionType === 'textarea' && (
+                      <textarea
+                        value={currentAnswer}
+                        onChange={(e) => {
+                          const newMap = new Map(trackingResponses);
+                          newMap.set(q.questionId, e.target.value);
+                          setTrackingResponses(newMap);
+                        }}
+                        rows={4}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        placeholder="Enter your answer..."
+                        required={q.isRequired}
+                      />
+                    )}
+
+                    {question.questionType === 'text' && (
+                      <input
+                        type="text"
+                        value={currentAnswer}
+                        onChange={(e) => {
+                          const newMap = new Map(trackingResponses);
+                          newMap.set(q.questionId, e.target.value);
+                          setTrackingResponses(newMap);
+                        }}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        placeholder="Enter your answer..."
+                        required={q.isRequired}
+                      />
+                    )}
+
+                    {question.questionType === 'number' && (
+                      <input
+                        type="number"
+                        value={currentAnswer}
+                        onChange={(e) => {
+                          const newMap = new Map(trackingResponses);
+                          newMap.set(q.questionId, e.target.value);
+                          setTrackingResponses(newMap);
+                        }}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        placeholder="Enter number..."
+                        required={q.isRequired}
+                      />
+                    )}
+
+                    {question.questionType === 'date' && (
+                      <input
+                        type="date"
+                        value={currentAnswer}
+                        onChange={(e) => {
+                          const newMap = new Map(trackingResponses);
+                          newMap.set(q.questionId, e.target.value);
+                          setTrackingResponses(newMap);
+                        }}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        required={q.isRequired}
+                      />
+                    )}
+
+                    {question.questionType === 'select' && question.options && (
+                      <select
+                        value={currentAnswer}
+                        onChange={(e) => {
+                          const newMap = new Map(trackingResponses);
+                          newMap.set(q.questionId, e.target.value);
+                          setTrackingResponses(newMap);
+                        }}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        required={q.isRequired}
+                      >
+                        <option value="">Select an option...</option>
+                        {question.options.map((opt, i) => (
+                          <option key={i} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    {question.questionType === 'multiselect' && question.options && (
+                      <div className="space-y-2 border border-slate-300 rounded-md p-3">
+                        {question.options.map((opt, i) => {
+                          const selectedOptions = currentAnswer ? currentAnswer.split(',') : [];
+                          const isChecked = selectedOptions.includes(opt);
+                          
+                          return (
+                            <label key={i} className="flex items-center gap-2 hover:bg-slate-50 p-1.5 rounded cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  let newSelected = [...selectedOptions];
+                                  if (e.target.checked) {
+                                    newSelected.push(opt);
+                                  } else {
+                                    newSelected = newSelected.filter(o => o !== opt);
+                                  }
+                                  const newMap = new Map(trackingResponses);
+                                  newMap.set(q.questionId, newSelected.filter(o => o).join(','));
+                                  setTrackingResponses(newMap);
+                                }}
+                                className="rounded border-slate-300"
+                              />
+                              <span className="text-sm text-slate-700">{opt}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {question.category && (
+                      <p className="text-xs text-slate-500 mt-2">
+                        Category: {question.category}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          {trackingQuestions.length > 0 && (
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsTrackingQuestionsModalOpen(false);
+                  setSelectedProgramForTracking(null);
+                  setTrackingQuestions([]);
+                  setTrackingResponses(new Map());
+                }}
+                disabled={isSavingTrackingResponses}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveTrackingResponses}
+                disabled={isSavingTrackingResponses}
+                className="bg-purple-600 hover:bg-purple-700 text-white"
+              >
+                {isSavingTrackingResponses ? 'Saving...' : 'Save Responses'}
+              </Button>
+            </div>
+          )}
+        </div>
       </Modal>
 
     </div>

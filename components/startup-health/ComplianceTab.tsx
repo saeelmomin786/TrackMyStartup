@@ -148,8 +148,9 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
     // NOTE: Removed client-side fallback rules generation.
     // From now on, tasks are exclusively sourced from DB via RPC + compliance_checks.
 
-    // Track syncing to avoid loops
+    // Track syncing and loading to avoid loops
     const isSyncingRef = useRef(false);
+    const isLoadingComplianceRef = useRef(false);
     const lastEntitySignatureRef = useRef<string | null>(null);
 
     // Load profile data to get subsidiaries
@@ -182,24 +183,29 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
             subsidiaries: startup.profile?.subsidiaries?.length || 0
         });
         loadProfileData();
-    }, [startup.id, startup.profile]);
+    }, [startup.id]); // Only reload when startup ID changes, not profile
 
     // Watch for profile updates from other components
     useEffect(() => {
-        if (onProfileUpdated !== undefined) {
+        if (onProfileUpdated !== undefined && onProfileUpdated > 0) {
             console.log('🔄 Profile updated trigger received:', onProfileUpdated, 'refreshing profile data...');
             loadProfileData();
         }
     }, [onProfileUpdated]);
 
-    // Load compliance data from backend
+    // Load compliance data from backend - ONLY on startup ID change, with guard
     useEffect(() => {
-        loadComplianceData();
-    }, [startup.id, profileData]); // Reload when startup ID or profile data changes
+        if (isLoadingComplianceRef.current) return; // Prevent concurrent loads
+        isLoadingComplianceRef.current = true;
+        loadComplianceData().finally(() => {
+            isLoadingComplianceRef.current = false;
+        });
+    }, [startup.id]); // Only reload when startup ID changes
 
-    // Sync compliance tasks when startup data changes (for new tasks)
+    // Sync compliance tasks when startup data changes (for new tasks) - WITH GUARD
     useEffect(() => {
         if (!profileData) return; // Wait for profile data to load
+        if (isSyncingRef.current) return; // Prevent concurrent syncs
         
         // Create entity signature from profile data including subsidiaries
         const entitySignature = JSON.stringify({
@@ -210,7 +216,7 @@ const ComplianceTab: React.FC<ComplianceTabProps> = ({ startup, currentUser, onU
         });
 
         // Only sync when primary/entity-defining fields change
-        if (lastEntitySignatureRef.current !== entitySignature && !isSyncingRef.current) {
+        if (lastEntitySignatureRef.current !== entitySignature) {
             isSyncingRef.current = true;
             console.log('🔍 Entity-defining fields changed, syncing compliance tasks...');
             complianceRulesIntegrationService.syncComplianceTasksWithComprehensiveRules(startup.id).finally(() => {

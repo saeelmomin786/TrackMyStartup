@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
-import { ArrowLeft, Share2, Building2, TrendingUp, DollarSign, Users, FileText, Video, ExternalLink, CheckCircle, Linkedin, Globe } from 'lucide-react';
+import { ArrowLeft, Share2, Building2, TrendingUp, DollarSign, Users, FileText, Video, ExternalLink, CheckCircle, Linkedin, Globe, TrendingDown, Percent, Gauge } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { messageService } from '../lib/messageService';
 import { Startup, FundraisingDetails, ComplianceStatus, InvestmentType } from '../types';
+import { DashboardMetricsService, DashboardMetrics } from '../lib/dashboardMetricsService';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { capTableService } from '../lib/capTableService';
@@ -26,6 +27,16 @@ const PublicStartupPage: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasDueDiligenceAccess, setHasDueDiligenceAccess] = useState(false);
+  
+  // Dashboard metrics for public card
+  const [metrics, setMetrics] = useState<DashboardMetrics>({
+    mrr: 0,
+    burnRate: 0,
+    cac: 0,
+    ltv: 0,
+    grossMargin: 0,
+  });
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
 
   // Check for path-based URL first (e.g., /startup/startup-name)
   const pathProfile = parseProfileUrl(window.location.pathname);
@@ -250,6 +261,33 @@ const PublicStartupPage: React.FC = () => {
     };
     checkDueDiligence();
   }, [isAuthenticated, currentUser?.id, startup?.id]);
+
+  // Load metrics when startup is loaded
+  useEffect(() => {
+    const loadMetrics = async () => {
+      if (!startup?.id) return;
+      
+      setIsLoadingMetrics(true);
+      try {
+        const calculatedMetrics = await DashboardMetricsService.calculateMetrics(startup);
+        setMetrics(calculatedMetrics);
+      } catch (e: any) {
+        console.error('Error loading metrics:', e);
+        // Don't show error - metrics are optional, just use defaults
+        setMetrics({
+          mrr: 0,
+          burnRate: 0,
+          cac: 0,
+          ltv: 0,
+          grossMargin: 0,
+        });
+      } finally {
+        setIsLoadingMetrics(false);
+      }
+    };
+
+    loadMetrics();
+  }, [startup?.id]);
 
   // Clean up ?page=landing from URL if present (for SEO) - MUST be before any early returns
   useEffect(() => {
@@ -1022,48 +1060,101 @@ const PublicStartupPage: React.FC = () => {
 
           {/* Investment Details Footer - Only show if fundraising details exist */}
           {hasFundraisingDetails && (
-            <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-3 sm:px-4 py-2 sm:py-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3 border-t border-slate-200">
-              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                <div className="text-xs sm:text-sm">
-                  <span className="font-semibold text-slate-800">Ask:</span> {formatCurrency(fundraisingDetails?.value || 0, startup?.currency || 'INR')} for <span className="font-semibold text-purple-600">{fundraisingDetails?.equity || 0}%</span> equity
+            <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-3 sm:px-4 py-2 sm:py-3 flex flex-col gap-2 sm:gap-3 border-t border-slate-200">
+              {/* Ask + Links Row */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                  <div className="text-xs sm:text-sm">
+                    <span className="font-semibold text-slate-800">Ask:</span> {formatCurrency(fundraisingDetails?.value || 0, startup?.currency || 'INR')} for <span className="font-semibold text-purple-600">{fundraisingDetails?.equity || 0}%</span> equity
+                  </div>
+                  {(fundraisingDetails?.websiteUrl || fundraisingDetails?.linkedInUrl) && (
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      {fundraisingDetails?.websiteUrl && fundraisingDetails?.websiteUrl !== '#' && (
+                        <a 
+                          href={fundraisingDetails.websiteUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                          title={fundraisingDetails.websiteUrl}
+                        >
+                          <Globe className="h-3 w-3 sm:h-4 sm:w-4" />
+                          <span className="truncate max-w-[150px] sm:max-w-[200px]">Website</span>
+                          <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3 opacity-50" />
+                        </a>
+                      )}
+                      {fundraisingDetails?.linkedInUrl && fundraisingDetails?.linkedInUrl !== '#' && (
+                        <a 
+                          href={fundraisingDetails.linkedInUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                          title={fundraisingDetails.linkedInUrl}
+                        >
+                          <Linkedin className="h-3 w-3 sm:h-4 sm:w-4" />
+                          <span className="truncate max-w-[150px] sm:max-w-[200px]">LinkedIn</span>
+                          <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3 opacity-50" />
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {(fundraisingDetails?.websiteUrl || fundraisingDetails?.linkedInUrl) && (
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    {fundraisingDetails?.websiteUrl && fundraisingDetails?.websiteUrl !== '#' && (
-                      <a 
-                        href={fundraisingDetails.websiteUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-600 hover:text-blue-600 transition-colors"
-                        title={fundraisingDetails.websiteUrl}
-                      >
-                        <Globe className="h-3 w-3 sm:h-4 sm:w-4" />
-                        <span className="truncate max-w-[150px] sm:max-w-[200px]">Website</span>
-                        <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3 opacity-50" />
-                      </a>
-                    )}
-                    {fundraisingDetails?.linkedInUrl && fundraisingDetails?.linkedInUrl !== '#' && (
-                      <a 
-                        href={fundraisingDetails.linkedInUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-600 hover:text-blue-600 transition-colors"
-                        title={fundraisingDetails.linkedInUrl}
-                      >
-                        <Linkedin className="h-3 w-3 sm:h-4 sm:w-4" />
-                        <span className="truncate max-w-[150px] sm:max-w-[200px]">LinkedIn</span>
-                        <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3 opacity-50" />
-                      </a>
-                    )}
+                {startup?.compliance_status === 'Compliant' && (
+                  <div className="flex items-center gap-1 text-green-600" title="This startup has been verified">
+                    <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="text-xs font-semibold">Verified</span>
                   </div>
                 )}
               </div>
-              {startup?.compliance_status === 'Compliant' && (
-                <div className="flex items-center gap-1 text-green-600" title="This startup has been verified">
-                  <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="text-xs font-semibold">Verified</span>
+
+              {/* Key Metrics Below Ask */}
+              <div className="border-t border-slate-300 pt-2">
+                <div className="text-xs font-semibold text-slate-600 mb-2">Key Metrics:</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {/* MRR */}
+                  <div className="flex items-center gap-1.5 bg-white rounded p-1.5 border border-slate-200">
+                    <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 text-green-600 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-600 truncate">MRR</div>
+                      <div className="text-xs sm:text-sm font-semibold text-slate-900 truncate">
+                        {isLoadingMetrics ? '—' : formatCurrency(metrics.mrr || 0, startup?.currency || 'INR')}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Burn Rate */}
+                  <div className="flex items-center gap-1.5 bg-white rounded p-1.5 border border-slate-200">
+                    <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4 text-red-600 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-600 truncate">Burn Rate</div>
+                      <div className="text-xs sm:text-sm font-semibold text-slate-900 truncate">
+                        {isLoadingMetrics ? '—' : formatCurrency(metrics.burnRate || 0, startup?.currency || 'INR')}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Gross Margin */}
+                  <div className="flex items-center gap-1.5 bg-white rounded p-1.5 border border-slate-200">
+                    <Percent className="h-3 w-3 sm:h-4 sm:w-4 text-blue-600 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-600 truncate">Gross Margin</div>
+                      <div className="text-xs sm:text-sm font-semibold text-slate-900 truncate">
+                        {isLoadingMetrics ? '—' : `${(metrics.grossMargin || 0).toFixed(1)}%`}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Compliance Status */}
+                  <div className="flex items-center gap-1.5 bg-white rounded p-1.5 border border-slate-200">
+                    <Gauge className="h-3 w-3 sm:h-4 sm:w-4 text-purple-600 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-600 truncate">Compliance</div>
+                      <div className="text-xs sm:text-sm font-semibold text-slate-900 truncate">
+                        {startup?.compliance_status || 'Pending'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
           )}
           

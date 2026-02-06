@@ -16,8 +16,9 @@ import { investorListService, InvestorListItem } from '../../lib/investorListSer
 import { getVideoEmbedUrl, VideoSource } from '../../lib/videoUtils';
 import { financialsService } from '../../lib/financialsService';
 import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
+import { DashboardMetricsService, DashboardMetrics } from '../../lib/dashboardMetricsService';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus, Crown, AlertCircle } from 'lucide-react';
+import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus, Crown, AlertCircle, TrendingDown, Gauge } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import FundraisingCRM from './FundraisingCRM';
@@ -37,6 +38,16 @@ interface FundraisingTabProps {
 }
 
 type FundraisingSubTab = 'portfolio' | 'programs' | 'investors' | 'crm';
+
+// Team member interface for one-pager
+interface TeamMember {
+  id: string;
+  name: string;
+  education: string;
+  experience: string;
+  description: string;
+  photoUrl?: string;
+}
 
 // Component to handle investor image with error fallback
 const InvestorImage: React.FC<{ imageUrl?: string; name: string }> = ({ imageUrl, name }) => {
@@ -479,7 +490,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     growthChallenge: '',
     usp: '',
     competition: '',
-    team: '',
+    teamMembers: [] as TeamMember[],
     tam: '',
     sam: '',
     som: '',
@@ -500,7 +511,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   const [autoplayVideo, setAutoplayVideo] = useState(false);
 
   // Simple per-field character limits (kept in one place)
-  const ONE_PAGER_LIMITS: Record<keyof typeof onePager, number> = {
+  const ONE_PAGER_LIMITS: Record<keyof Omit<typeof onePager, 'teamMembers'>, number> = {
     date: 10,
     oneLiner: 160,
     problemStatement: 500,
@@ -508,7 +519,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     growthChallenge: 450,
     usp: 450,
     competition: 450,
-    team: 450,
     tam: 80,
     sam: 80,
     som: 80,
@@ -524,6 +534,19 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
   const [onePagerErrors, setOnePagerErrors] = useState<Record<string, string>>({});
 
+  // Team member form state
+  const [showTeamMemberForm, setShowTeamMemberForm] = useState(false);
+  const [teamMemberFormData, setTeamMemberFormData] = useState<TeamMember>({
+    id: '',
+    name: '',
+    education: '',
+    experience: '',
+    description: '',
+    photoUrl: '',
+  });
+  const [editingTeamMemberId, setEditingTeamMemberId] = useState<string | null>(null);
+  const [teamPhotoFile, setTeamPhotoFile] = useState<File | null>(null);
+
   // Dropdown options from general_data table
   const [domainOptions, setDomainOptions] = useState<GeneralDataItem[]>([]);
   const [stageOptions, setStageOptions] = useState<GeneralDataItem[]>([]);
@@ -535,6 +558,16 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   const [filteredInvestors, setFilteredInvestors] = useState<InvestorListItem[]>([]);
   const [isLoadingInvestors, setIsLoadingInvestors] = useState(false);
   const [showAIMatched, setShowAIMatched] = useState(false);
+  
+  // Dashboard metrics state (MRR, Burn Rate, Gross Margin, Compliance)
+  const [metrics, setMetrics] = useState<DashboardMetrics>({
+    mrr: 0,
+    burnRate: 0,
+    cac: 0,
+    ltv: 0,
+    grossMargin: 0,
+  });
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
   
   // Validation status
   const [validationStatus, setValidationStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
@@ -737,6 +770,21 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
           setFundraising(latest);
 
           // Hydrate one-pager state from Supabase if available
+          let teamMembers: TeamMember[] = [];
+          try {
+            if (latest.teamText) {
+              // Try to parse as JSON array (new format)
+              teamMembers = JSON.parse(latest.teamText);
+              if (!Array.isArray(teamMembers)) {
+                teamMembers = [];
+              }
+            }
+          } catch (e) {
+            // If not JSON, treat as old text format and ignore
+            console.log('Team data in old text format, will be converted to new format on save');
+            teamMembers = [];
+          }
+
           setOnePager(prev => ({
             ...prev,
             date: latest.onePagerDate || prev.date,
@@ -746,7 +794,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             growthChallenge: latest.growthChallenge || prev.growthChallenge,
             usp: latest.uspText || prev.usp,
             competition: latest.competitionText || prev.competition,
-            team: latest.teamText || prev.team,
+            teamMembers: teamMembers,
             tam: latest.tamText || prev.tam,
             sam: latest.samText || prev.sam,
             som: latest.somText || prev.som,
@@ -792,6 +840,33 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
     loadInvestors();
   }, [activeSubTab]);
+
+  // Load metrics when portfolio tab is active
+  useEffect(() => {
+    const loadMetrics = async () => {
+      if (activeSubTab !== 'portfolio' || !startup?.id) return;
+      
+      setIsLoadingMetrics(true);
+      try {
+        const calculatedMetrics = await DashboardMetricsService.calculateMetrics(startup);
+        setMetrics(calculatedMetrics);
+      } catch (e: any) {
+        console.error('Error loading metrics:', e);
+        // Don't show error - metrics are optional, just use defaults
+        setMetrics({
+          mrr: 0,
+          burnRate: 0,
+          cac: 0,
+          ltv: 0,
+          grossMargin: 0,
+        });
+      } finally {
+        setIsLoadingMetrics(false);
+      }
+    };
+
+    loadMetrics();
+  }, [activeSubTab, startup?.id]);
 
   // AI Investor Matching function
   const handleAIMatching = () => {
@@ -937,7 +1012,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   };
 
   const handleOnePagerChange = (field: keyof typeof onePager, value: string) => {
-    const limit = ONE_PAGER_LIMITS[field];
+    const limit = ONE_PAGER_LIMITS[field as keyof Omit<typeof onePager, 'teamMembers'>];
     if (limit && value.length > limit) {
       // Hard-stop at limit and show error
       setOnePagerErrors(prev => ({
@@ -959,6 +1034,111 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       delete updated[field as string];
       return updated;
     });
+  };
+
+  // Team member handlers
+  const handleAddTeamMember = () => {
+    setEditingTeamMemberId(null);
+    setTeamMemberFormData({
+      id: '',
+      name: '',
+      education: '',
+      experience: '',
+      description: '',
+      photoUrl: '',
+    });
+    setTeamPhotoFile(null);
+    setShowTeamMemberForm(true);
+  };
+
+  const handleEditTeamMember = (member: TeamMember) => {
+    setEditingTeamMemberId(member.id);
+    setTeamMemberFormData(member);
+    setTeamPhotoFile(null);
+    setShowTeamMemberForm(true);
+  };
+
+  const handleSaveTeamMember = async () => {
+    if (!teamMemberFormData.name.trim() || !teamMemberFormData.education.trim() || !teamMemberFormData.experience.trim()) {
+      messageService.error('Incomplete Form', 'Please fill in Name, Education, and Experience fields.', 3000);
+      return;
+    }
+
+    let photoUrl = teamMemberFormData.photoUrl;
+    
+    // Upload team member photo if selected
+    if (teamPhotoFile) {
+      try {
+        const fileName = `${startup.id}-team-${Date.now()}-${teamPhotoFile.name}`;
+        const { data, error } = await supabase.storage
+          .from('startup-files')
+          .upload(fileName, teamPhotoFile);
+        
+        if (error) throw error;
+        
+        const { data: publicUrlData } = supabase.storage
+          .from('startup-files')
+          .getPublicUrl(fileName);
+        
+        photoUrl = publicUrlData.publicUrl;
+      } catch (error) {
+        console.error('Error uploading team photo:', error);
+        messageService.error('Upload Failed', 'Could not upload team member photo.', 3000);
+        return;
+      }
+    }
+
+    if (editingTeamMemberId) {
+      // Update existing team member
+      setOnePager(prev => ({
+        ...prev,
+        teamMembers: prev.teamMembers.map(member =>
+          member.id === editingTeamMemberId
+            ? {
+                ...member,
+                name: teamMemberFormData.name,
+                education: teamMemberFormData.education,
+                experience: teamMemberFormData.experience,
+                description: teamMemberFormData.description,
+                photoUrl: photoUrl || member.photoUrl,
+              }
+            : member
+        ),
+      }));
+    } else {
+      // Add new team member
+      const newMember: TeamMember = {
+        id: `team-${Date.now()}`,
+        name: teamMemberFormData.name,
+        education: teamMemberFormData.education,
+        experience: teamMemberFormData.experience,
+        description: teamMemberFormData.description,
+        photoUrl: photoUrl || '',
+      };
+      
+      setOnePager(prev => ({
+        ...prev,
+        teamMembers: [...prev.teamMembers, newMember],
+      }));
+    }
+
+    setShowTeamMemberForm(false);
+    setTeamMemberFormData({
+      id: '',
+      name: '',
+      education: '',
+      experience: '',
+      description: '',
+      photoUrl: '',
+    });
+    setTeamPhotoFile(null);
+  };
+
+  const handleDeleteTeamMember = (memberId: string) => {
+    setOnePager(prev => ({
+      ...prev,
+      teamMembers: prev.teamMembers.filter(member => member.id !== memberId),
+    }));
   };
 
   const limitText = (value: string, maxChars: number, fallback: string) => {
@@ -1247,8 +1427,22 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   };
 
   const validateOnePagerComplete = (): boolean => {
+    // Check if at least one team member is added
+    if (onePager.teamMembers.length === 0) {
+      setOnePagerErrors(prev => ({
+        ...prev,
+        teamMembers: 'At least one team member is required.',
+      }));
+    } else {
+      setOnePagerErrors(prev => {
+        const updated = { ...prev };
+        delete updated['teamMembers'];
+        return updated;
+      });
+    }
+
     // All one-pager fields are mandatory before saving
-    const requiredFields: (keyof typeof onePager)[] = [
+    const requiredFields: Exclude<keyof typeof onePager, 'teamMembers'>[] = [
       'date',
       'oneLiner',
       'problemStatement',
@@ -1256,7 +1450,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       'growthChallenge',
       'usp',
       'competition',
-      'team',
       'tam',
       'sam',
       'som',
@@ -1275,19 +1468,22 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       return !value || String(value).trim().length === 0;
     });
 
-    if (missing.length > 0) {
+    if (missing.length > 0 || onePager.teamMembers.length === 0) {
       // Mark missing fields with an error
       setOnePagerErrors(prev => {
         const updated = { ...prev };
         missing.forEach(field => {
           updated[field] = 'This field is required.';
         });
+        if (onePager.teamMembers.length === 0) {
+          updated['teamMembers'] = 'At least one team member is required.';
+        }
         return updated;
       });
 
       messageService.error(
         'Fundraising One‑Pager Incomplete',
-        'Please fill all fields in the Fundraising One‑Pager section before saving.',
+        'Please fill all fields and add at least one team member before saving.',
         4000
       );
       return false;
@@ -1376,7 +1572,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         growthChallenge: onePager.growthChallenge,
         uspText: onePager.usp,
         competitionText: onePager.competition,
-        teamText: onePager.team,
+        teamText: JSON.stringify(onePager.teamMembers), // Store team members as JSON
         tamText: onePager.tam,
         samText: onePager.sam,
         somText: onePager.som,
@@ -1404,6 +1600,18 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       setFundraising(updatedRecord);
       
       // Update one-pager state from saved data
+      let savedTeamMembers: TeamMember[] = [];
+      try {
+        if (updatedRecord.teamText) {
+          const parsed = JSON.parse(updatedRecord.teamText);
+          if (Array.isArray(parsed)) {
+            savedTeamMembers = parsed;
+          }
+        }
+      } catch (e) {
+        console.log('Could not parse saved team data');
+      }
+
       setOnePager(prev => ({
         ...prev,
         date: updatedRecord.onePagerDate || prev.date,
@@ -1413,7 +1621,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         growthChallenge: updatedRecord.growthChallenge || prev.growthChallenge,
         usp: updatedRecord.uspText || prev.usp,
         competition: updatedRecord.competitionText || prev.competition,
-        team: updatedRecord.teamText || prev.team,
+        teamMembers: savedTeamMembers.length > 0 ? savedTeamMembers : prev.teamMembers,
         tam: updatedRecord.tamText || prev.tam,
         sam: updatedRecord.samText || prev.sam,
         som: updatedRecord.somText || prev.som,
@@ -2114,48 +2322,101 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             </div>
 
             {/* Investment Details Footer */}
-            <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 border-t border-slate-200">
-              <div className="flex items-center gap-4 flex-wrap">
-                <div className="text-sm sm:text-base">
-                  <span className="font-semibold text-slate-800">Ask:</span> {formatCurrency(fundraising.value || 0, startup.currency || 'INR')} for <span className="font-semibold text-purple-600">{fundraising.equity || 0}%</span> equity
+            <div className="bg-gradient-to-r from-slate-50 to-purple-50 px-6 py-4 flex flex-col gap-4 border-t border-slate-200">
+              {/* Ask + Links Row */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
+                <div className="flex items-center gap-4 flex-wrap">
+                  <div className="text-sm sm:text-base">
+                    <span className="font-semibold text-slate-800">Ask:</span> {formatCurrency(fundraising.value || 0, startup.currency || 'INR')} for <span className="font-semibold text-purple-600">{fundraising.equity || 0}%</span> equity
+                  </div>
+                  {(fundraising.websiteUrl || fundraising.linkedInUrl) && (
+                    <div className="flex items-center gap-4">
+                      {fundraising.websiteUrl && fundraising.websiteUrl !== '#' && (
+                        <a 
+                          href={fundraising.websiteUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                          title={fundraising.websiteUrl}
+                        >
+                          <Globe className="h-4 w-4" />
+                          <span className="truncate max-w-[200px]">Website</span>
+                          <ExternalLink className="h-3 w-3 opacity-50" />
+                        </a>
+                      )}
+                      {fundraising.linkedInUrl && fundraising.linkedInUrl !== '#' && (
+                        <a 
+                          href={fundraising.linkedInUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                          title={fundraising.linkedInUrl}
+                        >
+                          <Linkedin className="h-4 w-4" />
+                          <span className="truncate max-w-[200px]">LinkedIn</span>
+                          <ExternalLink className="h-3 w-3 opacity-50" />
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {(fundraising.websiteUrl || fundraising.linkedInUrl) && (
-                  <div className="flex items-center gap-4">
-                    {fundraising.websiteUrl && fundraising.websiteUrl !== '#' && (
-                      <a 
-                        href={fundraising.websiteUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
-                        title={fundraising.websiteUrl}
-                      >
-                        <Globe className="h-4 w-4" />
-                        <span className="truncate max-w-[200px]">Website</span>
-                        <ExternalLink className="h-3 w-3 opacity-50" />
-                      </a>
-                    )}
-                    {fundraising.linkedInUrl && fundraising.linkedInUrl !== '#' && (
-                      <a 
-                        href={fundraising.linkedInUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
-                        title={fundraising.linkedInUrl}
-                      >
-                        <Linkedin className="h-4 w-4" />
-                        <span className="truncate max-w-[200px]">LinkedIn</span>
-                        <ExternalLink className="h-3 w-3 opacity-50" />
-                      </a>
-                    )}
+                {startup.compliance_status === 'Compliant' && (
+                  <div className="flex items-center gap-1 text-green-600" title="This startup has been verified">
+                    <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="text-xs font-semibold">Verified</span>
                   </div>
                 )}
               </div>
-              {startup.compliance_status === 'Compliant' && (
-                <div className="flex items-center gap-1 text-green-600" title="This startup has been verified">
-                  <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="text-xs font-semibold">Verified</span>
+
+              {/* Key Metrics Below Ask */}
+              <div className="border-t border-slate-300 pt-4">
+                <div className="text-xs font-semibold text-slate-600 mb-3">Key Metrics:</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {/* MRR */}
+                  <div className="flex items-center gap-2 bg-white rounded p-2 border border-slate-200">
+                    <TrendingUp className="h-4 w-4 text-green-600" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-600 truncate">MRR</div>
+                      <div className="text-sm font-semibold text-slate-900 truncate">
+                        {isLoadingMetrics ? '—' : formatCurrency(metrics.mrr || 0, startup.currency || 'INR')}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Burn Rate */}
+                  <div className="flex items-center gap-2 bg-white rounded p-2 border border-slate-200">
+                    <TrendingDown className="h-4 w-4 text-red-600" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-600 truncate">Burn Rate</div>
+                      <div className="text-sm font-semibold text-slate-900 truncate">
+                        {isLoadingMetrics ? '—' : formatCurrency(metrics.burnRate || 0, startup.currency || 'INR')}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Gross Margin */}
+                  <div className="flex items-center gap-2 bg-white rounded p-2 border border-slate-200">
+                    <Percent className="h-4 w-4 text-blue-600" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-600 truncate">Gross Margin</div>
+                      <div className="text-sm font-semibold text-slate-900 truncate">
+                        {isLoadingMetrics ? '—' : `${(metrics.grossMargin || 0).toFixed(1)}%`}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Compliance Status */}
+                  <div className="flex items-center gap-2 bg-white rounded p-2 border border-slate-200">
+                    <Gauge className="h-4 w-4 text-purple-600" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-600 truncate">Compliance</div>
+                      <div className="text-sm font-semibold text-slate-900 truncate">
+                        {startup.compliance_status || 'Pending'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
           </Card>
           ) : (
@@ -2321,20 +2582,141 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   <p className="text-[12px] text-red-500 mt-0.5">{onePagerErrors.competition}</p>
                 )}
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-600">Team (relevant background)</label>
-                <textarea
-                  rows={3}
-                  placeholder="Founders, relevant experience, prior startups, domain expertise..."
-                  value={onePager.team}
-                  onChange={e => handleOnePagerChange('team', e.target.value)}
-                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs sm:text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary bg-white"
-                />
-                {onePagerErrors.team && (
-                  <p className="text-[12px] text-red-500 mt-0.5">{onePagerErrors.team}</p>
+              
+              {/* Team Members Manager */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-slate-600">Team Members</label>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleAddTeamMember}
+                    className="text-xs"
+                  >
+                    <Plus className="h-3 w-3 mr-1" /> Add Member
+                  </Button>
+                </div>
+                
+                {onePagerErrors.teamMembers && (
+                  <p className="text-[12px] text-red-500">{onePagerErrors.teamMembers}</p>
+                )}
+
+                {/* Team Members List */}
+                <div className="space-y-2">
+                  {onePager.teamMembers.map((member) => (
+                    <div key={member.id} className="border border-slate-200 rounded-md p-2 bg-slate-50 flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-slate-900 truncate">{member.name}</p>
+                        <p className="text-xs text-slate-600 truncate">{member.education}</p>
+                        <p className="text-xs text-slate-600 truncate">{member.experience}</p>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleEditTeamMember(member)}
+                          className="text-xs px-2"
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteTeamMember(member.id)}
+                          className="text-xs px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {onePager.teamMembers.length === 0 && (
+                  <p className="text-xs text-slate-500 italic py-2">No team members added yet. Add at least one member.</p>
                 )}
               </div>
             </div>
+
+            {/* Team Member Form Modal */}
+            {showTeamMemberForm && (
+              <Modal
+                isOpen={showTeamMemberForm}
+                onClose={() => setShowTeamMemberForm(false)}
+                title={editingTeamMemberId ? 'Edit Team Member' : 'Add Team Member'}
+                size="medium"
+              >
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 block mb-1">Full Name *</label>
+                    <Input
+                      type="text"
+                      placeholder="e.g., John Smith"
+                      value={teamMemberFormData.name}
+                      onChange={(e) => setTeamMemberFormData({...teamMemberFormData, name: e.target.value})}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 block mb-1">Highest Education *</label>
+                    <Input
+                      type="text"
+                      placeholder="e.g., BS in Computer Science from MIT"
+                      value={teamMemberFormData.education}
+                      onChange={(e) => setTeamMemberFormData({...teamMemberFormData, education: e.target.value})}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 block mb-1">Relevant Experience *</label>
+                    <textarea
+                      rows={3}
+                      placeholder="e.g., 10 years in product management at Google, founded 2 startups..."
+                      value={teamMemberFormData.experience}
+                      onChange={(e) => setTeamMemberFormData({...teamMemberFormData, experience: e.target.value})}
+                      className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs sm:text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 block mb-1">Short Description</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Brief description of role and responsibilities..."
+                      value={teamMemberFormData.description}
+                      onChange={(e) => setTeamMemberFormData({...teamMemberFormData, description: e.target.value})}
+                      className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs sm:text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 block mb-1">Photo</label>
+                    <CloudDriveInput
+                      onSelect={(file) => setTeamPhotoFile(file)}
+                      defaultValue={teamMemberFormData.photoUrl}
+                      label="Upload team member photo (optional)"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-4 border-t">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowTeamMemberForm(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={handleSaveTeamMember}
+                    >
+                      {editingTeamMemberId ? 'Update' : 'Add'} Member
+                    </Button>
+                  </div>
+                </div>
+              </Modal>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1">
@@ -2578,16 +2960,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                       )}
                     </pre>
                   </div>
-                  <div className="border border-slate-300 rounded-[3px] p-1.5">
-                    <p className="font-bold text-[12px] text-blue-800 mb-0.5">TEAM</p>
-                    <pre className="whitespace-pre-wrap text-[12px] text-slate-900">
-                      {limitText(
-                        onePager.team,
-                        320,
-                        'Founders and key team members with relevant background.',
-                      )}
-                    </pre>
-                  </div>
                 </div>
 
                 {/* Right column blocks */}
@@ -2786,6 +3158,52 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     </div>
                   </div>
                 </div>
+
+                {/* Team Members Section - Lower Half */}
+                {onePager.teamMembers.length > 0 && (
+                  <div className="border border-slate-300 rounded-[3px] p-1.5 mt-2">
+                    <p className="font-bold text-[12px] text-blue-800 mb-1">TEAM</p>
+                    <div className={`grid gap-1.5 ${
+                      onePager.teamMembers.length === 1 ? 'grid-cols-1' :
+                      onePager.teamMembers.length === 2 ? 'grid-cols-2' :
+                      onePager.teamMembers.length === 3 ? 'grid-cols-3' :
+                      'grid-cols-4'
+                    }`}>
+                      {onePager.teamMembers.map((member) => (
+                        <div key={member.id} className="border border-slate-300 rounded-[2px] p-1 text-[9px]">
+                          {member.photoUrl && (
+                            <img 
+                              src={member.photoUrl} 
+                              alt={member.name}
+                              style={{
+                                width: '100%',
+                                height: '60px',
+                                objectFit: 'cover',
+                                borderRadius: '2px',
+                                marginBottom: '4px',
+                                display: 'block'
+                              }}
+                            />
+                          )}
+                          <p className="font-bold text-[9px] text-slate-900 mb-0.5 truncate">
+                            {member.name}
+                          </p>
+                          <p className="text-[8px] text-slate-700 mb-0.5 line-clamp-2">
+                            <strong>Edu:</strong> {member.education}
+                          </p>
+                          <p className="text-[8px] text-slate-700 mb-0.5 line-clamp-2">
+                            <strong>Exp:</strong> {member.experience}
+                          </p>
+                          {member.description && (
+                            <p className="text-[8px] text-slate-600 line-clamp-2">
+                              {member.description}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

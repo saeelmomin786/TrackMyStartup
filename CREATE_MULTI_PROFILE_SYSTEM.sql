@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     ca_code TEXT,
     cs_code TEXT,
     mentor_code TEXT,
+    facilitator_code TEXT,
     
     -- Profile information
     phone TEXT,

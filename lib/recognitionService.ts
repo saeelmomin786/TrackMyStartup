@@ -304,20 +304,15 @@ class RecognitionService {
       console.log('🔍 Validating facilitator code:', facilitatorCode);
       
       const { data, error } = await supabase
-        .from('users')
+        .from('user_profiles')
         .select('id, facilitator_code, name, role')
         .eq('facilitator_code', facilitatorCode)
         .eq('role', 'Startup Facilitation Center')
-        .single();
+        .maybeSingle();
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          // No rows returned
-          console.log('❌ No facilitator found with code:', facilitatorCode);
-          return false;
-        }
         console.error('❌ Error validating facilitator code:', error);
-        throw error;
+        return false;
       }
 
       if (data) {

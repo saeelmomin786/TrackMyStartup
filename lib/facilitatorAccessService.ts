@@ -70,7 +70,7 @@ export class FacilitatorAccessService {
           granted_at,
           expires_at,
           is_active,
-          users!facilitator_id(name, email)
+          user_profiles!facilitator_id(name, email)
         `)
         .eq('startup_id', startupId)
         .eq('is_active', true)

@@ -201,7 +201,9 @@ class ComplianceRulesIntegrationService {
             .eq('startup_id', startupId)
             .in('task_id', taskIds);
 
-          console.log('🔍 Status data from compliance_checks:', statusData, 'Error:', statusError);
+          if (process.env.NODE_ENV === 'development') {
+            console.log('📋 Compliance status loaded:', statusData?.length || 0);
+          }
           
           // Create a map of task_id -> status and is_applicable for quick lookup
           const statusMap = new Map<string, { ca_status?: string; cs_status?: string; is_applicable?: boolean }>();
@@ -216,7 +218,6 @@ class ComplianceRulesIntegrationService {
                 cs_status: item.cs_status,
                 is_applicable: isApplicableValue
               });
-              console.log('🔍 Mapped task_id:', item.task_id, 'is_applicable:', item.is_applicable, '-> mapped value:', isApplicableValue);
             });
           }
 
@@ -241,11 +242,6 @@ class ComplianceRulesIntegrationService {
             } else {
               // No statusInfo or is_applicable is null/undefined - default to true
               isApplicableValue = true;
-            }
-
-            // Debug logging for tasks with undefined isApplicable
-            if (task.task_id.includes('2022') || task.task_id.includes('2023') || task.task_id.includes('2024') || task.task_id.includes('2025') || task.task_id.includes('2026')) {
-              console.log('🔍 Transforming task:', task.task_id, 'statusInfo:', statusInfo, 'has is_applicable:', statusInfo ? 'is_applicable' in statusInfo : false, 'is_applicable value:', statusInfo?.is_applicable, 'final isApplicable:', isApplicableValue);
             }
 
             // Ensure isApplicable is always a boolean (never undefined)
@@ -311,15 +307,23 @@ class ComplianceRulesIntegrationService {
             console.error('❌ ERROR: Tasks still have invalid isApplicable after final pass:', tasksWithIssues.map(t => ({ taskId: t.taskId, isApplicable: t.isApplicable, type: typeof t.isApplicable })));
           }
 
-          console.log('🔍 Transformed integrated tasks (sample):', finalTasks.slice(0, 3).map(t => ({ taskId: t.taskId, isApplicable: t.isApplicable, type: typeof t.isApplicable })));
+          if (process.env.NODE_ENV === 'development') {
+            console.log('📋 Transformed', finalTasks.length, 'compliance tasks');
+          }
           return finalTasks;
         } else if (!dbError && dbTasks && dbTasks.length === 0) {
-          console.log('🔍 Database function returned empty results, falling back to comprehensive rules');
+          if (process.env.NODE_ENV === 'development') {
+            console.log('📋 No database tasks, using fallback rules');
+          }
         } else if (dbError) {
-          console.log('🔍 Database function error, falling back to comprehensive rules:', dbError);
+          if (process.env.NODE_ENV === 'development') {
+            console.log('📋 Database error, using fallback rules');
+          }
         }
       } catch (dbError) {
-        console.log('🔍 Database function not available, falling back to comprehensive rules:', dbError);
+        if (process.env.NODE_ENV === 'development') {
+          console.log('📋 Database function not available, using fallback rules');
+        }
       }
 
       // Fallback to the original comprehensive rules approach for parent company only

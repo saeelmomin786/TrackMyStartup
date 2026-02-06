@@ -1308,39 +1308,13 @@ class CapTableService {
   }
 
   async getValuationHistoryData(startupId: number): Promise<ValuationHistoryData[]> {
-    try {
-      const { data, error } = await supabase.rpc('get_valuation_history', {
-        p_startup_id: startupId
-      });
-
-      if (error) {
-        console.log('❌ Error calling get_valuation_history RPC, using manual calculation');
-        return this.calculateValuationHistoryManually(startupId);
-      }
-
-      return data || [];
-    } catch (error) {
-      console.log('🔄 Falling back to manual calculation for valuation history');
-      return this.calculateValuationHistoryManually(startupId);
-    }
+    // Use manual calculation directly (RPC not needed)
+    return this.calculateValuationHistoryManually(startupId);
   }
 
   async getEquityDistributionData(startupId: number): Promise<EquityDistributionData[]> {
-    try {
-      const { data, error } = await supabase.rpc('get_equity_distribution', {
-        p_startup_id: startupId
-      });
-
-      if (error) {
-        console.log('❌ Error calling get_equity_distribution RPC, using manual calculation');
-        return this.calculateEquityDistributionManually(startupId);
-      }
-
-      return data || [];
-    } catch (error) {
-      console.log('🔄 Falling back to manual calculation for equity distribution');
-      return this.calculateEquityDistributionManually(startupId);
-    }
+    // Use manual calculation directly (RPC not needed)
+    return this.calculateEquityDistributionManually(startupId);
   }
 
   async getFundraisingStatus(startupId: number): Promise<FundraisingStatus | null> {
@@ -1421,43 +1395,25 @@ class CapTableService {
   }
 
   private async calculateValuationHistoryManually(startupId: number): Promise<ValuationHistoryData[]> {
-    console.log('🔄 Calculating valuation history manually for startup:', startupId);
-    
     const investments = await this.getInvestmentRecords(startupId);
-    console.log('📊 Found investments:', investments.length);
     
     if (investments.length === 0) {
-      console.log('⚠️ No investments found, returning empty array');
       return [];
     }
     
-    // Group investments by date and calculate cumulative valuation
-    const valuationMap = new Map<string, { valuation: number; investment: number }>();
+    // Sort by date ascending to return all investments in chronological order
+    const sortedInvestments = [...investments].sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
     
-    investments.forEach(inv => {
-      console.log('💰 Processing investment:', {
-        date: inv.date,
-        amount: inv.amount,
-        preMoneyValuation: inv.preMoneyValuation,
-        investorName: inv.investorName
-      });
-      
-      const existing = valuationMap.get(inv.date) || { valuation: 0, investment: 0 };
-      valuationMap.set(inv.date, {
-        valuation: existing.valuation + inv.preMoneyValuation,
-        investment: existing.investment + inv.amount
-      });
-    });
-    
-    const result = Array.from(valuationMap.entries()).map(([date, data]) => ({
-      round_name: 'Investment Round',
-      valuation: data.valuation,
-      investment_amount: data.investment,
-      date
-    })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
-    console.log('📈 Manual valuation history result:', result);
-    return result;
+    // Map all investments, using postMoneyValuation field directly from database
+    // This field contains the actual Post-Money valuation from the investment round
+    return sortedInvestments.map(inv => ({
+      round_name: inv.investmentType || 'Investment Round',
+      valuation: inv.postMoneyValuation || 0, // Use actual post_money_valuation from DB
+      investment_amount: inv.amount,
+      date: inv.date
+    }));
   }
 
   private async calculateEquityDistributionManually(startupId: number): Promise<EquityDistributionData[]> {

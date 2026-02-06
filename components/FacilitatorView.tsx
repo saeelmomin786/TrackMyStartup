@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion, Star, Settings, X } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
@@ -31,6 +31,11 @@ import MessageContainer from './MessageContainer';
 import QuestionSelector from './QuestionSelector';
 import { questionBankService, ApplicationQuestion } from '../lib/questionBankService';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
+import { reportsService } from '../lib/reportsService';
+import { intakeCRMService } from '../lib/intakeCRMService';
+import { form2ResponseService } from '../lib/form2ResponseService';
+import { Form2SubmissionModal } from './Form2SubmissionModal';
+import { IntakeCRMBoard } from './IntakeCRMBoard';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -71,6 +76,19 @@ type ReceivedApplication = {
   stage?: string;
   createdAt?: string;
   diligenceUrls?: string[]; // Array of uploaded diligence document URLs
+  isShortlisted?: boolean; // For shortlist feature
+};
+
+type ReportMandate = {
+  id: string;
+  facilitator_id: string;
+  title: string;
+  program_name: string;
+  program_list?: string[];
+  question_ids: string[];
+  target_startups: string[];
+  source: 'existing' | 'startup';
+  created_at: string;
 };
 
 const initialNewOppState = {
@@ -256,7 +274,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isApplicationResponsesModalOpen, setIsApplicationResponsesModalOpen] = useState(false);
   const [selectedApplicationForResponses, setSelectedApplicationForResponses] = useState<ReceivedApplication | null>(null);
   const [applicationResponses, setApplicationResponses] = useState<Array<{ question: ApplicationQuestion; answerText: string }>>([]);
+  const [form2Responses, setForm2Responses] = useState<Array<{ question: ApplicationQuestion; answerText: string }>>([]);
   const [loadingResponses, setLoadingResponses] = useState(false);
+  const [loadingForm2Responses, setLoadingForm2Responses] = useState(false);
+  const [responseTab, setResponseTab] = useState<'response1' | 'response2'>('response1');
   
   // State for edit startup functionality
   const [isEditStartupModalOpen, setIsEditStartupModalOpen] = useState(false);
@@ -266,6 +287,58 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [showAllStartups, setShowAllStartups] = useState(false);
   const [showAllOpportunities, setShowAllOpportunities] = useState(false);
   const [showAllApplications, setShowAllApplications] = useState(false);
+  
+  // ============ FEATURE 1: SHORTLISTING SYSTEM ============
+  const [shortlistedApplications, setShortlistedApplications] = useState<Set<string>>(new Set());
+  
+  // ============ FEATURE 2: INTAKE CRM INTEGRATION ============
+  // Intake Management View Mode
+  const [intakeViewMode, setIntakeViewMode] = useState<'program' | 'crm'>('program');
+  
+  // ============ FEATURE 3: CONFIGURE QUESTIONS MODAL ============
+  const [isProgramQuestionsConfigModalOpen, setIsProgramQuestionsConfigModalOpen] = useState(false);
+  const [selectedProgramForQuestions, setSelectedProgramForQuestions] = useState<string | null>(null);
+  const [programQuestionIds, setProgramQuestionIds] = useState<string[]>([]);
+  const [programQuestionRequiredMap, setProgramQuestionRequiredMap] = useState<Map<string, boolean>>(new Map());
+  const [programQuestionSelectionTypeMap, setProgramQuestionSelectionTypeMap] = useState<Map<string, 'single' | 'multiple' | null>>(new Map());
+  const [isSavingProgramQuestions, setIsSavingProgramQuestions] = useState(false);
+  const [isLoadingProgramQuestionsConfig, setIsLoadingProgramQuestionsConfig] = useState(false);
+  
+  // ============ FEATURE 4: REPORTS MANDATE WIZARD ============
+  const [trackMyStartupsSubTab, setTrackMyStartupsSubTab] = useState<'portfolio' | 'reports'>('portfolio');
+  const [selectedReportIdForTracking, setSelectedReportIdForTracking] = useState<string | null>(null);
+  const [isCreateReportModalOpen, setIsCreateReportModalOpen] = useState(false);
+  const [reportStep, setReportStep] = useState<1 | 2 | 3>(1);
+  const [reportTitle, setReportTitle] = useState('');
+  const [reportProgram, setReportProgram] = useState('');
+  const [reportQuestionIds, setReportQuestionIds] = useState<string[]>([]);
+  const [allReportQuestions, setAllReportQuestions] = useState<ApplicationQuestion[]>([]);
+  const [isLoadingReportQuestions, setIsLoadingReportQuestions] = useState(false);
+  const [reportSource, setReportSource] = useState<'existing' | 'startup' | ''>('');
+  const [targetStartupIds, setTargetStartupIds] = useState<string[]>([]);
+  const [reportMandates, setReportMandates] = useState<ReportMandate[]>([]);
+  const [mandateStats, setMandateStats] = useState<Record<string, { submitted: number; total: number }>>({});
+  const [mandateResponses, setMandateResponses] = useState<Record<string, any[]>>({}); // Store responses per mandate
+  const [isEditMandateModalOpen, setIsEditMandateModalOpen] = useState(false);
+  const [selectedMandateForEdit, setSelectedMandateForEdit] = useState<ReportMandate | null>(null);
+  const [isViewMandateResponsesModalOpen, setIsViewMandateResponsesModalOpen] = useState(false);
+  const [selectedStartupResponse, setSelectedStartupResponse] = useState<any>(null);
+  const [questionBank, setQuestionBank] = useState<Map<string, ApplicationQuestion>>(new Map());
+  const [isGenerateReportModalOpen, setIsGenerateReportModalOpen] = useState(false);
+  const [selectedMandateForReport, setSelectedMandateForReport] = useState<ReportMandate | null>(null);
+  const [reportFormatChoices, setReportFormatChoices] = useState<'csv' | 'pdf' | null>(null);
+  
+  // ============ FEATURE 5: FORM 2 RESPONSE MODAL ============
+  const [isForm2ModalOpen, setIsForm2ModalOpen] = useState(false);
+  const [selectedApplicationForForm2, setSelectedApplicationForForm2] = useState<ReceivedApplication | null>(null);
+  
+  // ============ FEATURE 6: FORM 2 CONFIGURATION MODAL ============
+  const [isForm2ConfigModalOpen, setIsForm2ConfigModalOpen] = useState(false);
+  const [selectedOpportunityForForm2, setSelectedOpportunityForForm2] = useState<string | null>(null);
+  const [form2QuestionIds, setForm2QuestionIds] = useState<string[]>([]);
+  const [form2QuestionRequiredMap, setForm2QuestionRequiredMap] = useState<Map<string, boolean>>(new Map());
+  const [form2QuestionSelectionTypeMap, setForm2QuestionSelectionTypeMap] = useState<Map<string, 'single' | 'multiple' | null>>(new Map());
+  const [isSavingForm2Questions, setIsSavingForm2Questions] = useState(false);
   
   const formatCurrency = (value: number, currency: string = 'USD') => 
     formatCurrencyUtil(value, currency, { notation: 'compact' });
@@ -288,6 +361,657 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     setIsMessagingModalOpen(false);
     setSelectedApplicationForMessaging(null);
   };
+
+  // ============ FEATURE 1: SHORTLISTING SYSTEM ============
+  const handleShortlistApplication = async (application: ReceivedApplication) => {
+    const isCurrentlyShortlisted = shortlistedApplications.has(application.id);
+    const newShortlistValue = !isCurrentlyShortlisted;
+    
+    try {
+      // Update in database
+      const { error } = await supabase
+        .from('opportunity_applications')
+        .update({ is_shortlisted: newShortlistValue })
+        .eq('id', application.id);
+
+      if (error) {
+        console.error('Error updating shortlist:', error);
+        messageService.error('Error', 'Failed to update shortlist');
+        return;
+      }
+
+      // Update local state
+      setShortlistedApplications(prev => {
+        const newSet = new Set(prev);
+        if (newShortlistValue) {
+          newSet.add(application.id);
+        } else {
+          newSet.delete(application.id);
+        }
+        return newSet;
+      });
+
+      // Update applications list
+      setMyReceivedApplications(prev => 
+        prev.map(app => 
+          app.id === application.id 
+            ? { ...app, isShortlisted: newShortlistValue }
+            : app
+        )
+      );
+
+      messageService.success(
+        newShortlistValue ? 'Added to Shortlist' : 'Removed from Shortlist',
+        `${application.startupName} ${newShortlistValue ? 'added to' : 'removed from'} shortlist.`,
+        2000
+      );
+    } catch (err) {
+      console.error('Error toggling shortlist:', err);
+      messageService.error('Error', 'Failed to update shortlist');
+    }
+  };
+
+  // ============ FEATURE 3: CONFIGURE QUESTIONS MODAL ============
+  const openProgramQuestionsConfig = async (programName: string) => {
+    setSelectedProgramForQuestions(programName);
+    setIsLoadingProgramQuestionsConfig(true);
+    
+    try {
+      if (!facilitatorId) return;
+      
+      console.log('🔧 OPENING CONFIGURE QUESTIONS:');
+      console.log(`  Facilitator ID: ${facilitatorId}`);
+      console.log(`  Program Name: "${programName}"`);
+      console.log(`  Program Name Length: ${programName.length}`);
+      console.log(`  Program Name Bytes: ${new TextEncoder().encode(programName).length}`);
+      
+      // Load existing questions for this program
+      const existingQuestions = await questionBankService.getProgramTrackingQuestions(facilitatorId, programName);
+      
+      console.log('📋 Loaded existing questions:', existingQuestions);
+      
+      const qIds = existingQuestions.map(q => q.questionId);
+      setProgramQuestionIds(qIds);
+      
+      const reqMap = new Map<string, boolean>();
+      const selMap = new Map<string, 'single' | 'multiple' | null>();
+      
+      existingQuestions.forEach(q => {
+        reqMap.set(q.questionId, q.isRequired);
+        selMap.set(q.questionId, q.selectionType as 'single' | 'multiple' | null);
+      });
+      
+      setProgramQuestionRequiredMap(reqMap);
+      setProgramQuestionSelectionTypeMap(selMap);
+      
+      console.log(`✅ Loaded ${qIds.length} questions for program "${programName}"`);
+    } catch (err) {
+      console.error('❌ Error loading program questions config:', err);
+      messageService.error('Error', 'Failed to load questions configuration');
+    } finally {
+      setIsLoadingProgramQuestionsConfig(false);
+    }
+    
+    setIsProgramQuestionsConfigModalOpen(true);
+  };
+
+  const saveProgramQuestionsConfig = async () => {
+    if (!facilitatorId || !selectedProgramForQuestions) return;
+    
+    setIsSavingProgramQuestions(true);
+    try {
+      // Load existing questions to see what changed
+      const existingQuestions = await questionBankService.getProgramTrackingQuestions(
+        facilitatorId,
+        selectedProgramForQuestions
+      );
+      
+      const existingQIds = new Set(existingQuestions.map(q => q.questionId));
+      const newQIds = new Set(programQuestionIds);
+      
+      // Find questions to ADD (in new list but not in existing)
+      const questionsToAdd = Array.from(newQIds).filter(qId => !existingQIds.has(qId));
+      
+      // Find questions to REMOVE (in existing list but not in new list)
+      const questionsToRemove = Array.from(existingQIds).filter(qId => !newQIds.has(qId));
+      
+      console.log('📝 Configure Questions Save:');
+      console.log(`  ✓ To Add: ${questionsToAdd.length} questions`);
+      console.log(`  ✗ To Remove: ${questionsToRemove.length} questions`);
+      console.log(`  → Total will be: ${programQuestionIds.length} questions`);
+      
+      // STEP 1: Remove only the unchecked questions
+      if (questionsToRemove.length > 0) {
+        for (const questionId of questionsToRemove) {
+          await questionBankService.removeProgramQuestion(
+            facilitatorId,
+            selectedProgramForQuestions,
+            questionId
+          );
+        }
+        console.log(`✅ Removed ${questionsToRemove.length} question(s)`);
+      }
+      
+      // STEP 2: Add only the newly selected questions
+      if (questionsToAdd.length > 0) {
+        // Create maps only for the new questions
+        const addMap = new Map<string, boolean>();
+        const selMap = new Map<string, 'single' | 'multiple' | null>();
+        
+        questionsToAdd.forEach(qId => {
+          addMap.set(qId, programQuestionRequiredMap.get(qId) ?? true);
+          selMap.set(qId, programQuestionSelectionTypeMap.get(qId) ?? null);
+        });
+        
+        await questionBankService.addQuestionsToProgram(
+          facilitatorId,
+          selectedProgramForQuestions,
+          questionsToAdd,
+          addMap,
+          selMap
+        );
+        console.log(`✅ Added ${questionsToAdd.length} new question(s)`);
+      }
+      
+      // STEP 3: Update required and selection type for existing questions that changed
+      for (const existingQ of existingQuestions) {
+        if (newQIds.has(existingQ.questionId)) {
+          const newRequired = programQuestionRequiredMap.get(existingQ.questionId) ?? true;
+          const newSelType = programQuestionSelectionTypeMap.get(existingQ.questionId) ?? null;
+          
+          // Check if required status changed
+          if (newRequired !== existingQ.isRequired) {
+            await questionBankService.updateProgramQuestionRequired(
+              existingQ.id,
+              newRequired
+            );
+            console.log(`✓ Updated required status for question ${existingQ.questionId}`);
+          }
+          
+          // Check if selection type changed
+          if (newSelType !== existingQ.selectionType) {
+            await questionBankService.updateProgramQuestionSelectionType(
+              existingQ.id,
+              newSelType
+            );
+            console.log(`✓ Updated selection type for question ${existingQ.questionId}`);
+          }
+        }
+      }
+      
+      messageService.success(
+        'Success', 
+        `Questions configured: ${questionsToAdd.length} added${questionsToRemove.length > 0 ? `, ${questionsToRemove.length} removed` : ''}`,
+        2000
+      );
+      setIsProgramQuestionsConfigModalOpen(false);
+      setProgramQuestionIds([]);
+      setProgramQuestionRequiredMap(new Map());
+      setProgramQuestionSelectionTypeMap(new Map());
+    } catch (err) {
+      console.error('Error saving program questions:', err);
+      messageService.error('Error', 'Failed to save questions');
+    } finally {
+      setIsSavingProgramQuestions(false);
+    }
+  };
+
+  // ============ FEATURE 4: REPORTS MANDATE WIZARD ============
+  const resetCreateReportModal = () => {
+    setReportStep(1);
+    setReportTitle('');
+    setReportProgram('');
+    setReportQuestionIds([]);
+    setReportSource('');
+    setTargetStartupIds([]);
+  };
+
+  const handleNextStep = () => {
+    if (reportStep === 1) {
+      if (!reportTitle.trim()) {
+        messageService.warning('Required', 'Please enter a report title');
+        return;
+      }
+      if (!reportProgram) {
+        messageService.warning('Required', 'Please select a program');
+        return;
+      }
+    } else if (reportStep === 2) {
+      if (reportQuestionIds.length === 0) {
+        messageService.warning('Required', 'Please select at least one question');
+        return;
+      }
+    }
+    
+    if (reportStep < 3) {
+      setReportStep((reportStep + 1) as 1 | 2 | 3);
+    }
+  };
+
+  const handleBackStep = () => {
+    if (reportStep > 1) {
+      setReportStep((reportStep - 1) as 1 | 2 | 3);
+    }
+  };
+
+  const handleCreateMandate = async () => {
+    if (!facilitatorId) return;
+
+    try {
+      setIsProcessingAction(true);
+
+      const mandateId = crypto.randomUUID();
+      const { error } = await supabase
+        .from('reports_mandate')
+        .insert({
+          id: mandateId,
+          facilitator_id: facilitatorId,
+          title: reportTitle,
+          program_name: reportProgram,
+          question_ids: reportQuestionIds,
+          target_startups: reportSource === 'startup' ? targetStartupIds : [],
+          source: reportSource,
+          status: 'draft',
+          created_at: new Date().toISOString()
+        });
+
+      if (error) throw error;
+
+      // Auto-merge missing questions into program if needed
+      if (reportSource === 'startup') {
+        try {
+          const result = await questionBankService.addQuestionsToProgram(
+            facilitatorId,
+            reportProgram,
+            reportQuestionIds,
+            new Map(),
+            new Map()
+          );
+          
+          // Show summary message
+          if (result.added > 0) {
+            messageService.success(
+              'Success', 
+              `Added ${result.added} new question(s) to program. ${result.skipped > 0 ? `(${result.skipped} already configured)` : ''}`,
+              2000
+            );
+          } else if (result.skipped > 0) {
+            messageService.info(
+              'Info', 
+              `All ${result.skipped} selected question(s) were already configured in this program`,
+              2000
+            );
+          }
+        } catch (e) {
+          console.error('Error adding questions to program:', e);
+          messageService.warning('Note', 'Some questions may already exist in program');
+        }
+      }
+
+      messageService.success('Success', 'Report mandate created successfully', 2000);
+      resetCreateReportModal();
+      setIsCreateReportModalOpen(false);
+      
+      // Reload mandates
+      await loadReportMandates();
+    } catch (err) {
+      console.error('Error creating mandate:', err);
+      messageService.error('Error', 'Failed to create mandate');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // ============ OPTION A: GENERATE FROM EXISTING RESPONSES ============
+  const handleGenerateExistingReport = async () => {
+    if (!facilitatorId || !reportProgram) return;
+
+    try {
+      setIsProcessingAction(true);
+      console.log('🔍 Fetching existing responses for Option A...');
+      console.log('Program:', reportProgram);
+      console.log('Questions:', reportQuestionIds);
+
+      // Get all startups in this program
+      const programStartups = portfolioStartups.filter(s => 
+        reportProgram === 'All Programs' || s.programName === reportProgram
+      );
+
+      if (programStartups.length === 0) {
+        messageService.warning('No Data', 'No startups found in this program');
+        return;
+      }
+
+      console.log(`📊 Found ${programStartups.length} startups in program`);
+
+      // For each startup, fetch answers using cascading logic
+      const allResponses: any[] = [];
+
+      for (const startup of programStartups) {
+        const startupAnswers: Record<string, string> = {};
+
+        for (const questionId of reportQuestionIds) {
+          let answer = '';
+
+          // Priority 1: Check program_tracking_responses
+          try {
+            const { data: trackingData, error: trackingError } = await supabase
+              .from('program_tracking_responses')
+              .select('answer_text')
+              .eq('startup_id', startup.id)
+              .eq('program_name', reportProgram)
+              .eq('question_id', questionId)
+              .maybeSingle();
+
+            if (!trackingError && trackingData?.answer_text) {
+              answer = trackingData.answer_text;
+              console.log(`✓ Found answer in program_tracking_responses for startup ${startup.id}, question ${questionId}`);
+            }
+          } catch (e) {
+            console.log('No answer in program_tracking_responses');
+          }
+
+          // Priority 2: If not found, check Form 2 (opportunity_form2_responses)
+          if (!answer) {
+            try {
+              const { data: form2Data, error: form2Error } = await supabase
+                .from('opportunity_form2_responses')
+                .select('answers')
+                .eq('startup_id', startup.id)
+                .maybeSingle();
+
+              if (!form2Error && form2Data?.answers && form2Data.answers[questionId]) {
+                answer = form2Data.answers[questionId];
+                console.log(`✓ Found answer in Form 2 for startup ${startup.id}, question ${questionId}`);
+              }
+            } catch (e) {
+              console.log('No answer in Form 2');
+            }
+          }
+
+          // Priority 3: If not found, check Form 1 (opportunity_application_responses)
+          if (!answer) {
+            try {
+              const { data: form1Data, error: form1Error } = await supabase
+                .from('opportunity_application_responses')
+                .select('answers')
+                .eq('startup_id', startup.id)
+                .maybeSingle();
+
+              if (!form1Error && form1Data?.answers && form1Data.answers[questionId]) {
+                answer = form1Data.answers[questionId];
+                console.log(`✓ Found answer in Form 1 for startup ${startup.id}, question ${questionId}`);
+              }
+            } catch (e) {
+              console.log('No answer in Form 1');
+            }
+          }
+
+          // If still not found, leave empty
+          if (!answer) {
+            console.log(`✗ No answer found for startup ${startup.id}, question ${questionId} - leaving empty`);
+            answer = '';
+          }
+
+          startupAnswers[questionId] = answer;
+        }
+
+        allResponses.push({
+          startup_id: startup.id,
+          startup_name: startup.name,
+          answers: startupAnswers
+        });
+      }
+
+      console.log('✅ Collected all responses:', allResponses);
+
+      // Show format selection modal
+      setSelectedMandateForReport({
+        id: 'temp-existing',
+        title: reportTitle,
+        program_name: reportProgram,
+        question_ids: reportQuestionIds,
+        target_startups: programStartups.map(s => String(s.id)),
+        source: 'existing',
+        status: 'generated',
+        created_at: new Date().toISOString()
+      } as any);
+
+      // Store responses temporarily for download
+      setMandateResponses({
+        'temp-existing': allResponses
+      });
+
+      // Close create modal and open format selection
+      setIsCreateReportModalOpen(false);
+      resetCreateReportModal();
+      setIsGenerateReportModalOpen(true);
+
+    } catch (err) {
+      console.error('❌ Error generating existing report:', err);
+      messageService.error('Error', 'Failed to generate report from existing responses');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const loadQuestionBank = async () => {
+    try {
+      console.log('📚 Loading question bank...');
+      const { data, error } = await supabase
+        .from('application_question_bank')
+        .select('id, question_text');
+
+      if (error) throw error;
+
+      // Create a map of question ID to question text
+      const qMap = new Map<string, ApplicationQuestion>();
+      (data || []).forEach(q => {
+        qMap.set(q.id, q);
+      });
+
+      console.log('✅ Question bank loaded:', qMap.size, 'questions');
+      setQuestionBank(qMap);
+    } catch (err) {
+      console.error('❌ Error loading question bank:', err);
+    }
+  };
+
+  const loadReportMandates = async () => {
+    if (!facilitatorId) return;
+
+    try {
+      console.log('🔄 Loading report mandates for facilitator:', facilitatorId);
+      
+      const { data, error } = await supabase
+        .from('reports_mandate')
+        .select('*')
+        .eq('facilitator_id', facilitatorId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      console.log('✅ Report mandates loaded:', data);
+      setReportMandates(data || []);
+
+      // Calculate stats and fetch responses for each mandate
+      const stats: Record<string, { submitted: number; total: number }> = {};
+      const responses: Record<string, any[]> = {};
+      
+      for (const mandate of data || []) {
+        console.log('📊 Processing mandate:', mandate.id, 'Title:', mandate.title, 'Program:', mandate.program_name);
+        
+        if (mandate.target_startups && Array.isArray(mandate.target_startups)) {
+          // Fetch responses for each startup in the target list
+          const allResponses: any[] = [];
+          
+          for (const startupId of mandate.target_startups) {
+            // Convert startup ID to number if it's a string (since DB expects INTEGER)
+            const numStartupId = typeof startupId === 'string' ? parseInt(startupId, 10) : startupId;
+            
+            console.log(`🔍 Fetching responses for startup ${numStartupId} in program "${mandate.program_name}"`);
+            
+            let responseData: any[] | null = null;
+            let queryError: any = null;
+            
+            // If program is "All Programs", fetch responses from ALL programs for this startup
+            if (mandate.program_name === 'All Programs') {
+              console.log(`📌 "All Programs" detected - fetching responses across all programs for startup ${numStartupId}`);
+              const { data: allProgramResponses, error: err } = await supabase
+                .from('program_tracking_responses')
+                .select('*, startups(name)')
+                .eq('startup_id', numStartupId);
+              
+              responseData = allProgramResponses;
+              queryError = err;
+              console.log(`📋 Responses for startup ${numStartupId} across all programs:`, responseData);
+            } else {
+              // For specific program, fetch only that program's responses
+              const { data: programResponses, error: err } = await supabase
+                .from('program_tracking_responses')
+                .select('*, startups(name)')
+                .eq('startup_id', numStartupId)
+                .eq('program_name', mandate.program_name);
+              
+              responseData = programResponses;
+              queryError = err;
+              console.log(`📋 Responses for startup ${numStartupId} in program "${mandate.program_name}":`, responseData);
+            }
+
+            if (queryError) {
+              console.error(`❌ Error fetching responses for startup ${numStartupId}:`, queryError);
+            }
+            
+            if (responseData && responseData.length > 0) {
+              // Get the startup name from the first response
+              const startupName = responseData[0].startups?.name || numStartupId;
+              
+              // Group all answers for this startup
+              const startupResponse = {
+                startup_id: numStartupId,
+                startup_name: startupName,
+                program_name: mandate.program_name,
+                answers: {}
+              };
+              
+              // Build answers object
+              responseData.forEach(r => {
+                startupResponse.answers[r.question_id] = r.answer_text;
+              });
+              
+              // Check if any response has been submitted (use updated_at as submission indicator)
+              startupResponse.submitted_at = responseData[0].updated_at;
+              
+              allResponses.push(startupResponse);
+            } else {
+              // No response yet for this startup
+              allResponses.push({
+                startup_id: numStartupId,
+                startup_name: numStartupId,
+                program_name: mandate.program_name,
+                answers: {},
+                submitted_at: null
+              });
+            }
+          }
+
+          responses[mandate.id] = allResponses;
+
+          const submittedCount = allResponses.filter(r => r.submitted_at).length;
+          stats[mandate.id] = {
+            submitted: submittedCount,
+            total: mandate.target_startups.length
+          };
+          
+          console.log('📈 Mandate stats:', stats[mandate.id].submitted, '/', stats[mandate.id].total, 'submitted');
+        }
+      }
+      
+      console.log('📊 Final mandate stats:', stats);
+      console.log('📦 All responses:', responses);
+      setMandateStats(stats);
+      setMandateResponses(responses);
+    } catch (err) {
+      console.error('❌ Error loading report mandates:', err);
+    }
+  };
+
+  // ============ FEATURE 5: FORM 2 RESPONSE MODAL ============
+  const handleOpenForm2Modal = (application: ReceivedApplication) => {
+    setSelectedApplicationForForm2(application);
+    setIsForm2ModalOpen(true);
+  };
+
+  const handleCloseForm2Modal = () => {
+    setIsForm2ModalOpen(false);
+    setSelectedApplicationForForm2(null);
+  };
+
+  // ============ FEATURE 6: FORM 2 CONFIGURATION MODAL ============
+  const handleOpenForm2ConfigModal = async (opportunityId: string) => {
+    setSelectedOpportunityForForm2(opportunityId);
+    setIsForm2ConfigModalOpen(true);
+    
+    // Load existing Form 2 questions
+    try {
+      const questions = await questionBankService.getForm2Questions(opportunityId);
+      setForm2QuestionIds(questions.map(q => q.questionId));
+      
+      const requiredMap = new Map<string, boolean>();
+      const selectionTypeMap = new Map<string, 'single' | 'multiple' | null>();
+      questions.forEach(q => {
+        requiredMap.set(q.questionId, q.isRequired);
+        if (q.selectionType !== undefined) {
+          selectionTypeMap.set(q.questionId, q.selectionType);
+        }
+      });
+      setForm2QuestionRequiredMap(requiredMap);
+      setForm2QuestionSelectionTypeMap(selectionTypeMap);
+    } catch (error) {
+      console.error('Error loading Form 2 questions:', error);
+    }
+  };
+
+  const handleCloseForm2ConfigModal = () => {
+    setIsForm2ConfigModalOpen(false);
+    setSelectedOpportunityForForm2(null);
+    setForm2QuestionIds([]);
+    setForm2QuestionRequiredMap(new Map());
+    setForm2QuestionSelectionTypeMap(new Map());
+  };
+
+  const handleSaveForm2Questions = async () => {
+    if (!selectedOpportunityForForm2) return;
+    
+    try {
+      setIsSavingForm2Questions(true);
+      
+      // Remove all existing Form 2 questions
+      const existingQuestions = await questionBankService.getForm2Questions(selectedOpportunityForForm2);
+      for (const q of existingQuestions) {
+        await questionBankService.removeQuestionFromForm2(selectedOpportunityForForm2, q.questionId);
+      }
+      
+      // Add new Form 2 questions
+      if (form2QuestionIds.length > 0) {
+        await questionBankService.addQuestionsToForm2(
+          selectedOpportunityForForm2,
+          form2QuestionIds,
+          form2QuestionRequiredMap,
+          form2QuestionSelectionTypeMap
+        );
+      }
+      
+      messageService.success('Form 2 Configured', 'Form 2 questions saved successfully');
+      handleCloseForm2ConfigModal();
+    } catch (error) {
+      console.error('Error saving Form 2 questions:', error);
+      messageService.error('Error', 'Failed to save Form 2 questions');
+    } finally {
+      setIsSavingForm2Questions(false);
+    }
+  };
+
 
 
 
@@ -577,9 +1301,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     try {
       setIsLoadingRecognition(true);
       
-      // Get facilitator code first, create one if it doesn't exist
+      // Get facilitator code from user_profiles using id (not auth_user_id)
       const { data: facilitatorData, error: facilitatorError } = await supabase
-        .from('users')
+        .from('user_profiles')
         .select('facilitator_code')
         .eq('id', facilitatorId)
         .single();
@@ -826,6 +1550,27 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       const { data: { user } } = await supabase.auth.getUser();
         if (!mounted || !user?.id) return;
         
+        // Get user_profiles.id (not auth.uid()) for facilitator_id
+        console.log('🔍 Fetching user profile for auth user:', user.id);
+        const { data: profile, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('id')
+          .eq('auth_user_id', user.id)
+          .single();
+        
+        if (profileError) {
+          console.error('❌ Error fetching user profile:', profileError);
+          return;
+        }
+        
+        if (!profile?.id) {
+          console.error('❌ No user profile found for auth user:', user.id);
+          return;
+        }
+        
+        console.log('✅ Found user profile id:', profile.id);
+        // Use auth user ID for facilitator operations (uniform with Intake Management & Startup Dashboard)
+        // All three systems now use user.id (Auth User ID) for consistency
         setFacilitatorId(user.id);
         // Set loading timeout to prevent infinite loading
         loadingTimeout = setTimeout(() => {
@@ -835,18 +1580,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         }, 30000); // 30 second timeout
         
         // Load all data in parallel with proper error handling
+        // NOTE: incubation_opportunities uses auth.uid() (user.id), NOT user_profiles.id
+        // NOTE: facilitator_startups also uses auth.uid() (user.id), NOT user_profiles.id
         const [opportunitiesResult, recognitionResult, portfolioResult] = await Promise.allSettled([
-          // Load opportunities
+          // Load opportunities (uses auth.uid())
           supabase
           .from('incubation_opportunities')
           .select('*')
           .eq('facilitator_id', user.id)
             .order('created_at', { ascending: false }),
           
-          // Load recognition records
-          loadRecognitionRecords(user.id),
+          // Load recognition records (uses user_profiles.id)
+          loadRecognitionRecords(profile.id),
           
-          // Load portfolio
+          // Load portfolio (uses auth.uid())
           loadPortfolio(user.id)
         ]);
         
@@ -922,9 +1669,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       sector: a.domain,
                       stage: a.stage,
                       createdAt: a.created_at,
-                      diligenceUrls: a.diligence_urls || []
+                      diligenceUrls: a.diligence_urls || [],
+                      isShortlisted: a.is_shortlisted || false
                     }));
+                    
                     setMyReceivedApplications(fallbackAppsMapped);
+                    
+                    // Populate shortlist set from fallback applications
+                    const shortlistedIds = new Set<string>();
+                    fallbackAppsMapped.forEach(app => {
+                      if (app.isShortlisted) {
+                        shortlistedIds.add(app.id);
+                      }
+                    });
+                    setShortlistedApplications(shortlistedIds);
                   }
             } else {
               const appsMapped: ReceivedApplication[] = (apps || []).map((a: any) => ({
@@ -940,10 +1698,21 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 sector: a.domain,
                 stage: a.stage,
                 createdAt: a.created_at,
-                diligenceUrls: a.diligence_urls || []
+                diligenceUrls: a.diligence_urls || [],
+                isShortlisted: a.is_shortlisted || false
               }));
+              
               if (mounted) {
                 setMyReceivedApplications(appsMapped);
+                
+                // Populate shortlist set from loaded applications
+                const shortlistedIds = new Set<string>();
+                appsMapped.forEach(app => {
+                  if (app.isShortlisted) {
+                    shortlistedIds.add(app.id);
+                  }
+                });
+                setShortlistedApplications(shortlistedIds);
                 
                 // Calculate counts from apps
                 const appsCountsMap = new Map<string, number>();
@@ -1343,6 +2112,40 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     loadStartupInvitations();
   }, [facilitatorId]);
 
+  // Load report questions when report modal opens
+  useEffect(() => {
+    if (!isCreateReportModalOpen || !facilitatorId) return;
+
+    const loadQuestions = async () => {
+      setIsLoadingReportQuestions(true);
+      try {
+        const questions = await questionBankService.getApprovedQuestions();
+        setAllReportQuestions(questions);
+      } catch (err) {
+        console.error('Error loading report questions:', err);
+        messageService.error('Error', 'Failed to load questions');
+      } finally {
+        setIsLoadingReportQuestions(false);
+      }
+    };
+
+    loadQuestions();
+  }, [isCreateReportModalOpen, facilitatorId]);
+
+  // Load report mandates when report modal opens
+  useEffect(() => {
+    if (!isCreateReportModalOpen || !facilitatorId) return;
+    loadReportMandates();
+  }, [isCreateReportModalOpen, facilitatorId]);
+
+  // Load report mandates when Track My Startups Reports tab is active
+  useEffect(() => {
+    if (activeTab === 'trackMyStartups' && trackMyStartupsSubTab === 'reports' && facilitatorId) {
+      loadQuestionBank();
+      loadReportMandates();
+    }
+  }, [activeTab, trackMyStartupsSubTab, facilitatorId]);
+
   const handleOpenPostModal = () => {
     setEditingIndex(null);
     setNewOpportunity(initialNewOppState);
@@ -1416,13 +2219,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const handleViewApplicationResponses = async (app: ReceivedApplication) => {
     setSelectedApplicationForResponses(app);
     setIsApplicationResponsesModalOpen(true);
+    setResponseTab('response1');
     setLoadingResponses(true);
+    setLoadingForm2Responses(true);
     
     try {
+      // Load initial application responses
       const responses = await questionBankService.getApplicationResponses(app.id);
-      // Map responses to include question details
       const responsesWithQuestions = responses
-        .filter(response => response.question) // Only include responses with questions
+        .filter(response => response.question)
         .map(response => ({
           question: response.question as ApplicationQuestion,
           answerText: response.answerText
@@ -1434,6 +2239,58 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       setApplicationResponses([]);
     } finally {
       setLoadingResponses(false);
+    }
+
+    try {
+      // Load Form 2 responses with question details
+      const { data: form2Data, error: form2Error } = await supabase
+        .from('opportunity_form2_responses')
+        .select(`
+          *,
+          application_question_bank!opportunity_form2_responses_question_id_fkey(*)
+        `)
+        .eq('application_id', app.id);
+
+      if (form2Error) {
+        console.error('Form 2 query error:', form2Error);
+        throw form2Error;
+      }
+
+      console.log('Form 2 raw data:', form2Data);
+
+      const form2ResponsesWithQuestions = (form2Data || [])
+        .filter((response: any) => response.application_question_bank)
+        .map((response: any) => {
+          const questionData = response.application_question_bank;
+          return {
+            question: {
+              id: questionData.id,
+              questionText: questionData.question_text,
+              category: questionData.category,
+              questionType: questionData.question_type || 'text',
+              options: questionData.options,
+              status: questionData.status,
+              scope: questionData.scope || null,
+              scopeOpportunityId: questionData.scope_opportunity_id || null,
+              createdBy: questionData.created_by,
+              createdAt: questionData.created_at,
+              approvedAt: questionData.approved_at,
+              approvedBy: questionData.approved_by,
+              rejectionReason: questionData.rejection_reason,
+              usageCount: questionData.usage_count || 0,
+              updatedAt: questionData.updated_at
+            } as ApplicationQuestion,
+            answerText: response.answer_text || ''
+          };
+        });
+      
+      console.log('Form 2 responses with questions:', form2ResponsesWithQuestions);
+      setForm2Responses(form2ResponsesWithQuestions);
+    } catch (error: any) {
+      console.error('Failed to load Form 2 responses:', error);
+      setForm2Responses([]);
+    } finally {
+      setLoadingForm2Responses(false);
     }
   };
 
@@ -2123,7 +2980,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         
         // Check user is facilitator
         supabase
-          .from('users')
+          .from('user_profiles')
           .select('id, role')
           .eq('id', facilitatorId)
           .single()
@@ -2407,8 +3264,49 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               <SummaryCard title="Applications Received" value={myReceivedApplications.length} icon={<FileText className="h-6 w-6 text-brand-primary" />} />
       </div>
 
-            {/* Opportunity Sub-tabs */}
-                <Card>
+            {/* View Mode Tabs with Form 2 Button */}
+            <div className="flex justify-between items-center border-b border-slate-200 mb-4">
+              <div className="flex">
+                <button
+                  onClick={() => setIntakeViewMode('program')}
+                  className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${
+                    intakeViewMode === 'program'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300'
+                  }`}
+                >
+                  Portfolio
+                </button>
+                <button
+                  onClick={() => setIntakeViewMode('crm')}
+                  className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${
+                    intakeViewMode === 'crm'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300'
+                  }`}
+                >
+                  CRM
+                </button>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (selectedOpportunityId) {
+                    handleOpenForm2ConfigModal(selectedOpportunityId);
+                  } else {
+                    messageService.info('Select Opportunity', 'Please select an opportunity first to configure Form 2 questions');
+                  }
+                }}
+                className="flex items-center gap-1"
+              >
+                <PlusCircle className="h-4 w-4" />
+                Configure Form 2
+              </Button>
+            </div>
+
+            {/* Portfolio View (Table) */}
+            {intakeViewMode === 'program' && (
+            <Card>
               <h3 className="text-lg font-semibold mb-4 text-slate-700">Applications by Opportunity</h3>
               
               {/* Opportunity Tabs */}
@@ -2446,18 +3344,31 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <th className="px-4 py-4 text-left text-sm font-semibold text-slate-700">Opportunity</th>
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Pitch Materials</th>
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Status</th>
+                          {intakeViewMode === 'crm' && (
+                            <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">CRM Status</th>
+                          )}
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-slate-200">
                     {filteredApplications.map(app => (
-                          <tr key={app.id} className="hover:bg-slate-50 transition-colors">
+                          <tr 
+                            key={app.id} 
+                            className={`hover:bg-slate-50 transition-colors ${
+                              shortlistedApplications.has(app.id) ? 'bg-yellow-50' : ''
+                            }`}
+                          >
                             <td className="px-4 py-4">
-                              <div>
-                                <p className="text-sm font-semibold text-slate-900">{app.startupName}</p>
-                                {app.sector && (
-                                  <p className="text-xs text-slate-500 mt-0.5">{app.sector}</p>
+                              <div className="flex items-center gap-2">
+                                {shortlistedApplications.has(app.id) && (
+                                  <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
                                 )}
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-900">{app.startupName}</p>
+                                  {app.sector && (
+                                    <p className="text-xs text-slate-500 mt-0.5">{app.sector}</p>
+                                  )}
+                                </div>
                               </div>
                             </td>
                             <td className="px-4 py-4">
@@ -2565,11 +3476,61 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 )}
                               </div>
                             </td>
+                            {intakeViewMode === 'crm' && (
+                              <td className="px-4 py-4">
+                                <div className="flex justify-center">
+                                  <select
+                                    value={crmStatusMap.get(app.id) || 'pending'}
+                                    onChange={async (e) => {
+                                      try {
+                                        await intakeCRMService.setApplicationStatus(
+                                          app.id,
+                                          e.target.value
+                                        );
+                                        const newMap = new Map(crmStatusMap);
+                                        newMap.set(app.id, e.target.value);
+                                        setCrmStatusMap(newMap);
+                                        toast.success('CRM status updated');
+                                      } catch (error) {
+                                        console.error('Failed to update CRM status:', error);
+                                        toast.error('Failed to update status');
+                                      }
+                                    }}
+                                    className="text-xs px-2 py-1 border border-slate-300 rounded-md focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
+                                  >
+                                    <option value="pending">Pending</option>
+                                    <option value="under_review">Under Review</option>
+                                    <option value="needs_info">Needs More Info</option>
+                                    <option value="interview_scheduled">Interview Scheduled</option>
+                                    <option value="waitlisted">Waitlisted</option>
+                                    <option value="second_round">Second Round</option>
+                                    <option value="final_review">Final Review</option>
+                                  </select>
+                                </div>
+                              </td>
+                            )}
                             <td className="px-4 py-4">
                               <div className="flex justify-center items-center gap-2 flex-wrap">
                                 {/* Status Actions - All in one line */}
                               {app.status === 'pending' && (
                                   <>
+                                <Button
+                                  size="sm"
+                                  variant={shortlistedApplications.has(app.id) ? 'default' : 'outline'}
+                                  onClick={() => handleShortlistApplication(app)}
+                                  disabled={isProcessingAction}
+                                  className={`flex items-center gap-1 ${
+                                    shortlistedApplications.has(app.id)
+                                      ? 'bg-yellow-500 hover:bg-yellow-600 text-white border-yellow-500'
+                                      : 'text-yellow-600 border-yellow-600 hover:bg-yellow-50'
+                                  }`}
+                                  title={shortlistedApplications.has(app.id) ? 'Remove from shortlist' : 'Add to shortlist'}
+                                >
+                                  <Star className={`h-3.5 w-3.5 ${
+                                    shortlistedApplications.has(app.id) ? 'fill-white' : ''
+                                  }`} />
+                                  {shortlistedApplications.has(app.id) ? 'Shortlisted' : 'Shortlist'}
+                                </Button>
                                 <Button 
                                   size="sm" 
                                   onClick={() => handleAcceptApplication(app)}
@@ -2636,7 +3597,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         ))}
                     {filteredApplications.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="text-center py-12">
+                        <td colSpan={intakeViewMode === 'crm' ? 6 : 5} className="text-center py-12">
                           <div className="flex flex-col items-center">
                             <FileText className="h-12 w-12 text-slate-300 mb-3" />
                             <p className="text-slate-500 font-medium">
@@ -2653,109 +3614,484 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     </table>
         </div>
       </Card>
+            )}
+
+            {/* CRM View (Kanban Board) */}
+            {intakeViewMode === 'crm' && (
+              <Card className="p-6">
+                <h3 className="text-lg font-semibold mb-4 text-slate-700">Applications CRM</h3>
+                <IntakeCRMBoard
+                  facilitatorId={facilitatorId}
+                  opportunityId={selectedOpportunityId || ''}
+                  applications={filteredApplications}
+                  onColumnsUpdate={() => {
+                    // Refresh if needed
+                  }}
+                />
+              </Card>
+            )}
           </div>
         );
       case 'trackMyStartups':
+        // Filter accepted applications only
+        const acceptedApplications = myReceivedApplications.filter(app => app.status === 'accepted');
+        
+        // Get accepted applications for selected opportunity or all
+        const filteredAcceptedApps = selectedOpportunityId 
+          ? acceptedApplications.filter(app => app.opportunityId === selectedOpportunityId)
+          : acceptedApplications;
+
         return (
           <div className="space-y-8 animate-fade-in">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <SummaryCard title="My Startups" value={myPortfolio.length} icon={<Users className="h-6 w-6 text-brand-primary" />} />
-              <SummaryCard title="Active Startups" value={myPortfolio.filter(s => s.complianceStatus === 'compliant').length} icon={<CheckCircle className="h-6 w-6 text-brand-primary" />} />
-              <SummaryCard title="Pending Review" value={myPortfolio.filter(s => s.complianceStatus === 'pending').length} icon={<FileText className="h-6 w-6 text-brand-primary" />} />
+              <SummaryCard title="My Startups" value={acceptedApplications.length} icon={<Users className="h-6 w-6 text-brand-primary" />} />
+              <SummaryCard title="Active Programs" value={myPostedOpportunities.filter(opp => acceptedApplications.some(app => app.opportunityId === opp.id)).length} icon={<CheckCircle className="h-6 w-6 text-brand-primary" />} />
+              <SummaryCard title="Total Programs" value={myPostedOpportunities.length} icon={<Gift className="h-6 w-6 text-brand-primary" />} />
             </div>
 
-            <div className="space-y-8">
-              {/* My Startups Section */}
+            {/* Sub-tabs for Portfolio and Reports */}
+            <div className="border-b border-slate-200">
+              <nav className="-mb-px flex space-x-8" aria-label="Track My Startups Tabs">
+                <button
+                  onClick={() => setTrackMyStartupsSubTab('portfolio')}
+                  className={`${
+                    trackMyStartupsSubTab === 'portfolio'
+                      ? 'border-brand-primary text-brand-primary'
+                      : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+                >
+                  Portfolio
+                </button>
+                <button
+                  onClick={() => setTrackMyStartupsSubTab('reports')}
+                  className={`${
+                    trackMyStartupsSubTab === 'reports'
+                      ? 'border-brand-primary text-brand-primary'
+                      : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+                >
+                  Reports
+                </button>
+              </nav>
+            </div>
+
+            {/* Portfolio Sub-Tab Content */}
+            {trackMyStartupsSubTab === 'portfolio' && (
               <Card>
-                <h3 className="text-lg font-semibold mb-4 text-slate-700">My Startups</h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-slate-700">Accepted Startups by Program</h3>
+                  {selectedOpportunityId && (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        const selectedOpportunity = myPostedOpportunities.find(opp => opp.id === selectedOpportunityId);
+                        if (selectedOpportunity) {
+                          openProgramQuestionsConfig(selectedOpportunity.programName);
+                        }
+                      }}
+                      className="flex items-center gap-1"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Configure Questions
+                    </Button>
+                  )}
+                </div>
+                
+                {/* Program Tabs */}
+                <div className="border-b border-slate-200 mb-6">
+                  <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Program Tabs">
+                    <button 
+                      onClick={() => setSelectedOpportunityId(null)} 
+                      className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                    >
+                      <Users className="h-4 w-4" />
+                      All Startups ({acceptedApplications.length})
+                    </button>
+                    {myPostedOpportunities.map(opportunity => {
+                      const acceptedCount = acceptedApplications.filter(app => app.opportunityId === opportunity.id).length;
+                      if (acceptedCount === 0) return null; // Only show programs with accepted startups
+                      return (
+                        <button 
+                          key={opportunity.id}
+                          onClick={() => setSelectedOpportunityId(opportunity.id)} 
+                          className={`${selectedOpportunityId === opportunity.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          <Gift className="h-4 w-4" />
+                          {opportunity.programName} ({acceptedCount})
+                        </button>
+                      );
+                    })}
+                  </nav>
+                </div>
+
+                {/* Accepted Startups Table */}
                 <div className="overflow-x-auto">
-                  {isLoadingPortfolio ? (
-                    <div className="text-center py-8">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                      <p className="text-slate-500">Loading portfolio...</p>
+                  {filteredAcceptedApps.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Users className="h-16 w-16 text-slate-300 mx-auto mb-4" />
+                      <p className="text-slate-500 text-lg font-medium mb-2">No accepted startups yet</p>
+                      <p className="text-slate-400 text-sm">
+                        {selectedOpportunityId ? 'No startups have been accepted for this program yet.' : 'Accept startups from the Intake Management tab to track them here.'}
+                      </p>
                     </div>
                   ) : (
-                    <table className="min-w-full divide-y divide-slate-200">
-                      <thead className="bg-slate-50">
+                    <table className="w-full divide-y divide-slate-200">
+                      <thead className="bg-gradient-to-r from-slate-50 to-slate-100">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Startup Name</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Compliance Status</th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                          <th className="px-4 py-4 text-left text-sm font-semibold text-slate-700">Startup</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Contact</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Agreement</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Responses</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-slate-200">
-                        {myPortfolio.map(startup => (
-                          <tr key={startup.id}>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm font-medium text-slate-900">{startup.name}</div>
-                              <div className="text-xs text-slate-500">{startup.sector}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500"><Badge status={startup.complianceStatus} /></td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <div className="flex items-center gap-2 justify-end">
-                                <Button 
-                                  size="sm" 
-                                  variant="outline" 
-                                  onClick={async () => {
-                                    const startupObj = await buildStartupForView({
-                                      id: startup.id,
-                                      name: startup.name,
-                                      sector: startup.sector,
-                                      investmentType: 'equity' as any,
-                                      investmentValue: startup.totalFunding || 0,
-                                      equityAllocation: 0,
-                                      currentValuation: startup.totalFunding || 0,
-                                      totalFunding: startup.totalFunding || 0,
-                                      totalRevenue: startup.totalRevenue || 0,
-                                      registrationDate: startup.registrationDate || new Date().toISOString().split('T')[0],
-                                      complianceStatus: startup.complianceStatus || ComplianceStatus.Pending,
-                                      founders: []
-                                    });
-                                    onViewStartup(startupObj);
-                                  }}
-                                  title="View complete startup dashboard for tracking"
-                                >
-                                  <Eye className="mr-2 h-4 w-4" /> 
-                                  Track Startup
-                                </Button>
-                                <Button 
-                                  size="sm" 
+                        {filteredAcceptedApps.map(app => {
+                          const opportunity = myPostedOpportunities.find(opp => opp.id === app.opportunityId);
+                          return (
+                            <tr key={app.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="h-10 w-10 rounded-full bg-gradient-to-br from-brand-primary to-brand-secondary flex items-center justify-center text-white font-semibold text-sm">
+                                    {app.startupName.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div className="text-sm font-medium text-slate-900">{app.startupName}</div>
+                                    <div className="text-xs text-slate-500">{app.sector || 'Sector not specified'}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                <div className="text-sm text-slate-700">{app.founderEmail || 'N/A'}</div>
+                                {app.founderPhone && (
+                                  <div className="text-xs text-slate-500">{app.founderPhone}</div>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                {app.agreementUrl ? (
+                                  <a
+                                    href={app.agreementUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 transition-colors"
+                                    title="View Agreement"
+                                  >
+                                    <FileText className="h-4 w-4" />
+                                    View Agreement
+                                  </a>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 rounded-md">
+                                    <FileText className="h-4 w-4" />
+                                    No Agreement
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                <Button
+                                  size="sm"
                                   variant="outline"
-                                  onClick={async () => {
-                                    // Redirect to Intake Management tab where applications exist
-                                    setActiveTab('intakeManagement');
-                                    messageService.info(
-                                      'Messaging Location',
-                                      'Please use messaging from the "Intake Management" tab where valid program applications exist.'
-                                    );
-                                  }}
-                                  title="Send message to startup"
+                                  onClick={() => handleViewApplicationResponses(app)}
+                                  className="flex items-center gap-1.5 hover:bg-blue-50 text-blue-600 border-blue-600"
+                                  title="View Application Responses"
                                 >
-                                  <MessageCircle className="mr-2 h-4 w-4" />
-                                  Message Startup
+                                  <FileQuestion className="h-4 w-4" />
+                                  <span>View Responses</span>
                                 </Button>
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={() => handleDeleteStartupFromPortfolio(startup.id)}
-                                  className="text-red-600 border-red-600 hover:bg-red-50"
-                                  title="Remove startup from portfolio"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {myPortfolio.length === 0 && (
-                          <tr><td colSpan={3} className="text-center py-8 text-slate-500">No startups in your portfolio yet.</td></tr>
-                        )}
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="flex justify-center items-center gap-2 flex-wrap">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      // Open portfolio view for this startup
+                                      const startupId = app.startupId;
+                                      if (startupId) {
+                                        // Find startup in portfolio
+                                        const startup = myPortfolio.find(s => s.id === startupId);
+                                        if (startup) {
+                                          buildStartupForView({
+                                            id: startup.id,
+                                            name: startup.name,
+                                            sector: startup.sector,
+                                            investmentType: 'equity' as any,
+                                            investmentValue: startup.totalFunding || 0,
+                                            equityAllocation: 0,
+                                            currentValuation: startup.totalFunding || 0,
+                                            totalFunding: startup.totalFunding || 0,
+                                            totalRevenue: startup.totalRevenue || 0,
+                                            registrationDate: startup.registrationDate || new Date().toISOString().split('T')[0],
+                                            complianceStatus: startup.complianceStatus || ComplianceStatus.Pending,
+                                            founders: []
+                                          }).then(onViewStartup);
+                                        } else {
+                                          messageService.info('Startup Not Found', 'This startup is not yet in the portfolio tracking system.');
+                                        }
+                                      }
+                                    }}
+                                    className="flex items-center gap-1.5 hover:bg-slate-100"
+                                    title="Track this startup"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                    <span>Track</span>
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelectedApplicationForMessaging(app);
+                                      setIsMessagingModalOpen(true);
+                                    }}
+                                    className="flex items-center gap-1.5 hover:bg-blue-50 text-blue-600 border-blue-600"
+                                    title="Message Startup"
+                                  >
+                                    <MessageCircle className="h-4 w-4" />
+                                    <span>Message</span>
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   )}
                 </div>
               </Card>
-            </div>
+            )}
+
+            {/* Reports Sub-Tab Content */}
+            {trackMyStartupsSubTab === 'reports' && (
+              <div className="space-y-6">
+                <Card>
+                  <div className="flex justify-between items-center mb-6">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-700">Custom Reports</h3>
+                      <p className="text-sm text-slate-500 mt-1">Create and track custom questionnaire reports for your startups</p>
+                    </div>
+                    <Button
+                      onClick={() => setIsCreateReportModalOpen(true)}
+                      className="flex items-center gap-2"
+                    >
+                      <PlusCircle className="h-4 w-4" />
+                      Create Report
+                    </Button>
+                  </div>
+
+                  {/* Reports List */}
+                  {reportMandates.length === 0 ? (
+                    <div className="text-center py-12">
+                      <FileText className="h-16 w-16 text-slate-300 mx-auto mb-4" />
+                      <p className="text-slate-500 text-lg font-medium mb-2">No reports created yet</p>
+                      <p className="text-slate-400 text-sm mb-4">Create custom questionnaire reports to track startup progress</p>
+                      <Button
+                        onClick={() => setIsCreateReportModalOpen(true)}
+                        variant="outline"
+                        className="flex items-center gap-2 mx-auto"
+                      >
+                        <PlusCircle className="h-4 w-4" />
+                        Create Your First Report
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {reportMandates.map(mandate => {
+                        const stats = mandateStats[mandate.id] || { submitted: 0, total: 0 };
+                        return (
+                          <div
+                            key={mandate.id}
+                            className={`border rounded-lg p-4 transition-all hover:shadow-md ${
+                              selectedReportIdForTracking === mandate.id
+                                ? 'border-brand-primary bg-brand-primary/5'
+                                : 'border-slate-200 hover:border-brand-primary/50'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start mb-3">
+                              <div className="flex-1 cursor-pointer" onClick={() => setSelectedReportIdForTracking(mandate.id)}>
+                                <h4 className="font-semibold text-slate-900 text-sm">{mandate.title}</h4>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary" className="text-xs">
+                                  {mandate.source === 'existing' ? 'Generated' : 'Active'}
+                                </Badge>
+                                <button
+                                  onClick={() => {
+                                    setSelectedMandateForEdit(mandate);
+                                    setIsEditMandateModalOpen(true);
+                                  }}
+                                  className="p-1 hover:bg-slate-100 rounded transition-colors"
+                                  title="Edit Mandate"
+                                >
+                                  <Edit className="h-4 w-4 text-slate-600" />
+                                </button>
+                              </div>
+                            </div>
+                            <p className="text-xs text-slate-600 mb-3 cursor-pointer hover:text-slate-800" onClick={() => setSelectedReportIdForTracking(mandate.id)}>
+                              {mandate.program_name}
+                            </p>
+                            <div 
+                              className="flex items-center justify-between text-xs text-slate-500 cursor-pointer mb-3"
+                              onClick={() => setSelectedReportIdForTracking(mandate.id)}
+                            >
+                              <span>{mandate.question_ids?.length || 0} questions</span>
+                              <span className="flex items-center gap-1">
+                                <span className="font-medium text-brand-primary">{stats.submitted}</span>
+                                /
+                                <span>{stats.total}</span>
+                                submitted
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setSelectedMandateForReport(mandate);
+                                setIsGenerateReportModalOpen(true);
+                              }}
+                              className="w-full px-3 py-2 bg-purple-600 text-white text-xs font-semibold rounded-md hover:bg-purple-700 transition-all duration-200"
+                            >
+                              Generate Report
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+
+                {/* Response Tracking Table */}
+                {selectedReportIdForTracking && (
+                  <Card>
+                    <h3 className="text-lg font-semibold text-slate-700 mb-4">Response Tracking</h3>
+                    {(() => {
+                      const selectedMandate = reportMandates.find(m => m.id === selectedReportIdForTracking);
+                      if (!selectedMandate) return null;
+                      
+                      const mandateResponseData = mandateResponses[selectedMandate.id] || [];
+                      
+                      return (
+                        <div className="space-y-4">
+                          <div className="bg-slate-50 p-4 rounded-lg">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              <div>
+                                <p className="text-xs text-slate-500 mb-1">Program</p>
+                                <p className="text-sm font-medium text-slate-900">{selectedMandate.program_name}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-slate-500 mb-1">Questions</p>
+                                <p className="text-sm font-medium text-slate-900">{selectedMandate.question_ids?.length || 0}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-slate-500 mb-1">Target Startups</p>
+                                <p className="text-sm font-medium text-slate-900">{selectedMandate.target_startups?.length || 0}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-slate-500 mb-1">Submitted</p>
+                                <p className="text-sm font-medium text-brand-primary">
+                                  {mandateStats[selectedMandate.id]?.submitted || 0} / {mandateStats[selectedMandate.id]?.total || 0}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="overflow-x-auto">
+                            <table className="w-full divide-y divide-slate-200">
+                              <thead className="bg-gradient-to-r from-slate-50 to-slate-100">
+                                <tr>
+                                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Startup Name</th>
+                                  <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Status</th>
+                                  <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Responses</th>
+                                  <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="bg-white divide-y divide-slate-200">
+                                {selectedMandate.target_startups?.map((startupId: string) => {
+                                  const response = mandateResponseData.find(r => r.startup_id === parseInt(startupId));
+                                  
+                                  // Get only answers for the configured questions in this mandate
+                                  const mandateAnswers = selectedMandate.question_ids?.reduce((acc: Record<string, string>, qId: string) => {
+                                    if (response?.answers && response.answers[qId]) {
+                                      acc[qId] = response.answers[qId];
+                                    }
+                                    return acc;
+                                  }, {}) || {};
+                                  
+                                  const answeredCount = Object.keys(mandateAnswers).length;
+                                  const totalQuestions = selectedMandate.question_ids?.length || 0;
+                                  
+                                  const handleDownloadResponses = () => {
+                                    // Create CSV content
+                                    let csvContent = "Question,Answer\n";
+                                    selectedMandate.question_ids?.forEach((qId: string) => {
+                                      const answer = mandateAnswers[qId] || "";
+                                      const questionData = questionBank.get(qId);
+                                      const questionText = questionData?.question_text || qId;
+                                      // Escape quotes in CSV
+                                      const escapedQuestion = `"${questionText.replace(/"/g, '""')}"`;
+                                      const escapedAnswer = `"${String(answer).replace(/"/g, '""')}"`;
+                                      csvContent += `${escapedQuestion},${escapedAnswer}\n`;
+                                    });
+                                    
+                                    // Create blob and download
+                                    const blob = new Blob([csvContent], { type: 'text/csv' });
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `${response?.startup_name || startupId}_responses.csv`;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    window.URL.revokeObjectURL(url);
+                                    document.body.removeChild(a);
+                                  };
+                                  
+                                  return (
+                                    <tr key={startupId} className="hover:bg-slate-50">
+                                      <td className="px-4 py-3 text-sm text-slate-900 font-medium">
+                                        {response?.startup_name || startupId}
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold text-white ${answeredCount === totalQuestions && totalQuestions > 0 ? 'bg-green-600' : 'bg-orange-500'}`}>
+                                          {answeredCount}/{totalQuestions}
+                                        </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        {response && Object.keys(mandateAnswers).length > 0 ? (
+                                          <button
+                                            onClick={() => {
+                                              setSelectedStartupResponse(response);
+                                              setIsViewMandateResponsesModalOpen(true);
+                                            }}
+                                            className="inline-block px-3 py-2 bg-blue-600 text-white text-xs font-semibold rounded-md hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md"
+                                          >
+                                            View
+                                          </button>
+                                        ) : (
+                                          <span className="text-slate-400 italic">—</span>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        {response && Object.keys(mandateAnswers).length > 0 ? (
+                                          <button
+                                            onClick={handleDownloadResponses}
+                                            className="inline-block px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-md hover:bg-green-700 transition-all duration-200 shadow-sm hover:shadow-md"
+                                          >
+                                            Download
+                                          </button>
+                                        ) : (
+                                          <span className="text-slate-400 italic">—</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </Card>
+                )}
+              </div>
+            )}
           </div>
         );
       case 'dashboard':
@@ -4059,11 +5395,46 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           setIsApplicationResponsesModalOpen(false);
           setSelectedApplicationForResponses(null);
           setApplicationResponses([]);
+          setForm2Responses([]);
+          setResponseTab('response1');
         }} 
         title={`Application Responses - ${selectedApplicationForResponses?.startupName || ''}`} 
         size="3xl"
       >
         <div className="space-y-4">
+          {/* Response Tabs */}
+          <div className="flex gap-4 border-b border-slate-200">
+            <button
+              onClick={() => setResponseTab('response1')}
+              className={`pb-3 px-4 font-medium text-sm transition-colors relative ${
+                responseTab === 'response1'
+                  ? 'text-blue-600'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Response 1
+              {responseTab === 'response1' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+              )}
+            </button>
+            <button
+              onClick={() => setResponseTab('response2')}
+              className={`pb-3 px-4 font-medium text-sm transition-colors relative ${
+                responseTab === 'response2'
+                  ? 'text-blue-600'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Response 2
+              {responseTab === 'response2' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+              )}
+            </button>
+          </div>
+
+          {/* Response 1 Content */}
+          {responseTab === 'response1' && (
+            <>
           {loadingResponses ? (
             <div className="text-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary mx-auto mb-4"></div>
@@ -4087,7 +5458,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   onClick={() => {
                     // Create CSV content: Questions as column headers, answers in row below
                     // Escape CSV values (handle quotes and commas)
-                    const escapeCSV = (value: string) => {
+                    const escapeCSV = (value: string | undefined | null) => {
+                      if (!value) return '';
                       if (value.includes(',') || value.includes('"') || value.includes('\n')) {
                         return `"${value.replace(/"/g, '""')}"`;
                       }
@@ -4181,6 +5553,127 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 </Card>
               ))}
             </div>
+            </>
+          )}
+            </>
+          )}
+
+          {/* Response 2 Content (Form 2) */}
+          {responseTab === 'response2' && (
+            <>
+          {loadingForm2Responses ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary mx-auto mb-4"></div>
+              <p className="text-slate-600">Loading Form 2 responses...</p>
+            </div>
+          ) : form2Responses.length === 0 ? (
+            <div className="text-center py-8">
+              <FileQuestion className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+              <p className="text-slate-600">No Form 2 responses found for this application.</p>
+              <p className="text-sm text-slate-500 mt-2">
+                This application may not have submitted Form 2 yet, or Form 2 questions may not be configured.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Download Button */}
+              <div className="flex justify-end pb-2 border-b border-slate-200">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const escapeCSV = (value: string | undefined | null) => {
+                      if (!value) return '';
+                      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                        return `"${value.replace(/"/g, '""')}"`;
+                      }
+                      return value;
+                    };
+                    
+                    const startupName = selectedApplicationForResponses?.startupName || 'Unknown Startup';
+                    
+                    const headers: string[] = ['Startup Name'];
+                    const answers: string[] = [escapeCSV(startupName)];
+                    
+                    form2Responses.forEach(response => {
+                      let answer = response.answerText || '';
+                      if (response.question.questionType === 'multiselect' && answer) {
+                        answer = answer.split(',').filter(v => v.trim()).join('; ');
+                      }
+                      
+                      headers.push(escapeCSV(response.question.questionText));
+                      answers.push(escapeCSV(answer));
+                    });
+                    
+                    const csvContent = [
+                      headers.join(','),
+                      answers.join(',')
+                    ].join('\n');
+                    
+                    const BOM = '\uFEFF';
+                    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `Form2_Responses_${selectedApplicationForResponses?.startupName || 'Startup'}_${new Date().toISOString().split('T')[0]}.csv`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    
+                    messageService.success('Download Started', 'Form 2 responses exported to Excel (CSV format).');
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <FileText className="h-4 w-4" />
+                  Download as Excel
+                </Button>
+              </div>
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+              {form2Responses.map((response, index) => (
+                <Card key={index} className="p-4">
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <h4 className="text-sm font-semibold text-slate-900 mb-2">{response.question.questionText}</h4>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {response.question.category && (
+                            <span className="inline-block px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700 rounded">
+                              {response.question.category}
+                            </span>
+                          )}
+                          <span className="text-xs text-slate-500">
+                            {response.question.questionType === 'text' ? 'Short Answer' :
+                             response.question.questionType === 'textarea' ? 'Long Answer' :
+                             response.question.questionType === 'select' ? 'Multiple Choice' :
+                             response.question.questionType === 'multiselect' ? 'Checkbox' :
+                             response.question.questionType === 'number' ? 'Number' :
+                             response.question.questionType === 'date' ? 'Date' :
+                             response.question.questionType}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
+                      {response.question.questionType === 'multiselect' ? (
+                        <div className="space-y-1">
+                          {response.answerText.split(',').filter(v => v.trim()).map((option, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <Check className="h-4 w-4 text-green-600" />
+                              <span className="text-sm text-slate-700">{option.trim()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-700 whitespace-pre-wrap">{response.answerText}</p>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+            </>
+          )}
             </>
           )}
         </div>
@@ -4375,6 +5868,657 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         />
       )}
 
+      {/* ============ FEATURE 3: CONFIGURE QUESTIONS MODAL ============ */}
+      {isProgramQuestionsConfigModalOpen && selectedProgramForQuestions && (
+        <Modal
+          isOpen={isProgramQuestionsConfigModalOpen}
+          onClose={() => setIsProgramQuestionsConfigModalOpen(false)}
+          title={`Configure Tracking Questions - ${selectedProgramForQuestions}`}
+          fullScreen={true}
+        >
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-sm text-blue-800">
+                Configure the questions that startups in this program need to answer for periodic tracking and updates.
+              </p>
+            </div>
+
+            {isLoadingProgramQuestionsConfig ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                <p className="text-slate-500">Loading questions...</p>
+              </div>
+            ) : (
+              <>
+                <QuestionSelector
+                  opportunityId={null}
+                  selectedQuestionIds={programQuestionIds}
+                  onSelectionChange={setProgramQuestionIds}
+                  questionRequiredMap={programQuestionRequiredMap}
+                  onRequiredChange={(questionId, isRequired) => {
+                    const newMap = new Map(programQuestionRequiredMap);
+                    newMap.set(questionId, isRequired);
+                    setProgramQuestionRequiredMap(newMap);
+                  }}
+                  questionSelectionTypeMap={programQuestionSelectionTypeMap}
+                  onSelectionTypeChange={(questionId, selectionType) => {
+                    const newMap = new Map(programQuestionSelectionTypeMap);
+                    newMap.set(questionId, selectionType);
+                    setProgramQuestionSelectionTypeMap(newMap);
+                  }}
+                />
+
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsProgramQuestionsConfigModalOpen(false)}
+                    disabled={isSavingProgramQuestions}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={saveProgramQuestionsConfig}
+                    disabled={isSavingProgramQuestions || programQuestionIds.length === 0}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {isSavingProgramQuestions ? 'Saving...' : 'Save Questions'}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ============ FEATURE 4: REPORTS MANDATE WIZARD MODAL ============ */}
+      {isCreateReportModalOpen && (
+        <Modal
+          isOpen={isCreateReportModalOpen}
+          onClose={() => {
+            setIsCreateReportModalOpen(false);
+            resetCreateReportModal();
+          }}
+          title="Create Report Mandate"
+        >
+          <div className="space-y-6">
+            {/* Step Indicator */}
+            <div className="flex items-center justify-center gap-4">
+              {[1, 2, 3].map((step) => (
+                <div key={step} className="flex items-center">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
+                    reportStep >= step
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {step}
+                  </div>
+                  {step < 3 && (
+                    <div className={`w-12 h-1 mx-2 ${
+                      reportStep > step ? 'bg-blue-600' : 'bg-slate-200'
+                    }`}></div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Step 1: Title & Program */}
+            {reportStep === 1 && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Report Title</label>
+                  <Input
+                    type="text"
+                    placeholder="e.g., Q1 2026 Portfolio Update"
+                    value={reportTitle}
+                    onChange={(e) => setReportTitle(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Program</label>
+                  <select
+                    value={reportProgram}
+                    onChange={(e) => setReportProgram(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select a program...</option>
+                    <option value="All Programs">All Programs</option>
+                    {Array.from(new Set(portfolioStartups.map(s => s.programName)))
+                      .sort()
+                      .map((programName) => (
+                        <option key={programName} value={programName}>
+                          {programName}
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Question Selection */}
+            {reportStep === 2 && (
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-blue-800">
+                    Select the questions to include in this report. Startups will be asked to respond to these questions.
+                  </p>
+                </div>
+
+                {isLoadingReportQuestions ? (
+                  <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                    <p className="text-slate-500">Loading questions...</p>
+                  </div>
+                ) : (
+                  <QuestionSelector
+                    selectedQuestionIds={reportQuestionIds}
+                    onSelectionChange={setReportQuestionIds}
+                    requiredMap={new Map()}
+                    onRequiredMapChange={() => {}}
+                    selectionTypeMap={new Map()}
+                    onSelectionTypeMapChange={() => {}}
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Step 3: Source Selection */}
+            {reportStep === 3 && (
+              <div className="space-y-4">
+                <p className="text-sm font-medium text-slate-700">How would you like to handle responses?</p>
+
+                <div className="space-y-3">
+                  <label className="flex items-center p-4 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+                    <input
+                      type="radio"
+                      name="source"
+                      value="existing"
+                      checked={reportSource === 'existing'}
+                      onChange={(e) => setReportSource(e.target.value as any)}
+                      className="h-4 w-4 text-blue-600"
+                    />
+                    <div className="ml-3">
+                      <p className="font-medium text-slate-900">View Existing Responses</p>
+                      <p className="text-sm text-slate-500">Export current responses from your tracking questions</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center p-4 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+                    <input
+                      type="radio"
+                      name="source"
+                      value="startup"
+                      checked={reportSource === 'startup'}
+                      onChange={(e) => setReportSource(e.target.value as any)}
+                      className="h-4 w-4 text-blue-600"
+                    />
+                    <div className="ml-3">
+                      <p className="font-medium text-slate-900">Create Mandate & Send to Startups</p>
+                      <p className="text-sm text-slate-500">Create a mandate and send these questions to startups for response</p>
+                    </div>
+                  </label>
+                </div>
+
+                {reportSource === 'startup' && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Select Target Startups</label>
+                    <div className="max-h-48 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-3">
+                      {(() => {
+                        const filteredStartups = reportProgram === 'All Programs'
+                          ? portfolioStartups
+                          : portfolioStartups.filter(s => s.programName === reportProgram);
+                        
+                        if (filteredStartups.length === 0) {
+                          return <p className="text-slate-500 text-sm">No startups in this program</p>;
+                        }
+                        
+                        return filteredStartups.map((startup) => (
+                          <label key={startup.id} className="flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={targetStartupIds.includes(String(startup.id))}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setTargetStartupIds([...targetStartupIds, String(startup.id)]);
+                                } else {
+                                  setTargetStartupIds(targetStartupIds.filter(id => id !== String(startup.id)));
+                                }
+                              }}
+                              className="h-4 w-4 text-blue-600 rounded"
+                            />
+                            <span className="ml-2 text-sm text-slate-700">{startup.name}</span>
+                          </label>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Navigation Buttons */}
+            <div className="flex justify-between pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (reportStep === 1) {
+                    setIsCreateReportModalOpen(false);
+                    resetCreateReportModal();
+                  } else {
+                    handleBackStep();
+                  }
+                }}
+              >
+                {reportStep === 1 ? 'Cancel' : 'Back'}
+              </Button>
+
+              <div className="flex gap-2">
+                {reportStep < 3 && (
+                  <Button
+                    onClick={handleNextStep}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    Next
+                  </Button>
+                )}
+
+                {reportStep === 3 && (
+                  <>
+                    {reportSource === 'existing' && (
+                      <Button
+                        onClick={handleGenerateExistingReport}
+                        disabled={isProcessingAction}
+                        className="bg-purple-600 hover:bg-purple-700 text-white"
+                      >
+                        {isProcessingAction ? 'Generating...' : 'Generate Report'}
+                      </Button>
+                    )}
+                    
+                    {reportSource === 'startup' && (
+                      <Button
+                        onClick={handleCreateMandate}
+                        disabled={isProcessingAction || targetStartupIds.length === 0}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {isProcessingAction ? 'Creating...' : `Create Mandate ${targetStartupIds.length > 0 ? `(${targetStartupIds.length} selected)` : ''}`}
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ============ FEATURE 5: FORM 2 RESPONSE MODAL ============ */}
+      {isForm2ModalOpen && selectedApplicationForForm2 && (
+        <Form2SubmissionModal
+          isOpen={isForm2ModalOpen}
+          onClose={handleCloseForm2Modal}
+          applicationId={selectedApplicationForForm2.id}
+          opportunityId={selectedApplicationForForm2.opportunityId}
+          opportunityName={selectedApplicationForForm2.opportunityId}
+          onSuccess={() => {
+            handleCloseForm2Modal();
+            messageService.success('Success', 'Form submitted successfully', 2000);
+          }}
+        />
+      )}
+
+      {/* ============ FEATURE 6: FORM 2 CONFIGURATION MODAL ============ */}
+      {isForm2ConfigModalOpen && selectedOpportunityForForm2 && (
+        <Modal
+          isOpen={isForm2ConfigModalOpen}
+          onClose={handleCloseForm2ConfigModal}
+          title={`Configure Form 2 Questions - ${myPostedOpportunities.find(o => o.id === selectedOpportunityForForm2)?.programName || 'Opportunity'}`}
+          fullScreen={true}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Configure additional questions (Form 2) that shortlisted applicants will need to answer. 
+              These are separate from the initial application questions and are typically more detailed.
+            </p>
+            
+            <QuestionSelector
+              opportunityId={selectedOpportunityForForm2}
+              contextOpportunityId={selectedOpportunityForForm2}
+              selectedQuestionIds={form2QuestionIds}
+              onSelectionChange={setForm2QuestionIds}
+              questionRequiredMap={form2QuestionRequiredMap}
+              onRequiredChange={(questionId, isRequired) => {
+                const newMap = new Map(form2QuestionRequiredMap);
+                newMap.set(questionId, isRequired);
+                setForm2QuestionRequiredMap(newMap);
+              }}
+              questionSelectionTypeMap={form2QuestionSelectionTypeMap}
+              onSelectionTypeChange={(questionId, selectionType) => {
+                const newMap = new Map(form2QuestionSelectionTypeMap);
+                newMap.set(questionId, selectionType);
+                setForm2QuestionSelectionTypeMap(newMap);
+              }}
+            />
+            
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button variant="secondary" onClick={handleCloseForm2ConfigModal}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveForm2Questions} disabled={isSavingForm2Questions}>
+                {isSavingForm2Questions ? 'Saving...' : 'Save Form 2 Questions'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Edit Mandate Modal */}
+      {isEditMandateModalOpen && selectedMandateForEdit && (
+        <Modal isOpen={isEditMandateModalOpen} onClose={() => {
+          setIsEditMandateModalOpen(false);
+          setSelectedMandateForEdit(null);
+        }}>
+          <div className="bg-white rounded-lg p-6 max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-slate-900">Edit Mandate</h2>
+              <button
+                onClick={() => {
+                  setIsEditMandateModalOpen(false);
+                  setSelectedMandateForEdit(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Mandate Title</label>
+                <input
+                  type="text"
+                  value={selectedMandateForEdit.title}
+                  onChange={(e) => setSelectedMandateForEdit({ ...selectedMandateForEdit, title: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+
+              {/* Program (read-only) */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Program</label>
+                <p className="px-3 py-2 bg-slate-50 rounded-lg text-slate-600">{selectedMandateForEdit.program_name}</p>
+              </div>
+
+              {/* Questions Management */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Questions ({selectedMandateForEdit.question_ids?.length || 0})</label>
+                <div className="border border-slate-200 rounded-lg p-4">
+                  <div className="max-h-48 overflow-y-auto space-y-2 mb-4">
+                    {Array.from(questionBank.values()).map(question => {
+                      const isSelected = selectedMandateForEdit.question_ids?.includes(question.id);
+                      return (
+                        <label key={question.id} className="flex items-start gap-3 p-2 hover:bg-slate-50 rounded cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isSelected || false}
+                            onChange={(e) => {
+                              const updatedIds = e.target.checked
+                                ? [...(selectedMandateForEdit.question_ids || []), question.id]
+                                : selectedMandateForEdit.question_ids?.filter(id => id !== question.id) || [];
+                              setSelectedMandateForEdit({ ...selectedMandateForEdit, question_ids: updatedIds });
+                            }}
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-slate-900">{question.question_text}</p>
+                            <p className="text-xs text-slate-500">{question.id}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {questionBank.size === 0 && (
+                    <p className="text-sm text-slate-500 text-center py-4">No questions available</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Startups Management */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Target Startups ({selectedMandateForEdit.target_startups?.length || 0})</label>
+                <div className="border border-slate-200 rounded-lg p-4">
+                  <div className="max-h-48 overflow-y-auto space-y-2">
+                    {selectedMandateForEdit.target_startups?.map((startupId) => (
+                      <div key={startupId} className="flex items-center justify-between p-2 bg-slate-50 rounded">
+                        <span className="text-sm text-slate-900">{startupId}</span>
+                        <button
+                          onClick={() => {
+                            const updated = selectedMandateForEdit.target_startups?.filter(id => id !== startupId) || [];
+                            setSelectedMandateForEdit({ ...selectedMandateForEdit, target_startups: updated });
+                          }}
+                          className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {(!selectedMandateForEdit.target_startups || selectedMandateForEdit.target_startups.length === 0) && (
+                    <p className="text-sm text-slate-500 text-center py-4">No startups added</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <Button 
+                variant="secondary" 
+                onClick={() => {
+                  setIsEditMandateModalOpen(false);
+                  setSelectedMandateForEdit(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={async () => {
+                  try {
+                    // Update mandate in database
+                    const { error } = await supabase
+                      .from('reports_mandate')
+                      .update({
+                        title: selectedMandateForEdit.title,
+                        question_ids: selectedMandateForEdit.question_ids || [],
+                        target_startups: selectedMandateForEdit.target_startups || [],
+                        updated_at: new Date().toISOString()
+                      })
+                      .eq('id', selectedMandateForEdit.id);
+
+                    if (error) throw error;
+
+                    console.log('✅ Mandate updated successfully');
+                    // Reload mandates
+                    await loadReportMandates();
+                    setIsEditMandateModalOpen(false);
+                    setSelectedMandateForEdit(null);
+                  } catch (err) {
+                    console.error('❌ Error updating mandate:', err);
+                  }
+                }}
+              >
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* View Mandate Responses Modal */}
+      {isViewMandateResponsesModalOpen && selectedStartupResponse && selectedReportIdForTracking && (
+        <Modal isOpen={isViewMandateResponsesModalOpen} onClose={() => {
+          setIsViewMandateResponsesModalOpen(false);
+          setSelectedStartupResponse(null);
+        }}>
+          <div className="bg-white rounded-lg p-6 max-w-2xl max-h-96 overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-slate-900">
+                Responses from {selectedStartupResponse.startup_name}
+              </h2>
+              <button
+                onClick={() => {
+                  setIsViewMandateResponsesModalOpen(false);
+                  setSelectedStartupResponse(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {(() => {
+                const selectedMandate = reportMandates.find(m => m.id === selectedReportIdForTracking);
+                if (!selectedMandate) return null;
+
+                return selectedMandate.question_ids?.map((qId: string) => {
+                  const answer = selectedStartupResponse.answers?.[qId];
+                  const questionData = questionBank.get(qId);
+                  const questionText = questionData?.question_text || `Question (ID: ${qId})`;
+                  
+                  return (
+                    <div key={qId} className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                      <div className="mb-3">
+                        <p className="text-sm font-medium text-slate-500 uppercase tracking-wide">Question</p>
+                        <p className="text-slate-900 font-medium break-words">{questionText}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-500 uppercase tracking-wide mb-1">Answer</p>
+                        <p className="text-slate-900 text-base break-words whitespace-pre-wrap">
+                          {answer ? String(answer) : <span className="text-slate-400 italic">No answer provided</span>}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <Button 
+                variant="secondary" 
+                onClick={() => {
+                  setIsViewMandateResponsesModalOpen(false);
+                  setSelectedStartupResponse(null);
+                }}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Generate Report Format Modal */}
+      {isGenerateReportModalOpen && selectedMandateForReport && (
+        <Modal isOpen={isGenerateReportModalOpen} onClose={() => {
+          setIsGenerateReportModalOpen(false);
+          setSelectedMandateForReport(null);
+          setReportFormatChoices(null);
+        }}>
+          <div className="bg-white rounded-lg p-6 max-w-md">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-slate-900">Choose Report Format</h2>
+              <button
+                onClick={() => {
+                  setIsGenerateReportModalOpen(false);
+                  setSelectedMandateForReport(null);
+                  setReportFormatChoices(null);
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              <button
+                onClick={() => {
+                  setReportFormatChoices('csv');
+                  // Generate CSV report
+                  const mandateData = selectedMandateForReport;
+                  const responsesForMandate = mandateResponses[mandateData.id] || [];
+                  
+                  // Create CSV header
+                  let csvContent = "Program Name,Startup Name,";
+                  mandateData.question_ids?.forEach(qId => {
+                    const q = questionBank.get(qId);
+                    const qText = q?.question_text || qId;
+                    csvContent += `"${qText.replace(/"/g, '""')}",`;
+                  });
+                  csvContent = csvContent.slice(0, -1) + "\n";
+                  
+                  // Add data rows
+                  mandateData.target_startups?.forEach(startupId => {
+                    const response = responsesForMandate.find(r => r.startup_id === parseInt(startupId));
+                    // Only add row if we have a startup name (skip if only ID)
+                    if (response?.startup_name) {
+                      csvContent += `"${mandateData.program_name}","${response.startup_name}",`;
+                      mandateData.question_ids?.forEach(qId => {
+                        const answer = response?.answers?.[qId] || "";
+                        csvContent += `"${String(answer).replace(/"/g, '""')}",`;
+                      });
+                      csvContent = csvContent.slice(0, -1) + "\n";
+                    }
+                  });
+                  
+                  // Download CSV
+                  const blob = new Blob([csvContent], { type: 'text/csv' });
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${mandateData.title}_report.csv`;
+                  document.body.appendChild(a);
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                  document.body.removeChild(a);
+                  
+                  setIsGenerateReportModalOpen(false);
+                  setSelectedMandateForReport(null);
+                  setReportFormatChoices(null);
+                }}
+                className="w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors text-center"
+              >
+                📄 CSV Format
+              </button>
+              <button
+                onClick={() => {
+                  setReportFormatChoices('pdf');
+                  // Generate PDF report (will implement below)
+                  alert('PDF generation coming soon!');
+                }}
+                className="w-full px-4 py-3 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors text-center"
+              >
+                📋 PDF Format
+              </button>
+            </div>
+
+            <div className="text-center">
+              <button
+                onClick={() => {
+                  setIsGenerateReportModalOpen(false);
+                  setSelectedMandateForReport(null);
+                  setReportFormatChoices(null);
+                }}
+                className="text-slate-600 hover:text-slate-900 font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       <style>{`
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fade-in 0.4s ease-out forwards; }
@@ -4385,3 +6529,4 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 };
 
 export default FacilitatorView;
+

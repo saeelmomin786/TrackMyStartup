@@ -21,6 +21,7 @@ export interface StartupDashboardData {
   totalFunding: number;
   totalRevenue: number;
   registrationDate: string;
+  programName?: string;
   // Cap table data
   capTableData: any[];
   // Compliance data
@@ -83,16 +84,90 @@ class FacilitatorStartupService {
     }
   }
 
+  // Add a startup to facilitator's portfolio with program assignment
+  async addStartupToPortfolioWithProgram(
+      facilitatorId: string, 
+      startupId: number, 
+      recognitionRecordId: number,
+      programName: string | null
+    ): Promise<FacilitatorStartup | null> {
+      try {
+        // Add/update the facilitator-startup relationship with program_name
+        const { data, error } = await supabase
+          .from('facilitator_startups')
+          .upsert({
+            facilitator_id: facilitatorId,
+            startup_id: startupId,
+            recognition_record_id: recognitionRecordId,
+            program_name: programName, // Store program_name here
+            status: 'active'
+          }, { onConflict: 'facilitator_id,startup_id' })
+          .select()
+          .single();
+
+        if (error) {
+          console.error('❌ Error adding startup to portfolio with program:', error);
+          throw error;
+        }
+
+        console.log(`✅ Updated facilitator portfolio: startup ${startupId} with program: ${programName}`);
+
+        // After adding to portfolio, update any pending opportunity_applications to 'accepted'
+        // This links Intake Management with Track My Startups
+        if (programName) {
+          // Find opportunity application for this startup and program
+          const { data: opportunities } = await supabase
+            .from('incubation_opportunities')
+            .select('id')
+            .eq('facilitator_id', facilitatorId)
+            .eq('program_name', programName);
+
+          if (opportunities && opportunities.length > 0) {
+            const oppId = opportunities[0].id;
+            
+            // Update application status to 'accepted'
+            const { error: updateAppError } = await supabase
+              .from('opportunity_applications')
+              .update({ status: 'accepted' })
+              .eq('startup_id', startupId)
+              .eq('opportunity_id', oppId)
+              .eq('status', 'pending'); // Only update if still pending
+
+            if (updateAppError) {
+              console.warn('⚠️ Could not update opportunity application:', updateAppError);
+            } else {
+              console.log(`✅ Marked opportunity application as accepted for startup ${startupId}`);
+            }
+          }
+        }
+
+        return {
+          id: data.id,
+          facilitatorId: data.facilitator_id,
+          startupId: data.startup_id,
+          recognitionRecordId: data.recognition_record_id,
+          accessGrantedAt: data.access_granted_at,
+          status: data.status,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at
+        };
+      } catch (error) {
+        console.error('Error in addStartupToPortfolioWithProgram:', error);
+        return null;
+      }
+    }
+
   // Get all startups in facilitator's portfolio
   async getFacilitatorPortfolio(facilitatorId: string): Promise<StartupDashboardData[]> {
     try {
-      // Get facilitator-startup relationships
+      // Get facilitator-startup relationships WITH program_name
       const { data: relationships, error: relError } = await supabase
         .from('facilitator_startups')
         .select(`
           startup_id,
           status,
-          access_granted_at
+          access_granted_at,
+          program_name
         `)
         .eq('facilitator_id', facilitatorId)
         .eq('status', 'active');
@@ -107,6 +182,12 @@ class FacilitatorStartupService {
       }
 
       const startupIds = relationships.map(r => r.startup_id);
+      
+      // Create a map of startup_id to program_name for quick lookup
+      const programMap: { [key: number]: string | null } = {};
+      relationships.forEach(rel => {
+        programMap[rel.startup_id] = rel.program_name;
+      });
       
       // Fetch startup data with real-time information
       const { data: startups, error: startupError } = await supabase
@@ -185,54 +266,10 @@ class FacilitatorStartupService {
         .in('startup_id', startupIds)
         .order('date', { ascending: false });
 
-      // Initialize empty arrays for missing tables
-      let capTableData = [];
-      let complianceData = [];
-      let financialData = [];
+      // Note: cap_table, compliance_tasks, and financials tables are not used
+      // Portfolio data comes from investment_records and incubation_programs
+      
       let incubationData = [];
-
-      // Try to fetch cap table data (if table exists)
-      try {
-        const { data: capData, error: capError } = await supabase
-          .from('cap_table')
-          .select('*')
-          .in('startup_id', startupIds)
-          .order('created_at', { ascending: false });
-        
-        if (!capError) {
-          capTableData = capData || [];
-        }
-      } catch (err) {
-        console.warn('Cap table not available, using investment records instead');
-      }
-
-      // Try to fetch compliance data (if table exists)
-      try {
-        const { data: complianceDataResult, error: complianceError } = await supabase
-          .from('compliance_tasks')
-          .select('*')
-          .in('startup_id', startupIds);
-        
-        if (!complianceError) {
-          complianceData = complianceDataResult || [];
-        }
-      } catch (err) {
-        console.warn('Compliance tasks table not available');
-      }
-
-      // Try to fetch financial data (if table exists)
-      try {
-        const { data: financialDataResult, error: financialError } = await supabase
-          .from('financials')
-          .select('*')
-          .in('startup_id', startupIds);
-        
-        if (!financialError) {
-          financialData = financialDataResult || [];
-        }
-      } catch (err) {
-        console.warn('Financials table not available');
-      }
 
       // Try to fetch incubation programs data (if table exists)
       try {
@@ -256,40 +293,35 @@ class FacilitatorStartupService {
       console.log('🔍 Portfolio Debug - Final domain map:', domainMap);
       
       const mappedStartups = (startups || []).map(startup => {
-        const startupCapTable = capTableData?.filter(c => c.startup_id === startup.id) || [];
-        const startupCompliance = complianceData?.filter(c => c.startup_id === startup.id) || [];
-        const startupFinancial = financialData?.filter(c => c.startup_id === startup.id) || [];
+        const rel = relationships.find(r => r.startup_id === startup.id);
+        const programName = programMap[startup.id] || undefined; // Get from facilitator_startups.program_name
         const startupIncubation = incubationData?.filter(c => c.startup_id === startup.id) || [];
         const startupInvestments = investmentData?.filter(c => c.startup_id === startup.id) || [];
 
         // Calculate current valuation from investment records (latest entry)
         const latestInvestment = startupInvestments[0]; // Already ordered by date DESC
-        const latestCapTableEntry = startupCapTable[0]; // Fallback to cap table if available
         
         const currentValuation = latestInvestment?.post_money_valuation || 
-                                latestCapTableEntry?.post_money_valuation || 
                                 startup.current_valuation || 0;
 
-        // Calculate overall compliance status
-        const complianceStatus = this.calculateOverallComplianceStatus(startupCompliance);
-
         const finalSector = domainMap[startup.id] || startup.sector || 'N/A';
-        console.log(`🔍 Portfolio Debug - Startup ${startup.name} (ID: ${startup.id}): original sector=${startup.sector}, domain=${domainMap[startup.id]}, final sector=${finalSector}`);
+        console.log(`🔍 Portfolio Debug - Startup ${startup.name} (ID: ${startup.id}): original sector=${startup.sector}, domain=${domainMap[startup.id]}, final sector=${finalSector}, program=${programName}`);
         
         return {
           id: startup.id,
           name: startup.name,
           sector: finalSector, // Use domain from applications, fallback to startup sector
           currentValuation,
-          complianceStatus,
+          complianceStatus: 'Pending', // Default status since compliance_tasks table doesn't exist
           totalFunding: startup.total_funding || 0,
           totalRevenue: startup.total_revenue || 0,
           registrationDate: startup.registration_date || new Date().toISOString().split('T')[0],
-          capTableData: startupCapTable,
-          complianceData: startupCompliance,
-          financialData: startupFinancial,
+          capTableData: [],
+          complianceData: [],
+          financialData: [],
           incubationData: startupIncubation,
-          investmentData: startupInvestments
+          investmentData: startupInvestments,
+          programName
         };
       });
       

@@ -138,10 +138,10 @@ class AdvisorAddedStartupService {
   // Check if startup already exists on TMS (by email or name)
   async checkStartupExistsOnTMS(email: string, startupName: string): Promise<{ exists: boolean; startupId?: number; userId?: string }> {
     try {
-      // Check by email in users table
+      // Check by email in user_profiles table
       const { data: userData } = await supabase
-        .from('users')
-        .select('id, role, startup_name')
+        .from('user_profiles')
+        .select('auth_user_id, role, startup_name')
         .eq('email', email.toLowerCase().trim())
         .eq('role', 'Startup')
         .maybeSingle();
@@ -151,7 +151,7 @@ class AdvisorAddedStartupService {
         const { data: startupData } = await supabase
           .from('startups')
           .select('id')
-          .eq('user_id', userData.id)
+          .eq('user_id', userData.auth_user_id)
           .maybeSingle();
 
         if (startupData) {
@@ -212,16 +212,16 @@ class AdvisorAddedStartupService {
 
         // Get advisor details (use authUserId instead of startup.advisor_id)
         const { data: advisorData } = await supabase
-          .from('users')
+          .from('user_profiles')
           .select('investment_advisor_code, name, email')
-          .eq('id', authUserId)
+          .eq('auth_user_id', authUserId)
           .maybeSingle();
 
         // Get startup user details and check if already has an advisor
         const { data: startupUserData } = await supabase
-          .from('users')
+          .from('user_profiles')
           .select('email, investment_advisor_code_entered')
-          .eq('id', existsCheck.userId)
+          .eq('auth_user_id', existsCheck.userId)
           .maybeSingle();
 
         // Check if startup already has a different advisor
@@ -234,7 +234,7 @@ class AdvisorAddedStartupService {
           
           // Get existing advisor name
           const { data: existingAdvisorData } = await supabase
-            .from('users')
+            .from('user_profiles')
             .select('name, investment_advisor_code')
             .eq('investment_advisor_code', startupUserData.investment_advisor_code_entered)
             .eq('role', 'Investment Advisor')

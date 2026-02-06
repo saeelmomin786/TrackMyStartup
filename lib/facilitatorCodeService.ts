@@ -38,11 +38,10 @@ class FacilitatorCodeService {
   async getFacilitatorCodeByUserId(userId: string): Promise<string | null> {
     try {
         const { data, error } = await supabase
-        .from('users')
+        .from('user_profiles')
         .select('facilitator_code')
-        .eq('id', userId)
-        .eq('role', 'Startup Facilitation Center')
-        .single();
+        .eq('auth_user_id', userId)
+        .maybeSingle();
         
         if (error) {
         console.error('Error fetching facilitator code:', error);
@@ -204,10 +203,10 @@ class FacilitatorCodeService {
       
       // Update user with new facilitator code
       const { error } = await supabase
-        .from('users')
+        .from('user_profiles')
         .update({ facilitator_code: newCode })
-        .eq('id', userId)
-        .eq('role', 'Startup Facilitation Center');
+        // userId is auth.uid(); update via auth_user_id
+        .eq('auth_user_id', userId);
         
         if (error) {
         console.error('❌ Error updating user with facilitator code:', error);

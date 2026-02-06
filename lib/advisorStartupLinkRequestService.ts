@@ -136,9 +136,9 @@ class AdvisorStartupLinkRequestService {
 
       // Check if startup already has a different advisor
       const { data: startupUser } = await supabase
-        .from('users')
+        .from('user_profiles')
         .select('investment_advisor_code_entered')
-        .eq('id', request.startup_user_id)
+        .eq('auth_user_id', request.startup_user_id)
         .maybeSingle();
 
       let switchedAdvisor = false;
@@ -151,7 +151,7 @@ class AdvisorStartupLinkRequestService {
         
         // Get previous advisor name
         const { data: previousAdvisor } = await supabase
-          .from('users')
+          .from('user_profiles')
           .select('name')
           .eq('investment_advisor_code', startupUser.investment_advisor_code_entered)
           .eq('role', 'Investment Advisor')
@@ -187,12 +187,12 @@ class AdvisorStartupLinkRequestService {
 
       // Link advisor code to startup (this will replace any existing advisor)
       await supabase
-        .from('users')
+        .from('user_profiles')
         .update({
           investment_advisor_code_entered: request.advisor_code,
           updated_at: new Date().toISOString()
         })
-        .eq('id', request.startup_user_id);
+        .eq('auth_user_id', request.startup_user_id);
 
       await supabase
         .from('startups')

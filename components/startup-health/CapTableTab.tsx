@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Startup, InvestmentRecord, InvestorType, InvestmentRoundType, Founder, FundraisingDetails, UserRole, InvestmentType, IncubationProgram, AddIncubationProgramData, RecognitionRecord, MentorRecord, IncubationType, FeeType, StartupDomain, StartupStage } from '../../types';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
@@ -102,6 +102,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     const [hasFundUtilizationReportAccess, setHasFundUtilizationReportAccess] = useState<boolean | null>(null);
     const [showUpgradeModal, setShowUpgradeModal] = useState(false);
     
+    // Performance optimization: prevent concurrent data fetches
+    const isLoadingRef = useRef(false);
+    const lastLoadedStartupIdRef = useRef<number | null>(null);
+    const dataLoadTimestampRef = useRef<number>(0);
+    
     // Check feature access for Fund Utilization Report
     useEffect(() => {
         const checkAccess = async () => {
@@ -141,15 +146,19 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                     .from('startup_shares')
                     .select('*')
                     .eq('startup_id', startup.id);
-                console.log('🚨 CRITICAL - Direct startup_shares query result:', sharesData, sharesError);
-                console.log('🚨 CRITICAL - ESOP reserved shares from database:', sharesData?.[0]?.esop_reserved_shares);
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('🚨 CRITICAL - Direct startup_shares query result:', sharesData, sharesError);
+                    console.log('🚨 CRITICAL - ESOP reserved shares from database:', sharesData?.[0]?.esop_reserved_shares);
+                }
                 
                 // Check startups table for profile data
                 const { data: profileData, error: profileError } = await supabase
                     .from('startups')
                     .select('country_of_registration, company_type, registration_date, currency, country, total_shares, price_per_share, esop_reserved_shares')
                     .eq('id', startup.id);
-                console.log('🔍 Direct profile query result:', profileData, profileError);
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('🔍 Direct profile query result:', profileData, profileError);
+                }
             }
         };
         
@@ -310,10 +319,11 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     }, [isEditInvestmentModalOpen, editingInvestment?.shares, editingInvestment?.pricePerShare]);
 
     // Helper function to calculate total shares including recognition records with equity
-    const calculateTotalShares = () => {
+    // Memoized to prevent infinite re-renders
+    const calculateTotalShares = useCallback(() => {
         const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
         const totalInvestorShares = investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0);
-        const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0; // Use startup object as fallback
+        const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
         const totalRecognitionShares = recognitionRecords
             .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
             .reduce((sum, rec) => sum + (rec.shares || 0), 0);
@@ -323,18 +333,13 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         
         const totalShares = totalFounderShares + totalInvestorShares + esopReservedShares + totalRecognitionShares + totalMentorShares;
         
-        console.log('📊 RECREATED Total Shares Calculation:', {
-            totalFounderShares,
-            totalInvestorShares,
-            esopReservedShares,
-            totalRecognitionShares,
-            totalShares,
-            esopData: esopData,
-            esopDataEsopReservedShares: esopData?.esopReservedShares
-        });
+        // Only log in development and reduce verbosity
+        if (process.env.NODE_ENV === 'development') {
+            console.log('📊 Total Shares:', totalShares);
+        }
         
         return totalShares;
-    };
+    }, [founders, investmentRecords, esopData, startup.esopReservedShares, recognitionRecords, mentorRecords]);
 
     // Utility function to validate total shares allocation
     const validateSharesAllocation = (newShares: number, excludeInvestmentId?: string): { isValid: boolean; message?: string; availableShares: number } => {
@@ -351,31 +356,540 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     };
     // Removed isSharesModalOpen - no longer needed since total shares are calculated automatically
 
+    // CRITICAL: Define callback functions BEFORE they are used in useEffect
+    // Main data loading function
+    const loadCapTableData = useCallback(async () => {
+        if (!startup?.id) return;
+        
+        // Prevent concurrent loads and duplicate fetches
+        if (isLoadingRef.current) {
+            if (process.env.NODE_ENV === 'development') {
+                console.log('⏸️ Skipping loadCapTableData - already loading');
+            }
+            return;
+        }
+        
+        // Check if data was recently loaded for this startup (within 1 second)
+        const now = Date.now();
+        if (lastLoadedStartupIdRef.current === startup.id && (now - dataLoadTimestampRef.current) < 1000) {
+            if (process.env.NODE_ENV === 'development') {
+                console.log('⏸️ Skipping loadCapTableData - data recently loaded');
+            }
+            return;
+        }
+        
+        isLoadingRef.current = true;
+        lastLoadedStartupIdRef.current = startup.id;
+        dataLoadTimestampRef.current = now;
+        
+        console.log('🔍 CapTableTab loading data for startup ID:', startup.id);
+        console.log('🔍 Startup object:', startup);
+        console.log('🔍 Startup ESOP data:', {
+            esopReservedShares: startup.esopReservedShares,
+            pricePerShare: startup.pricePerShare,
+            totalShares: startup.totalShares
+        });
+        
+        setIsLoading(true);
+        setError(null);
+        
+        try {
+            const [
+                records,
+                foundersData,
+                fundraisingData,
+                valuationData,
+                equityData,
+                summaryData,
+                totalSharesData,
+                incubationProgramsData,
+                popularProgramsData,
+                financialRecordsData,
+                recognitionData,
+                mentorData,
+                startupData,
+                employeesData
+            ] = await Promise.allSettled([
+                            capTableService.getInvestmentRecords(startup.id),
+            capTableService.getFounders(startup.id),
+            capTableService.getFundraisingDetails(startup.id),
+            capTableService.getValuationHistoryData(startup.id),
+            capTableService.getEquityDistributionData(startup.id),
+            capTableService.getInvestmentSummary(startup.id),
+            capTableService.getStartupSharesData(startup.id),
+                            incubationProgramsService.getIncubationPrograms(startup.id),
+                incubationProgramsService.getPopularPrograms(),
+                financialsService.getFinancialRecords(startup.id),
+                recognitionService.getRecognitionRecordsByStartupId(startup.id),
+                mentorEquityService.getMentorRecordsByStartupId(startup.id),
+                // Load startup data to get country, registration info, profile data, and current_valuation (all from startups table)
+                supabase.from('startups').select('country_of_registration, company_type, registration_date, currency, country, total_shares, price_per_share, current_valuation').eq('id', startup.id).single(),
+                employeesService.getEmployees(startup.id)
+            ]);
 
-    // Load data on component mount
+            // Handle each result individually
+            setInvestmentRecords(records.status === 'fulfilled' ? records.value : []);
+            
+            // Check if startup already has founders data (e.g., from facilitator access)
+            const hasExistingFoundersData = startup.founders && startup.founders.length > 0;
+            
+            if (hasExistingFoundersData) {
+                console.log('🔍 Startup already has founders data, preserving it:', startup.founders);
+                setFounders(startup.founders);
+            } else {
+            const foundersResult = foundersData.status === 'fulfilled' ? foundersData.value : [];
+                console.log('🔍 Founders data loaded from database:', foundersResult);
+            console.log('🔍 Founders data status:', foundersData.status);
+            if (foundersData.status === 'rejected') {
+                console.error('❌ Founders data loading failed:', foundersData.reason);
+            }
+            setFounders(foundersResult);
+            }
+            
+            // Debug all the data loading results
+            console.log('🔍 All data loading results:');
+            console.log('Records:', records.status, records.status === 'fulfilled' ? records.value.length : records.reason);
+            console.log('Founders:', foundersData.status, foundersData.status === 'fulfilled' ? foundersData.value.length : foundersData.reason);
+            console.log('Total Shares:', totalSharesData.status, totalSharesData.status === 'fulfilled' ? totalSharesData.value : totalSharesData.reason);
+            setFundraisingDetails(fundraisingData.status === 'fulfilled' ? fundraisingData.value : []);
+            const valuationHistoryMapped = valuationData.status === 'fulfilled' ? valuationData.value.map(item => ({
+                roundName: item.round_name,
+                valuation: item.valuation,
+                investmentAmount: item.investment_amount,
+                date: item.date
+            })) : [];
+            setValuationHistory(valuationHistoryMapped);
+            
+            // Initialize currentValuation from latest valuation history (Post-Money Valuation)
+            // This gets the most recent investment's actual post_money_valuation from the database
+            if (valuationHistoryMapped.length > 0) {
+                const latestValuation = [...valuationHistoryMapped].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+                if (latestValuation.valuation && latestValuation.valuation > 0) {
+                    setCurrentValuation(latestValuation.valuation);
+                    if (process.env.NODE_ENV === 'development') {
+                        console.log('✅ Set currentValuation from latest investment post_money_valuation:', latestValuation.valuation, 'on', latestValuation.date);
+                    }
+                }
+            }
+            
+            // Also check latest investment records directly for post_money_valuation as fallback
+            if (records.status === 'fulfilled' && records.value.length > 0) {
+                const latestInvestment = [...records.value].sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+                if (latestInvestment.postMoneyValuation && latestInvestment.postMoneyValuation > 0) {
+                    if (currentValuation === 0 || latestInvestment.postMoneyValuation > (currentValuation || 0)) {
+                        setCurrentValuation(latestInvestment.postMoneyValuation);
+                        if (process.env.NODE_ENV === 'development') {
+                            console.log('✅ Updated currentValuation from latest investment postMoneyValuation:', latestInvestment.postMoneyValuation);
+                        }
+                    }
+                }
+            }
+            setEquityDistribution(equityData.status === 'fulfilled' ? equityData.value.map(item => ({
+                holderType: item.holder_type,
+                equityPercentage: item.equity_percentage,
+                totalAmount: item.total_amount
+            })) : []);
+            setEmployees(employeesData.status === 'fulfilled' ? employeesData.value : []);
+            setInvestmentSummary(summaryData.status === 'fulfilled' ? {
+                totalEquityFunding: summaryData.value.total_equity_funding || 0,
+                totalDebtFunding: summaryData.value.total_debt_funding || 0,
+                totalGrantFunding: summaryData.value.total_grant_funding || 0,
+                totalInvestments: summaryData.value.total_investments || 0,
+                avgEquityAllocated: summaryData.value.avg_equity_allocated || 0
+            } : {
+                totalEquityFunding: 0,
+                totalDebtFunding: 0,
+                totalGrantFunding: 0,
+                totalInvestments: 0,
+                avgEquityAllocated: 0
+            });
+
+            // Handle shares data - only load ESOP reserved shares and price per share
+            // Check if startup already has share data (e.g., from facilitator access)
+            // Only consider it existing if the values are meaningful (not 0 or undefined)
+            const hasExistingShareData = (startup.esopReservedShares !== undefined && startup.esopReservedShares > 0) || 
+                                       (startup.pricePerShare !== undefined && startup.pricePerShare > 0);
+            
+            if (process.env.NODE_ENV === 'development') {
+                console.log('🚨 CRITICAL - totalSharesData status check:', {
+                    totalSharesDataStatus: totalSharesData.status,
+                    hasExistingShareData,
+                    startupEsopReservedShares: startup.esopReservedShares,
+                    startupPricePerShare: startup.pricePerShare
+                });
+            }
+            
+            if (hasExistingShareData) {
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('🔍 Startup already has share data, preserving it:', {
+                        esopReservedShares: startup.esopReservedShares,
+                        pricePerShare: startup.pricePerShare,
+                        totalShares: startup.totalShares
+                    });
+                }
+                setPricePerShare(startup.pricePerShare || 0);
+            } else if (totalSharesData.status === 'fulfilled') {
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('🚨 CRITICAL - totalSharesData.status is fulfilled');
+                }
+                const sharesData = totalSharesData.value;
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('🚨 CRITICAL - sharesData from totalSharesData:', sharesData);
+                }
+                const esopShares = Number(sharesData.esopReservedShares) || 0;
+                const pricePerShare = Number(sharesData.pricePerShare) || 0;
+                
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('🔍 Shares data loaded from database:', { esopShares, pricePerShare });
+                    console.log('🔍 Raw shares data:', sharesData);
+                    console.log('🔍 Setting price per share to:', pricePerShare);
+                }
+                
+                setPricePerShare(pricePerShare);
+                
+                // Update startup object with ESOP reserved shares
+                if (startup) {
+                    startup.esopReservedShares = esopShares;
+                    startup.totalShares = sharesData.totalShares || 0;
+                    startup.pricePerShare = pricePerShare;
+                    console.log('✅ Updated startup object with fresh data:', {
+                        esopReservedShares: startup.esopReservedShares,
+                        totalShares: startup.totalShares,
+                        pricePerShare: startup.pricePerShare
+                    });
+                    console.log('🔍 Startup object after update:', startup);
+                }
+                    
+                    // Update ESOP data state to force re-render
+                const newEsopData = {
+                    esopReservedShares: esopShares,
+                    totalShares: sharesData.totalShares || 0,
+                    pricePerShare: pricePerShare
+                };
+                setEsopData(newEsopData);
+                
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('✅ ESOP data state updated from startup_shares table:', newEsopData);
+                    console.log('🚨 CRITICAL DEBUG - setEsopData called with:', newEsopData);
+                }
+                
+                // Calculate and save price per share if not already saved
+                if (pricePerShare === 0 && sharesData.totalShares > 0) {
+                    console.log('🔄 No price per share in database, calculating and saving...');
+                    try {
+                        // Get latest valuation
+                        let latestValuation = currentValuation > 0 ? currentValuation : (startup.currentValuation || 0);
+                        if (investmentRecords && investmentRecords.length > 0) {
+                            const latest = [...investmentRecords]
+                                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
+                            if (latest?.postMoneyValuation && latest.postMoneyValuation > 0) {
+                                latestValuation = latest.postMoneyValuation;
+                            }
+                        }
+                        
+                        if (latestValuation > 0) {
+                            const calculatedPricePerShare = latestValuation / sharesData.totalShares;
+                            console.log('✅ Calculated price per share:', calculatedPricePerShare, '(Valuation:', latestValuation, '/ Shares:', sharesData.totalShares, ')');
+                            
+                            // Save to database
+                            await capTableService.upsertPricePerShare(startup.id, calculatedPricePerShare);
+                            console.log('✅ Saved calculated price per share to database:', calculatedPricePerShare);
+                            
+                            // Update local state
+                            setPricePerShare(calculatedPricePerShare);
+                            if (startup) {
+                                startup.pricePerShare = calculatedPricePerShare;
+                            }
+                        }
+                    } catch (err) {
+                        console.error('❌ Failed to calculate and save price per share:', err);
+                    }
+                }
+                
+                // Check if startup_shares record exists, if not, create it with default ESOP
+                if (esopShares === 0 && pricePerShare === 0) {
+                    console.log('⚠️ No startup_shares record found, creating default record...');
+                    try {
+                        const defaultEsopShares = 10000;
+                        await capTableService.upsertEsopReservedShares(startup.id, defaultEsopShares);
+                        console.log('✅ Created default startup_shares record with ESOP:', defaultEsopShares);
+                        
+                        // Update startup object with new ESOP data
+                        if (startup) {
+                            startup.esopReservedShares = defaultEsopShares;
+                        }
+                    } catch (err) {
+                        console.error('❌ Failed to create default startup_shares record:', err);
+                    }
+                }
+            } else {
+                console.error('❌ Shares data loading failed:', totalSharesData.reason);
+                // Try to load from startup_profiles table as fallback
+                try {
+                    const { data: profileData } = await supabase
+                        .from('startup_profiles')
+                        .select('price_per_share, esop_reserved_shares')
+                        .eq('startup_id', startup.id)
+                        .single();
+                    
+                    if (profileData) {
+                        console.log('🔄 Fallback: Loading shares from startup_profiles:', profileData);
+                        setPricePerShare(profileData.price_per_share || 0);
+                        if (startup) {
+                            startup.esopReservedShares = profileData.esop_reserved_shares || 0;
+                        }
+                        
+                        // Update ESOP data state from fallback
+                        const fallbackEsopData = {
+                            esopReservedShares: profileData.esop_reserved_shares || 0,
+                            totalShares: 0,
+                            pricePerShare: profileData.price_per_share || 0
+                        };
+                        setEsopData(fallbackEsopData);
+                        console.log('🚨 CRITICAL DEBUG - setEsopData called from fallback with:', fallbackEsopData);
+                    } else {
+                        setPricePerShare(0);
+                        const defaultEsopData = {
+                            esopReservedShares: 0,
+                            totalShares: 0,
+                            pricePerShare: 0
+                        };
+                        setEsopData(defaultEsopData);
+                        console.log('🚨 CRITICAL DEBUG - setEsopData called with default values:', defaultEsopData);
+                    }
+                } catch (fallbackError) {
+                    console.error('❌ Fallback shares loading also failed:', fallbackError);
+                    setPricePerShare(0);
+                }
+            }
+
+            // Set current fundraising details if available
+            if (fundraisingData.status === 'fulfilled' && fundraisingData.value.length > 0) {
+                setFundraising(fundraisingData.value[0]);
+                setPitchDeckFile(null); // Reset file state when loading fundraising data
+            }
+
+            // Handle recognition records
+            if (recognitionData.status === 'fulfilled') {
+                setRecognitionRecords(recognitionData.value);
+                console.log('✅ Recognition records loaded:', recognitionData.value.length);
+            } else {
+                console.error('Failed to load recognition records:', recognitionData.reason);
+            }
+
+            // Handle mentor records
+            if (mentorData.status === 'fulfilled') {
+                setMentorRecords(mentorData.value);
+                console.log('✅ Mentor records loaded:', mentorData.value.length);
+            } else {
+                console.error('Failed to load mentor records:', mentorData.reason);
+            }
+
+            // Handle startup profile data (without ESOP data - that comes from startup_shares)
+            console.log('🔍 Processing startup profile data...');
+            console.log('🔍 Startup data status:', startupData.status);
+            
+            if (startupData.status === 'rejected') {
+                console.error('❌ Startup data loading failed:', startupData.reason);
+            }
+            
+            const startupDataResult = startupData.status === 'fulfilled' ? startupData.value : null;
+            
+            console.log('🔍 Startup data result:', startupDataResult);
+            
+            if (startupDataResult) {
+                setStartupProfileData(startupDataResult);
+                // Update current valuation from database
+                if (startupDataResult.current_valuation !== undefined && startupDataResult.current_valuation !== null) {
+                    const freshValuation = Number(startupDataResult.current_valuation) || 0;
+                    setCurrentValuation(freshValuation);
+                    // Also update startup object for consistency
+                    if (startup) {
+                        startup.currentValuation = freshValuation;
+                    }
+                    console.log('✅ Current valuation updated from database:', freshValuation);
+                }
+                console.log('✅ Startup profile data loaded and set:', startupDataResult);
+            } else {
+                console.log('⚠️ No startup profile data available');
+            }
+
+            // Currency is now handled by the useStartupCurrency hook
+
+            // Log any errors for debugging
+            [records, foundersData, fundraisingData, valuationData, equityData, summaryData, incubationProgramsData, popularProgramsData, financialRecordsData, recognitionData].forEach((result, index) => {
+                if (result.status === 'rejected') {
+                    console.warn('Failed to load data ' + index + ':', result.reason);
+                }
+            });
+
+            // Debug loaded data
+            console.log('📊 Equity Allocation Data Loaded:', {
+                investmentRecords: records.status === 'fulfilled' ? records.value.length : 'failed',
+                founders: foundersData.status === 'fulfilled' ? foundersData.value.length : 'failed',
+                fundraisingDetails: fundraisingData.status === 'fulfilled' ? fundraisingData.value.length : 'failed',
+                valuationHistory: valuationData.status === 'fulfilled' ? valuationData.value.length : 'failed',
+                equityDistribution: equityData.status === 'fulfilled' ? equityData.value.length : 'failed',
+                investmentSummary: summaryData.status === 'fulfilled' ? summaryData.value : 'failed',
+                totalShares: totalSharesData.status === 'fulfilled' ? totalSharesData.value : 'failed',
+                incubationPrograms: incubationProgramsData.status === 'fulfilled' ? incubationProgramsData.value.length : 'failed',
+                popularPrograms: popularProgramsData.status === 'fulfilled' ? popularProgramsData.value.length : 'failed',
+                financialRecords: financialRecordsData.status === 'fulfilled' ? financialRecordsData.value.length : 'failed',
+                recognitionRecords: recognitionData.status === 'fulfilled' ? recognitionData.value.length : 'failed'
+            });
+            
+            // Debug summary data specifically
+            if (summaryData.status === 'fulfilled') {
+                console.log('💰 Investment Summary Raw Data:', summaryData.value);
+                console.log('💰 Investment Summary Mapped Data:', {
+                    totalEquityFunding: summaryData.value.total_equity_funding || 0,
+                    totalDebtFunding: summaryData.value.total_debt_funding || 0,
+                    totalGrantFunding: summaryData.value.total_grant_funding || 0,
+                    totalInvestments: summaryData.value.total_investments || 0,
+                    avgEquityAllocated: summaryData.value.avg_equity_allocated || 0
+                });
+            }
+            
+            // Debug valuation history data specifically
+            if (valuationData.status === 'fulfilled') {
+                console.log('📈 Valuation History Raw Data:', valuationData.value);
+                console.log('📈 Valuation History Mapped Data:', valuationData.value.map(item => ({
+                    roundName: item.round_name,
+                    valuation: item.valuation,
+                    investmentAmount: item.investment_amount,
+                    date: item.date
+                })));
+            } else if (valuationData.status === 'rejected') {
+                console.error('❌ Valuation History Failed:', valuationData.reason);
+            }
+            
+            // Debug equity distribution data specifically
+            if (equityData.status === 'fulfilled') {
+                console.log('🥧 Equity Distribution Raw Data:', equityData.value);
+                console.log('🥧 Equity Distribution Mapped Data:', equityData.value.map(item => ({
+                    holderType: item.holder_type,
+                    equityPercentage: item.equity_percentage,
+                    totalAmount: item.total_amount
+                })));
+            } else if (equityData.status === 'rejected') {
+                console.error('❌ Equity Distribution Failed:', equityData.reason);
+            }
+
+            // Process incubation programs data
+            if (incubationProgramsData.status === 'fulfilled') {
+                setIncubationPrograms(incubationProgramsData.value);
+                console.log('🎓 Incubation Programs Data:', incubationProgramsData.value);
+                console.log('🎓 Incubation Programs Count:', incubationProgramsData.value?.length || 0);
+            } else if (incubationProgramsData.status === 'rejected') {
+                console.error('❌ Incubation Programs Failed:', incubationProgramsData.reason);
+                setIncubationPrograms([]);
+            } else {
+                console.log('⚠️ Incubation Programs Status: unavailable');
+                setIncubationPrograms([]);
+            }
+
+            if (popularProgramsData.status === 'fulfilled') {
+                setPopularPrograms(popularProgramsData.value);
+                console.log('📚 Popular Programs:', popularProgramsData.value);
+            }
+
+            if (financialRecordsData.status === 'fulfilled') {
+                setFinancialRecords(financialRecordsData.value);
+                console.log('💰 Financial Records:', financialRecordsData.value.length, 'records loaded');
+                
+                // Debug: Check for pooja-related records
+                const poojaRecords = financialRecordsData.value.filter(record => 
+                    record.funding_source && record.funding_source.toLowerCase().includes('pooja')
+                );
+                if (poojaRecords.length > 0) {
+                    console.log('🔍 Found Pooja Financial Records:', poojaRecords);
+                } else {
+                    console.log('⚠️ No Pooja financial records found');
+                }
+                
+                // Debug: Show all funding sources
+                const allFundingSources = financialRecordsData.value
+                    .filter(record => record.funding_source)
+                    .map(record => record.funding_source);
+                console.log('📋 All Funding Sources:', allFundingSources);
+            } else if (financialRecordsData.status === 'rejected') {
+                console.error('❌ Financial Records Failed:', financialRecordsData.reason);
+            }
+        } catch (err) {
+            console.error('Error loading equity allocation data:', err);
+            setError('Failed to load equity allocation data');
+        } finally {
+            setIsLoading(false);
+            isLoadingRef.current = false; // Reset loading guard
+        }
+    }, [startup?.id, currentValuation]);
+
+    // Setup real-time subscriptions
+    const setupRealTimeSubscriptions = useCallback(() => {
+        if (!startup?.id) return;
+
+        // Subscribe to real-time changes
+        const investmentSubscription = capTableService.subscribeToInvestmentRecords(startup.id, (records) => {
+            setInvestmentRecords(records);
+        });
+
+        const foundersSubscription = capTableService.subscribeToFounders(startup.id, (founders) => {
+            setFounders(founders);
+        });
+
+        const fundraisingSubscription = capTableService.subscribeToFundraisingDetails(startup.id, (details) => {
+            setFundraisingDetails(details);
+            if (details.length > 0) {
+                setFundraising(details[0]);
+                setPitchDeckFile(null); // Reset file state when fundraising data updates
+            }
+        });
+
+        const incubationProgramsSubscription = incubationProgramsService.subscribeToIncubationPrograms(startup.id, (programs) => {
+            setIncubationPrograms(programs);
+        });
+
+        // Cleanup subscriptions on unmount
+        return () => {
+            investmentSubscription?.unsubscribe();
+            foundersSubscription?.unsubscribe();
+            fundraisingSubscription?.unsubscribe();
+            incubationProgramsSubscription?.unsubscribe();
+        };
+    }, [startup?.id]); // Memoize with startup.id dependency
+
+    // Load data on component mount and when startup ID changes
     useEffect(() => {
-        console.log('🔄 useEffect triggered - loading data for startup:', startup?.id);
+        if (process.env.NODE_ENV === 'development') {
+            console.log('🔄 useEffect triggered - loading data for startup:', startup?.id);
+        }
         if (startup?.id) {
             loadCapTableData();
             setupRealTimeSubscriptions();
         }
-    }, [startup?.id]); // Only depend on startup.id, not the entire startup object
+    }, [startup?.id, loadCapTableData, setupRealTimeSubscriptions]); // Memoized dependencies
 
-    // Monitor esopData changes
+    // Monitor esopData changes (dev only)
     useEffect(() => {
-        console.log('🚨 CRITICAL - esopData changed:', esopData);
+        if (process.env.NODE_ENV === 'development') {
+            console.log('🚨 esopData changed:', esopData ? 'present' : 'null');
+        }
     }, [esopData]);
 
-    // Validate shares allocation when data changes
+    // Validate shares allocation when data changes (debounced)
     useEffect(() => {
         if (founders.length > 0) {
-            const validation = validateAndFixFounderShares();
-            if (!validation.isValid) {
-                console.warn('⚠️ Shares allocation issue detected:', validation.message);
-                // You could show a toast notification here
-            }
+            // Debounce validation to prevent excessive calls
+            const timeoutId = setTimeout(() => {
+                const validation = validateAndFixFounderShares();
+                if (!validation.isValid && process.env.NODE_ENV === 'development') {
+                    console.warn('⚠️ Shares allocation issue detected:', validation.message);
+                }
+            }, 500);
+            
+            return () => clearTimeout(timeoutId);
         }
-    }, [founders, investmentRecords, startup.esopReservedShares]);
+    }, [founders.length, investmentRecords.length, startup.esopReservedShares]); // Only trigger on length/value changes
 
     // Legacy calculation removed - now using shares-based calculation only
 
@@ -383,8 +897,6 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
     useEffect(() => {
         const shares = Number(invSharesDraft);
         const pricePerShare = Number(invPricePerShareDraft);
-        
-        console.log('🔄 Auto-calculation triggered:', { shares, pricePerShare, invSharesDraft, invPricePerShareDraft });
         
         if (Number.isFinite(shares) && shares > 0 && Number.isFinite(pricePerShare) && pricePerShare > 0) {
             // Calculate investment amount
@@ -829,451 +1341,12 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                 };
             }, [startup.id]);
 
-    const loadCapTableData = async () => {
-        if (!startup?.id) return;
-        
-        console.log('🔍 CapTableTab loading data for startup ID:', startup.id);
-        console.log('🔍 Startup object:', startup);
-        console.log('🔍 Startup ESOP data:', {
-            esopReservedShares: startup.esopReservedShares,
-            pricePerShare: startup.pricePerShare,
-            totalShares: startup.totalShares
-        });
-        
-        setIsLoading(true);
-        setError(null);
-        
-        try {
-            const [
-                records,
-                foundersData,
-                fundraisingData,
-                valuationData,
-                equityData,
-                summaryData,
-                totalSharesData,
-                incubationProgramsData,
-                popularProgramsData,
-                financialRecordsData,
-                recognitionData,
-                mentorData,
-                startupData,
-                employeesData
-            ] = await Promise.allSettled([
-                            capTableService.getInvestmentRecords(startup.id),
-            capTableService.getFounders(startup.id),
-            capTableService.getFundraisingDetails(startup.id),
-            capTableService.getValuationHistoryData(startup.id),
-            capTableService.getEquityDistributionData(startup.id),
-            capTableService.getInvestmentSummary(startup.id),
-            capTableService.getStartupSharesData(startup.id),
-                            incubationProgramsService.getIncubationPrograms(startup.id),
-                incubationProgramsService.getPopularPrograms(),
-                financialsService.getFinancialRecords(startup.id),
-                recognitionService.getRecognitionRecordsByStartupId(startup.id),
-                mentorEquityService.getMentorRecordsByStartupId(startup.id),
-                // Load startup data to get country, registration info, profile data, and current_valuation (all from startups table)
-                supabase.from('startups').select('country_of_registration, company_type, registration_date, currency, country, total_shares, price_per_share, current_valuation').eq('id', startup.id).single(),
-                employeesService.getEmployees(startup.id)
-            ]);
-
-            // Handle each result individually
-            setInvestmentRecords(records.status === 'fulfilled' ? records.value : []);
-            
-            // Check if startup already has founders data (e.g., from facilitator access)
-            const hasExistingFoundersData = startup.founders && startup.founders.length > 0;
-            
-            if (hasExistingFoundersData) {
-                console.log('🔍 Startup already has founders data, preserving it:', startup.founders);
-                setFounders(startup.founders);
-            } else {
-            const foundersResult = foundersData.status === 'fulfilled' ? foundersData.value : [];
-                console.log('🔍 Founders data loaded from database:', foundersResult);
-            console.log('🔍 Founders data status:', foundersData.status);
-            if (foundersData.status === 'rejected') {
-                console.error('❌ Founders data loading failed:', foundersData.reason);
-            }
-            setFounders(foundersResult);
-            }
-            
-            // Debug all the data loading results
-            console.log('🔍 All data loading results:');
-            console.log('Records:', records.status, records.status === 'fulfilled' ? records.value.length : records.reason);
-            console.log('Founders:', foundersData.status, foundersData.status === 'fulfilled' ? foundersData.value.length : foundersData.reason);
-            console.log('Total Shares:', totalSharesData.status, totalSharesData.status === 'fulfilled' ? totalSharesData.value : totalSharesData.reason);
-            setFundraisingDetails(fundraisingData.status === 'fulfilled' ? fundraisingData.value : []);
-            setValuationHistory(valuationData.status === 'fulfilled' ? valuationData.value.map(item => ({
-                roundName: item.round_name,
-                valuation: item.valuation,
-                investmentAmount: item.investment_amount,
-                date: item.date
-            })) : []);
-            setEquityDistribution(equityData.status === 'fulfilled' ? equityData.value.map(item => ({
-                holderType: item.holder_type,
-                equityPercentage: item.equity_percentage,
-                totalAmount: item.total_amount
-            })) : []);
-            setEmployees(employeesData.status === 'fulfilled' ? employeesData.value : []);
-            setInvestmentSummary(summaryData.status === 'fulfilled' ? {
-                totalEquityFunding: summaryData.value.total_equity_funding || 0,
-                totalDebtFunding: summaryData.value.total_debt_funding || 0,
-                totalGrantFunding: summaryData.value.total_grant_funding || 0,
-                totalInvestments: summaryData.value.total_investments || 0,
-                avgEquityAllocated: summaryData.value.avg_equity_allocated || 0
-            } : {
-                totalEquityFunding: 0,
-                totalDebtFunding: 0,
-                totalGrantFunding: 0,
-                totalInvestments: 0,
-                avgEquityAllocated: 0
-            });
-
-            // Handle shares data - only load ESOP reserved shares and price per share
-            // Check if startup already has share data (e.g., from facilitator access)
-            // Only consider it existing if the values are meaningful (not 0 or undefined)
-            const hasExistingShareData = (startup.esopReservedShares !== undefined && startup.esopReservedShares > 0) || 
-                                       (startup.pricePerShare !== undefined && startup.pricePerShare > 0);
-            
-            console.log('🚨 CRITICAL - totalSharesData status check:', {
-                totalSharesDataStatus: totalSharesData.status,
-                hasExistingShareData,
-                startupEsopReservedShares: startup.esopReservedShares,
-                startupPricePerShare: startup.pricePerShare
-            });
-            
-            if (hasExistingShareData) {
-                console.log('🔍 Startup already has share data, preserving it:', {
-                    esopReservedShares: startup.esopReservedShares,
-                    pricePerShare: startup.pricePerShare,
-                    totalShares: startup.totalShares
-                });
-                setPricePerShare(startup.pricePerShare || 0);
-            } else if (totalSharesData.status === 'fulfilled') {
-                console.log('🚨 CRITICAL - totalSharesData.status is fulfilled');
-                const sharesData = totalSharesData.value;
-                console.log('🚨 CRITICAL - sharesData from totalSharesData:', sharesData);
-                const esopShares = Number(sharesData.esopReservedShares) || 0;
-                const pricePerShare = Number(sharesData.pricePerShare) || 0;
-                
-                console.log('🔍 Shares data loaded from database:', { esopShares, pricePerShare });
-                console.log('🔍 Raw shares data:', sharesData);
-                console.log('🔍 Setting price per share to:', pricePerShare);
-                
-                setPricePerShare(pricePerShare);
-                
-                // Update startup object with ESOP reserved shares
-                if (startup) {
-                    startup.esopReservedShares = esopShares;
-                    startup.totalShares = sharesData.totalShares || 0;
-                    startup.pricePerShare = pricePerShare;
-                    console.log('✅ Updated startup object with fresh data:', {
-                        esopReservedShares: startup.esopReservedShares,
-                        totalShares: startup.totalShares,
-                        pricePerShare: startup.pricePerShare
-                    });
-                    console.log('🔍 Startup object after update:', startup);
-                }
-                    
-                    // Update ESOP data state to force re-render
-                const newEsopData = {
-                        esopReservedShares: esopShares,
-                        totalShares: sharesData.totalShares || 0,
-                        pricePerShare: pricePerShare
-                };
-                setEsopData(newEsopData);
-                
-                console.log('✅ ESOP data state updated from startup_shares table:', newEsopData);
-                console.log('🚨 CRITICAL DEBUG - setEsopData called with:', newEsopData);
-                
-                // Calculate and save price per share if not already saved
-                if (pricePerShare === 0 && sharesData.totalShares > 0) {
-                    console.log('🔄 No price per share in database, calculating and saving...');
-                    try {
-                        // Get latest valuation
-                        let latestValuation = currentValuation > 0 ? currentValuation : (startup.currentValuation || 0);
-                        if (investmentRecords && investmentRecords.length > 0) {
-                            const latest = [...investmentRecords]
-                                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] as any;
-                            if (latest?.postMoneyValuation && latest.postMoneyValuation > 0) {
-                                latestValuation = latest.postMoneyValuation;
-                            }
-                        }
-                        
-                        if (latestValuation > 0) {
-                            const calculatedPricePerShare = latestValuation / sharesData.totalShares;
-                            console.log('✅ Calculated price per share:', calculatedPricePerShare, '(Valuation:', latestValuation, '/ Shares:', sharesData.totalShares, ')');
-                            
-                            // Save to database
-                            await capTableService.upsertPricePerShare(startup.id, calculatedPricePerShare);
-                            console.log('✅ Saved calculated price per share to database:', calculatedPricePerShare);
-                            
-                            // Update local state
-                            setPricePerShare(calculatedPricePerShare);
-                            if (startup) {
-                                startup.pricePerShare = calculatedPricePerShare;
-                            }
-                        }
-                    } catch (err) {
-                        console.error('❌ Failed to calculate and save price per share:', err);
-                    }
-                }
-                
-                // Check if startup_shares record exists, if not, create it with default ESOP
-                if (esopShares === 0 && pricePerShare === 0) {
-                    console.log('⚠️ No startup_shares record found, creating default record...');
-                    try {
-                        const defaultEsopShares = 10000;
-                        await capTableService.upsertEsopReservedShares(startup.id, defaultEsopShares);
-                        console.log('✅ Created default startup_shares record with ESOP:', defaultEsopShares);
-                        
-                        // Update startup object with new ESOP data
-                        if (startup) {
-                            startup.esopReservedShares = defaultEsopShares;
-                        }
-                    } catch (err) {
-                        console.error('❌ Failed to create default startup_shares record:', err);
-                    }
-                }
-            } else {
-                console.error('❌ Shares data loading failed:', totalSharesData.reason);
-                // Try to load from startup_profiles table as fallback
-                try {
-                    const { data: profileData } = await supabase
-                        .from('startup_profiles')
-                        .select('price_per_share, esop_reserved_shares')
-                        .eq('startup_id', startup.id)
-                        .single();
-                    
-                    if (profileData) {
-                        console.log('🔄 Fallback: Loading shares from startup_profiles:', profileData);
-                        setPricePerShare(profileData.price_per_share || 0);
-                        if (startup) {
-                            startup.esopReservedShares = profileData.esop_reserved_shares || 0;
-                        }
-                        
-                        // Update ESOP data state from fallback
-                        const fallbackEsopData = {
-                            esopReservedShares: profileData.esop_reserved_shares || 0,
-                            totalShares: 0,
-                            pricePerShare: profileData.price_per_share || 0
-                        };
-                        setEsopData(fallbackEsopData);
-                        console.log('🚨 CRITICAL DEBUG - setEsopData called from fallback with:', fallbackEsopData);
-                    } else {
-                        setPricePerShare(0);
-                        const defaultEsopData = {
-                            esopReservedShares: 0,
-                            totalShares: 0,
-                            pricePerShare: 0
-                        };
-                        setEsopData(defaultEsopData);
-                        console.log('🚨 CRITICAL DEBUG - setEsopData called with default values:', defaultEsopData);
-                    }
-                } catch (fallbackError) {
-                    console.error('❌ Fallback shares loading also failed:', fallbackError);
-                    setPricePerShare(0);
-                }
-            }
-
-            // Set current fundraising details if available
-            if (fundraisingData.status === 'fulfilled' && fundraisingData.value.length > 0) {
-                setFundraising(fundraisingData.value[0]);
-                setPitchDeckFile(null); // Reset file state when loading fundraising data
-            }
-
-            // Handle recognition records
-            if (recognitionData.status === 'fulfilled') {
-                setRecognitionRecords(recognitionData.value);
-                console.log('✅ Recognition records loaded:', recognitionData.value.length);
-            } else {
-                console.error('Failed to load recognition records:', recognitionData.reason);
-            }
-
-            // Handle mentor records
-            if (mentorData.status === 'fulfilled') {
-                setMentorRecords(mentorData.value);
-                console.log('✅ Mentor records loaded:', mentorData.value.length);
-            } else {
-                console.error('Failed to load mentor records:', mentorData.reason);
-            }
-
-            // Handle startup profile data (without ESOP data - that comes from startup_shares)
-            console.log('🔍 Processing startup profile data...');
-            console.log('🔍 Startup data status:', startupData.status);
-            
-            if (startupData.status === 'rejected') {
-                console.error('❌ Startup data loading failed:', startupData.reason);
-            }
-            
-            const startupDataResult = startupData.status === 'fulfilled' ? startupData.value : null;
-            
-            console.log('🔍 Startup data result:', startupDataResult);
-            
-            if (startupDataResult) {
-                setStartupProfileData(startupDataResult);
-                // Update current valuation from database
-                if (startupDataResult.current_valuation !== undefined && startupDataResult.current_valuation !== null) {
-                    const freshValuation = Number(startupDataResult.current_valuation) || 0;
-                    setCurrentValuation(freshValuation);
-                    // Also update startup object for consistency
-                    if (startup) {
-                        startup.currentValuation = freshValuation;
-                    }
-                    console.log('✅ Current valuation updated from database:', freshValuation);
-                }
-                console.log('✅ Startup profile data loaded and set:', startupDataResult);
-            } else {
-                console.log('⚠️ No startup profile data available');
-            }
-
-            // Currency is now handled by the useStartupCurrency hook
-
-            // Log any errors for debugging
-            [records, foundersData, fundraisingData, valuationData, equityData, summaryData, incubationProgramsData, popularProgramsData, financialRecordsData, recognitionData].forEach((result, index) => {
-                if (result.status === 'rejected') {
-                    console.warn('Failed to load data ' + index + ':', result.reason);
-                }
-            });
-
-            // Debug loaded data
-            console.log('📊 Equity Allocation Data Loaded:', {
-                investmentRecords: records.status === 'fulfilled' ? records.value.length : 'failed',
-                founders: foundersData.status === 'fulfilled' ? foundersData.value.length : 'failed',
-                fundraisingDetails: fundraisingData.status === 'fulfilled' ? fundraisingData.value.length : 'failed',
-                valuationHistory: valuationData.status === 'fulfilled' ? valuationData.value.length : 'failed',
-                equityDistribution: equityData.status === 'fulfilled' ? equityData.value.length : 'failed',
-                investmentSummary: summaryData.status === 'fulfilled' ? summaryData.value : 'failed',
-                totalShares: totalSharesData.status === 'fulfilled' ? totalSharesData.value : 'failed',
-                incubationPrograms: incubationProgramsData.status === 'fulfilled' ? incubationProgramsData.value.length : 'failed',
-                popularPrograms: popularProgramsData.status === 'fulfilled' ? popularProgramsData.value.length : 'failed',
-                financialRecords: financialRecordsData.status === 'fulfilled' ? financialRecordsData.value.length : 'failed',
-                recognitionRecords: recognitionData.status === 'fulfilled' ? recognitionData.value.length : 'failed'
-            });
-            
-            // Debug summary data specifically
-            if (summaryData.status === 'fulfilled') {
-                console.log('💰 Investment Summary Raw Data:', summaryData.value);
-                console.log('💰 Investment Summary Mapped Data:', {
-                    totalEquityFunding: summaryData.value.total_equity_funding || 0,
-                    totalDebtFunding: summaryData.value.total_debt_funding || 0,
-                    totalGrantFunding: summaryData.value.total_grant_funding || 0,
-                    totalInvestments: summaryData.value.total_investments || 0,
-                    avgEquityAllocated: summaryData.value.avg_equity_allocated || 0
-                });
-            }
-            
-            // Debug valuation history data specifically
-            if (valuationData.status === 'fulfilled') {
-                console.log('📈 Valuation History Raw Data:', valuationData.value);
-                console.log('📈 Valuation History Mapped Data:', valuationData.value.map(item => ({
-                    roundName: item.round_name,
-                    valuation: item.valuation,
-                    investmentAmount: item.investment_amount,
-                    date: item.date
-                })));
-            } else if (valuationData.status === 'rejected') {
-                console.error('❌ Valuation History Failed:', valuationData.reason);
-            }
-            
-            // Debug equity distribution data specifically
-            if (equityData.status === 'fulfilled') {
-                console.log('🥧 Equity Distribution Raw Data:', equityData.value);
-                console.log('🥧 Equity Distribution Mapped Data:', equityData.value.map(item => ({
-                    holderType: item.holder_type,
-                    equityPercentage: item.equity_percentage,
-                    totalAmount: item.total_amount
-                })));
-            } else if (equityData.status === 'rejected') {
-                console.error('❌ Equity Distribution Failed:', equityData.reason);
-            }
-
-            // Process incubation programs data
-            if (incubationProgramsData.status === 'fulfilled') {
-                setIncubationPrograms(incubationProgramsData.value);
-                console.log('🎓 Incubation Programs Data:', incubationProgramsData.value);
-                console.log('🎓 Incubation Programs Count:', incubationProgramsData.value?.length || 0);
-            } else if (incubationProgramsData.status === 'rejected') {
-                console.error('❌ Incubation Programs Failed:', incubationProgramsData.reason);
-                setIncubationPrograms([]);
-            } else {
-                console.log('⚠️ Incubation Programs Status: unavailable');
-                setIncubationPrograms([]);
-            }
-
-            if (popularProgramsData.status === 'fulfilled') {
-                setPopularPrograms(popularProgramsData.value);
-                console.log('📚 Popular Programs:', popularProgramsData.value);
-            }
-
-            if (financialRecordsData.status === 'fulfilled') {
-                setFinancialRecords(financialRecordsData.value);
-                console.log('💰 Financial Records:', financialRecordsData.value.length, 'records loaded');
-                
-                // Debug: Check for pooja-related records
-                const poojaRecords = financialRecordsData.value.filter(record => 
-                    record.funding_source && record.funding_source.toLowerCase().includes('pooja')
-                );
-                if (poojaRecords.length > 0) {
-                    console.log('🔍 Found Pooja Financial Records:', poojaRecords);
-                } else {
-                    console.log('⚠️ No Pooja financial records found');
-                }
-                
-                // Debug: Show all funding sources
-                const allFundingSources = financialRecordsData.value
-                    .filter(record => record.funding_source)
-                    .map(record => record.funding_source);
-                console.log('📋 All Funding Sources:', allFundingSources);
-            } else if (financialRecordsData.status === 'rejected') {
-                console.error('❌ Financial Records Failed:', financialRecordsData.reason);
-            }
-        } catch (err) {
-            console.error('Error loading equity allocation data:', err);
-            setError('Failed to load equity allocation data');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
     // Update current valuation when startup prop changes
     useEffect(() => {
         if (startup?.currentValuation !== undefined) {
             setCurrentValuation(startup.currentValuation || 0);
         }
     }, [startup?.currentValuation]);
-
-    const setupRealTimeSubscriptions = () => {
-        if (!startup?.id) return;
-
-        // Subscribe to real-time changes
-        const investmentSubscription = capTableService.subscribeToInvestmentRecords(startup.id, (records) => {
-            setInvestmentRecords(records);
-        });
-
-        const foundersSubscription = capTableService.subscribeToFounders(startup.id, (founders) => {
-            setFounders(founders);
-        });
-
-        const fundraisingSubscription = capTableService.subscribeToFundraisingDetails(startup.id, (details) => {
-            setFundraisingDetails(details);
-            if (details.length > 0) {
-                setFundraising(details[0]);
-                setPitchDeckFile(null); // Reset file state when fundraising data updates
-            }
-        });
-
-        const incubationProgramsSubscription = incubationProgramsService.subscribeToIncubationPrograms(startup.id, (programs) => {
-            setIncubationPrograms(programs);
-        });
-
-        // Cleanup subscriptions on unmount
-        return () => {
-            investmentSubscription?.unsubscribe();
-            foundersSubscription?.unsubscribe();
-            fundraisingSubscription?.unsubscribe();
-            incubationProgramsSubscription?.unsubscribe();
-        };
-    };
 
     const handleEditFoundersClick = () => {
         console.log('🔧 Opening founder edit modal with founders:', founders);
@@ -1359,9 +1432,10 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                         if (!founder.mentorCode) continue;
                         
                         // Find mentor by mentor code
+                        // Migrate off legacy users table: mentor_code now lives on user_profiles.auth_user_id
                         const { data: mentorUser, error: mentorError } = await supabase
-                            .from('users')
-                            .select('id, mentor_code, name, role')
+                            .from('user_profiles')
+                            .select('auth_user_id as id, mentor_code, name, role')
                             .eq('mentor_code', founder.mentorCode.trim())
                             .eq('role', 'Mentor')
                             .single();
@@ -2617,17 +2691,19 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
         );
     };
 
-         // Prepare chart data directly from investment records (not fundraising data)
-     const valuationData = investmentRecords.length > 0 ? 
-         investmentRecords.map(inv => ({
-             name: inv.investmentType || 'Investment Round',
-             valuation: Number(inv.preMoneyValuation) || 0,
-             investment: Number(inv.amount) || 0
-         })).filter(item => item.valuation > 0 || item.investment > 0) : [];
+    // Memoize expensive chart data calculations to prevent re-computation on every render
+    const valuationData = useMemo(() => {
+        return investmentRecords.length > 0 ? 
+            investmentRecords.map(inv => ({
+                name: inv.investmentType || 'Investment Round',
+                valuation: Number(inv.preMoneyValuation) || 0,
+                investment: Number(inv.amount) || 0
+            })).filter(item => item.valuation > 0 || item.investment > 0) : [];
+    }, [investmentRecords]);
 
-     // Calculate equity distribution from investment records, founders, ESOP, recognition, and mentors
-     const equityData = (() => {
-         const distribution: { name: string; value: number }[] = [];
+    // Memoize equity distribution calculation
+    const equityData = useMemo(() => {
+        const distribution: { name: string; value: number }[] = [];
          
          // Use the comprehensive calculateTotalShares function that includes all sources
          const calculatedTotalShares = calculateTotalShares();
@@ -2758,7 +2834,7 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
          }
          
          return distribution.filter(item => item.value > 0);
-     })();
+    }, [founders, investmentRecords, esopData, recognitionRecords, mentorRecords, startup.esopReservedShares]);
 
     // Debug chart data (commented out for production)
     // console.log('📈 Chart Data:', {
@@ -2825,17 +2901,19 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                 {(() => {
                                     const calculatedTotalShares = calculateTotalShares();
                                     
-                                    console.log('🔍 Total Shares Display - Using calculateTotalShares():', {
-                                        calculatedTotalShares,
-                                        breakdown: {
-                                            totalFounderShares: founders.reduce((sum, founder) => sum + (founder.shares || 0), 0),
-                                            totalInvestorShares: investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0),
-                                            esopReservedShares: startup.esopReservedShares || 0,
-                                            totalRecognitionShares: recognitionRecords
-                                                .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
-                                                .reduce((sum, rec) => sum + (rec.shares || 0), 0)
-                                        }
-                                    });
+                                    if (process.env.NODE_ENV === 'development') {
+                                        console.log('🔍 Total Shares Display - Using calculateTotalShares():', {
+                                            calculatedTotalShares,
+                                            breakdown: {
+                                                totalFounderShares: founders.reduce((sum, founder) => sum + (founder.shares || 0), 0),
+                                                totalInvestorShares: investmentRecords.reduce((sum, inv) => sum + (inv.shares || 0), 0),
+                                                esopReservedShares: startup.esopReservedShares || 0,
+                                                totalRecognitionShares: recognitionRecords
+                                                    .filter(rec => (rec.feeType === 'Equity' || rec.feeType === 'Hybrid') && rec.shares && rec.shares > 0)
+                                                    .reduce((sum, rec) => sum + (rec.shares || 0), 0)
+                                            }
+                                        });
+                                    }
                                     
                                     return calculatedTotalShares.toLocaleString();
                                 })()}
@@ -2854,14 +2932,16 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                         const computedPricePerShare = cumulativeValuation / calculatedTotalShares;
                                         
                                         // DETAILED DEBUG: Track Equity Allocation price calculation
-                                        console.log('🔍 DETAILED DEBUG - Equity Allocation Price Per Share Calculation:', {
-                                            'startup.currentValuation': startup.currentValuation,
-                                            'cumulativeValuation': cumulativeValuation,
-                                            'calculatedTotalShares': calculatedTotalShares,
-                                            'computedPricePerShare': computedPricePerShare,
-                                            'formattedPrice': formatCurrency(computedPricePerShare, startupCurrency),
-                                            'calculation': cumulativeValuation + ' / ' + calculatedTotalShares + ' = ' + computedPricePerShare
-                                        });
+                                        if (process.env.NODE_ENV === 'development') {
+                                            console.log('🔍 DETAILED DEBUG - Equity Allocation Price Per Share Calculation:', {
+                                                'startup.currentValuation': startup.currentValuation,
+                                                'cumulativeValuation': cumulativeValuation,
+                                                'calculatedTotalShares': calculatedTotalShares,
+                                                'computedPricePerShare': computedPricePerShare,
+                                                'formattedPrice': formatCurrency(computedPricePerShare, startupCurrency),
+                                                'calculation': cumulativeValuation + ' / ' + calculatedTotalShares + ' = ' + computedPricePerShare
+                                            });
+                                        }
                                         
                                         // Save the calculated price per share to database
                                         if (computedPricePerShare > 0) {
@@ -2898,38 +2978,18 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                          // Use startup object as fallback since esopData state is not updating properly
                          const esopReservedShares = esopData?.esopReservedShares || startup.esopReservedShares || 0;
                          
-                         // CRITICAL DEBUG: Check what we're actually using
-                         console.log('🚨 CRITICAL - ESOP calculation values:', {
-                             esopData,
-                             esopDataEsopReservedShares: esopData?.esopReservedShares,
-                             startupEsopReservedShares: startup.esopReservedShares,
-                             esopReservedShares,
-                             esopReservedSharesType: typeof esopReservedShares
-                         });
+                         if (process.env.NODE_ENV === 'development') {
+                             console.log('🚨 CRITICAL - ESOP calculation values:', {
+                                 esopData,
+                                 esopDataEsopReservedShares: esopData?.esopReservedShares,
+                                 startupEsopReservedShares: startup.esopReservedShares,
+                                 esopReservedShares,
+                                 esopReservedSharesType: typeof esopReservedShares
+                             });
+                         }
                          
                          // Calculate total shares using comprehensive function
                          const calculatedTotalShares = calculateTotalShares();
-                         
-                         // CRITICAL DEBUG: Check if esopData is null
-                         console.log('🚨 CRITICAL DEBUG - esopData Status:', {
-                             esopDataIsNull: esopData === null,
-                             esopDataIsUndefined: esopData === undefined,
-                             esopDataType: typeof esopData,
-                             esopDataValue: esopData,
-                             esopDataEsopReservedShares: esopData?.esopReservedShares,
-                             esopDataEsopReservedSharesType: typeof esopData?.esopReservedShares
-                         });
-                         
-                         // Debug logging
-                         console.log('🔍 RECREATED Total Shares Calculation:', {
-                             totalFounderShares,
-                             totalInvestorShares,
-                             esopReservedShares,
-                             totalRecognitionShares,
-                             calculatedTotalShares,
-                             esopData: esopData,
-                             esopDataEsopReservedShares: esopData?.esopReservedShares
-                         });
                          
                          if (calculatedTotalShares > 0) {
                              return (
@@ -3186,14 +3246,16 @@ const CapTableTab: React.FC<CapTableTabProps> = ({ startup, userRole, user, onAc
                                                     const esopReservedShares = startup.esopReservedShares || 0;
                                                     const calculatedTotalShares = totalFounderShares + totalInvestorShares + esopReservedShares;
                                                     
-                                                    console.log('🔍 Founder equity check:', {
-                                                        name: founder.name,
-                                                        equityPercentage: founder.equityPercentage,
-                                                        equityType: typeof founder.equityPercentage,
-                                                        shares: founder.shares,
-                                                        sharesType: typeof founder.shares,
-                                                        calculatedTotalShares: calculatedTotalShares
-                                                    });
+                                                    if (process.env.NODE_ENV === 'development') {
+                                                        console.log('🔍 Founder equity check:', {
+                                                            name: founder.name,
+                                                            equityPercentage: founder.equityPercentage,
+                                                            equityType: typeof founder.equityPercentage,
+                                                            shares: founder.shares,
+                                                            sharesType: typeof founder.shares,
+                                                            calculatedTotalShares: calculatedTotalShares
+                                                        });
+                                                    }
                                                     
                                                     const actualEquityPercentage = founder.shares && calculatedTotalShares > 0 
                                                         ? (founder.shares / calculatedTotalShares) * 100 

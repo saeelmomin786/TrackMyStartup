@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion, Star, Settings, X } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
@@ -36,6 +36,9 @@ import { intakeCRMService } from '../lib/intakeCRMService';
 import { form2ResponseService } from '../lib/form2ResponseService';
 import { Form2SubmissionModal } from './Form2SubmissionModal';
 import { IntakeCRMBoard } from './IntakeCRMBoard';
+import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../lib/advisorConnectionRequestService';
+import FacilitatorProfileForm from './facilitator/FacilitatorProfileForm';
+import FacilitatorCard from './facilitator/FacilitatorCard';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -48,7 +51,7 @@ interface FacilitatorViewProps {
   onLogout?: () => void;
 }
 
-type FacilitatorTab = 'dashboard' | 'discover' | 'intakeManagement' | 'trackMyStartups' | 'ourInvestments';
+type FacilitatorTab = 'dashboard' | 'discover' | 'intakeManagement' | 'trackMyStartups' | 'ourInvestments' | 'collaboration' | 'portfolio';
 
 // Local opportunity type for facilitator postings
 type IncubationOpportunity = {
@@ -205,7 +208,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   };
   const [activeTab, setActiveTab] = useState<FacilitatorTab>((() => {
     const fromUrl = (getQueryParam('tab') as FacilitatorTab) || 'dashboard';
-    const valid: FacilitatorTab[] = ['dashboard','discover','intakeManagement','trackMyStartups','ourInvestments'];
+    const valid: FacilitatorTab[] = ['dashboard','discover','intakeManagement','trackMyStartups','ourInvestments','collaboration','portfolio'];
     return valid.includes(fromUrl) ? fromUrl : 'dashboard';
   })());
   // Keep URL in sync when tab changes
@@ -241,8 +244,24 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [favoritedPitches, setFavoritedPitches] = useState<Set<number>>(new Set());
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyValidated, setShowOnlyValidated] = useState(false);
+  const [showOnlyRecommendations, setShowOnlyRecommendations] = useState(false);
   const [shuffledPitches, setShuffledPitches] = useState<ActiveFundraisingStartup[]>([]);
+  const [receivedRecommendations, setReceivedRecommendations] = useState<Array<{startup_id: number, sender_name: string, message?: string, created_at: string}>>([]);
   const [facilitatorId, setFacilitatorId] = useState<string | null>(null);
+  
+  // Collaboration state
+  const [collaborationSubTab, setCollaborationSubTab] = useState<'explore-collaborators' | 'myCollaborators' | 'collaboratorRequests'>('explore-collaborators');
+  const [collaborationRequests, setCollaborationRequests] = useState<AdvisorConnectionRequest[]>([]);
+  const [loadingCollaborationRequests, setLoadingCollaborationRequests] = useState(false);
+  const [acceptedCollaborators, setAcceptedCollaborators] = useState<AdvisorConnectionRequest[]>([]);
+  const [collaboratorProfiles, setCollaboratorProfiles] = useState<{[key: string]: any}>({});
+  const [locallyRejectedRequestKeys, setLocallyRejectedRequestKeys] = useState<Set<string>>(new Set());
+  const [showLaunchingSoonModal, setShowLaunchingSoonModal] = useState(false);
+  const [users, setUsers] = useState<any[]>([]);
+  
+  // Portfolio state
+  const [previewProfile, setPreviewProfile] = useState<any>(null);
+  
   const [myPostedOpportunities, setMyPostedOpportunities] = useState<IncubationOpportunity[]>([]);
   const [opportunityApplicationCounts, setOpportunityApplicationCounts] = useState<Map<string, number>>(new Map());
   const [myReceivedApplications, setMyReceivedApplications] = useState<ReceivedApplication[]>([]);
@@ -1772,6 +1791,151 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       .finally(() => { if (mounted) setIsLoadingPitches(false); });
     return () => { mounted = false; };
   }, [activeTab]);
+
+  // Load received recommendations for facilitator
+  useEffect(() => {
+    if (activeTab !== 'discover') return;
+    const loadReceivedRecommendations = async () => {
+      try {
+        if (!facilitatorId) {
+          setReceivedRecommendations([]);
+          return;
+        }
+
+        // Fetch recommendations sent to this facilitator
+        const { data, error } = await supabase
+          .from('facilitator_recommendations')
+          .select('*')
+          .eq('facilitator_id', facilitatorId)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Error fetching facilitator recommendations:', error);
+          setReceivedRecommendations([]);
+          return;
+        }
+
+        setReceivedRecommendations(data || []);
+      } catch (error) {
+        console.error('Error loading facilitator recommendations:', error);
+        setReceivedRecommendations([]);
+      }
+    };
+
+    loadReceivedRecommendations();
+  }, [activeTab, facilitatorId]);
+
+  // Load pending collaboration requests
+  useEffect(() => {
+    const loadPendingCollaborationRequests = async () => {
+      if (activeTab === 'collaboration' && facilitatorId) {
+        setLoadingCollaborationRequests(true);
+        try {
+          const requests = await advisorConnectionRequestService.getCollaboratorRequests(facilitatorId);
+          setCollaborationRequests(requests.filter(r => r.status === 'pending'));
+        } catch (error) {
+          console.error('Error loading collaboration requests:', error);
+        } finally {
+          setLoadingCollaborationRequests(false);
+        }
+      }
+    };
+    loadPendingCollaborationRequests();
+  }, [activeTab, facilitatorId]);
+
+  // Load accepted collaborators and their profiles
+  useEffect(() => {
+    const loadAcceptedCollaborators = async () => {
+      if (collaborationRequests.length === 0 && acceptedCollaborators.length === 0) return;
+      
+      const allRequests = [...collaborationRequests, ...acceptedCollaborators];
+      const uniqueRequesterIds = Array.from(new Set(allRequests.map(r => r.requester_id)));
+
+      if (uniqueRequesterIds.length === 0) return;
+
+      try {
+        // Load user profiles
+        const { data: userProfilesData, error: userProfilesError } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .in('auth_user_id', uniqueRequesterIds);
+
+        if (userProfilesError) {
+          console.error('Error loading user profiles:', userProfilesError);
+          return;
+        }
+
+        const usersMap: any[] = userProfilesData || [];
+        setUsers(usersMap);
+
+        // Load specific profile data for each user type
+        const profilesMap: {[key: string]: any} = {};
+        
+        for (const request of allRequests) {
+          const user = usersMap.find(u => u.auth_user_id === request.requester_id);
+          if (!user) continue;
+
+          try {
+            let profileData = null;
+            
+            switch (request.requester_type) {
+              case 'Investor':
+                const { data: investorData } = await supabase
+                  .from('investor_profiles')
+                  .select('*')
+                  .eq('user_id', request.requester_id)
+                  .single();
+                profileData = investorData;
+                break;
+              case 'Investment Advisor':
+                const { data: advisorData } = await supabase
+                  .from('investment_advisor_profiles')
+                  .select('*')
+                  .eq('user_id', request.requester_id)
+                  .single();
+                profileData = advisorData;
+                break;
+              case 'Mentor':
+                const { data: mentorData } = await supabase
+                  .from('mentor_profiles')
+                  .select('*')
+                  .eq('user_id', request.requester_id)
+                  .single();
+                profileData = mentorData;
+                break;
+            }
+            
+            if (profileData) {
+              profilesMap[request.requester_id] = profileData;
+            }
+          } catch (err) {
+            console.error(`Error loading ${request.requester_type} profile:`, err);
+          }
+        }
+
+        setCollaboratorProfiles(profilesMap);
+      } catch (error) {
+        console.error('Error loading collaborator data:', error);
+      }
+    };
+
+    loadAcceptedCollaborators();
+  }, [collaborationRequests, acceptedCollaborators]);
+
+  // Load accepted collaborators on collaboration tab
+  useEffect(() => {
+    const loadAcceptedRequests = async () => {
+      if (activeTab === 'collaboration' && facilitatorId) {
+        try {
+          const requests = await advisorConnectionRequestService.getCollaboratorRequests(facilitatorId);
+          setAcceptedCollaborators(requests.filter(r => r.status === 'accepted'));
+        } catch (error) {
+          console.error('Error loading accepted collaborators:', error);
+        }
+      }
+    };
+    loadAcceptedRequests();
+  }, [activeTab, facilitatorId]);
 
   // Keep selected pitch in URL when on discover tab
   useEffect(() => {
@@ -4641,6 +4805,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         // Apply filters
         if (showOnlyValidated) list = list.filter(s => s.complianceStatus === ComplianceStatus.Compliant);
         if (showOnlyFavorites) list = list.filter(s => favoritedPitches.has(s.id));
+        if (showOnlyRecommendations) {
+          const recommendedStartupIds = new Set(receivedRecommendations.map(rec => rec.startup_id));
+          list = list.filter(s => recommendedStartupIds.has(s.id));
+        }
 
         return (
           <div className="animate-fade-in max-w-4xl mx-auto w-full">
@@ -4669,9 +4837,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
                   <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <button
-                      onClick={() => { setShowOnlyValidated(false); setShowOnlyFavorites(false); }}
+                      onClick={() => { setShowOnlyValidated(false); setShowOnlyFavorites(false); setShowOnlyRecommendations(false); }}
                       className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                        !showOnlyValidated && !showOnlyFavorites ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-600 border border-slate-200'
+                        !showOnlyValidated && !showOnlyFavorites && !showOnlyRecommendations ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-600 border border-slate-200'
                       }`}
                     >
                       <Film className="h-4 w-4" />
@@ -4679,9 +4847,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     </button>
 
                     <button
-                      onClick={() => { setShowOnlyValidated(true); setShowOnlyFavorites(false); }}
+                      onClick={() => { setShowOnlyValidated(true); setShowOnlyFavorites(false); setShowOnlyRecommendations(false); }}
                       className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
-                        showOnlyValidated && !showOnlyFavorites ? 'bg-green-600 text-white shadow-green-200' : 'bg-white text-slate-600 hover:bg-green-50 hover:text-green-600 border border-slate-200'
+                        showOnlyValidated && !showOnlyFavorites && !showOnlyRecommendations ? 'bg-green-600 text-white shadow-green-200' : 'bg-white text-slate-600 hover:bg-green-50 hover:text-green-600 border border-slate-200'
                       }`}
                     >
                       <CheckCircle className={`h-4 w-4 ${showOnlyValidated && !showOnlyFavorites ? 'fill-current' : ''}`} />
@@ -4689,13 +4857,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     </button>
 
                     <button
-                      onClick={() => { setShowOnlyValidated(false); setShowOnlyFavorites(true); }}
+                      onClick={() => { setShowOnlyValidated(false); setShowOnlyFavorites(true); setShowOnlyRecommendations(false); }}
                       className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
                         showOnlyFavorites ? 'bg-red-600 text-white shadow-red-200' : 'bg-white text-slate-600 hover:bg-red-50 hover:text-red-600 border border-slate-200'
                       }`}
                     >
                       <Heart className={`h-4 w-4 ${showOnlyFavorites ? 'fill-current' : ''}`} />
                       <span className="hidden sm:inline">Favorites</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setShowOnlyValidated(false); setShowOnlyFavorites(false); setShowOnlyRecommendations(true); }}
+                      className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 shadow-sm ${
+                        showOnlyRecommendations ? 'bg-orange-600 text-white shadow-orange-200' : 'bg-white text-slate-600 hover:bg-orange-50 hover:text-orange-600 border border-slate-200'
+                      }`}
+                    >
+                      <Star className={`h-4 w-4 ${showOnlyRecommendations ? 'fill-current' : ''}`} />
+                      <span className="hidden sm:inline">Recommendations</span>
                     </button>
                   </div>
 
@@ -4726,148 +4904,263 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 <div className="max-w-sm mx-auto">
                   <Film className="h-16 w-16 text-slate-400 mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-slate-800 mb-2">
-                    {searchTerm.trim() ? 'No Matching Startups' : showOnlyValidated ? 'No Verified Startups' : showOnlyFavorites ? 'No Favorited Pitches' : 'No Active Fundraising'}
+                    {searchTerm.trim() ? 'No Matching Startups' : showOnlyValidated ? 'No Verified Startups' : showOnlyFavorites ? 'No Favorited Pitches' : showOnlyRecommendations ? 'No Recommendations' : 'No Active Fundraising'}
                   </h3>
                   <p className="text-slate-500">
-                    {searchTerm.trim() ? 'No startups found matching your search. Try adjusting your search terms or filters.' : showOnlyValidated ? 'No Startup Nation verified startups are currently fundraising. Try removing the verification filter or check back later.' : showOnlyFavorites ? 'Start favoriting pitches to see them here.' : 'No startups are currently fundraising. Check back later for new opportunities.'}
+                    {searchTerm.trim() ? 'No startups found matching your search. Try adjusting your search terms or filters.' : showOnlyValidated ? 'No Startup Nation verified startups are currently fundraising. Try removing the verification filter or check back later.' : showOnlyFavorites ? 'Start favoriting pitches to see them here.' : showOnlyRecommendations ? 'No startups have been recommended to you yet. Recommendations from investors or advisors will appear here.' : 'No startups are currently fundraising. Check back later for new opportunities.'}
                   </p>
                 </div>
               </Card>
             ) : (
-              <div className="space-y-8">
+              <div className="space-y-6 sm:space-y-8">
                 {list.map(inv => {
                   const videoEmbedInfo = inv.pitchVideoUrl ? getVideoEmbedUrl(inv.pitchVideoUrl, false) : null;
                   const embedUrl = videoEmbedInfo?.embedUrl || null;
                   const videoSource = videoEmbedInfo?.source || null;
+                  // Find recommendation info for this startup
+                  const recommendation = receivedRecommendations.find(rec => rec.startup_id === inv.id);
                   return (
-                    <Card key={inv.id} className="!p-0 overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 bg-white">
-                      {/* Video section */}
-                      <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-                        {embedUrl ? (
-                          playingVideoId === inv.id ? (
-                            <div className="relative w-full h-full">
-                              {videoSource === 'direct' ? (
-                                <video
-                                  src={embedUrl}
-                                  controls
-                                  autoPlay
-                                  muted
-                                  playsInline
-                                  className="absolute top-0 left-0 w-full h-full object-cover"
+                    <div key={inv.id} className="bg-white rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border-0 overflow-hidden">
+                      <div className="flex flex-col md:flex-row md:items-stretch gap-0">
+                        {/* Logo/Video Section - Left Side - Show video first if available, then logo */}
+                        <div className="md:w-2/5 lg:w-1/3 relative aspect-[16/9] md:aspect-auto md:min-h-full bg-white">
+                          {/* Priority 1: Show video if available */}
+                          {embedUrl ? (
+                            playingVideoId === inv.id ? (
+                              <div className="relative w-full h-full">
+                                {videoSource === 'direct' ? (
+                                  <video
+                                    src={embedUrl}
+                                    controls
+                                    autoPlay
+                                    muted
+                                    playsInline
+                                    className="absolute top-0 left-0 w-full h-full object-cover"
+                                  >
+                                    Your browser does not support the video tag.
+                                  </video>
+                                ) : (
+                                  <iframe
+                                    src={embedUrl}
+                                    title={`Pitch video for ${inv.name}`}
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                    className="absolute top-0 left-0 w-full h-full"
+                                  ></iframe>
+                                )}
+                                <button
+                                  onClick={() => setPlayingVideoId(null)}
+                                  className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm z-10"
                                 >
-                                  Your browser does not support the video tag.
-                                </video>
-                              ) : (
-                              <iframe
-                                src={embedUrl}
-                                title={`Pitch video for ${inv.name}`}
-                                frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                                className="absolute top-0 left-0 w-full h-full"
-                              ></iframe>
-                              )}
-                              <button
-                                onClick={() => setPlayingVideoId(null)}
-                                className="absolute top-4 right-4 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 transition-all duration-200 backdrop-blur-sm"
+                                  ×
+                                </button>
+                              </div>
+                            ) : (
+                              <div
+                                className="relative w-full h-full group cursor-pointer bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"
+                                onClick={() => setPlayingVideoId(inv.id)}
                               >
-                                ×
-                              </button>
-                            </div>
-                          ) : (
-                            <div 
-                              className="relative w-full h-full group cursor-pointer"
-                              onClick={() => setPlayingVideoId(inv.id)}
-                            >
-                              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
-                                  <svg className="w-10 h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="M8 5v14l11-7z" />
-                                  </svg>
+                                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/40" />
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <div className="w-16 h-16 md:w-20 md:h-20 bg-red-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-red-500/50">
+                                    <svg className="w-8 h-8 md:w-10 md:h-10 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                      <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                  </div>
+                                </div>
+                                <div className="absolute bottom-4 left-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                  <p className="text-xs md:text-sm font-medium">Click to play</p>
                                 </div>
                               </div>
-                              <div className="absolute bottom-4 left-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                <p className="text-sm font-medium">Click to play</p>
+                            )
+                          ) : inv.logoUrl && inv.logoUrl !== '#' && inv.logoUrl.trim() !== '' ? (
+                            // Priority 2: Show logo if no video
+                            <div className="w-full h-full flex items-center justify-center bg-white p-4 sm:p-6">
+                              <img 
+                                src={inv.logoUrl} 
+                                alt={`${inv.name} Logo`} 
+                                className="object-contain w-full h-full max-w-full max-h-full" 
+                                onError={(e) => {
+                                  // If image fails to load, hide it
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            // Only show placeholder if no logo and no video
+                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-800">
+                              <div className="text-center text-slate-400">
+                                <Video className="h-12 w-12 md:h-16 md:w-16 mx-auto mb-2 opacity-50" />
+                                <p className="text-xs md:text-sm">No media available</p>
                               </div>
                             </div>
-                          )
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-slate-400">
-                            <div className="text-center">
-                              <Video className="h-16 w-16 mx-auto mb-2 opacity-50" />
-                              <p className="text-sm">No video available</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Content */}
-                      <div className="p-6">
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex-1">
-                            <h3 className="text-2xl font-bold text-slate-800 mb-2">{inv.name}</h3>
-                            <p className="text-slate-600 font-medium">{inv.sector}</p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {inv.complianceStatus === ComplianceStatus.Compliant && (
-                              <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
-                                <CheckCircle className="h-3 w-3" />
-                                Verified
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex items-center gap-4 mt-6">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            className={`!rounded-full !p-3 transition-all duration-200 ${
-                              favoritedPitches.has(inv.id) ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200' : 'hover:bg-red-50 hover:text-red-600 border border-slate-200'
-                            }`}
-                            onClick={() => handleFavoriteToggle(inv.id)}
-                          >
-                            <Heart className={`h-5 w-5 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
-                          </Button>
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleShare(inv)}
-                            className="!rounded-full !p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
-                          >
-                            <Share2 className="h-5 w-5" />
-                          </Button>
-
-                          {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
-                            <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
-                              <Button size="sm" variant="secondary" className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200">
-                                <FileText className="h-4 w-4 mr-2" /> View Deck
-                              </Button>
-                            </a>
                           )}
                         </div>
-                      </div>
 
-                      {/* Footer */}
-                      <div className="bg-gradient-to-r from-slate-50 to-blue-50 px-6 py-4 flex justify-between items-center border-t border-slate-200">
-                        <div className="text-base">
-                          <span className="font-semibold text-slate-800">Ask:</span> {(() => {
-                            const ccy = (inv as any).currency || (inv as any).startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
-                            const sym = getCurrencySymbol(ccy);
-                            return `${sym}${inv.investmentValue.toLocaleString()}`;
-                          })()} for <span className="font-semibold text-blue-600">{inv.equityAllocation}%</span> equity
-                        </div>
-                        {inv.complianceStatus === ComplianceStatus.Compliant && (
-                          <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
-                            <CheckCircle className="h-4 w-4" />
-                            <span className="text-xs font-semibold">Verified</span>
+                        {/* Content Section - Right Side */}
+                        <div className="md:w-3/5 lg:w-2/3 p-4 sm:p-6 flex flex-col">
+                          <div className="flex flex-col sm:flex-row items-start justify-between mb-4 gap-3">
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2 break-words">{inv.name}</h3>
+                              {/* Domain, Round, Stage in one line */}
+                              <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                                {inv.domain && (
+                                  <span>
+                                    <span className="font-medium text-slate-700">Domain:</span> {inv.domain}
+                                  </span>
+                                )}
+                                {inv.fundraisingType && (
+                                  <>
+                                    {inv.domain && <span className="text-slate-300">•</span>}
+                                    <span>
+                                      <span className="font-medium text-slate-700">Round:</span> {inv.fundraisingType}
+                                    </span>
+                                  </>
+                                )}
+                                {inv.stage && (
+                                  <>
+                                    {(inv.domain || inv.fundraisingType) && <span className="text-slate-300">•</span>}
+                                    <span>
+                                      <span className="font-medium text-slate-700">Stage:</span> {inv.stage}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                              {/* Recommendation Badge and Sender Info */}
+                              {recommendation && (
+                                <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
+                                  <div className="flex items-center gap-2">
+                                    <Star className="h-4 w-4 text-orange-600 fill-current" />
+                                    <p className="text-sm font-medium text-orange-800">
+                                      Recommended by {recommendation.sender_name || 'Unknown'}
+                                    </p>
+                                  </div>
+                                  {recommendation.message && (
+                                    <p className="text-xs text-orange-700 mt-1 italic">
+                                      "{recommendation.message}"
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {recommendation && (
+                                <div className="flex items-center gap-1 bg-gradient-to-r from-orange-500 to-orange-600 text-white px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-medium shadow-sm">
+                                  <Star className="h-3 w-3 fill-current" />
+                                  <span className="hidden xs:inline">Recommended</span>
+                                </div>
+                              )}
+                              {inv.isStartupNationValidated && (
+                                <div className="flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-medium shadow-sm">
+                                  <CheckCircle className="h-3 w-3" />
+                                  <span className="hidden xs:inline">Verified</span>
+                                </div>
+                              )}
+                              <button
+                                onClick={() => handleShare(inv)}
+                                className="!rounded-full !p-2 sm:!p-3 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all duration-200 border border-slate-200"
+                              >
+                                <Share2 className="h-4 w-4 sm:h-5 sm:w-5" />
+                              </button>
+                            </div>
                           </div>
-                        )}
+
+                          {/* Document Buttons Row - First Row */}
+                          <div className="flex flex-wrap items-center gap-2 mt-3 sm:mt-4">
+                            {inv.pitchDeckUrl && inv.pitchDeckUrl !== '#' && (
+                              <a href={inv.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[120px]">
+                                <button className="w-full hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                                  <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> <span className="hidden xs:inline">View </span>Deck
+                                </button>
+                              </a>
+                            )}
+
+                            {inv.businessPlanUrl && inv.businessPlanUrl !== '#' && (
+                              <a href={inv.businessPlanUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[140px]">
+                                <button className="w-full hover:bg-purple-50 hover:text-purple-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                                  <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> <span className="hidden xs:inline">Business </span>Plan
+                                </button>
+                              </a>
+                            )}
+
+                            {inv.onePagerUrl && inv.onePagerUrl !== '#' && (
+                              <a href={inv.onePagerUrl} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-[100px] sm:min-w-[120px]">
+                                <button className="w-full hover:bg-emerald-50 hover:text-emerald-600 transition-all duration-200 border border-slate-200 bg-white text-xs sm:text-sm py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg font-medium">
+                                  <FileText className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" /> One-Pager
+                                </button>
+                              </a>
+                            )}
+                          </div>
+
+                          {/* Action Buttons Row - Second Row */}
+                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2">
+                            <button
+                              onClick={() => handleFavoriteToggle(inv.id)}
+                              className={`!rounded-full !p-1.5 sm:!p-2 transition-all duration-200 ${
+                                favoritedPitches.has(inv.id)
+                                  ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white shadow-lg shadow-red-200'
+                                  : 'hover:bg-red-50 hover:text-red-600 border border-slate-200 bg-white'
+                              }`}
+                            >
+                              <Heart className={`h-3 w-3 sm:h-4 sm:w-4 ${favoritedPitches.has(inv.id) ? 'fill-current' : ''}`} />
+                            </button>
+                          </div>
+
+                          {/* Investment Details Footer */}
+                          <div className="mt-auto pt-4 border-t border-slate-200">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
+                              <div className="flex items-center gap-4 flex-wrap">
+                                <div className="text-sm sm:text-base">
+                                  <span className="font-semibold text-slate-800">Ask:</span> {(() => {
+                                    const ccy = (inv as any).currency || (inv as any).startup?.currency || (currentUser?.country ? resolveCurrency(currentUser.country) : 'USD');
+                                    const sym = getCurrencySymbol(ccy);
+                                    return `${sym}${inv.investmentValue.toLocaleString()}`;
+                                  })()} for <span className="font-semibold text-purple-600">{inv.equityAllocation}%</span> equity
+                                </div>
+                                {(inv.websiteUrl || inv.linkedInUrl) && (
+                                  <div className="flex items-center gap-4">
+                                    {inv.websiteUrl && inv.websiteUrl !== '#' && (
+                                      <a 
+                                        href={inv.websiteUrl} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                                        title={inv.websiteUrl}
+                                      >
+                                        <Globe className="h-4 w-4" />
+                                        <span className="truncate max-w-[200px]">Website</span>
+                                        <ExternalLink className="h-3 w-3 opacity-50" />
+                                      </a>
+                                    )}
+                                    {inv.linkedInUrl && inv.linkedInUrl !== '#' && (
+                                      <a 
+                                        href={inv.linkedInUrl} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+                                        title={inv.linkedInUrl}
+                                      >
+                                        <Linkedin className="h-4 w-4" />
+                                        <span className="truncate max-w-[200px]">LinkedIn</span>
+                                        <ExternalLink className="h-3 w-3 opacity-50" />
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              {inv.complianceStatus === ComplianceStatus.Compliant && (
+                                <div className="flex items-center gap-1 text-green-600" title="This startup has been verified by Startup Nation">
+                                  <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+                                  <span className="text-xs font-semibold">Verified</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </Card>
+                    </div>
                   );
                 })}
               </div>
@@ -5224,6 +5517,259 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             </Card>
           </div>
         );
+      case 'collaboration':
+        return (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Collaboration</h2>
+                  <p className="text-sm text-slate-600">Manage collaborators and incoming requests.</p>
+                </div>
+              </div>
+
+              <div className="border-b border-slate-200 mb-4 flex flex-wrap gap-4">
+                <button
+                  onClick={() => setCollaborationSubTab('explore-collaborators')}
+                  className={`pb-2 text-sm font-medium ${
+                    collaborationSubTab === 'explore-collaborators'
+                      ? 'text-blue-600 border-b-2 border-blue-600'
+                      : 'text-slate-600 hover:text-slate-800 border-b-2 border-transparent'
+                  }`}
+                >
+                  Explore Collaborators
+                </button>
+                <button
+                  onClick={() => setCollaborationSubTab('myCollaborators')}
+                  className={`pb-2 text-sm font-medium ${
+                    collaborationSubTab === 'myCollaborators'
+                      ? 'text-blue-600 border-b-2 border-blue-600'
+                      : 'text-slate-600 hover:text-slate-800 border-b-2 border-transparent'
+                  }`}
+                >
+                  My Collaborators
+                </button>
+                <button
+                  onClick={() => setCollaborationSubTab('collaboratorRequests')}
+                  className={`pb-2 text-sm font-medium ${
+                    collaborationSubTab === 'collaboratorRequests'
+                      ? 'text-blue-600 border-b-2 border-blue-600'
+                      : 'text-slate-600 hover:text-slate-800 border-b-2 border-transparent'
+                  }`}
+                >
+                  Collaborator Requests
+                </button>
+              </div>
+
+              {loadingCollaborationRequests && collaborationSubTab !== 'explore-collaborators' ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-slate-600">Loading collaboration data...</p>
+                </div>
+              ) : collaborationSubTab === 'explore-collaborators' ? (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4">Explore by Profile Type</h3>
+                    <p className="text-sm text-slate-600 mb-6">Browse and connect with different types of collaborators</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {[
+                      { role: 'Investment Advisor', icon: Briefcase, color: 'bg-purple-100 text-purple-700 hover:bg-purple-200', description: 'Connect with investment advisors' },
+                      { role: 'Mentor', icon: Users, color: 'bg-green-100 text-green-700 hover:bg-green-200', description: 'Connect with mentors' },
+                      { role: 'Investor', icon: Gift, color: 'bg-blue-100 text-blue-700 hover:bg-blue-200', description: 'Connect with investors' },
+                      { role: 'CA', icon: FileText, color: 'bg-orange-100 text-orange-700 hover:bg-orange-200', description: 'Connect with Chartered Accountants' },
+                      { role: 'CS', icon: Shield, color: 'bg-pink-100 text-pink-700 hover:bg-pink-200', description: 'Connect with Company Secretaries' },
+                      { role: 'Incubation', icon: Building2, color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200', description: 'Connect with other incubation centers' },
+                    ].map((profileType) => {
+                      const IconComponent = profileType.icon;
+                      return (
+                        <Card
+                          key={profileType.role}
+                          className="p-6 hover:shadow-lg transition-all duration-200 border border-slate-200 text-center"
+                        >
+                          <div className="flex flex-col items-center">
+                            <div className={`w-16 h-16 rounded-full ${profileType.color} flex items-center justify-center mb-4 transition-colors`}>
+                              <IconComponent className="h-8 w-8" />
+                            </div>
+                            <h4 className="text-lg font-semibold text-slate-900 mb-2">
+                              {profileType.role}
+                            </h4>
+                            <p className="text-sm text-slate-600 mb-4">
+                              {profileType.description}
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full"
+                              onClick={() => setShowLaunchingSoonModal(true)}
+                              disabled={true}
+                            >
+                              <Eye className="h-3 w-3 mr-2" />
+                              Explore
+                            </Button>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : collaborationSubTab === 'myCollaborators' ? (
+                <div>
+                  {acceptedCollaborators.length === 0 ? (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
+                      <p className="font-medium text-slate-800 mb-1">No collaborators yet</p>
+                      <p className="text-slate-600">Accepted collaborators will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {acceptedCollaborators.map((request) => {
+                        const requesterUser = users.find(u => u.id === request.requester_id);
+                        const collaboratorProfile = collaboratorProfiles[request.requester_id] || null;
+                        const firmName = collaboratorProfile?.firm_name || collaboratorProfile?.investor_name || collaboratorProfile?.advisor_name || collaboratorProfile?.mentor_name || '';
+
+                        return (
+                          <Card key={request.id} className="p-4">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <h4 className="text-lg font-semibold text-slate-900">{firmName || requesterUser?.name || 'Unknown'}</h4>
+                                <p className="text-sm text-slate-600">{request.requester_type}</p>
+                                {collaboratorProfile?.location && (
+                                  <p className="text-xs text-slate-500 mt-1">{collaboratorProfile.location}</p>
+                                )}
+                              </div>
+                              <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Accepted
+                              </span>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  {collaborationRequests.length === 0 ? (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
+                      <p className="font-medium text-slate-800 mb-1">No pending requests</p>
+                      <p className="text-slate-600">Collaboration requests will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {collaborationRequests.map((request) => {
+                        const requesterUser = users.find(u => u.id === request.requester_id);
+                        const requestKey = `${request.requester_id}-${request.requester_type}`;
+                        if (locallyRejectedRequestKeys.has(requestKey)) return null;
+
+                        return (
+                          <Card key={request.id} className="p-4">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1">
+                                <h4 className="text-lg font-semibold text-slate-900">{requesterUser?.name || 'Unknown'}</h4>
+                                <p className="text-sm text-slate-600">{request.requester_type}</p>
+                                {request.message && (
+                                  <p className="text-sm text-slate-700 mt-2 italic">"{request.message}"</p>
+                                )}
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={async () => {
+                                    try {
+                                      await advisorConnectionRequestService.updateRequestStatus(request.id, 'accepted');
+                                      setCollaborationRequests(prev => prev.filter(r => r.id !== request.id));
+                                      setAcceptedCollaborators(prev => [...prev, { ...request, status: 'accepted' }]);
+                                      messageService.success('Request Accepted', 'You can now collaborate with this user.');
+                                    } catch (error: any) {
+                                      console.error('Error accepting request:', error);
+                                      messageService.error('Error', error.message || 'Failed to accept collaboration request.');
+                                    }
+                                  }}
+                                >
+                                  Accept
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    try {
+                                      setLocallyRejectedRequestKeys(prev => new Set([...prev, requestKey]));
+                                      await advisorConnectionRequestService.updateRequestStatus(request.id, 'rejected');
+                                      setCollaborationRequests(prev => prev.filter(r => r.id !== request.id));
+                                      messageService.info('Request Rejected', 'The collaboration request has been declined.');
+                                    } catch (error: any) {
+                                      console.error('Error rejecting request:', error);
+                                      setLocallyRejectedRequestKeys(prev => {
+                                        const next = new Set(prev);
+                                        next.delete(requestKey);
+                                        return next;
+                                      });
+                                      messageService.error('Error', error.message || 'Failed to reject collaboration request.');
+                                    }
+                                  }}
+                                >
+                                  Decline
+                                </Button>
+                              </div>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      case 'portfolio':
+        return (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {/* Left Column - Profile Form */}
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Incubation Center Profile</h2>
+                  <p className="text-slate-600 mt-1">
+                    Manage your public profile information and showcase your center's programs and achievements.
+                  </p>
+                </div>
+                <FacilitatorProfileForm
+                  currentUser={currentUser}
+                  onSave={(profile) => {
+                    console.log('Profile saved:', profile);
+                    messageService.success('Profile Saved', 'Your incubation center profile has been updated successfully.');
+                  }}
+                  onProfileChange={(profile) => {
+                    setPreviewProfile(profile);
+                  }}
+                />
+              </div>
+
+              {/* Right Column - Profile Preview */}
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Profile Preview</h2>
+                  <p className="text-slate-600 mt-1">
+                    This is how others will see your center's profile.
+                  </p>
+                </div>
+                {previewProfile ? (
+                  <FacilitatorCard facilitator={previewProfile} />
+                ) : (
+                  <Card className="p-8 text-center">
+                    <div className="text-slate-400 mb-4">
+                      <Building2 className="w-16 h-16 mx-auto mb-4" />
+                    </div>
+                    <p className="text-slate-600">
+                      Fill out your profile information to see a preview of how it will appear to others.
+                    </p>
+                  </Card>
+                )}
+              </div>
+            </div>
+          </div>
+        );
       default:
         return null;
     }
@@ -5285,6 +5831,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           </button>
           <button onClick={() => setActiveTab('discover')} className={`${activeTab === 'discover' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Film className="h-5 w-5" />Discover Pitches
+          </button>
+          <button onClick={() => setActiveTab('collaboration')} className={`${activeTab === 'collaboration' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+            <Users className="h-5 w-5" />Collaboration
+          </button>
+          <button onClick={() => setActiveTab('portfolio')} className={`${activeTab === 'portfolio' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+            <User className="h-5 w-5" />Portfolio
           </button>
         </nav>
       </div>
@@ -6515,6 +7067,30 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 Cancel
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Launching Soon Modal */}
+      {showLaunchingSoonModal && (
+        <Modal
+          isOpen={showLaunchingSoonModal}
+          onClose={() => setShowLaunchingSoonModal(false)}
+          title="Coming Soon"
+        >
+          <div className="p-6 text-center">
+            <div className="mb-4">
+              <div className="w-16 h-16 mx-auto bg-blue-100 rounded-full flex items-center justify-center">
+                <Star className="h-8 w-8 text-blue-600" />
+              </div>
+            </div>
+            <h3 className="text-xl font-semibold text-slate-900 mb-2">Feature Coming Soon</h3>
+            <p className="text-slate-600 mb-6">
+              We're working hard to bring you this exciting collaboration feature. Stay tuned!
+            </p>
+            <Button onClick={() => setShowLaunchingSoonModal(false)}>
+              Got it
+            </Button>
           </div>
         </Modal>
       )}

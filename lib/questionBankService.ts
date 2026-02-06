@@ -457,25 +457,28 @@ class QuestionBankService {
    * Get all answers for a startup (for reference draft)
    */
   async getStartupAnswers(startupId: number): Promise<StartupAnswer[]> {
+    // Fetch without nested question data to avoid RLS issues
     const { data, error } = await supabase
       .from(this.startupAnswersTable)
-      .select(`
-        *,
-        question:application_question_bank(*)
-      `)
+      .select('*')
       .eq('startup_id', startupId)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.warn(`Error fetching startup answers: ${error.message}`);
+      return [];
+    }
 
+    // For each answer, optionally fetch the related question separately
+    // For now, we'll return without the question data to avoid RLS issues
     return (data || []).map((row: any) => ({
       id: row.id,
       startupId: row.startup_id,
       questionId: row.question_id,
       answerText: row.answer_text,
       createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      question: row.question ? this.mapQuestion(row.question) : undefined
+      updatedAt: row.updated_at
+      // Note: question data removed to avoid RLS issues with nested queries
     }));
   }
 
@@ -483,19 +486,36 @@ class QuestionBankService {
    * Get answer for a specific question (if exists)
    */
   async getStartupAnswer(startupId: number, questionId: string): Promise<StartupAnswer | null> {
-    const { data, error } = await supabase
+    // First try to fetch without nested question data to avoid RLS issues
+    let { data, error } = await supabase
       .from(this.startupAnswersTable)
-      .select(`
-        *,
-        question:application_question_bank(*)
-      `)
+      .select('*')
       .eq('startup_id', startupId)
       .eq('question_id', questionId)
       .single();
 
     if (error) {
       if (error.code === 'PGRST116') return null; // Not found
-      throw error;
+      // If we get a 406 or other error, still return null instead of throwing
+      console.warn(`Error fetching startup answer: ${error.message}`);
+      return null;
+    }
+
+    // Try to fetch the related question separately if needed
+    let question: ApplicationQuestion | undefined = undefined;
+    try {
+      const { data: questionData } = await supabase
+        .from(this.questionTable)
+        .select('*')
+        .eq('id', data.question_id)
+        .single();
+      
+      if (questionData) {
+        question = this.mapQuestion(questionData);
+      }
+    } catch (questionError) {
+      // If we can't fetch the question, just continue without it
+      console.warn('Could not fetch related question:', questionError);
     }
 
     return {
@@ -505,7 +525,7 @@ class QuestionBankService {
       answerText: data.answer_text,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
-      question: data.question ? this.mapQuestion(data.question) : undefined
+      question: question
     };
   }
 

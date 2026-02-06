@@ -650,13 +650,13 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                             
                             if (userIds.length > 0) {
                                 const { data: usersData } = await supabase
-                                    .from('users')
-                                    .select('id, name, email')
-                                    .in('id', userIds);
+                                    .from('user_profiles')
+                                    .select('auth_user_id, name, email')
+                                    .in('auth_user_id', userIds);
                                 
                                 if (usersData) {
                                     usersData.forEach((user: any) => {
-                                        userMap[user.id] = { name: user.name || 'Unknown', email: user.email || '' };
+                                        userMap[user.auth_user_id] = { name: user.name || 'Unknown', email: user.email || '' };
                                     });
                                 }
                             }
@@ -908,8 +908,8 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                 .single();
               
               const { data: investorData } = await supabase
-                .from('users')
-                .select('id, name, email')
+                .from('user_profiles')
+                .select('auth_user_id, name, email')
                 .eq('email', offer.investor_email)
                 .single();
               
@@ -4060,14 +4060,16 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               <div className="border-b border-slate-200 mb-6">
                 <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto pb-2" aria-label="Mandate Tabs">
                   {mandates.map((mandate) => (
-                    <button
+                    <div
                       key={mandate.id}
-                      onClick={() => setSelectedMandateId(mandate.id)}
-                      className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-2 ${
+                      className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-2 transition-colors cursor-pointer ${
                         selectedMandateId === mandate.id
                           ? 'border-blue-500 text-blue-600'
                           : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                       }`}
+                      onClick={() => setSelectedMandateId(mandate.id)}
+                      role="tab"
+                      aria-selected={selectedMandateId === mandate.id}
                     >
                       <Filter className="h-4 w-4" />
                       {mandate.name}
@@ -4078,7 +4080,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                               e.stopPropagation();
                               handleEditMandate(mandate);
                             }}
-                            className="p-1 hover:bg-slate-100 rounded"
+                            className="p-1 hover:bg-slate-100 rounded transition-colors"
                             title="Edit mandate"
                           >
                             <Edit className="h-3 w-3" />
@@ -4088,14 +4090,14 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                               e.stopPropagation();
                               handleDeleteMandate(mandate.id);
                             }}
-                            className="p-1 hover:bg-red-100 rounded text-red-600"
+                            className="p-1 hover:bg-red-100 rounded text-red-600 transition-colors"
                             title="Delete mandate"
                           >
                             <X className="h-3 w-3" />
                           </button>
                         </div>
                       )}
-                    </button>
+                    </div>
                   ))}
                 </nav>
               </div>

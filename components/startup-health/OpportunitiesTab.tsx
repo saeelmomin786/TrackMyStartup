@@ -469,9 +469,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 id: data.id,
                 startupId: startup.id,
                 opportunityId: applyingOppId,
-                status: 'pending',
-                pitchDeckUrl: pitchDeckUrl || undefined,
-                pitchVideoUrl: pitchVideo || undefined
+                status: 'pending'
             }]);
 
             setIsApplyModalOpen(false);

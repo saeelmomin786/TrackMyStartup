@@ -733,6 +733,23 @@ export const startupService = {
   }
 }
 
+// Request caching and deduplication
+const requestCache = new Map<string, { promise: Promise<any>; timestamp: number }>();
+const CACHE_TTL = 5000; // 5 seconds cache
+
+function getCachedRequest(key: string): any | null {
+  const cached = requestCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.promise;
+  }
+  requestCache.delete(key);
+  return null;
+}
+
+function setCachedRequest(key: string, promise: Promise<any>) {
+  requestCache.set(key, { promise, timestamp: Date.now() });
+}
+
 // Investment Management
 export const investmentService = {
   // Get new investments
@@ -2678,14 +2695,25 @@ export const investmentService = {
   // Get investment offers for specific user (both regular and co-investment offers)
   async getUserInvestmentOffers(userEmail: string) {
     console.log('🔍 Fetching investment offers for user:', userEmail);
+    
+    // Check if request is already in progress (deduplication)
+    const cacheKey = `getUserInvestmentOffers:${userEmail}`;
+    const cachedPromise = getCachedRequest(cacheKey);
+    if (cachedPromise) {
+      console.log('⏭️ Investment offers fetch already in progress, reusing promise');
+      return cachedPromise;
+    }
+
     try {
-      // Fetch regular investment offers
-      const { data: regularOffers, error: regularError } = await supabase
-        .from('investment_offers')
-        .select(`
-          *,
-          startup:startups(
-            id,
+      // Create the promise for this request
+      const promise = (async () => {
+        // Fetch regular investment offers
+        const { data: regularOffers, error: regularError } = await supabase
+          .from('investment_offers')
+          .select(`
+            *,
+            startup:startups(
+              id,
             name,
             sector,
             user_id,
@@ -2815,10 +2843,13 @@ export const investmentService = {
               // Get startup user information using user_id
               console.log('🔍 Fetching user by user_id:', offer.startup.user_id);
               const { data: startupUserData, error: userError } = await supabase
-                .from('users')
-                .select('id, email, name, investment_advisor_code')
-                .eq('id', offer.startup.user_id)
-                .single();
+                .from('user_profiles')
+                .select('auth_user_id, email, name, investment_advisor_code')
+                .eq('auth_user_id', offer.startup.user_id)
+                .eq('role', 'Startup')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
 
               if (!userError && startupUserData) {
                 offer.startup.startup_user = startupUserData;
@@ -2836,18 +2867,30 @@ export const investmentService = {
           // Always try fallback method
           try {
             console.log('🔍 Trying fallback method for startup_name:', offer.startup_name);
-            const { data: fallbackUserData, error: fallbackError } = await supabase
-              .from('users')
-              .select('id, email, name, investment_advisor_code')
-              .eq('startup_name', offer.startup_name)
-              .eq('role', 'Startup')
-              .single();
+            const { data: startupRow, error: startupNameError } = await supabase
+              .from('startups')
+              .select('user_id')
+              .eq('name', offer.startup_name)
+              .maybeSingle();
 
-            if (!fallbackError && fallbackUserData) {
-              offer.startup.startup_user = fallbackUserData;
-              console.log('🔍 ✅ Added startup user data via fallback for offer:', offer.id, fallbackUserData);
+            if (!startupNameError && startupRow?.user_id) {
+              const { data: fallbackUserData, error: fallbackError } = await supabase
+                .from('user_profiles')
+                .select('auth_user_id, email, name, investment_advisor_code')
+                .eq('auth_user_id', startupRow.user_id)
+                .eq('role', 'Startup')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              if (!fallbackError && fallbackUserData) {
+                offer.startup.startup_user = fallbackUserData;
+                console.log('🔍 ✅ Added startup user data via fallback for offer:', offer.id, fallbackUserData);
+              } else {
+                console.log('🔍 ❌ No startup user found via fallback for:', offer.startup_name, fallbackError);
+              }
             } else {
-              console.log('🔍 ❌ No startup user found via fallback for:', offer.startup_name, fallbackError);
+              console.log('🔍 ❌ No startup user_id found via name lookup for:', offer.startup_name, startupNameError);
             }
           } catch (err) {
             console.log('🔍 ❌ Error in fallback method for offer:', offer.id, err);
@@ -2952,6 +2995,11 @@ export const investmentService = {
       
       console.log('✅ Formatted investor offers (getUserInvestmentOffers):', mappedData.length);
       return mappedData;
+      })();
+      
+      // Cache the promise for deduplication
+      setCachedRequest(cacheKey, promise);
+      return promise;
     } catch (error) {
       console.error('Error in getUserInvestmentOffers:', error);
       return [];

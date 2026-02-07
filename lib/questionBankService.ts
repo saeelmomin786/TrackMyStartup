@@ -72,7 +72,6 @@ class QuestionBankService {
       .from(this.questionTable)
       .select('*')
       .eq('status', 'approved')
-      .or('scope.is.null,scope.eq.global')
       .order('category', { ascending: true })
       .order('usage_count', { ascending: false });
 

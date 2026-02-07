@@ -31,7 +31,6 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
   const [questionOptions, setQuestionOptions] = useState(''); // For select/multiselect options
   const [questionType, setQuestionType] = useState<'text' | 'textarea' | 'number' | 'date' | 'select' | 'multiselect'>('text');
   const [isSaving, setIsSaving] = useState(false);
-  const [isProgramOnly, setIsProgramOnly] = useState(false);
   
   // Reset form when modal opens/closes
   useEffect(() => {
@@ -40,7 +39,6 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
       setCategory('');
       setQuestionOptions('');
       setQuestionType('text');
-      setIsProgramOnly(false);
     }
   }, [isOpen]);
 
@@ -79,8 +77,8 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
         category: selectedQuestionType === 'other' ? (category.trim() || null) : null,
         questionType,
         options,
-        scope: contextOpportunityId && isProgramOnly ? 'opportunity' : 'facilitator',
-        scopeOpportunityId: contextOpportunityId && isProgramOnly ? contextOpportunityId : null
+        scope: 'facilitator',
+        scopeOpportunityId: contextOpportunityId || null
       });
       setQuestionText('');
       setCategory('');
@@ -155,27 +153,14 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
             </p>
           </div>
         )}
-        {contextOpportunityId && (
-          <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-            <input
-              id="programOnlyQuestion"
-              type="checkbox"
-              checked={isProgramOnly}
-              onChange={(e) => setIsProgramOnly(e.target.checked)}
-              className="rounded border-slate-300"
-            />
-            <label htmlFor="programOnlyQuestion" className="text-sm text-slate-700">
-              <span className="font-medium">Add to this form/program only</span> — This question will be auto-approved and available only for this specific form. It won't require admin approval or appear in other programs.
-            </label>
-          </div>
-        )}
         <div className="bg-blue-50 border border-blue-200 rounded-md p-3 flex items-start gap-2">
           <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-blue-800">
-            <p className="font-medium mb-1">How Custom Questions Work:</p>
+            <p className="font-medium mb-1">How This Works:</p>
             <ul className="list-disc list-inside space-y-1">
-              <li><strong>Checked above:</strong> Question added instantly to this form only (no approval needed)</li>
-              <li><strong>Unchecked:</strong> Question available for all your programs (admin approval needed for global use)</li>
+              <li>Your question will be added to this form immediately</li>
+              <li>The question will be sent to admin for approval</li>
+              <li>Once approved, it becomes available in the shared question bank for all facilitators</li>
             </ul>
           </div>
         </div>
@@ -283,16 +268,14 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
         ? selectedCategory 
         : (selectedCategory === 'other' ? questionData.category : null);
       
-      // If this is a program-only question (scope === 'opportunity'), auto-approve it
-      const questionStatus = questionData.scope === 'opportunity' ? 'approved' : 'pending';
-      
+      // Always create with status 'pending' so admin reviews it
       const question = await questionBankService.createQuestion({
         questionText: questionData.questionText,
         category: category || undefined,
         questionType: questionData.questionType as any,
         options: questionData.options,
-        status: questionStatus,
-        scope: questionData.scope,
+        status: 'pending',
+        scope: 'facilitator',
         scopeOpportunityId: questionData.scopeOpportunityId
       });
       
@@ -302,11 +285,7 @@ const QuestionSelector: React.FC<QuestionSelectorProps> = ({
       // Auto-select the new question at the end of the list
       onSelectionChange([...selectedQuestionIds, question.id]);
       
-      const successMessage = questionData.scope === 'opportunity' 
-        ? 'Your question has been added to this program/form only and is ready to use.'
-        : 'Your custom question has been added and can be used immediately in your opportunities. Admin approval is only required to add it to the shared question bank.';
-      
-      messageService.success('Question Added', successMessage);
+      messageService.success('Question Added', 'Your question has been added to this form and sent to admin for approval to be added to the shared question bank.');
     } catch (error: any) {
       throw error;
     }

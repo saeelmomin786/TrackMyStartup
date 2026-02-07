@@ -22,6 +22,24 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
   const [advisorInfo, setAdvisorInfo] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
+  // Detect if we're on a subdomain
+  const isOnSubdomain = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    const hostname = window.location.hostname;
+    // Handle localhost for development
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
+      return false;
+    }
+    const parts = hostname.split('.');
+    if (parts.length >= 3) {
+      const subdomain = parts[0];
+      if (subdomain && subdomain !== 'www') {
+        return true;
+      }
+    }
+    return false;
+  };
+
   useEffect(() => {
     const fetchAdvisorInfo = async () => {
       console.log('🔍 AdvisorAwareLogo: Checking user data:', {
@@ -86,7 +104,9 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
             <h1 className={textClassName}>
               {advisorInfo.firm_name || advisorInfo.name || 'Advisor'}
             </h1>
-            <p className="text-xs text-blue-600 mt-1">Supported by Track My Startup</p>
+            {!isOnSubdomain() && (
+              <p className="text-xs text-blue-600 mt-1">Supported by Track My Startup</p>
+            )}
           </div>
         )}
       </div>

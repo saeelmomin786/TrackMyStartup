@@ -54,7 +54,29 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   
   // Role selection state
-  const [availableRoles, setAvailableRoles] = useState<string[]>(['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Mentor']);
+  // On subdomain, show only Investor and Startup roles
+  const isOnSubdomain = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    const hostname = window.location.hostname;
+    // Handle localhost for development
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
+      return false;
+    }
+    const parts = hostname.split('.');
+    if (parts.length >= 3) {
+      const subdomain = parts[0];
+      if (subdomain && subdomain !== 'www') {
+        return true;
+      }
+    }
+    return false;
+  };
+  
+  const [availableRoles, setAvailableRoles] = useState<string[]>(
+    isOnSubdomain() 
+      ? ['Investor', 'Startup']
+      : ['Investor', 'Startup', 'Startup Facilitation Center', 'Investment Advisor', 'Mentor', 'CA', 'CS']
+  );
   
   // Get current user email if adding profile
   useEffect(() => {
@@ -63,6 +85,16 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
         if (user) {
           setFormData(prev => ({ ...prev, email: user.email }));
         }
+      });
+    }
+    
+    // On subdomain, ensure role is limited to Investor or Startup
+    if (isOnSubdomain()) {
+      setFormData(prev => {
+        if (prev.role !== 'Investor' && prev.role !== 'Startup') {
+          return { ...prev, role: 'Investor' as UserRole };
+        }
+        return prev;
       });
     }
   }, [isAddingProfile]);
@@ -186,16 +218,19 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
         return;
       }
 
-      if (formData.role === 'Startup Facilitation Center' && !formData.centerName?.trim()) {
-        setError('Center name is required for Startup Facilitation Center role');
-        setIsLoading(false);
-        return;
-      }
+      // Only validate center/firm names if on main domain
+      if (!isOnSubdomain()) {
+        if (formData.role === 'Startup Facilitation Center' && !formData.centerName?.trim()) {
+          setError('Center name is required for Startup Facilitation Center role');
+          setIsLoading(false);
+          return;
+        }
 
-      if (formData.role === 'Investment Advisor' && !formData.firmName?.trim()) {
-        setError('Firm name is required for Investment Advisor role');
-        setIsLoading(false);
-        return;
+        if (formData.role === 'Investment Advisor' && !formData.firmName?.trim()) {
+          setError('Firm name is required for Investment Advisor role');
+          setIsLoading(false);
+          return;
+        }
       }
 
       // Create profile directly
@@ -287,16 +322,19 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
       return;
     }
 
-    if (formData.role === 'Startup Facilitation Center' && !formData.centerName.trim()) {
-      setError('Center name is required for Startup Facilitation Center role');
-      setIsLoading(false);
-      return;
-    }
+    // Only validate center/firm names if on main domain
+    if (!isOnSubdomain()) {
+      if (formData.role === 'Startup Facilitation Center' && !formData.centerName.trim()) {
+        setError('Center name is required for Startup Facilitation Center role');
+        setIsLoading(false);
+        return;
+      }
 
-    if (formData.role === 'Investment Advisor' && !formData.firmName.trim()) {
-      setError('Firm name is required for Investment Advisor role');
-      setIsLoading(false);
-      return;
+      if (formData.role === 'Investment Advisor' && !formData.firmName.trim()) {
+        setError('Firm name is required for Investment Advisor role');
+        setIsLoading(false);
+        return;
+      }
     }
 
     // Additional email validation
@@ -436,7 +474,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Center Name - Only show if role is Startup Facilitation Center */}
-        {formData.role === 'Startup Facilitation Center' && (
+        {!isOnSubdomain() && formData.role === 'Startup Facilitation Center' && (
           <Input
             label="Facilitation Center Name"
             id="centerName"
@@ -596,17 +634,32 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
               name="role"
               required
               value={formData.role}
-              onChange={(e) => handleInputChange('role', e.target.value as UserRole)}
+              onChange={(e) => {
+                const newRole = e.target.value as UserRole;
+                // On subdomain, only allow Investor or Startup
+                if (isOnSubdomain()) {
+                  if (newRole !== 'Investor' && newRole !== 'Startup') {
+                    return;
+                  }
+                }
+                handleInputChange('role', newRole);
+              }}
               className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
             >
               <option value="">Select Role</option>
-              {availableRoles.map(role => (
-                <option key={role} value={role}>
-                  {role === 'CA' ? `${role} (Chartered Accountant)` :
-                   role === 'CS' ? `${role} (Company Secretary)` :
-                   role}
-                </option>
-              ))}
+              {availableRoles.map(role => {
+                // Filter roles based on subdomain
+                if (isOnSubdomain() && role !== 'Investor' && role !== 'Startup') {
+                  return null;
+                }
+                return (
+                  <option key={role} value={role}>
+                    {role === 'CA' ? `${role} (Chartered Accountant)` :
+                     role === 'CS' ? `${role} (Company Secretary)` :
+                     role}
+                  </option>
+                );
+              }).filter(Boolean)}
             </select>
           </div>
         </div>
@@ -657,7 +710,7 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
         )}
 
         {/* Firm Name - Only show if role is Investment Advisor */}
-        {formData.role === 'Investment Advisor' && (
+        {!isOnSubdomain() && formData.role === 'Investment Advisor' && (
           <Input
             label="Firm Name"
             id="firmName"

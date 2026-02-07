@@ -3935,6 +3935,23 @@ const App: React.FC = () => {
                 const hasAssignedAdvisor = assignedInvestmentAdvisor && (currentUser?.role === 'Investor' || currentUser?.role === 'Startup');
                 const shouldShowAdvisorLogo = Boolean(isInvestmentAdvisor || hasAssignedAdvisor);
                 
+                // Check if on subdomain
+                const isOnSubdomain = (): boolean => {
+                  if (typeof window === 'undefined') return false;
+                  const hostname = window.location.hostname;
+                  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
+                    return false;
+                  }
+                  const parts = hostname.split('.');
+                  if (parts.length >= 3) {
+                    const subdomain = parts[0];
+                    if (subdomain && subdomain !== 'www') {
+                      return true;
+                    }
+                  }
+                  return false;
+                };
+                
                 console.log('🔍 Header logo display check:', {
                   currentUserRole: currentUser?.role,
                   currentUserLogo: (currentUser as any)?.logo_url,
@@ -3942,42 +3959,101 @@ const App: React.FC = () => {
                   assignedAdvisorLogo: assignedInvestmentAdvisor?.logo_url,
                   isInvestmentAdvisor,
                   hasAssignedAdvisor,
-                  shouldShowAdvisorLogo
+                  shouldShowAdvisorLogo,
+                  isOnSubdomain: isOnSubdomain()
                 });
                 return shouldShowAdvisorLogo;
               })() ? (
                 <div className="flex items-center gap-3">
-                  {((currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url) || 
-                    (assignedInvestmentAdvisor?.logo_url)) ? (
-                    <>
-                      <img 
-                        src={currentUser?.role === 'Investment Advisor' 
-                          ? (currentUser as any).logo_url 
-                          : assignedInvestmentAdvisor?.logo_url} 
-                        alt="Company Logo" 
-                        className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded object-contain bg-white border border-gray-200 p-1"
-                        onError={(e) => {
-                          // Fallback to TrackMyStartup logo if image fails to load
-                          e.currentTarget.style.display = 'none';
-                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                        }}
-                      />
-                      <img src={LogoTMS} alt="TrackMyStartup" className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 object-contain hidden" />
-                    </>
-                  ) : (
-                    <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
-                      <span className="text-purple-600 font-semibold text-sm sm:text-base md:text-lg">IA</span>
-                    </div>
-                  )}
+                  {(() => {
+                    const isOnSubdomain = (): boolean => {
+                      if (typeof window === 'undefined') return false;
+                      const hostname = window.location.hostname;
+                      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
+                        return false;
+                      }
+                      const parts = hostname.split('.');
+                      if (parts.length >= 3) {
+                        const subdomain = parts[0];
+                        if (subdomain && subdomain !== 'www') {
+                          return true;
+                        }
+                      }
+                      return false;
+                    };
+
+                    const hasLogo = currentUser?.role === 'Investment Advisor' 
+                      ? (currentUser as any)?.logo_url 
+                      : assignedInvestmentAdvisor?.logo_url;
+
+                    if (hasLogo) {
+                      return (
+                        <>
+                          <img 
+                            src={currentUser?.role === 'Investment Advisor' 
+                              ? (currentUser as any).logo_url 
+                              : assignedInvestmentAdvisor?.logo_url} 
+                            alt="Company Logo" 
+                            className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded object-contain bg-white border border-gray-200 p-1"
+                            onError={(e) => {
+                              // On subdomain: hide on error (no fallback)
+                              // On main domain: fallback to TrackMyStartup logo
+                              if (isOnSubdomain()) {
+                                e.currentTarget.style.display = 'none';
+                              } else {
+                                e.currentTarget.style.display = 'none';
+                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                              }
+                            }}
+                          />
+                          {/* Fallback logo only shown on main domain */}
+                          {!isOnSubdomain() && (
+                            <img src={LogoTMS} alt="TrackMyStartup" className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 object-contain hidden" />
+                          )}
+                        </>
+                      );
+                    } else if (!isOnSubdomain()) {
+                      // Show IA badge only on main domain if no logo
+                      return (
+                        <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
+                          <span className="text-purple-600 font-semibold text-sm sm:text-base md:text-lg">IA</span>
+                        </div>
+                      );
+                    } else {
+                      // On subdomain with no logo: show blank space
+                      return (
+                        <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded bg-transparent" />
+                      );
+                    }
+                  })()}
                   <div className="min-w-0">
                     <h1 className="text-sm sm:text-lg font-semibold text-gray-800 truncate">
                       {currentUser?.role === 'Investment Advisor' 
                         ? (currentUser as any).firm_name || (currentUser as any).name || 'Investment Advisor'
                         : assignedInvestmentAdvisor?.firm_name || assignedInvestmentAdvisor?.name || 'Investment Advisor'}
                     </h1>
-                    <p className="text-[10px] sm:text-xs text-blue-600 truncate">
-                      Supported by Track My Startup
-                    </p>
+                    {!(() => {
+                      const isOnSubdomain = (): boolean => {
+                        if (typeof window === 'undefined') return false;
+                        const hostname = window.location.hostname;
+                        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
+                          return false;
+                        }
+                        const parts = hostname.split('.');
+                        if (parts.length >= 3) {
+                          const subdomain = parts[0];
+                          if (subdomain && subdomain !== 'www') {
+                            return true;
+                          }
+                        }
+                        return false;
+                      };
+                      return isOnSubdomain();
+                    })() && (
+                      <p className="text-[10px] sm:text-xs text-blue-600 truncate">
+                        Supported by Track My Startup
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : (

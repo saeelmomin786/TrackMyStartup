@@ -17,8 +17,9 @@ import { getVideoEmbedUrl, VideoSource } from '../../lib/videoUtils';
 import { financialsService } from '../../lib/financialsService';
 import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
 import { DashboardMetricsService, DashboardMetrics } from '../../lib/dashboardMetricsService';
+import { complianceRulesIntegrationService } from '../../lib/complianceRulesIntegrationService';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus, Crown, AlertCircle, TrendingDown, Gauge } from 'lucide-react';
+import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus, Crown, AlertCircle, TrendingDown, Gauge, Clock, XCircle } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import FundraisingCRM from './FundraisingCRM';
@@ -504,6 +505,42 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     fixedCostLast3Months: '',
   });
 
+  // Team photo size preference
+  const [teamPhotoSize, setTeamPhotoSize] = useState<'small' | 'medium' | 'large'>('medium');
+  const [teamPhotoCustomHeight, setTeamPhotoCustomHeight] = useState<number | null>(null);
+  const [isResizingTeamPhoto, setIsResizingTeamPhoto] = useState(false);
+  const teamPhotoResizeStartY = useRef<number>(0);
+  const teamPhotoResizeStartX = useRef<number>(0);
+  const teamPhotoResizeStartHeight = useRef<number>(0);
+  const isResizingTeamPhotoRef = useRef<boolean>(false);
+  const teamPhotoResizeDirection = useRef<'vertical' | 'horizontal'>('vertical');
+  
+  // Team photo size configurations
+  const teamPhotoSizes = {
+    small: { heightPx: 30 },
+    medium: { heightPx: 45 },
+    large: { heightPx: 60 }
+  };
+  
+  // Get current photo height (custom or preset)
+  const getCurrentPhotoHeight = () => {
+    if (teamPhotoCustomHeight !== null) {
+      return teamPhotoCustomHeight;
+    }
+    return teamPhotoSizes[teamPhotoSize].heightPx;
+  };
+  
+  // Get photo height as px string
+  const getPhotoHeight = () => {
+    return `${getCurrentPhotoHeight()}px`;
+  };
+  
+  // Reset team photo to preset size
+  const resetTeamPhotoToPresetSize = (size: 'small' | 'medium' | 'large') => {
+    setTeamPhotoSize(size);
+    setTeamPhotoCustomHeight(null);
+  };
+
   const onePagerRef = useRef<HTMLDivElement | null>(null);
   const onePagerPrintRef = useRef<HTMLDivElement | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -568,6 +605,25 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     grossMargin: 0,
   });
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
+  
+  // Compliance data state
+  const [complianceData, setComplianceData] = useState<{
+    totalTasks: number;
+    completedTasks: number;
+    percentage: number;
+    submittedTasks: number;
+    submittedPercentage: number;
+    verifiedTasks: number;
+    verifiedPercentage: number;
+  }>({
+    totalTasks: 0,
+    completedTasks: 0,
+    percentage: 0,
+    submittedTasks: 0,
+    submittedPercentage: 0,
+    verifiedTasks: 0,
+    verifiedPercentage: 0
+  });
   
   // Validation status
   const [validationStatus, setValidationStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
@@ -661,6 +717,67 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     setTractionGraphSize(size);
     setTractionGraphCustomHeight(null);
   };
+  
+  // =====================================================
+  // TEAM PHOTO RESIZE HANDLERS
+  // =====================================================
+  const handleTeamPhotoResizeMoveRef = useRef<((e: MouseEvent) => void) | null>(null);
+  const handleTeamPhotoResizeEndRef = useRef<(() => void) | null>(null);
+  
+  useEffect(() => {
+    handleTeamPhotoResizeMoveRef.current = (e: MouseEvent) => {
+      if (!isResizingTeamPhotoRef.current) return;
+      e.preventDefault();
+      
+      // Use either Y or X delta based on which edge was clicked
+      const delta = teamPhotoResizeDirection.current === 'vertical' 
+        ? e.clientY - teamPhotoResizeStartY.current
+        : e.clientX - teamPhotoResizeStartX.current;
+      
+      const newHeight = Math.max(20, Math.min(100, teamPhotoResizeStartHeight.current + delta));
+      setTeamPhotoCustomHeight(newHeight);
+    };
+    
+    handleTeamPhotoResizeEndRef.current = () => {
+      isResizingTeamPhotoRef.current = false;
+      setIsResizingTeamPhoto(false);
+      if (handleTeamPhotoResizeMoveRef.current) {
+        document.removeEventListener('mousemove', handleTeamPhotoResizeMoveRef.current);
+      }
+      if (handleTeamPhotoResizeEndRef.current) {
+        document.removeEventListener('mouseup', handleTeamPhotoResizeEndRef.current);
+      }
+    };
+  }, []);
+  
+  const handleTeamPhotoResizeStart = (e: React.MouseEvent, direction: 'vertical' | 'horizontal' = 'vertical') => {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizingTeamPhotoRef.current = true;
+    setIsResizingTeamPhoto(true);
+    teamPhotoResizeDirection.current = direction;
+    teamPhotoResizeStartY.current = e.clientY;
+    teamPhotoResizeStartX.current = e.clientX;
+    teamPhotoResizeStartHeight.current = getCurrentPhotoHeight();
+    
+    if (handleTeamPhotoResizeMoveRef.current) {
+      document.addEventListener('mousemove', handleTeamPhotoResizeMoveRef.current);
+    }
+    if (handleTeamPhotoResizeEndRef.current) {
+      document.addEventListener('mouseup', handleTeamPhotoResizeEndRef.current);
+    }
+  };
+  
+  useEffect(() => {
+    return () => {
+      if (handleTeamPhotoResizeMoveRef.current) {
+        document.removeEventListener('mousemove', handleTeamPhotoResizeMoveRef.current);
+      }
+      if (handleTeamPhotoResizeEndRef.current) {
+        document.removeEventListener('mouseup', handleTeamPhotoResizeEndRef.current);
+      }
+    };
+  }, []);
   
   // CRM ref to add investors
   const crmRef = useRef<{ 
@@ -868,6 +985,84 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     loadMetrics();
   }, [activeSubTab, startup?.id]);
 
+  // Load compliance data when portfolio tab is active
+  useEffect(() => {
+    const loadComplianceData = async () => {
+      if (activeSubTab !== 'portfolio' || !startup?.id) return;
+      
+      try {
+        const complianceTasks = await complianceRulesIntegrationService.getComplianceTasksForStartup(startup.id);
+        
+        // Filter to only include applicable tasks
+        const applicableTasks = complianceTasks.filter(task => task.isApplicable !== false);
+        
+        const totalTasks = applicableTasks.length;
+        
+        // Calculate completed tasks (both CA and CS are Verified)
+        const completedTasks = applicableTasks.filter(task => {
+          const caVerified = !task.caRequired || task.caStatus === 'Verified';
+          const csVerified = !task.csRequired || task.csStatus === 'Verified';
+          return caVerified && csVerified;
+        }).length;
+        
+        // Calculate submitted tasks (at least one required status is Submitted or Verified)
+        const submittedTasks = applicableTasks.filter(task => {
+          const caSubmitted = task.caRequired && (task.caStatus === 'Submitted' || task.caStatus === 'Verified');
+          const csSubmitted = task.csRequired && (task.csStatus === 'Submitted' || task.csStatus === 'Verified');
+          if (task.caRequired && task.csRequired) {
+            return caSubmitted || csSubmitted;
+          } else if (task.caRequired) {
+            return caSubmitted;
+          } else if (task.csRequired) {
+            return csSubmitted;
+          }
+          return false;
+        }).length;
+        
+        // Calculate verified tasks (at least one required status is Verified)
+        const verifiedTasks = applicableTasks.filter(task => {
+          const caVerified = task.caRequired && task.caStatus === 'Verified';
+          const csVerified = task.csRequired && task.csStatus === 'Verified';
+          if (task.caRequired && task.csRequired) {
+            return caVerified || csVerified;
+          } else if (task.caRequired) {
+            return caVerified;
+          } else if (task.csRequired) {
+            return csVerified;
+          }
+          return false;
+        }).length;
+        
+        const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+        const submittedPercentage = totalTasks > 0 ? Math.round((submittedTasks / totalTasks) * 100) : 0;
+        const verifiedPercentage = totalTasks > 0 ? Math.round((verifiedTasks / totalTasks) * 100) : 0;
+        
+        setComplianceData({
+          totalTasks,
+          completedTasks,
+          percentage,
+          submittedTasks,
+          submittedPercentage,
+          verifiedTasks,
+          verifiedPercentage
+        });
+      } catch (error) {
+        console.error('Error loading compliance data:', error);
+        setComplianceData({
+          totalTasks: 0,
+          completedTasks: 0,
+          percentage: 0,
+          submittedTasks: 0,
+          submittedPercentage: 0,
+          verifiedTasks: 0,
+          verifiedPercentage: 0
+        });
+      }
+    };
+
+    loadComplianceData();
+  }, [activeSubTab, startup?.id]);
+
   // AI Investor Matching function
   const handleAIMatching = () => {
     if (!startup || !fundraising) {
@@ -1038,17 +1233,33 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
   // Team member handlers
   const handleAddTeamMember = () => {
-    setEditingTeamMemberId(null);
-    setTeamMemberFormData({
-      id: '',
-      name: '',
-      education: '',
-      experience: '',
-      description: '',
-      photoUrl: '',
-    });
-    setTeamPhotoFile(null);
-    setShowTeamMemberForm(true);
+    if (showTeamMemberForm) {
+      // If form is already open, close it (Cancel action)
+      setShowTeamMemberForm(false);
+      setEditingTeamMemberId(null);
+      setTeamMemberFormData({
+        id: '',
+        name: '',
+        education: '',
+        experience: '',
+        description: '',
+        photoUrl: '',
+      });
+      setTeamPhotoFile(null);
+    } else {
+      // Open form for adding new member
+      setEditingTeamMemberId(null);
+      setTeamMemberFormData({
+        id: '',
+        name: '',
+        education: '',
+        experience: '',
+        description: '',
+        photoUrl: '',
+      });
+      setTeamPhotoFile(null);
+      setShowTeamMemberForm(true);
+    }
   };
 
   const handleEditTeamMember = (member: TeamMember) => {
@@ -1064,47 +1275,66 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       return;
     }
 
-    let photoUrl = teamMemberFormData.photoUrl;
+    let photoUrl = teamMemberFormData.photoUrl || '';
+    
+    console.log('📋 handleSaveTeamMember called');
+    console.log('📋 teamPhotoFile state:', teamPhotoFile);
+    console.log('📋 teamMemberFormData.photoUrl:', teamMemberFormData.photoUrl);
     
     // Upload team member photo if selected
     if (teamPhotoFile) {
       try {
-        const fileName = `${startup.id}-team-${Date.now()}-${teamPhotoFile.name}`;
+        console.log('🚀 Starting photo upload for:', teamPhotoFile.name);
+        const fileName = `team/${startup.id}/${Date.now()}-${teamPhotoFile.name}`;
+        console.log('📁 Upload path:', fileName);
+        console.log('📁 Bucket: team-photos');
+        
         const { data, error } = await supabase.storage
-          .from('startup-files')
+          .from('team-photos')
           .upload(fileName, teamPhotoFile);
         
-        if (error) throw error;
+        if (error) {
+          console.error('❌ Supabase upload error:', error);
+          messageService.error('Upload Failed', `Could not upload photo: ${error.message}`, 4000);
+          return;
+        }
+        
+        console.log('✅ File uploaded to Supabase:', data);
         
         const { data: publicUrlData } = supabase.storage
-          .from('startup-files')
+          .from('team-photos')
           .getPublicUrl(fileName);
         
         photoUrl = publicUrlData.publicUrl;
-      } catch (error) {
-        console.error('Error uploading team photo:', error);
-        messageService.error('Upload Failed', 'Could not upload team member photo.', 3000);
+        console.log('✅ Team photo public URL:', photoUrl);
+        if (!photoUrl) {
+          throw new Error('Failed to generate public URL for uploaded photo');
+        }
+        messageService.success('Photo Uploaded', 'Team member photo uploaded successfully!', 2000);
+      } catch (error: any) {
+        console.error('❌ Error uploading team photo:', error);
+        messageService.error('Upload Failed', error?.message || 'Could not upload team member photo. Check console.', 4000);
         return;
       }
+    } else {
+      console.log('⚠️ No photo file selected, using existing or empty URL:', photoUrl);
     }
 
     if (editingTeamMemberId) {
       // Update existing team member
+      const updatedMember = {
+        ...teamMemberFormData,
+        photoUrl: photoUrl || teamMemberFormData.photoUrl,
+      };
+      console.log('✏️ Updating team member:', updatedMember);
+      
       setOnePager(prev => ({
         ...prev,
         teamMembers: prev.teamMembers.map(member =>
-          member.id === editingTeamMemberId
-            ? {
-                ...member,
-                name: teamMemberFormData.name,
-                education: teamMemberFormData.education,
-                experience: teamMemberFormData.experience,
-                description: teamMemberFormData.description,
-                photoUrl: photoUrl || member.photoUrl,
-              }
-            : member
+          member.id === editingTeamMemberId ? updatedMember : member
         ),
       }));
+      messageService.success('Member Updated', `${teamMemberFormData.name} has been updated!`, 2000);
     } else {
       // Add new team member
       const newMember: TeamMember = {
@@ -1113,13 +1343,15 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         education: teamMemberFormData.education,
         experience: teamMemberFormData.experience,
         description: teamMemberFormData.description,
-        photoUrl: photoUrl || '',
+        photoUrl: photoUrl,
       };
+      console.log('➕ Adding new team member:', newMember);
       
       setOnePager(prev => ({
         ...prev,
         teamMembers: [...prev.teamMembers, newMember],
       }));
+      messageService.success('Member Added', `${teamMemberFormData.name} has been added!`, 2000);
     }
 
     setShowTeamMemberForm(false);
@@ -1404,15 +1636,16 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
       // Upload to Supabase
       const onePagerUrl = await capTableService.uploadOnePagerPDF(pdfFile, startup.id);
+      const cacheBustedUrl = `${onePagerUrl}?v=${Date.now()}`;
 
       // Update only the one-pager URL in the existing fundraising record (don't recreate the record)
-      await capTableService.updateOnePagerUrl(startup.id, onePagerUrl);
+      await capTableService.updateOnePagerUrl(startup.id, cacheBustedUrl);
       
       // Update local state
-      setFundraising({ ...fundraising, onePagerUrl });
+      setFundraising({ ...fundraising, onePagerUrl: cacheBustedUrl });
       if (existingRounds.length > 0) {
         const updatedRounds = existingRounds.map(round => 
-          round.id === fundraising.id ? { ...round, onePagerUrl } : round
+          round.id === fundraising.id ? { ...round, onePagerUrl: cacheBustedUrl } : round
         );
         setExistingRounds(updatedRounds);
       }
@@ -1747,7 +1980,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         growthChallenge: onePager.growthChallenge,
         uspText: onePager.usp,
         competitionText: onePager.competition,
-        teamText: onePager.team,
+        teamText: JSON.stringify(onePager.teamMembers),
         tamText: onePager.tam,
         samText: onePager.sam,
         somText: onePager.som,
@@ -2406,12 +2639,44 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   </div>
 
                   {/* Compliance Status */}
-                  <div className="flex items-center gap-2 bg-white rounded p-2 border border-slate-200">
-                    <Gauge className="h-4 w-4 text-purple-600" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs text-slate-600 truncate">Compliance</div>
-                      <div className="text-sm font-semibold text-slate-900 truncate">
-                        {startup.compliance_status || 'Pending'}
+                  <div className="flex flex-col bg-white rounded p-3 border border-slate-200 gap-2">
+                    <div className="flex items-center gap-2">
+                      {complianceData.verifiedPercentage >= 100 ? (
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                      ) : complianceData.verifiedPercentage >= 50 ? (
+                        <Clock className="h-4 w-4 text-yellow-600" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-600" />
+                      )}
+                      <div className="text-xs text-slate-600 font-medium">Compliance</div>
+                    </div>
+                    <div className="space-y-1">
+                      {/* Submitted Percentage */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Submitted</span>
+                        <span className={`text-xs font-semibold ${
+                          complianceData.submittedPercentage >= 100 
+                            ? 'text-green-600' 
+                            : complianceData.submittedPercentage >= 50 
+                              ? 'text-blue-600' 
+                              : 'text-yellow-600'
+                        }`}>
+                          {complianceData.submittedPercentage}%
+                        </span>
+                      </div>
+                      
+                      {/* Verified Percentage */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Verified</span>
+                        <span className={`text-xs font-semibold ${
+                          complianceData.verifiedPercentage >= 100 
+                            ? 'text-green-600' 
+                            : complianceData.verifiedPercentage >= 50 
+                              ? 'text-yellow-600' 
+                              : 'text-red-600'
+                        }`}>
+                          {complianceData.verifiedPercentage}%
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -2583,8 +2848,8 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 )}
               </div>
               
-              {/* Team Members Manager */}
-              <div className="space-y-2">
+              {/* Team Members Manager - Full Width */}
+              <div className="space-y-2 sm:col-span-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-slate-600">Team Members</label>
                   <Button
@@ -2593,7 +2858,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     onClick={handleAddTeamMember}
                     className="text-xs"
                   >
-                    <Plus className="h-3 w-3 mr-1" /> Add Member
+                    <Plus className="h-3 w-3 mr-1" /> {showTeamMemberForm ? 'Cancel' : 'Add Member'}
                   </Button>
                 </div>
                 
@@ -2601,16 +2866,127 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   <p className="text-[12px] text-red-500">{onePagerErrors.teamMembers}</p>
                 )}
 
+                {/* Inline Team Member Form */}
+                {showTeamMemberForm && (
+                  <div className="border border-slate-300 rounded-md p-3 bg-slate-50 space-y-3">
+                    <p className="text-xs font-semibold text-slate-700">
+                      {editingTeamMemberId ? 'Edit Team Member' : 'Add New Team Member'}
+                    </p>
+                    
+                    {/* Responsive Grid for Form Fields */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Full Name *</label>
+                        <Input
+                          type="text"
+                          placeholder="e.g., John Smith"
+                          value={teamMemberFormData.name}
+                          onChange={(e) => setTeamMemberFormData({...teamMemberFormData, name: e.target.value})}
+                          className="w-full"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Highest Education *</label>
+                        <Input
+                          type="text"
+                          placeholder="e.g., BS in Computer Science from MIT"
+                          value={teamMemberFormData.education}
+                          onChange={(e) => setTeamMemberFormData({...teamMemberFormData, education: e.target.value})}
+                          className="w-full"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Relevant Experience *</label>
+                        <textarea
+                          rows={2}
+                          placeholder="e.g., 10 years in product management at Google, founded 2 startups..."
+                          value={teamMemberFormData.experience}
+                          onChange={(e) => setTeamMemberFormData({...teamMemberFormData, experience: e.target.value})}
+                          className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs sm:text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary bg-white"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Short Description</label>
+                        <textarea
+                          rows={2}
+                          placeholder="Brief description of role and responsibilities..."
+                          value={teamMemberFormData.description}
+                          onChange={(e) => setTeamMemberFormData({...teamMemberFormData, description: e.target.value})}
+                          className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs sm:text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary bg-white"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Photo</label>
+                        <CloudDriveInput
+                          onFileSelect={(file) => {
+                            console.log('✅ Photo file selected:', file.name);
+                            setTeamPhotoFile(file);
+                            messageService.success(
+                              'Photo Selected',
+                              `Team member photo "${file.name}" selected. Click "Add Member" or "Update Member" to save.`,
+                              3000
+                            );
+                          }}
+                          onChange={(url) => {
+                            setTeamMemberFormData(prev => ({...prev, photoUrl: url}));
+                          }}
+                          value={teamMemberFormData.photoUrl || ''}
+                          label="Upload team member photo (optional)"
+                          accept=".jpg,.jpeg,.png,.gif,.webp"
+                          maxSize={5}
+                          documentType="team member photo"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 justify-end pt-2 border-t border-slate-300">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setShowTeamMemberForm(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={handleSaveTeamMember}
+                      >
+                        {editingTeamMemberId ? 'Update' : 'Add'} Member
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Team Members List */}
                 <div className="space-y-2">
                   {onePager.teamMembers.map((member) => (
                     <div key={member.id} className="border border-slate-200 rounded-md p-2 bg-slate-50 flex items-start justify-between gap-2">
+                      {/* Photo Thumbnail */}
+                      {member.photoUrl && (
+                        <img 
+                          src={member.photoUrl} 
+                          alt={member.name}
+                          className="w-10 h-10 rounded object-cover flex-shrink-0"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      )}
+                      
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-slate-900 truncate">{member.name}</p>
                         <p className="text-xs text-slate-600 truncate">{member.education}</p>
                         <p className="text-xs text-slate-600 truncate">{member.experience}</p>
+                        {member.photoUrl && (
+                          <p className="text-[10px] text-green-600 mt-0.5">✓ Photo saved</p>
+                        )}
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 flex-shrink-0">
                         <Button
                           size="sm"
                           variant="outline"
@@ -2637,86 +3013,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                 )}
               </div>
             </div>
-
-            {/* Team Member Form Modal */}
-            {showTeamMemberForm && (
-              <Modal
-                isOpen={showTeamMemberForm}
-                onClose={() => setShowTeamMemberForm(false)}
-                title={editingTeamMemberId ? 'Edit Team Member' : 'Add Team Member'}
-                size="medium"
-              >
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-xs font-medium text-slate-600 block mb-1">Full Name *</label>
-                    <Input
-                      type="text"
-                      placeholder="e.g., John Smith"
-                      value={teamMemberFormData.name}
-                      onChange={(e) => setTeamMemberFormData({...teamMemberFormData, name: e.target.value})}
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-slate-600 block mb-1">Highest Education *</label>
-                    <Input
-                      type="text"
-                      placeholder="e.g., BS in Computer Science from MIT"
-                      value={teamMemberFormData.education}
-                      onChange={(e) => setTeamMemberFormData({...teamMemberFormData, education: e.target.value})}
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-slate-600 block mb-1">Relevant Experience *</label>
-                    <textarea
-                      rows={3}
-                      placeholder="e.g., 10 years in product management at Google, founded 2 startups..."
-                      value={teamMemberFormData.experience}
-                      onChange={(e) => setTeamMemberFormData({...teamMemberFormData, experience: e.target.value})}
-                      className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs sm:text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-slate-600 block mb-1">Short Description</label>
-                    <textarea
-                      rows={2}
-                      placeholder="Brief description of role and responsibilities..."
-                      value={teamMemberFormData.description}
-                      onChange={(e) => setTeamMemberFormData({...teamMemberFormData, description: e.target.value})}
-                      className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs sm:text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-primary focus:border-brand-primary bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-slate-600 block mb-1">Photo</label>
-                    <CloudDriveInput
-                      onSelect={(file) => setTeamPhotoFile(file)}
-                      defaultValue={teamMemberFormData.photoUrl}
-                      label="Upload team member photo (optional)"
-                    />
-                  </div>
-
-                  <div className="flex gap-2 justify-end pt-4 border-t">
-                    <Button
-                      variant="outline"
-                      onClick={() => setShowTeamMemberForm(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="primary"
-                      onClick={handleSaveTeamMember}
-                    >
-                      {editingTeamMemberId ? 'Update' : 'Add'} Member
-                    </Button>
-                  </div>
-                </div>
-              </Modal>
-            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1">
@@ -3161,47 +3457,154 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
                 {/* Team Members Section - Lower Half */}
                 {onePager.teamMembers.length > 0 && (
-                  <div className="border border-slate-300 rounded-[3px] p-1.5 mt-2">
-                    <p className="font-bold text-[12px] text-blue-800 mb-1">TEAM</p>
-                    <div className={`grid gap-1.5 ${
-                      onePager.teamMembers.length === 1 ? 'grid-cols-1' :
-                      onePager.teamMembers.length === 2 ? 'grid-cols-2' :
-                      onePager.teamMembers.length === 3 ? 'grid-cols-3' :
-                      'grid-cols-4'
-                    }`}>
-                      {onePager.teamMembers.map((member) => (
-                        <div key={member.id} className="border border-slate-300 rounded-[2px] p-1 text-[9px]">
-                          {member.photoUrl && (
-                            <img 
-                              src={member.photoUrl} 
-                              alt={member.name}
-                              style={{
+                  <div className="border border-slate-300 rounded-[3px] p-1 mt-2">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <div>
+                        <p className="font-bold text-[11px] text-blue-800">TEAM</p>
+                        <p className="text-[8px] text-slate-500">(Drag bottom or right edge to resize)</p>
+                      </div>
+                      <div className="flex gap-0.5">
+                        <button
+                          onClick={() => resetTeamPhotoToPresetSize('small')}
+                          className={`text-[8px] px-1.5 py-0.5 rounded border ${
+                            teamPhotoSize === 'small' && teamPhotoCustomHeight === null
+                              ? 'bg-blue-600 text-white border-blue-600' 
+                              : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                          }`}
+                          title="Small photos (30px)"
+                        >
+                          S
+                        </button>
+                        <button
+                          onClick={() => resetTeamPhotoToPresetSize('medium')}
+                          className={`text-[8px] px-1.5 py-0.5 rounded border ${
+                            teamPhotoSize === 'medium' && teamPhotoCustomHeight === null
+                              ? 'bg-blue-600 text-white border-blue-600' 
+                              : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                          }`}
+                          title="Medium photos (45px)"
+                        >
+                          M
+                        </button>
+                        <button
+                          onClick={() => resetTeamPhotoToPresetSize('large')}
+                          className={`text-[8px] px-1.5 py-0.5 rounded border ${
+                            teamPhotoSize === 'large' && teamPhotoCustomHeight === null
+                              ? 'bg-blue-600 text-white border-blue-600' 
+                              : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                          }`}
+                          title="Large photos (60px)"
+                        >
+                          L
+                        </button>
+                      </div>
+                    </div>
+                    <div className="relative">
+                      <div className={`grid gap-1 ${
+                        onePager.teamMembers.length === 1 ? 'grid-cols-1' :
+                        onePager.teamMembers.length === 2 ? 'grid-cols-2' :
+                        onePager.teamMembers.length === 3 ? 'grid-cols-3' :
+                        onePager.teamMembers.length <= 5 ? 'grid-cols-4' :
+                        'grid-cols-5'
+                      }`}>
+                        {onePager.teamMembers.map((member) => (
+                          <div key={member.id} className="border border-slate-300 rounded-[2px] p-0.5">
+                            {/* Photo */}
+                            {member.photoUrl ? (
+                              <img 
+                                src={member.photoUrl} 
+                                alt={member.name}
+                                loading="lazy"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                                style={{
+                                  width: '100%',
+                                  height: getPhotoHeight(),
+                                  objectFit: 'cover',
+                                  borderRadius: '1px',
+                                  marginBottom: '2px',
+                                  display: 'block'
+                                }}
+                              />
+                            ) : (
+                              <div style={{
                                 width: '100%',
-                                height: '60px',
-                                objectFit: 'cover',
-                                borderRadius: '2px',
-                                marginBottom: '4px',
-                                display: 'block'
-                              }}
-                            />
-                          )}
-                          <p className="font-bold text-[9px] text-slate-900 mb-0.5 truncate">
+                                height: getPhotoHeight(),
+                                backgroundColor: '#f3f4f6',
+                                borderRadius: '1px',
+                                marginBottom: '2px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '7px',
+                                color: '#9ca3af'
+                              }}>
+                                No photo
+                              </div>
+                            )}
+                          
+                          {/* Name */}
+                          <p className="font-bold text-[7.5px] text-slate-900 truncate leading-tight mb-0.5">
                             {member.name}
                           </p>
-                          <p className="text-[8px] text-slate-700 mb-0.5 line-clamp-2">
-                            <strong>Edu:</strong> {member.education}
-                          </p>
-                          <p className="text-[8px] text-slate-700 mb-0.5 line-clamp-2">
-                            <strong>Exp:</strong> {member.experience}
-                          </p>
+                          
+                          {/* Education */}
+                          {member.education && (
+                            <p className="text-[6.5px] text-slate-700 line-clamp-1 leading-tight">
+                              <span className="font-semibold">Ed:</span> {member.education}
+                            </p>
+                          )}
+                          
+                          {/* Experience */}
+                          {member.experience && (
+                            <p className="text-[6.5px] text-slate-700 line-clamp-1 leading-tight">
+                              <span className="font-semibold">Ex:</span> {member.experience}
+                            </p>
+                          )}
+                          
+                          {/* Description */}
                           {member.description && (
-                            <p className="text-[8px] text-slate-600 line-clamp-2">
+                            <p className="text-[6px] text-slate-600 line-clamp-2 leading-tight">
                               {member.description}
                             </p>
                           )}
                         </div>
                       ))}
                     </div>
+                    
+                    {/* Bottom Resize Handle */}
+                    <div
+                      onMouseDown={(e) => handleTeamPhotoResizeStart(e, 'vertical')}
+                      className={`absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize transition-colors ${
+                        isResizingTeamPhoto ? 'bg-blue-400' : 'bg-blue-100/50 hover:bg-blue-200'
+                      }`}
+                      style={{ zIndex: 10, userSelect: 'none' }}
+                      title="Drag to resize team photos"
+                      onDragStart={(e) => e.preventDefault()}
+                    >
+                      <div className="absolute bottom-0.5 left-1/2 transform -translate-x-1/2 w-16 h-0.5 bg-slate-600 rounded-full"></div>
+                      <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 text-[7px] text-slate-600 font-medium">
+                        ⋮⋮
+                      </div>
+                    </div>
+                    
+                    {/* Right Resize Handle */}
+                    <div
+                      onMouseDown={(e) => handleTeamPhotoResizeStart(e, 'horizontal')}
+                      className={`absolute top-0 right-0 bottom-0 w-3 cursor-ew-resize transition-colors ${
+                        isResizingTeamPhoto ? 'bg-blue-400' : 'bg-blue-100/50 hover:bg-blue-200'
+                      }`}
+                      style={{ zIndex: 10, userSelect: 'none' }}
+                      title="Drag to resize team photos"
+                      onDragStart={(e) => e.preventDefault()}
+                    >
+                      <div className="absolute right-0.5 top-1/2 transform -translate-y-1/2 h-16 w-0.5 bg-slate-600 rounded-full"></div>
+                      <div className="absolute right-0 top-1/2 transform -translate-y-1/2 text-[7px] text-slate-600 font-medium rotate-90">
+                        ⋮⋮
+                      </div>
+                    </div>
+                  </div>
                   </div>
                 )}
               </div>
@@ -3336,14 +3739,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     '• Main competitors\n• How you are different',
                   ),
                 },
-                {
-                  title: 'TEAM',
-                  value: limitText(
-                    onePager.team,
-                    320,
-                    'Founders and key team members with relevant background.',
-                  ),
-                },
               ].map(section => (
                 <div
                   key={section.title}
@@ -3368,6 +3763,117 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   </div>
                 </div>
               ))}
+              
+              {/* TEAM Section with Photos */}
+              {onePager.teamMembers.length > 0 && (
+                <div
+                  style={{
+                    border: '1px solid #d1d5db',
+                    borderRadius: 4,
+                    padding: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: '#1e40af',
+                      marginBottom: 4,
+                    }}
+                  >
+                    TEAM
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: `repeat(${Math.min(3, onePager.teamMembers.length)}, 1fr)`,
+                      gap: 8,
+                    }}
+                  >
+                    {onePager.teamMembers.map((member) => (
+                      <div
+                        key={member.id}
+                        style={{
+                          textAlign: 'center',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: 4,
+                          padding: 6,
+                        }}
+                      >
+                        {/* Photo */}
+                        {member.photoUrl ? (
+                          <img
+                            src={member.photoUrl}
+                            alt={member.name}
+                            style={{
+                              width: '100%',
+                              height: 80,
+                              objectFit: 'cover',
+                              borderRadius: 3,
+                              marginBottom: 4,
+                              display: 'block',
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: '100%',
+                              height: 80,
+                              backgroundColor: '#f3f4f6',
+                              borderRadius: 3,
+                              marginBottom: 4,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: 10,
+                              color: '#9ca3af',
+                            }}
+                          >
+                            No photo
+                          </div>
+                        )}
+                        
+                        {/* Name */}
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: '#1f2937',
+                            marginBottom: 3,
+                          }}
+                        >
+                          {member.name}
+                        </div>
+                        
+                        {/* Education */}
+                        {member.education && (
+                          <div
+                            style={{
+                              fontSize: 9,
+                              color: '#6b7280',
+                              marginBottom: 2,
+                            }}
+                          >
+                            {member.education}
+                          </div>
+                        )}
+                        
+                        {/* Experience */}
+                        {member.experience && (
+                          <div
+                            style={{
+                              fontSize: 9,
+                              color: '#6b7280',
+                            }}
+                          >
+                            {member.experience}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right column */}

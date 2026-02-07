@@ -1708,7 +1708,7 @@ class CapTableService {
       bucket: 'pitch-decks',
       path: fileName,
       file,
-      cacheControl: '3600',
+      cacheControl: '0',
       upsert: true, // Replace file if it exists
       userId: startupData.user_id,
       fileType: 'document',

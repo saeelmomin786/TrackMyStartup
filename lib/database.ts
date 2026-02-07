@@ -153,10 +153,34 @@ export const userService = {
       // who has entered this advisor's code.
       const currentUser = (await supabase.auth.getUser()).data.user
 
+      // If the frontend passed a `user_profiles.id` (profile id) we need to
+      // map it to the underlying `auth_user_id` before calling the RPC which
+      // still operates on the legacy `users` table. Try to resolve a profile
+      // record first; otherwise, use the provided id as-is.
+      let pUserIdToSend = userId
+      try {
+        const { data: profileRow, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('auth_user_id')
+          .eq('id', userId)
+          .maybeSingle()
+
+        if (profileError) {
+          console.warn('Warning resolving profile id to auth_user_id:', profileError)
+        }
+
+        if (profileRow && (profileRow as any).auth_user_id) {
+          pUserIdToSend = (profileRow as any).auth_user_id
+          console.log('Mapped profile id to auth_user_id for RPC:', { original: userId, mapped: pUserIdToSend })
+        }
+      } catch (mapErr) {
+        console.warn('Error while attempting to map profile id to auth_user_id:', mapErr)
+      }
+
       const { data: userData, error: userError } = await supabase.rpc(
         'accept_startup_advisor_request',
         {
-          p_user_id: userId,
+          p_user_id: pUserIdToSend,
           p_advisor_id: currentUser?.id,
           // Service Requests flow does not capture a financial matrix yet,
           // so we pass null – the function handles this safely.

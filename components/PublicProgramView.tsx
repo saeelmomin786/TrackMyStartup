@@ -129,20 +129,18 @@ const PublicProgramView: React.FC = () => {
     };
 
     const handleLogin = () => {
-        // Preserve the program URL for return after login
-        const currentUrl = window.location.href;
+        // Redirect to login with opportunityId so user is taken to apply form after login
         const url = new URL(window.location.origin);
         url.searchParams.set('page', 'login');
-        url.searchParams.set('returnUrl', currentUrl);
+        url.searchParams.set('opportunityId', opportunityId);
         window.location.href = url.toString();
     };
 
     const handleRegister = () => {
-        // Preserve the program URL for return after register
-        const currentUrl = window.location.href;
+        // Redirect to register with opportunityId so user is taken to apply form after registration
         const url = new URL(window.location.origin);
         url.searchParams.set('page', 'register');
-        url.searchParams.set('returnUrl', currentUrl);
+        url.searchParams.set('opportunityId', opportunityId);
         window.location.href = url.toString();
     };
 

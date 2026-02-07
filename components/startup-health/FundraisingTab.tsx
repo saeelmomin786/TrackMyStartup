@@ -28,6 +28,7 @@ import FeatureGuard from '../FeatureGuard';
 import { supabase } from '../../lib/supabase';
 import { featureAccessService } from '../../lib/featureAccessService';
 import SubscriptionPlansPage from '../SubscriptionPlansPage';
+import { getQueryParam } from '../../lib/urlState';
 
 interface FundraisingTabProps {
   startup: Startup;
@@ -437,7 +438,30 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 }) => {
   const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
 
-  const [activeSubTab, setActiveSubTab] = useState<FundraisingSubTab>('portfolio');
+  // Initialize activeSubTab based on URL tab parameter or opportunityId
+  const getInitialSubTab = (): FundraisingSubTab => {
+    const tabParam = getQueryParam('tab');
+    const opportunityId = getQueryParam('opportunityId');
+    
+    // If tab=fundraising is explicitly set, check if we need to go to programs
+    if (tabParam === 'fundraising') {
+      // If opportunityId is present, go to programs sub-tab
+      if (opportunityId) {
+        return 'programs';
+      }
+      // Otherwise just stay in portfolio (user clicked fundraising tab manually)
+      return 'portfolio';
+    }
+    
+    // If opportunityId exists, go to programs
+    if (opportunityId) {
+      return 'programs';
+    }
+    
+    return 'portfolio';
+  };
+
+  const [activeSubTab, setActiveSubTab] = useState<FundraisingSubTab>(getInitialSubTab());
   const [authUserId, setAuthUserId] = useState<string>('');
 
   // Get auth_user_id (UUID from auth.users) for feature access checks
@@ -453,6 +477,15 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       }
     };
     getAuthUserId();
+  }, []);
+
+  // Auto-switch to programs tab if there's an opportunityId in the URL
+  useEffect(() => {
+    const opportunityId = getQueryParam('opportunityId');
+    if (opportunityId && activeSubTab !== 'programs') {
+      console.log('🎯 Switching to programs tab due to opportunityId in URL:', opportunityId);
+      setActiveSubTab('programs');
+    }
   }, []);
   
   // In due diligence view, only show portfolio sub-tab, hide programs, investors, and crm

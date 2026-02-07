@@ -2110,6 +2110,23 @@ const App: React.FC = () => {
       setQueryParam('page', 'complete-registration', false);
       return; // Don't proceed with normal login flow, let Form 2 handle it
     }
+
+    // Check if user is applying for a program (from grant opportunities page)
+    const opportunityId = getQueryParam('opportunityId');
+    if (opportunityId) {
+      console.log('🎯 User logged in while applying for program:', opportunityId);
+      setIsAuthenticated(true);
+      setCurrentUser(user);
+      // Redirect to startup dashboard with opportunityId to open application form
+      setCurrentPage('startup-health');
+      // Keep opportunityId in URL and set tab to fundraising
+      setQueryParam('page', 'startup-health', true);
+      setQueryParam('opportunityId', opportunityId, true);
+      setQueryParam('tab', 'fundraising', true);
+      // Store opportunityId for the startup health component to know which program to apply to
+      sessionStorage.setItem('applyToOpportunityId', opportunityId);
+      return;
+    }
     
     // Check if there's a redirect URL stored (e.g., from public startup page)
     const redirectUrl = sessionStorage.getItem('redirectAfterLogin');
@@ -2159,6 +2176,23 @@ const App: React.FC = () => {
         setStartups(prev => [newStartup, ...prev]);
         setSelectedStartup(newStartup);
         setView('startupHealth');
+    }
+    
+    // Check if user registered while applying for a program
+    const opportunityId = getQueryParam('opportunityId');
+    if (opportunityId) {
+      console.log('🎯 New user registered while applying for program:', opportunityId);
+      setIsAuthenticated(true);
+      setCurrentUser(user);
+      // For startups registering to apply, go to dashboard with program application flow
+      setCurrentPage('startup-health');
+      // Keep opportunityId in URL and set tab to fundraising
+      setQueryParam('page', 'startup-health', true);
+      setQueryParam('opportunityId', opportunityId, true);
+      setQueryParam('tab', 'fundraising', true);
+      // Store opportunityId for the startup health component to know which program to apply to
+      sessionStorage.setItem('applyToOpportunityId', opportunityId);
+      return;
     }
      
     handleLogin(user);

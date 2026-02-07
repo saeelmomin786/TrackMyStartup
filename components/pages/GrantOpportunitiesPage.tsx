@@ -652,7 +652,14 @@ const GrantOpportunitiesPage: React.FC = () => {
                                     <Button 
                                       type="button" 
                                       className="flex-1" 
-                                      onClick={() => window.location.href = '/?page=register'}
+                                      onClick={() => {
+                                        // Store the opportunity ID and redirect to register/login
+                                        const url = new URL(window.location.origin);
+                                        url.searchParams.set('page', 'register');
+                                        url.searchParams.set('opportunityId', opp.id);
+                                        url.searchParams.set('programName', opp.programName);
+                                        window.location.href = url.toString();
+                                      }}
                                     >
                                       Apply for Program
                                     </Button>

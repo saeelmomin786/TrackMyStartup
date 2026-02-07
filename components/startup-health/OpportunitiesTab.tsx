@@ -113,6 +113,15 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
     const [applyingOppId, setApplyingOppId] = useState<string | null>(null);
     const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
+    // Track which opp was auto-opened in sessionStorage to prevent re-opening across re-renders
+    const getAutoOpenedOppId = () => sessionStorage.getItem('autoOpenedGrantOppId');
+    const setAutoOpenedOppIdInStorage = (id: string | null) => {
+        if (id) {
+            sessionStorage.setItem('autoOpenedGrantOppId', id);
+        } else {
+            sessionStorage.removeItem('autoOpenedGrantOppId');
+        }
+    };
     // Image modal state
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
     const [selectedImageUrl, setSelectedImageUrl] = useState<string>('');
@@ -176,7 +185,13 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 if (mounted) setAdminPosts([]);
             }
         })();
-        return () => { mounted = false; };
+        return () => { 
+            mounted = false;
+            // Cleanup when component unmounts or startup changes
+            // Close any open forms and reset state
+            setIsApplyModalOpen(false);
+            setApplyingOppId(null);
+        };
     }, [startup.id]);
 
     const appliedIds = useMemo(() => new Set(applications.map(a => a.opportunityId)), [applications]);
@@ -308,9 +323,52 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [opportunities]);
 
+    // Auto-open application form if user just logged in to apply for a program
     useEffect(() => {
-        const id = selectedOpportunity?.id || '';
-        setQueryParam('opportunityId', id, true);
+        if (opportunities.length === 0) return;
+        
+        // Check if this opportunity was already auto-opened
+        const alreadyAutoOpened = getAutoOpenedOppId();
+        if (alreadyAutoOpened) {
+            console.log('🎯 Opportunity already auto-opened, skipping:', alreadyAutoOpened);
+            return; // Skip if already opened
+        }
+        
+        // Check sessionStorage first (for post-login redirect)
+        let opportunityIdToOpen = sessionStorage.getItem('applyToOpportunityId');
+        
+        // If not in sessionStorage, check URL parameter
+        if (!opportunityIdToOpen) {
+            opportunityIdToOpen = getQueryParam('opportunityId');
+        }
+        
+        if (opportunityIdToOpen && !isApplyModalOpen) {
+            const targetOpportunity = opportunities.find(o => o.id === opportunityIdToOpen);
+            if (targetOpportunity && !appliedIds.has(opportunityIdToOpen)) {
+                console.log('🎯 Auto-opening application form for opportunity:', opportunityIdToOpen);
+                // Auto-open the application form
+                openApplyModal(opportunityIdToOpen);
+                // Mark this opportunity as auto-opened to prevent re-triggering
+                setAutoOpenedOppIdInStorage(opportunityIdToOpen);
+                // Clear the session storage item so it doesn't open again
+                sessionStorage.removeItem('applyToOpportunityId');
+                // Remove opportunityId, programName, and tab from URL to prevent re-opening when modal closes
+                const url = new URL(window.location.href);
+                url.searchParams.delete('opportunityId');
+                url.searchParams.delete('programName');
+                url.searchParams.delete('tab');
+                window.history.replaceState({}, document.title, url.toString());
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [opportunities, isApplyModalOpen, appliedIds]);
+
+    useEffect(() => {
+        // Only set the query param if selectedOpportunity has a value
+        // Don't clear it if selectedOpportunity is empty - let the initial URL param persist
+        if (selectedOpportunity?.id) {
+            setQueryParam('opportunityId', selectedOpportunity.id, true);
+        }
     }, [selectedOpportunity]);
 
     const handleShareOpportunity = async (opp: OpportunityItem) => {
@@ -863,7 +921,21 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             
             
             {/* Apply Modal */}
-            <Modal isOpen={isApplyModalOpen} onClose={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null); setPortfolioUrl(''); setStartupWebsiteUrl(null);} }} title="Submit Application">
+            <Modal isOpen={isApplyModalOpen} onClose={() => { 
+                if (!isSubmittingApplication) { 
+                    setIsApplyModalOpen(false); 
+                    setApplyingOppId(null); 
+                    setPortfolioUrl(''); 
+                    setStartupWebsiteUrl(null);
+                    
+                    // Clean up URL completely - return to normal state
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('opportunityId');
+                    url.searchParams.delete('programName');
+                    url.searchParams.delete('tab');
+                    window.history.replaceState({}, document.title, url.toString());
+                } 
+            }} title="Submit Application">
                 <div className="space-y-4">
                     {/* Portfolio URL - Auto-filled from startup's fundraising card URL */}
                     <div>
@@ -1008,7 +1080,18 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     )}
                     
                     <div className="flex justify-end gap-3 pt-2">
-                        <Button variant="secondary" type="button" onClick={() => { if (!isSubmittingApplication) { setIsApplyModalOpen(false); setApplyingOppId(null);} }} disabled={isSubmittingApplication}>Cancel</Button>
+                        <Button variant="secondary" type="button" onClick={() => { 
+                            if (!isSubmittingApplication) { 
+                                setIsApplyModalOpen(false); 
+                                setApplyingOppId(null);
+                                // Clean up URL when closing modal
+                                const url = new URL(window.location.href);
+                                url.searchParams.delete('opportunityId');
+                                url.searchParams.delete('programName');
+                                url.searchParams.delete('tab');
+                                window.history.replaceState({}, document.title, url.toString());
+                            } 
+                        }} disabled={isSubmittingApplication}>Cancel</Button>
                          <Button 
                             type="button" 
                             onClick={submitApplication} 

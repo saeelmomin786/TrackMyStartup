@@ -263,7 +263,20 @@ class IntakeCRMService {
       .select();
 
     if (error) {
+      // 409 Conflict typically means columns already exist or RLS policy blocks insert
+      // Either way, just return empty - parent will use defaults
       console.error('Error initializing default columns:', error);
+      
+      // If it's a 409 conflict, it might mean they already exist
+      // Try to fetch existing columns instead
+      if (error.code === '23505' || error.message?.includes('Conflict')) {
+        console.log('Columns may already exist, attempting to fetch...');
+        const existing = await this.getColumns(facilitatorId);
+        if (existing.length > 0) {
+          return existing;
+        }
+      }
+      
       return [];
     }
     return data || [];

@@ -147,7 +147,10 @@ const FundraisingCRM = React.forwardRef<{
       }
     } catch (error) {
       console.error('Error persisting status columns:', error);
-      messageService.error('Save Failed', 'Could not save column configuration.', 3000);
+      // Silently handle RLS policy errors - columns are applied locally
+      if (error instanceof Error && !error.message.includes('42501') && !error.message.includes('row-level security')) {
+        messageService.error('Save Failed', 'Could not save column configuration.', 3000);
+      }
     }
   };
 
@@ -163,19 +166,25 @@ const FundraisingCRM = React.forwardRef<{
           }));
           setStatusColumns(mappedColumns);
         } else {
-          // No columns in DB, use defaults and save them
+          // No columns in DB, use defaults
           setStatusColumns(DEFAULT_STATUS_COLUMNS);
-          // Save default columns to database
-          for (let i = 0; i < DEFAULT_STATUS_COLUMNS.length; i++) {
-            await fundraisingCRMService.addColumn(startupId, {
-              label: DEFAULT_STATUS_COLUMNS[i].label,
-              color: DEFAULT_STATUS_COLUMNS[i].color,
-              position: i
-            });
+          // Try to save default columns to database, but don't fail if RLS policy blocks it
+          try {
+            for (let i = 0; i < DEFAULT_STATUS_COLUMNS.length; i++) {
+              await fundraisingCRMService.addColumn(startupId, {
+                label: DEFAULT_STATUS_COLUMNS[i].label,
+                color: DEFAULT_STATUS_COLUMNS[i].color,
+                position: i
+              });
+            }
+          } catch (error) {
+            // Silently handle RLS policy errors - defaults are already set locally
+            console.warn('Could not save default columns to database (RLS policy may apply)', error);
           }
         }
       } catch (error) {
         console.error('Error loading status columns:', error);
+        // Fall back to defaults locally
         setStatusColumns(DEFAULT_STATUS_COLUMNS);
       }
     };

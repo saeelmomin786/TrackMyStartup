@@ -1148,8 +1148,8 @@ export const investmentService = {
         success_fee: offerData.success_fee != null ? Number(offerData.success_fee) : null,
         notes: offerData.notes ?? null,
         investment_advisor_code: offerData.investment_advisor_code ?? null,
-        investor_advisor_approval_status: 'approved',
-        investor_advisor_approval_at: new Date().toISOString(),
+        investor_advisor_approval_status: offerData.investment_advisor_code ? 'not_required' : 'pending',
+        investor_advisor_approval_at: offerData.investment_advisor_code ? new Date().toISOString() : null,
         wants_co_investment: false,
         // Maintain created_by as same as investor for audit
         created_by: investorId ?? null
@@ -1350,16 +1350,8 @@ export const investmentService = {
         stage: offer.stage || 1,
         contact_details_revealed: offer.contact_details_revealed || false,
         contact_details_revealed_at: offer.contact_details_revealed_at,
-        // Keep original fields for backward compatibility (spread last to preserve)
-        ...offer,
-        // Ensure camelCase fields take precedence
-        investorEmail: offer.investor_email || offer.investorEmail,
-        investorName: offer.investor_name || offer.investorName || offer.investor?.name,
-        startupName: offer.startup_name || offer.startupName || offer.startup?.name,
-        startupId: offer.startup_id || offer.startupId || offer.startup?.id,
-        offerAmount: Number(offer.offer_amount || offer.offerAmount) || 0,
-        equityPercentage: Number(offer.equity_percentage || offer.equityPercentage) || 0,
-        createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : (offer.createdAt || new Date().toISOString())
+        // Keep original fields for backward compatibility
+        ...offer
       };
     });
     
@@ -1377,22 +1369,6 @@ export const investmentService = {
 
     if (error) throw error
     return true
-  },
-
-  // Update investment offer
-  async updateInvestmentOffer(offerId: number, offerAmount: number, equityPercentage: number) {
-    const { data, error } = await supabase
-      .from('investment_offers')
-      .update({ 
-        offer_amount: offerAmount, 
-        equity_percentage: equityPercentage 
-      })
-      .eq('id', offerId)
-      .select()
-      .single()
-
-    if (error) throw error
-    return data
   },
 
   // Delete investment offer
@@ -2986,23 +2962,11 @@ export const investmentService = {
         // For lead investor: check if they created a co-investment opportunity for this startup
         created_co_investment_opportunity_id: (offer as any).created_co_investment_opportunity_id || null,
         is_co_investment_related: (offer as any).is_co_investment_related || false,
-        // Approval fields for co-investment offers
-        investor_advisor_approval_status: offer.investor_advisor_approval_status || 'not_required',
-        investor_advisor_approval_at: offer.investor_advisor_approval_at,
+        // Lead investor fields for co-investment offers
         lead_investor_approval_status: offer.lead_investor_approval_status || 'not_required',
         lead_investor_approval_at: offer.lead_investor_approval_at,
-        startup_advisor_approval_status: offer.startup_advisor_approval_status || 'not_required',
-        startup_advisor_approval_at: offer.startup_advisor_approval_at,
-        // Keep original fields for backward compatibility (spread last to preserve)
-        ...offer,
-        // Ensure camelCase fields take precedence
-        investorEmail: offer.investor_email || offer.investorEmail,
-        investorName: offer.investor_name || offer.investorName || offer.investor?.name,
-        startupName: offer.startup_name || offer.startupName || offer.startup?.name,
-        startupId: offer.startup_id || offer.startupId || offer.startup?.id,
-        offerAmount: Number(offer.offer_amount || offer.offerAmount) || 0,
-        equityPercentage: Number(offer.equity_percentage || offer.equityPercentage) || 0,
-        createdAt: offer.created_at ? new Date(offer.created_at).toISOString() : (offer.createdAt || new Date().toISOString())
+        // Keep original fields for backward compatibility
+        ...offer
       }));
       
       // Debug: Log mapped data

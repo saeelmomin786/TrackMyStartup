@@ -7633,7 +7633,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                                     offerStatus === 'rejected';
                                   
                                   // Only show Accept/Decline if not already approved/rejected
-                                  if (investorAdvisorStatus === 'approved' || investorAdvisorStatus === 'rejected') {
+                                  // IMPORTANT: Don't return early if stage >= 2 (offer moved past investor advisor approval)
+                                  if ((investorAdvisorStatus === 'approved' || investorAdvisorStatus === 'rejected') && offerStage === 1) {
                                     return (
                                       <div className="flex flex-col space-y-1">
                                         <button
@@ -7742,50 +7743,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 
                                 if (offerStage === 2) {
                                   // Stage 2: Startup advisor approval
+                                  // In Investor Offers section, just show status - no action buttons
+                                  // Action buttons appear in Startup Offers section for startup advisor
                                   return (
-                                    <div className="flex flex-col space-y-1">
-                                      <button
-                                        onClick={() => {
-                                          // For co-investment offers, use the actual offer.id (from co_investment_offers table)
-                                          const offerId = offer.id;
-                                          console.log('🔍 Accept button clicked (Startup Offers - Stage 2):', {
-                                            isCoInvestment: (offer as any).isCoInvestment || (offer as any).is_co_investment,
-                                            is_co_investment: (offer as any).is_co_investment,
-                                            offer_id: offer.id,
-                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
-                                            passed_offerId: offerId,
-                                            offer_data: {
-                                              id: offer.id,
-                                              stage: (offer as any).stage,
-                                              startup_name: offer.startup_name
-                                            }
-                                          });
-                                          handleAdvisorApproval(offerId, 'approve', 'startup');
-                                        }}
-                                        disabled={isLoading}
-                                        className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200 disabled:opacity-50 font-medium"
-                                      >
-                                        Accept
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          // For co-investment offers, use the actual offer.id (from co_investment_offers table)
-                                          const offerId = offer.id;
-                                          console.log('🔍 Decline button clicked (Startup Offers - Stage 2):', {
-                                            isCoInvestment: (offer as any).isCoInvestment || (offer as any).is_co_investment,
-                                            is_co_investment: (offer as any).is_co_investment,
-                                            offer_id: offer.id,
-                                            co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
-                                            passed_offerId: offerId
-                                          });
-                                          handleAdvisorApproval(offerId, 'reject', 'startup');
-                                        }}
-                                        disabled={isLoading}
-                                        className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200 disabled:opacity-50 font-medium"
-                                      >
-                                        Decline
-                                      </button>
-                                    </div>
+                                    <span className="text-xs text-gray-500">
+                                      Awaiting startup advisor
+                                    </span>
                                   );
                                 }
                                 

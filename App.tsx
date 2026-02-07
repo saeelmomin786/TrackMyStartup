@@ -2910,6 +2910,7 @@ const App: React.FC = () => {
         investor_email: currentUserRef.current.email,
         startup_name: opportunity.name,
         investment_id: opportunity.id, // This is the new_investments.id
+        startup_id: opportunity.id, // Also pass startup_id (same as opportunity.id for new_investments)
         offer_amount: offerAmount,
         equity_percentage: equityPercentage,
         currency: currency || 'USD',

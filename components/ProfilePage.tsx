@@ -335,9 +335,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ currentUser, onBack, onProfil
             
             // Debug: Log role information (always log for debugging)
             console.log('🔍 ProfilePage - Logo Section Check:', {
-              refreshedProfileRole: refreshedProfile?.role,
               refreshedRole,
-              currentUserRole: currentUser?.role,
               currentUserRole,
               refreshedProfileInvestmentAdvisorCode: refreshedProfile?.investment_advisor_code,
               refreshedAdvisorCode,

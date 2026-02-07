@@ -34,6 +34,15 @@ function generateMentorCode(): string {
   return result;
 }
 
+function generateFacilitatorCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'FAC-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -279,6 +288,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const investorCode = role === 'Investor' ? generateInvestorCode() : null;
         const investmentAdvisorCodeValue = role === 'Investment Advisor' ? generateInvestmentAdvisorCode() : null;
         const mentorCode = role === 'Mentor' ? generateMentorCode() : null;
+        const facilitatorCode = role === 'Startup Facilitation Center' ? generateFacilitatorCode() : null;
 
         const { data: newProfile, error: profileError } = await supabaseAdmin
           .from('user_profiles')
@@ -293,6 +303,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             investor_code: investorCode,
             investment_advisor_code: investmentAdvisorCodeValue,
             mentor_code: mentorCode,
+            facilitator_code: facilitatorCode,
             investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null,
             registration_date: new Date().toISOString().split('T')[0],
             is_profile_complete: false

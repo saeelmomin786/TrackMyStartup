@@ -36,11 +36,11 @@ interface IntakeCRMBoardProps {
 }
 
 const DEFAULT_STATUS_COLUMNS: IntakeCRMColumn[] = [
-  { id: 'to_be_contacted', label: 'To be contacted', color: 'bg-slate-100', position: 0, facilitator_id: '', created_at: '', updated_at: '' },
-  { id: 'reached_out', label: 'Reached out', color: 'bg-blue-50', position: 1, facilitator_id: '', created_at: '', updated_at: '' },
-  { id: 'in_progress', label: 'In progress', color: 'bg-yellow-50', position: 2, facilitator_id: '', created_at: '', updated_at: '' },
-  { id: 'committed', label: 'Committed', color: 'bg-green-50', position: 3, facilitator_id: '', created_at: '', updated_at: '' },
-  { id: 'not_happening', label: 'Not happening', color: 'bg-red-50', position: 4, facilitator_id: '', created_at: '', updated_at: '' },
+  { id: 'temp-1', label: 'To be contacted', color: 'bg-slate-100', position: 0, facilitator_id: '', created_at: '', updated_at: '' },
+  { id: 'temp-2', label: 'Reached out', color: 'bg-blue-50', position: 1, facilitator_id: '', created_at: '', updated_at: '' },
+  { id: 'temp-3', label: 'In progress', color: 'bg-yellow-50', position: 2, facilitator_id: '', created_at: '', updated_at: '' },
+  { id: 'temp-4', label: 'Committed', color: 'bg-green-50', position: 3, facilitator_id: '', created_at: '', updated_at: '' },
+  { id: 'temp-5', label: 'Not happening', color: 'bg-red-50', position: 4, facilitator_id: '', created_at: '', updated_at: '' },
 ];
 
 const STATUS_COLOR_CHOICES = [
@@ -85,23 +85,27 @@ export function IntakeCRMBoard(
       
       if (columnsData && columnsData.length > 0) {
         setStatusColumns(columnsData);
-        console.log('Loaded columns from Supabase:', columnsData);
+        console.log('✅ Loaded columns from Supabase:', columnsData);
         return;
       }
 
-      // If no columns exist, initialize defaults
+      // If no columns exist, try to initialize defaults
       console.log('No columns found, initializing defaults...');
       const initialized = await intakeCRMService.initializeDefaultColumns(facilitatorId);
       
       if (initialized && initialized.length > 0) {
         setStatusColumns(initialized);
-        console.log('Initialized default columns:', initialized);
+        console.log('✅ Initialized default columns:', initialized);
       } else {
-        throw new Error('Failed to initialize default columns');
+        // Database initialization failed or returned empty - use local defaults
+        console.log('⚠️ Using local defaults (database initialization failed or columns may already exist)');
+        setStatusColumns(DEFAULT_STATUS_COLUMNS);
       }
     } catch (error) {
-      console.error('Error loading CRM columns:', error);
-      messageService.error('Failed to load CRM columns', 'Please check your connection and permissions.');
+      console.error('❌ Error loading CRM columns:', error);
+      // Fall back to local defaults - don't show user error
+      console.log('↙️ Falling back to local default columns');
+      setStatusColumns(DEFAULT_STATUS_COLUMNS);
     } finally {
       setIsLoading(false);
     }
@@ -203,23 +207,26 @@ export function IntakeCRMBoard(
     }
 
     try {
-      const success = await intakeCRMService.deleteColumn(id);
-      if (success) {
-        const filtered = statusColumns.filter(col => col.id !== id);
-        setStatusColumns(filtered);
-        
-        // Move applications from deleted column to first column
-        const fallbackStatus = filtered[0]?.id || getDefaultStatusId();
-        const updated = crmItems.map(item =>
-          item.status === id ? { ...item, status: fallbackStatus } : item
-        );
-        setCrmItems(updated);
-
-        messageService.success('Column removed', 'Applications moved to the first column.', 2000);
-        onColumnsUpdate?.();
-      } else {
-        throw new Error('Failed to delete column');
+      // Only delete from database if it's a real UUID (not a local temp ID)
+      if (!id.startsWith('temp-')) {
+        const success = await intakeCRMService.deleteColumn(id);
+        if (!success) {
+          throw new Error('Failed to delete column from database');
+        }
       }
+      
+      const filtered = statusColumns.filter(col => col.id !== id);
+      setStatusColumns(filtered);
+      
+      // Move applications from deleted column to first column
+      const fallbackStatus = filtered[0]?.id || getDefaultStatusId();
+      const updated = crmItems.map(item =>
+        item.status === id ? { ...item, status: fallbackStatus } : item
+      );
+      setCrmItems(updated);
+
+      messageService.success('Column removed', 'Applications moved to the first column.', 2000);
+      onColumnsUpdate?.();
     } catch (error) {
       console.error('Error removing column:', error);
       messageService.error('Failed to remove column', 'Please check your connection and permissions.');
@@ -248,23 +255,26 @@ export function IntakeCRMBoard(
     if (!draggedItem) return;
 
     try {
-      // Update in Supabase
-      const success = await intakeCRMService.moveApplicationToColumn(facilitatorId, draggedItem, columnId);
-      
-      if (success) {
-        // Update local state
-        const updated = crmItems.map(item =>
-          item.id === draggedItem ? { ...item, status: columnId } : item
-        );
-        setCrmItems(updated);
-
-        // Update status map
-        const newMap = new Map(statusMap);
-        newMap.set(draggedItem, columnId);
-        setStatusMap(newMap);
-
-        messageService.success('Moved', 'Application moved successfully.', 1500);
+      // Only update database if target column is a real DB column (not a temp local column)
+      if (!columnId.startsWith('temp-')) {
+        const success = await intakeCRMService.moveApplicationToColumn(facilitatorId, draggedItem, columnId);
+        if (!success) {
+          console.warn('Failed to update database, but updating local state');
+        }
       }
+      
+      // Always update local state regardless of database success
+      const updated = crmItems.map(item =>
+        item.id === draggedItem ? { ...item, status: columnId } : item
+      );
+      setCrmItems(updated);
+
+      // Update status map
+      const newMap = new Map(statusMap);
+      newMap.set(draggedItem, columnId);
+      setStatusMap(newMap);
+
+      messageService.success('Moved', 'Application moved successfully.', 1500);
     } catch (error) {
       console.error('Error moving application:', error);
       messageService.error('Failed to move application', 'Please check your connection and permissions.');

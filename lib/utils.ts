@@ -55,6 +55,31 @@ export function generateMentorCode(): string {
 }
 
 /**
+ * Generates a unique Facilitator code in the format FAC-XXXXXX
+ * @returns A unique Facilitator code
+ */
+export function generateFacilitatorCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'FAC-';
+  
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  return result;
+}
+
+/**
+ * Validates if a string is a valid Facilitator code format
+ * @param code The code to validate
+ * @returns True if valid, false otherwise
+ */
+export function isValidFacilitatorCode(code: string): boolean {
+  const facilitatorCodeRegex = /^FAC-[A-Z0-9]{6}$/;
+  return facilitatorCodeRegex.test(code);
+}
+
+/**
  * Validates if a string is a valid Investment Advisor code format
  * @param code The code to validate
  * @returns True if valid, false otherwise

@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
@@ -1031,6 +1031,80 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   };
 
+  // ============ SEND FORM 2 TO SHORTLISTED APPLICANTS ============
+  const handleSendForm2ToShortlisted = async (opportunityId: string) => {
+    try {
+      // Check if opportunity has Form 2 questions configured
+      const form2Questions = await questionBankService.getForm2Questions(opportunityId);
+      if (!form2Questions || form2Questions.length === 0) {
+        messageService.error(
+          'No Form 2 Questions',
+          'Please configure at least one Form 2 question before sending to shortlisted applicants.'
+        );
+        return;
+      }
+
+      // Call RPC function to send Form 2 to shortlisted
+      const { data, error } = await supabase.rpc('send_form2_to_shortlisted', {
+        p_opportunity_id: opportunityId
+      });
+
+      if (error) {
+        console.error('Error sending Form 2 to shortlisted:', error);
+        messageService.error('Error', 'Failed to send Form 2 to shortlisted applicants');
+        return;
+      }
+
+      const updatedCount = data?.[0]?.updated_count || 0;
+      
+      if (updatedCount > 0) {
+        messageService.success(
+          'Form 2 Sent',
+          `Form 2 has been sent to ${updatedCount} shortlisted applicant${updatedCount !== 1 ? 's' : ''}.`
+        );
+        
+        // Reload applications to reflect Form 2 status
+        const pinnedOpp = selectedOpportunityId;
+        if (pinnedOpp) {
+          const apps = await supabase
+            .from('opportunity_applications')
+            .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, form2_requested, startups!inner(id,name)')
+            .eq('opportunity_id', pinnedOpp)
+            .order('created_at', { ascending: false });
+          
+          if (apps.data) {
+            const appsMapped: ReceivedApplication[] = (apps.data || []).map((a: any) => ({
+              id: a.id,
+              startupId: a.startup_id,
+              startupName: a.startups?.name || `Startup #${a.startup_id}`,
+              opportunityId: a.opportunity_id,
+              status: a.status || 'pending',
+              pitchDeckUrl: a.pitch_deck_url || undefined,
+              pitchVideoUrl: a.pitch_video_url || undefined,
+              diligenceStatus: a.diligence_status || 'none',
+              agreementUrl: a.agreement_url || undefined,
+              sector: a.domain,
+              stage: a.stage,
+              createdAt: a.created_at,
+              diligenceUrls: a.diligence_urls || [],
+              isShortlisted: a.is_shortlisted || false
+            }));
+            
+            setMyReceivedApplications(appsMapped);
+          }
+        }
+      } else {
+        messageService.info(
+          'No Shortlisted Applicants',
+          'There are no shortlisted pending applications to send Form 2 to. Eligible criteria: shortlisted + pending status + Form 2 not yet sent'
+        );
+      }
+    } catch (error) {
+      console.error('Error in handleSendForm2ToShortlisted:', error);
+      messageService.error('Error', 'Failed to send Form 2 to shortlisted applicants');
+    }
+  };
+
 
 
 
@@ -1640,7 +1714,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             try {
             const { data: apps, error: appsError } = await supabase
               .from('opportunity_applications')
-              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, startups!inner(id,name)')
+              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, startups!inner(id,name)')
               .in('opportunity_id', oppIds)
               .order('created_at', { ascending: false });
             
@@ -1666,7 +1740,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   // Try without the inner join
                   const { data: fallbackApps, error: fallbackAppsError } = await supabase
                     .from('opportunity_applications')
-                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls')
+                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted')
                     .in('opportunity_id', oppIds)
                     .order('created_at', { ascending: false });
                   
@@ -3428,7 +3502,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               <SummaryCard title="Applications Received" value={myReceivedApplications.length} icon={<FileText className="h-6 w-6 text-brand-primary" />} />
       </div>
 
-            {/* View Mode Tabs with Form 2 Button */}
+            {/* View Mode Tabs with Form 2 Buttons */}
             <div className="flex justify-between items-center border-b border-slate-200 mb-4">
               <div className="flex">
                 <button
@@ -3452,20 +3526,37 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   CRM
                 </button>
               </div>
-              <Button
-                size="sm"
-                onClick={() => {
-                  if (selectedOpportunityId) {
-                    handleOpenForm2ConfigModal(selectedOpportunityId);
-                  } else {
-                    messageService.info('Select Opportunity', 'Please select an opportunity first to configure Form 2 questions');
-                  }
-                }}
-                className="flex items-center gap-1"
-              >
-                <PlusCircle className="h-4 w-4" />
-                Configure Form 2
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    if (selectedOpportunityId) {
+                      handleOpenForm2ConfigModal(selectedOpportunityId);
+                    } else {
+                      messageService.info('Select Opportunity', 'Please select an opportunity first to configure Form 2 questions');
+                    }
+                  }}
+                  className="flex items-center gap-1"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  Configure Form 2
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => {
+                    if (selectedOpportunityId) {
+                      handleSendForm2ToShortlisted(selectedOpportunityId);
+                    } else {
+                      messageService.info('Select Opportunity', 'Please select an opportunity first to send Form 2');
+                    }
+                  }}
+                  className="flex items-center gap-1"
+                >
+                  <Send className="h-4 w-4" />
+                  Send Form 2
+                </Button>
+              </div>
             </div>
 
             {/* Portfolio View (Table) */}
@@ -6606,8 +6697,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       className="h-4 w-4 text-blue-600"
                     />
                     <div className="ml-3">
-                      <p className="font-medium text-slate-900">Create Mandate & Send to Startups</p>
-                      <p className="text-sm text-slate-500">Create a mandate and send these questions to startups for response</p>
+                      <p className="font-medium text-slate-900">Create Report </p>
+                      <p className="text-sm text-slate-500">Take updated responses from startups, then generate report</p>
                     </div>
                   </label>
                 </div>

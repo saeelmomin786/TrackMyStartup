@@ -363,9 +363,9 @@ export function IntakeCRMBoard(
               isOpen={isStatusModalOpen}
               onClose={() => setIsStatusModalOpen(false)}
               title="Customize CRM Columns"
-              position="top"
-              showBackdrop={false}
-              variant="absolute"
+              position="center"
+              showBackdrop={true}
+              variant="fixed"
             >
             <div className="space-y-6 pb-4">
               {/* Existing Columns */}

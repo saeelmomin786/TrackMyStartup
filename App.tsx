@@ -3320,8 +3320,12 @@ const App: React.FC = () => {
     !isAuthenticated &&
     !currentUser &&
     !selectedStartup &&
+    // Don't show global loading screen when user is on interactive flows
+    // like login, register, complete-registration (Form 2) or subscription.
     currentPage !== 'login' &&
-    currentPage !== 'register'
+    currentPage !== 'register' &&
+    currentPage !== 'complete-registration' &&
+    currentPage !== 'subscription'
   ) {
       console.log('Rendering loading screen...', { isAuthenticated, currentUser: !!currentUser });
       return (

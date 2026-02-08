@@ -578,6 +578,33 @@ const App: React.FC = () => {
   const ignoreAuthEventsRef = useRef(false);
   const [showAddProfileModal, setShowAddProfileModal] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const [hasCheckedExistingSession, setHasCheckedExistingSession] = useState(false);
+  const [existingSessionDetected, setExistingSessionDetected] = useState(false);
+
+  // MOBILE FIX: Check for existing session before showing login page
+  // On mobile refresh, if user is still logged in to Supabase but isAuthenticated is false,
+  // show loading screen instead of login form to prevent confusion
+  useEffect(() => {
+    if (!hasCheckedExistingSession && currentPage === 'login' && !isAuthenticated && !currentUser) {
+      (async () => {
+        try {
+          const { data } = await authService.supabase.auth.getSession();
+          if (data?.session) {
+            console.log('✅ Existing session detected on login page - showing loading instead of login form');
+            setExistingSessionDetected(true);
+          }
+        } catch (e) {
+          console.warn('⚠️ Error checking existing session:', e);
+        } finally {
+          setHasCheckedExistingSession(true);
+        }
+      })();
+    } else if (currentPage !== 'login') {
+      // Reset session detection when navigating away from login
+      setHasCheckedExistingSession(false);
+      setExistingSessionDetected(false);
+    }
+  }, [currentPage, isAuthenticated, currentUser, hasCheckedExistingSession]);
 
   // Refresh user data when accessing payment page to ensure Form 2 completion is checked with latest data
   useEffect(() => {
@@ -822,7 +849,7 @@ const App: React.FC = () => {
             autoReloadGuardRef.current = true;
             try { window.location.reload(); } catch {}
           }
-        }, 20000); // 20s hard-refresh safeguard
+        }, 10000); // 10s hard-refresh safeguard
       }
     };
     arm();
@@ -945,13 +972,13 @@ const App: React.FC = () => {
     // SAFETY TIMEOUT: Prevent loading screen from hanging indefinitely
     // If auth doesn't complete within 15 seconds, force clear loading state
     // This handles cases where token refresh fails with 400 error
-    const LOADING_TIMEOUT_MS = 15000; // 15 seconds
+    const LOADING_TIMEOUT_MS = 10000; // 10 seconds
     
     const startLoadingTimeout = () => {
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
       loadingTimeoutRef.current = setTimeout(() => {
         if (isMounted && isLoading && !isAuthenticated) {
-          console.warn('⚠️ LOADING TIMEOUT: Auth state not resolved after 15 seconds');
+          console.warn('⚠️ LOADING TIMEOUT: Auth state not resolved after 10 seconds');
           console.warn('⚠️ This likely means token refresh failed or auth service is slow');
           console.warn('⚠️ Forcing loading state to clear - user can manually refresh if needed');
           setIsLoading(false);
@@ -1430,6 +1457,22 @@ const App: React.FC = () => {
                   
                   setIsAuthenticated(true);
                   setIsLoading(false);
+                  
+                  // CROSS-TAB COORDINATION: Broadcast login success to other tabs
+                  // This allows other tabs waiting on login to detect and sync
+                  if (session?.user?.id) {
+                    try {
+                      const signal = {
+                        timestamp: Date.now(),
+                        authUserId: session.user.id,
+                        type: 'login_success'
+                      };
+                      localStorage.setItem('tms_auth_success', JSON.stringify(signal));
+                      console.log('📡 Broadcast auth success signal for cross-tab sync');
+                    } catch (e) {
+                      console.warn('⚠️ Could not broadcast auth success to other tabs:', e);
+                    }
+                  }
                 } else {
                   console.log('❌ Could not load complete user data, creating basic profile...');
                   
@@ -1491,6 +1534,21 @@ const App: React.FC = () => {
                       
                       setIsAuthenticated(true);
                       setIsLoading(false);
+                      
+                      // CROSS-TAB COORDINATION: Broadcast login success to other tabs
+                      if (session?.user?.id) {
+                        try {
+                          const signal = {
+                            timestamp: Date.now(),
+                            authUserId: session.user.id,
+                            type: 'login_success'
+                          };
+                          localStorage.setItem('tms_auth_success', JSON.stringify(signal));
+                          console.log('📡 Broadcast auth success signal for cross-tab sync (new profile)');
+                        } catch (e) {
+                          console.warn('⚠️ Could not broadcast auth success to other tabs:', e);
+                        }
+                      }
                       
                       // For new users, redirect to Form 2 to complete their profile
                       if (newProfile.role === 'Startup') {
@@ -1595,6 +1653,71 @@ const App: React.FC = () => {
   //   }
   // }, 10000); // 10 seconds timeout
 
+    // CROSS-TAB COORDINATION: Listen for login events from other tabs
+    // When one tab logs in successfully, other tabs should detect it and sync
+    // This prevents stuck login state when multiple tabs try to log in simultaneously
+    const handleStorageEvent = (e: StorageEvent) => {
+      // Only care about auth success signals
+      if (e.key !== 'tms_auth_success') return;
+      if (!isMounted) return;
+      
+      // Parse the signal (contains timestamp and user_id to avoid self-triggers)
+      let signal: any = null;
+      try {
+        signal = JSON.parse(e.newValue || '{}');
+      } catch {
+        return; // Invalid signal, ignore
+      }
+      
+      const { timestamp: signalTime, authUserId: signalUserId } = signal;
+      if (!signalTime || !signalUserId) return;
+      
+      // Check current session to see if this is from a different tab
+      (async () => {
+        try {
+          const { data: { user: currentAuthUser } } = await authService.supabase.auth.getUser();
+          if (!currentAuthUser) return; // Not authenticated in this tab
+          
+          // If the signal is from a DIFFERENT user, ignore it (multi-user scenario)
+          if (signalUserId !== currentAuthUser.id) return;
+          
+          // If the signal is recent (within 5 seconds) and from the same user, it's from another tab
+          const now = Date.now();
+          const age = now - signalTime;
+          
+          if (age > 5000) {
+            console.log('⏰ Auth success signal too old, ignoring:', age, 'ms');
+            return; // Signal too old, ignore
+          }
+          
+          // Check if we're already authenticated with data loaded
+          if (isAuthenticatedRef.current && hasInitialDataLoadedRef.current) {
+            console.log('✅ Another tab logged in successfully - we already have auth/data, no sync needed');
+            return;
+          }
+          
+          // If we're stuck on login page or loading screen, force sync with successful tab
+          if (!isAuthenticatedRef.current || !hasInitialDataLoadedRef.current) {
+            console.log('🔄 CROSS-TAB SYNC: Another tab logged in! Triggering auth refresh in 500ms');
+            
+            // Wait a moment to let the other tab finish its initialization
+            setTimeout(() => {
+              if (isMounted) {
+                console.log('🔄 CROSS-TAB SYNC EXECUTING: Forcing auth state refresh');
+                // Re-check session and initialize if not already done
+                initializeAuth();
+              }
+            }, 500);
+          }
+        } catch (error) {
+          console.warn('⚠️ Error in cross-tab sync handler:', error);
+        }
+      })();
+    };
+    
+    // Attach storage listener for cross-tab coordination
+    window.addEventListener('storage', handleStorageEvent);
+
     // After listener is attached, kick off initialization (prevents mobile race)
     initializeAuth();
 
@@ -1605,6 +1728,7 @@ const App: React.FC = () => {
       document.removeEventListener('visibilitychange', visibilityHandler);
       window.removeEventListener('focus', debouncedFocus);
       window.removeEventListener('blur', onBlur);
+      window.removeEventListener('storage', handleStorageEvent); // Clean up storage listener
     };
   }, []);
 
@@ -2145,6 +2269,22 @@ const App: React.FC = () => {
       setCurrentPage('complete-registration');
       // Keep advisorCode in URL
       setQueryParam('page', 'complete-registration', false);
+      
+      // CROSS-TAB COORDINATION: Broadcast login success
+      try {
+        const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+        if (authUser?.id) {
+          const signal = {
+            timestamp: Date.now(),
+            authUserId: authUser.id,
+            type: 'login_success'
+          };
+          localStorage.setItem('tms_auth_success', JSON.stringify(signal));
+          console.log('📡 Broadcast auth success (advisorCode flow)');
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not broadcast auth success:', e);
+      }
       return; // Don't proceed with normal login flow, let Form 2 handle it
     }
 
@@ -2162,6 +2302,22 @@ const App: React.FC = () => {
       setQueryParam('tab', 'fundraising', true);
       // Store opportunityId for the startup health component to know which program to apply to
       sessionStorage.setItem('applyToOpportunityId', opportunityId);
+      
+      // CROSS-TAB COORDINATION: Broadcast login success
+      try {
+        const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+        if (authUser?.id) {
+          const signal = {
+            timestamp: Date.now(),
+            authUserId: authUser.id,
+            type: 'login_success'
+          };
+          localStorage.setItem('tms_auth_success', JSON.stringify(signal));
+          console.log('📡 Broadcast auth success (opportunity flow)');
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not broadcast auth success:', e);
+      }
       return;
     }
     
@@ -2221,6 +2377,22 @@ const App: React.FC = () => {
         }
 
         setIsAuthenticated(true);
+        
+        // CROSS-TAB COORDINATION: Broadcast login success to other tabs
+        try {
+          const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+          if (authUser?.id) {
+            const signal = {
+              timestamp: Date.now(),
+              authUserId: authUser.id,
+              type: 'login_success'
+            };
+            localStorage.setItem('tms_auth_success', JSON.stringify(signal));
+            console.log('📡 Broadcast auth success signal for cross-tab sync (handleLogin)');
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not broadcast auth success to other tabs:', e);
+        }
       } catch (e) {
         console.warn('⚠️ Post-login initialization failed, proceeding to dashboard:', e);
         setIsAuthenticated(true);
@@ -3344,7 +3516,7 @@ const App: React.FC = () => {
                   {/* Safety control so users aren't stuck on mobile */}
                   <div className="mt-2">
                     <button
-                      onClick={() => { try { window.location.reload(); } catch {} }}
+                      onClick={() => { try { (window as any).resetAuthState?.(); } catch { try { window.location.reload(); } catch {} } }}
                       className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm"
                     >
                       Refresh
@@ -3615,6 +3787,14 @@ const App: React.FC = () => {
                       onNavigateToLogin={() => setCurrentPage('login')}
                       onNavigateToRegister={() => setCurrentPage('register')}
                     />
+                ) : currentPage === 'login' && existingSessionDetected ? (
+                    // MOBILE FIX: Show loading instead of login form if we detect an existing session
+                    // This prevents user confusion on mobile refresh where they see login form briefly
+                    <div className="flex flex-col items-center gap-4">
+                      <BarChart3 className="w-16 h-16 animate-pulse text-brand-primary" />
+                      <p className="text-xl font-semibold text-slate-800">Loading your dashboard...</p>
+                      <p className="text-sm text-slate-600">You are already logged in</p>
+                    </div>
                 ) : currentPage === 'login' ? (
                     <LoginPage 
                         onLogin={handleLogin} 

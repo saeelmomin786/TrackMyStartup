@@ -229,6 +229,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [selectedApplication, setSelectedApplication] = useState<ReceivedApplication | null>(null);
   const [isPitchVideoModalOpen, setIsPitchVideoModalOpen] = useState(false);
   const [selectedPitchVideo, setSelectedPitchVideo] = useState<string>('');
+  const [isPitchDeckModalOpen, setIsPitchDeckModalOpen] = useState(false);
+  const [selectedPitchDeck, setSelectedPitchDeck] = useState<string>('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [newOpportunity, setNewOpportunity] = useState(initialNewOppState);
   const [posterPreview, setPosterPreview] = useState<string>('');
@@ -2454,6 +2456,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     setIsPitchVideoModalOpen(true);
   };
 
+  const handleViewPitchDeck = (deckUrl: string) => {
+    setSelectedPitchDeck(deckUrl);
+    setIsPitchDeckModalOpen(true);
+  };
+
   const handleViewApplicationResponses = async (app: ReceivedApplication) => {
     setSelectedApplicationForResponses(app);
     setIsApplicationResponsesModalOpen(true);
@@ -3630,76 +3637,31 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               <p className="text-sm text-slate-700 font-medium">{myPostedOpportunities.find(o => o.id === app.opportunityId)?.programName || '—'}</p>
                             </td>
                             <td className="px-4 py-4">
-                              <div className="flex justify-center items-center gap-2">
+                              <div className="flex justify-center items-center gap-2 flex-wrap">
+                                {app.pitchDeckUrl && (
                                   <Button 
                                     size="sm"
                                     variant="outline"
-                                  onClick={async () => {
-                                    try {
-                                      // Check if startup has active fundraising
-                                      const { data: fundraisingData } = await supabase
-                                        .from('fundraising_details')
-                                        .select('active')
-                                        .eq('startup_id', app.startupId)
-                                        .eq('active', true)
-                                        .order('created_at', { ascending: false })
-                                        .limit(1)
-                                        .maybeSingle();
-                                      
-                                      if (fundraisingData && (fundraisingData as any).active) {
-                                        // Generate public fundraising card URL
-                                        const { createSlug, createProfileUrl } = await import('../lib/slugUtils');
-                                        const startupName = app.startupName || 'Startup';
-                                        const slug = createSlug(startupName);
-                                        const baseUrl = window.location.origin;
-                                        const fundraisingCardUrl = createProfileUrl(baseUrl, 'startup', slug, String(app.startupId));
-                                        
-                                        // Open public fundraising card in new page/tab
-                                        window.open(fundraisingCardUrl, '_blank', 'noopener,noreferrer');
-                                      } else {
-                                        // No active fundraising, open full startup view
-                                        const startupObj = await buildStartupForView({
-                                          id: app.startupId,
-                                          name: app.startupName,
-                                          sector: app.sector || 'Unknown',
-                                          investmentType: 'equity' as any,
-                                          investmentValue: 0,
-                                          equityAllocation: 0,
-                                          currentValuation: 0,
-                                          totalFunding: 0,
-                                          totalRevenue: 0,
-                                          registrationDate: new Date().toISOString().split('T')[0],
-                                          complianceStatus: ComplianceStatus.Pending,
-                                          founders: []
-                                        });
-                                        onViewStartup(startupObj);
-                                      }
-                                    } catch (error) {
-                                      console.error('Failed to open portfolio:', error);
-                                      // Fallback to full startup view
-                                      const startupObj = await buildStartupForView({
-                                        id: app.startupId,
-                                        name: app.startupName,
-                                        sector: app.sector || 'Unknown',
-                                        investmentType: 'equity' as any,
-                                        investmentValue: 0,
-                                        equityAllocation: 0,
-                                        currentValuation: 0,
-                                        totalFunding: 0,
-                                        totalRevenue: 0,
-                                        registrationDate: new Date().toISOString().split('T')[0],
-                                        complianceStatus: ComplianceStatus.Pending,
-                                        founders: []
-                                      });
-                                      onViewStartup(startupObj);
-                                    }
-                                  }}
-                                  className="flex items-center gap-1.5 hover:bg-slate-100"
-                                  title="View Public Fundraising Card (if available)"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  <span>Portfolio</span>
+                                    onClick={() => handleViewPitchDeck(app.pitchDeckUrl!)}
+                                    className="flex items-center gap-1.5 hover:bg-slate-100"
+                                    title="View Pitch Deck"
+                                  >
+                                    <FileText className="h-4 w-4" />
+                                    <span>Pitch Deck</span>
                                   </Button>
+                                )}
+                                {app.pitchVideoUrl && (
+                                  <Button 
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleViewPitchVideo(app.pitchVideoUrl!)}
+                                    className="flex items-center gap-1.5 hover:bg-slate-100"
+                                    title="View Pitch Video"
+                                  >
+                                    <Film className="h-4 w-4" />
+                                    <span>Pitch Video</span>
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -6360,6 +6322,45 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         </div>
       </Modal>
 
+      {/* Pitch Deck Modal */}
+      <Modal isOpen={isPitchDeckModalOpen} onClose={() => setIsPitchDeckModalOpen(false)} title="Pitch Deck" size="2xl">
+        <div className="space-y-4">
+          {selectedPitchDeck ? (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-slate-700">Pitch Deck URL:</p>
+              <a 
+                href={selectedPitchDeck} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline break-all text-sm"
+              >
+                {selectedPitchDeck}
+              </a>
+              <Button
+                variant="secondary"
+                onClick={() => window.open(selectedPitchDeck, '_blank')}
+                className="mt-4 flex items-center gap-2"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open in New Tab
+              </Button>
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <FileText className="h-16 w-16 mx-auto mb-2 text-slate-300" />
+              <p className="text-sm text-slate-500">Pitch deck not available</p>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button 
+              variant="secondary" 
+              onClick={() => setIsPitchDeckModalOpen(false)}
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Messaging Modal */}
       {selectedApplicationForMessaging && (

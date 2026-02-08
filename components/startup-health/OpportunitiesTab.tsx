@@ -13,6 +13,7 @@ import { toDirectImageUrl } from '../../lib/imageUrl';
 import ReferenceApplicationDraft from '../ReferenceApplicationDraft';
 import DraftAnswersView from '../DraftAnswersView';
 import { questionBankService, OpportunityQuestion, StartupAnswer } from '../../lib/questionBankService';
+import { storageService } from '../../lib/storage';
 import FeatureGuard from '../FeatureGuard';
 import UpgradePrompt from '../UpgradePrompt';
 import { featureAccessService } from '../../lib/featureAccessService';
@@ -122,6 +123,31 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             sessionStorage.removeItem('autoOpenedGrantOppId');
         }
     };
+
+    // Handlers to upload pitch deck and pitch video files (or accept cloud links)
+    const handlePitchDeckFileSelect = async (file: File) => {
+        setPitchDeckUploadError(null);
+        setIsUploadingPitchDeck(true);
+        try {
+            const res = await storageService.uploadPitchDeck(file, String(startup.id));
+            if (res.success && res.url) {
+                setPitchDeckUrl(res.url);
+                messageService.success('Uploaded', 'Pitch deck uploaded successfully', 2000);
+            } else {
+                const err = res.error || 'Upload failed';
+                setPitchDeckUploadError(err);
+                messageService.error('Upload Failed', err);
+            }
+        } catch (err: any) {
+            console.error('Pitch deck upload error:', err);
+            setPitchDeckUploadError(err?.message || 'Upload failed');
+            messageService.error('Upload Failed', err?.message || 'Failed to upload pitch deck');
+        } finally {
+            setIsUploadingPitchDeck(false);
+        }
+    };
+
+    // Pitch video is URL-only; no file upload handler required
     // Image modal state
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
     const [selectedImageUrl, setSelectedImageUrl] = useState<string>('');
@@ -136,6 +162,10 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     const [loadingQuestions, setLoadingQuestions] = useState(false);
     const [portfolioUrl, setPortfolioUrl] = useState('');
     const [startupWebsiteUrl, setStartupWebsiteUrl] = useState<string | null>(null);
+    const [pitchDeckUrl, setPitchDeckUrl] = useState<string>('');
+    const [pitchVideoUrl, setPitchVideoUrl] = useState<string>('');
+    const [isUploadingPitchDeck, setIsUploadingPitchDeck] = useState(false);
+    const [pitchDeckUploadError, setPitchDeckUploadError] = useState<string | null>(null);
     
 
     useEffect(() => {
@@ -470,7 +500,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 .insert({
                     startup_id: startup.id,
                     opportunity_id: applyingOppId,
-                    status: 'pending'
+                    status: 'pending',
+                    pitch_deck_url: pitchDeckUrl || null,
+                    pitch_video_url: pitchVideoUrl || null
                 })
                 .select()
                 .single();
@@ -527,7 +559,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 id: data.id,
                 startupId: startup.id,
                 opportunityId: applyingOppId,
-                status: 'pending'
+                status: 'pending',
+                pitchDeckUrl: data.pitch_deck_url || pitchDeckUrl || undefined,
+                pitchVideoUrl: data.pitch_video_url || pitchVideoUrl || undefined
             }]);
 
             setIsApplyModalOpen(false);
@@ -536,6 +570,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             setQuestionAnswers(new Map());
             setPortfolioUrl('');
             setStartupWebsiteUrl(null);
+            setPitchDeckUrl('');
+            setPitchVideoUrl('');
+            setPitchDeckUploadError(null);
 
             const successMessage = document.createElement('div');
             successMessage.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
@@ -937,34 +974,17 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 } 
             }} title="Submit Application">
                 <div className="space-y-4">
-                    {/* Portfolio URL - Auto-filled from startup's fundraising card URL */}
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Portfolio/Website URL</label>
-                        <Input
-                            type="url"
-                            placeholder="https://yourstartup.com"
-                            value={portfolioUrl}
-                            onChange={(e) => setPortfolioUrl(e.target.value)}
-                            className="w-full"
-                        />
-                        <p className="text-xs text-slate-500 mt-1">
-                            {startupWebsiteUrl 
-                                ? 'Auto-filled from your fundraising card URL. You can edit if needed.'
-                                : 'Your fundraising card URL (if you have active fundraising). Leave blank if you don\'t have one.'}
-                        </p>
-                    </div>
-                    
                     {/* Application Questions - Only questions from the opportunity */}
                     {loadingQuestions ? (
-                        <div className="border-t pt-4">
+                        <div className="border-b pb-4">
                             <p className="text-sm text-slate-500 text-center">Loading questions...</p>
                         </div>
                     ) : opportunityQuestions.length === 0 ? (
-                        <div className="border-t pt-4">
+                        <div className="border-b pb-4">
                             <p className="text-sm text-slate-500 text-center">This opportunity has no application questions.</p>
                         </div>
                     ) : (
-                        <div className="border-t pt-4 space-y-4">
+                        <div className="border-b pb-4 space-y-4">
                             <h4 className="text-md font-semibold text-slate-700">Application Questions</h4>
                             <p className="text-xs text-slate-500">
                                 Your saved answers have been auto-filled. You can edit them before submitting.
@@ -1079,6 +1099,34 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                         </div>
                     )}
                     
+                    {/* Pitch Deck and Pitch Video inputs */}
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (link or upload)</label>
+                        <CloudDriveInput
+                            label=""
+                            value={pitchDeckUrl}
+                            onChange={(url) => setPitchDeckUrl(url)}
+                            onFileSelect={handlePitchDeckFileSelect}
+                            placeholder="https://drive.google.com/... or upload a PDF/PPT"
+                            accept=".pdf,.ppt,.pptx,.doc,.docx"
+                            documentType="pitch deck"
+                            className="w-full"
+                        />
+                        {isUploadingPitchDeck && <p className="text-xs text-slate-500 mt-1">Uploading pitch deck...</p>}
+                        {pitchDeckUploadError && <p className="text-xs text-red-600 mt-1">{pitchDeckUploadError}</p>}
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Video (video URL)</label>
+                        <Input
+                            type="url"
+                            placeholder="https://youtube.com/... or https://vimeo.com/..."
+                            value={pitchVideoUrl}
+                            onChange={(e) => setPitchVideoUrl(e.target.value)}
+                            className="w-full"
+                        />
+                    </div>
+                    
                     <div className="flex justify-end gap-3 pt-2">
                         <Button variant="secondary" type="button" onClick={() => { 
                             if (!isSubmittingApplication) { 
@@ -1099,6 +1147,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                 isSubmittingApplication || 
                                 opportunityQuestions.length === 0 ||
                                 (opportunityQuestions.some(q => q.isRequired && (!questionAnswers.get(q.questionId) || questionAnswers.get(q.questionId)?.trim() === '')))
+                                || isUploadingPitchDeck
                             }
                         >
                             {isSubmittingApplication ? 'Submitting...' : 'Submit Application'}

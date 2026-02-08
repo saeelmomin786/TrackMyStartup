@@ -500,10 +500,46 @@ const App: React.FC = () => {
     }
   }, [isAuthenticated, currentUser?.id, isLoading]);
 
+  // Clear loading timeout when auth completes successfully
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && currentUser) {
+      // Auth completed successfully - clear the safety timeout
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+        console.log('✅ Loading timeout cleared - auth completed successfully');
+      }
+    }
+  }, [isLoading, isAuthenticated, currentUser]);
+
   // EXISTING: Check if Startup user has selected a subscription plan (MANDATORY)
   // This is a secondary check - only fires if we're already on login page
   // Prevents showing subscription page if user already has a subscription
   useEffect(() => {
+    // First handle case where user is loaded but not yet authenticated (Form 2 check needed)
+    if (currentUser && !isAuthenticated && isLoading === false) {
+      // User data loaded but not authenticated - check Form 2 for basic user paths
+      (async () => {
+        try {
+          const isProfileComplete = await authService.isProfileComplete(currentUser.id);
+          
+          if (!isProfileComplete) {
+            console.log('❌ Form 2 NOT complete (from effect) - redirecting to complete-registration');
+            setCurrentPage('complete-registration');
+            return;
+          }
+          
+          console.log('✅ Form 2 IS complete (from effect) - allowing dashboard');
+          setIsAuthenticated(true);
+        } catch (error) {
+          console.warn('⚠️ Error checking Form 2, allowing dashboard access:', error);
+          setIsAuthenticated(true);
+        }
+      })();
+      return;
+    }
+    
+    // Second: Check if Startup user has selected a subscription plan
     const checkSubscriptionSelection = async () => {
       if (isAuthenticated && currentUser && currentUser.role === 'Startup' && !isLoading && currentPage === 'login') {
         try {
@@ -756,6 +792,7 @@ const App: React.FC = () => {
   const isAuthenticatedRef = useRef<boolean>(false);
   const hasInitialDataLoadedRef = useRef<boolean>(false);
   const autoReloadGuardRef = useRef<boolean>(false);
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Safety timeout for loading screen
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -904,6 +941,35 @@ const App: React.FC = () => {
     // Track focus/visibility timing to avoid instant re-inits on quick tab switches
     const lastHiddenAtRef = { current: 0 } as { current: number };
     const REFRESH_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+    
+    // SAFETY TIMEOUT: Prevent loading screen from hanging indefinitely
+    // If auth doesn't complete within 15 seconds, force clear loading state
+    // This handles cases where token refresh fails with 400 error
+    const LOADING_TIMEOUT_MS = 15000; // 15 seconds
+    
+    const startLoadingTimeout = () => {
+      if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = setTimeout(() => {
+        if (isMounted && isLoading && !isAuthenticated) {
+          console.warn('⚠️ LOADING TIMEOUT: Auth state not resolved after 15 seconds');
+          console.warn('⚠️ This likely means token refresh failed or auth service is slow');
+          console.warn('⚠️ Forcing loading state to clear - user can manually refresh if needed');
+          setIsLoading(false);
+          setCurrentUser(null);
+          setIsAuthenticated(false);
+        }
+      }, LOADING_TIMEOUT_MS);
+    };
+    
+    const clearLoadingTimeout = () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+    };
+    
+    // Start loading timeout
+    startLoadingTimeout();
     
     const initializeAuth = async () => {
       try {
@@ -1144,6 +1210,10 @@ const App: React.FC = () => {
               console.log('Email not confirmed, signing out user');
               await authService.supabase.auth.signOut();
               setError('Please confirm your email before logging in. Check your inbox for the confirmation link.');
+              if (isMounted) {
+                setIsLoading(false);
+                setIsProcessingAuthChange(false);
+              }
               return;
             }
             
@@ -1156,8 +1226,9 @@ const App: React.FC = () => {
                 role: (session.user.user_metadata as any)?.role || 'Investor',
                 registration_date: new Date().toISOString().split('T')[0]
               };
-              setCurrentUser(minimalUser);
-              setIsAuthenticated(true);
+              // Don't set authenticated yet - wait for complete user data first to avoid showing dashboard with missing data
+              // setCurrentUser(minimalUser);
+              // setIsAuthenticated(true);
               // Only reset data-loaded flag if we don't already have data loaded
               // This prevents reload on tab switch
               if (!hasInitialDataLoadedRef.current) {
@@ -1339,6 +1410,24 @@ const App: React.FC = () => {
                   }
                   
                   setCurrentUser(completeUser);
+                  
+                  // CHECK: Is Form 2 complete before allowing dashboard access?
+                  const isProfileComplete = await authService.isProfileComplete(completeUser.id);
+                  console.log('✅ Form 2 Completion Check:', {
+                    isComplete: isProfileComplete,
+                    userId: completeUser.id,
+                    role: completeUser.role,
+                    hasCaLicense: !!completeUser.ca_license
+                  });
+                  
+                  if (!isProfileComplete) {
+                    console.log('❌ Form 2 NOT complete - redirecting to complete-registration');
+                    setCurrentPage('complete-registration');
+                    setIsLoading(false);
+                    setIsProcessingAuthChange(false);
+                    return;
+                  }
+                  
                   setIsAuthenticated(true);
                   setIsLoading(false);
                 } else {
@@ -1389,6 +1478,17 @@ const App: React.FC = () => {
                       };
                       
                       setCurrentUser(mappedUser);
+                      
+                      // CHECK: Is Form 2 complete?
+                      const newUserIsProfileComplete = await authService.isProfileComplete(newProfile.id);
+                      if (!newUserIsProfileComplete) {
+                        console.log('❌ New user - Form 2 NOT complete, redirecting to complete-registration');
+                        setCurrentPage('complete-registration');
+                        setIsLoading(false);
+                        setIsProcessingAuthChange(false);
+                        return;
+                      }
+                      
                       setIsAuthenticated(true);
                       setIsLoading(false);
                       
@@ -1413,8 +1513,10 @@ const App: React.FC = () => {
                       registration_date: new Date().toISOString().split('T')[0]
                     };
                     setCurrentUser(basicUser);
-                    setIsAuthenticated(true);
                     setIsLoading(false);
+                    setIsProcessingAuthChange(false);
+                    // For basic user, don't auto-authenticate until form 2 is checked
+                    // This prevents showing dashboard with incomplete profile
                   }
                 }
               } catch (error) {
@@ -1428,8 +1530,9 @@ const App: React.FC = () => {
                   registration_date: new Date().toISOString().split('T')[0]
                 };
                 setCurrentUser(basicUser);
-                setIsAuthenticated(true);
                 setIsLoading(false);
+                setIsProcessingAuthChange(false);
+                // Don't set authenticated - let Form 2 check handle it
               }
               
               // Only reset data loading flag if this is a truly new user
@@ -1438,94 +1541,21 @@ const App: React.FC = () => {
               }
             }
 
-            // Try to get full profile, and if it doesn't exist, create it automatically
-            // ONLY if we don't already have data loaded (prevents reload on tab switch)
-            if (!hasInitialDataLoadedRef.current) {
-              (async () => {
-                try {
-                  console.log('Fetching full profile after sign-in...');
-                  let profileUser = await authService.getCurrentUser();
-                
-                if (!profileUser) {
-                  console.log('Profile not found, attempting to create it automatically...');
-                  // Profile doesn't exist, try to create it from user metadata
-                  const metadata = session.user.user_metadata;
-                  if (metadata?.name && metadata?.role) {
-                    console.log('Creating profile automatically with metadata:', { name: metadata.name, role: metadata.role });
-                    
-                    // Profile creation from metadata is deprecated - users should use registration flow
-                    // This will not work with user_profiles (requires proper profile creation flow)
-                    console.warn('⚠️ Automatic profile creation from metadata is deprecated. User should complete registration.');
-                    // Don't create profile - let user complete registration
-                    // Profile must be created through verify-otp.ts registration flow
-                  }
-                }
-                
-                if (profileUser && isMounted && !hasInitialDataLoadedRef.current) {
-                  console.log('Full profile loaded. Updating currentUser with startup_name:', profileUser.startup_name);
-                  
-                  // Check if profile is complete using the proper method
-                  const isProfileComplete = await authService.isProfileComplete(profileUser.id);
-                  console.log('Profile completion status:', isProfileComplete);
-                  
-                  // Check if profile is complete before setting as authenticated
-                  // BUT: Don't redirect to complete-registration if this is an invite flow (user needs to set password first)
-                  if (!isProfileComplete) {
-                    const advisorCode = getQueryParam('advisorCode');
-                    const pageParam = getQueryParam('page');
-                    const isResetPasswordPage = currentPage === 'reset-password' || 
-                                               window.location.href.includes('reset-password') ||
-                                               pageParam === 'reset-password';
-                    
-                    // If this is an invite flow, ALWAYS redirect to reset-password page (user needs to set password via OTP first)
-                    // This applies even if they're on complete-registration - they must set password first
-                    if (advisorCode) {
-                      // Only redirect if we're NOT already on reset-password page
-                      if (!isResetPasswordPage) {
-                        console.log('📧 Invite flow detected - user needs to set password first, redirecting to reset-password page');
-                        setCurrentUser(profileUser);
-                        const email = getQueryParam('email');
-                        if (email) {
-                          const encodedEmail = encodeURIComponent(email);
-                          window.location.href = `/?page=reset-password&advisorCode=${advisorCode}&email=${encodedEmail}`;
-                        } else {
-                          window.location.href = `/?page=reset-password&advisorCode=${advisorCode}`;
-                        }
-                        setIsLoading(false);
-                        setIsProcessingAuthChange(false);
-                        return; // Don't redirect to complete-registration, go to reset-password first
-                      } else {
-                        // Already on reset-password page, just stay there
-                        console.log('📧 Invite flow detected - user is on reset-password page, staying here');
-                        setCurrentUser(profileUser);
-                        setIsLoading(false);
-                        setIsProcessingAuthChange(false);
-                        return; // Don't redirect, let user set password first
-                      }
-                    }
-                    
-                    console.log('Profile not complete, redirecting to complete-registration page');
-                    setCurrentUser(profileUser);
-                    setCurrentPage('complete-registration');
-                    setIsLoading(false);
-                    setIsProcessingAuthChange(false);
-                    return;
-                  }
-                  
-                  setCurrentUser(profileUser);
-                }
-              } catch (e) {
-                console.error('Failed to load/create full user profile after sign-in (non-blocking):', e);
-              } finally {
-                // Reset the flag when done
-                if (isMounted) {
-                  setIsProcessingAuthChange(false);
-                }
-              }
-            })();
-            }
+            // CONSOLIDATED: Skip duplicate profile fetching - already done above
+            // The full profile fetch above already handles all cases:
+            // 1. Loads complete user data
+            // 2. Checks if profile is complete
+            // 3. Redirects to Form 2 if needed
+            // So we don't need to fetch again here
+            console.log('✅ Auth initialization complete - profile already fetched above');
           } else {
             // No existing session; show login page
+            // This can happen when:
+            // 1. User is not logged in
+            // 2. Session token has expired
+            // 3. Token refresh failed (e.g., 400 error)
+            console.log('❌ No active session found (user not authenticated or session expired)');
+            console.log('🔄 Clearing auth state and showing login page');
             if (isMounted) {
               setCurrentUser(null);
               setIsAuthenticated(false);
@@ -1536,7 +1566,13 @@ const App: React.FC = () => {
         } catch (error) {
           console.error('Error processing auth state change:', error);
           if (isMounted) {
+            // CRITICAL FIX: Always set isLoading to false when error occurs
+            // Otherwise users can get stuck on loading screen if token refresh fails
+            setIsLoading(false);
             setIsProcessingAuthChange(false);
+            setCurrentUser(null);
+            setIsAuthenticated(false);
+            console.error('⚠️ Auth state error - user not authenticated, clearing auth state');
           }
         }
       } else if (event === 'SIGNED_OUT') {
@@ -1564,6 +1600,7 @@ const App: React.FC = () => {
 
     return () => {
       isMounted = false;
+      clearLoadingTimeout(); // Clear the loading timeout on unmount
       subscription?.unsubscribe();
       document.removeEventListener('visibilitychange', visibilityHandler);
       window.removeEventListener('focus', debouncedFocus);
@@ -2137,8 +2174,11 @@ const App: React.FC = () => {
       return;
     }
     console.log(`User ${user.email} logged in as ${user.role}`);
-    setIsAuthenticated(true);
+    // Don't mark as authenticated yet — refresh full profile first to avoid
+    // rendering the dashboard briefly with incomplete data. Show loading
+    // until profile + Form 2 checks and initial data fetch have started.
     setCurrentUser(user);
+    setIsLoading(true);
     
     // Check for returnUrl to redirect back to program view
     const returnUrl = getQueryParam('returnUrl');
@@ -2152,6 +2192,42 @@ const App: React.FC = () => {
     if (user.role !== 'Startup') {
       setView('investor'); // Default view for non-startup users
     }
+
+    // Start background initialization: refresh complete profile, check Form 2,
+    // then fetch initial data. Only mark authenticated after these complete
+    // to avoid UI flashing between pages.
+    (async () => {
+      try {
+        const refreshedUser = await authService.getCurrentUser();
+        if (refreshedUser) {
+          setCurrentUser(refreshedUser);
+
+          // Check Form 2 completeness before showing dashboard
+          const isComplete = await authService.isProfileComplete(refreshedUser.id);
+          if (!isComplete) {
+            console.log('❌ Form 2 NOT complete (post-login) - redirecting to Form 2');
+            setShouldReplaceHistory(true);
+            setCurrentPage('complete-registration');
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        // Kick off data fetch (non-blocking) and then mark as authenticated
+        try {
+          await fetchData(true);
+        } catch (e) {
+          console.warn('⚠️ fetchData failed during post-login init:', e);
+        }
+
+        setIsAuthenticated(true);
+      } catch (e) {
+        console.warn('⚠️ Post-login initialization failed, proceeding to dashboard:', e);
+        setIsAuthenticated(true);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
   }, []);
 
   const handleRegister = useCallback((user: AuthUser, foundersData: Founder[], startupName?: string, investmentAdvisorCode?: string) => {
@@ -3301,9 +3377,29 @@ const App: React.FC = () => {
                   // ⚠️ CRITICAL: ONLY show subscription page for Startup users
                   // Other roles (Mentor, Admin, Investor, etc.) should go directly to dashboard
                   if (refreshedUser.role === 'Startup') {
-                    console.log('✅ Startup user - navigating to subscription page for plan selection');
-                    setCurrentPage('subscription');
-                    setQueryParam('page', 'subscription', false);
+                    console.log('✅ Startup user - checking for existing subscription...');
+                    
+                    // Check if startup user already has an active subscription
+                    try {
+                      const { SubscriptionService } = await import('./lib/subscriptionService');
+                      const subscriptionService = new SubscriptionService();
+                      const existingSubscription = await subscriptionService.getUserSubscription(refreshedUser.id);
+                      
+                      if (existingSubscription && existingSubscription.status === 'active') {
+                        console.log('✅ Startup already has active subscription, skipping subscription page:', existingSubscription.plan_tier);
+                        setCurrentPage('login');
+                        setQueryParam('page', 'login', false);
+                      } else {
+                        console.log('✅ Startup has no active subscription - showing subscription page for plan selection');
+                        setCurrentPage('subscription');
+                        setQueryParam('page', 'subscription', false);
+                      }
+                    } catch (subError) {
+                      console.warn('⚠️ Error checking subscription status, defaulting to subscription page:', subError);
+                      // If there's an error checking subscription, default to showing subscription page
+                      setCurrentPage('subscription');
+                      setQueryParam('page', 'subscription', false);
+                    }
                   } else {
                     console.log('✅ Non-Startup user (role:', refreshedUser.role, ') - navigating directly to dashboard');
                     setCurrentPage('login');

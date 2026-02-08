@@ -149,104 +149,81 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToRegister, on
                 // Use getCurrentUser() which handles user_profiles first, then falls back to users table
                 // This ensures we use the correct table based on the multi-profile system
                 const currentUser = await authService.getCurrentUser();
-                const userProfile = currentUser ? {
-                    government_id: currentUser.government_id,
-                    ca_license: currentUser.ca_license,
-                    startup_name: currentUser.startup_name
-                } : null;
                 
-                // Fetch from startups table for company info
-                // Use auth_user_id (from auth.users) which matches startups.user_id
-                let { data: startupProfiles } = await authService.supabase
-                    .from('startups')
-                    .select('name, country, user_id')
-                    .eq('user_id', user.id);
+                console.log('🔍 Form 2 Completion Check - LoginPage:', {
+                    userExists: !!currentUser,
+                    isProfileComplete: currentUser?.is_profile_complete,
+                    role: currentUser?.role,
+                    hasGovernmentId: !!currentUser?.government_id,
+                    hasCaLicense: !!currentUser?.ca_license,
+                    startupName: currentUser?.startup_name
+                });
                 
-                // If no startup found by user_id, try matching by startup_name from user profile
-                if ((!startupProfiles || startupProfiles.length === 0) && userProfile?.startup_name) {
-                    console.log('🔍 No startup found by user_id, trying startup_name match:', userProfile.startup_name);
-                    const { data: startupByName } = await authService.supabase
+                if (!currentUser) {
+                    // No user profile found - user needs to complete Form 2
+                    console.log('❌ No user profile found - redirecting to Form 2');
+                    onNavigateToCompleteRegistration();
+                    return;
+                }
+                
+                // ✅ PROPER CHECK: Use is_profile_complete flag (source of truth for Form 2)
+                if (currentUser.is_profile_complete !== true) {
+                    console.log('❌ Form 2 NOT complete (is_profile_complete = false) - redirecting to Form 2');
+                    console.log('Missing documents or company info - user needs to complete Form 2');
+                    onNavigateToCompleteRegistration();
+                    return;
+                }
+                
+                // For Startup users only: verify startup record exists with name & country
+                if (currentUser.role === 'Startup') {
+                    console.log('🔍 Startup user - checking if startup record exists...');
+                    let { data: startupProfiles } = await authService.supabase
                         .from('startups')
                         .select('name, country, user_id')
-                        .eq('name', userProfile.startup_name);
+                        .eq('user_id', user.id);
                     
-                    if (startupByName && startupByName.length > 0) {
-                        startupProfiles = startupByName;
-                        console.log('✅ Found startup by name match:', startupByName[0]);
+                    // If no startup found by user_id, try matching by startup_name from user profile
+                    if ((!startupProfiles || startupProfiles.length === 0) && currentUser?.startup_name) {
+                        console.log('🔍 No startup found by user_id, trying startup_name match:', currentUser.startup_name);
+                        const { data: startupByName } = await authService.supabase
+                            .from('startups')
+                            .select('name, country, user_id')
+                            .eq('name', currentUser.startup_name);
+                        
+                        if (startupByName && startupByName.length > 0) {
+                            startupProfiles = startupByName;
+                            console.log('✅ Found startup by name match:', startupByName[0]);
+                        }
                     }
-                }
-                
-                const startupProfile = startupProfiles && startupProfiles.length > 0 ? startupProfiles[0] : null;
-                
-                console.log('Profile check result:', { 
-                    userProfile, 
-                    startupProfile,
-                    hasGovId: !!userProfile?.government_id, 
-                    hasCaLicense: !!userProfile?.ca_license,
-                    hasCompanyName: !!startupProfile?.name,
-                    hasCountry: !!startupProfile?.country,
-                    govIdValue: userProfile?.government_id,
-                    caLicenseValue: userProfile?.ca_license,
-                    companyNameValue: startupProfile?.name,
-                    countryValue: startupProfile?.country,
-                    userStartupName: userProfile?.startup_name,
-                    startupUserId: startupProfile?.user_id,
-                    currentUserId: user.id
-                });
-                
-                console.log('🔍 Detailed Form 2 verification:', {
-                    userProfileExists: !!userProfile,
-                    governmentIdExists: !!userProfile?.government_id,
-                    startupProfileExists: !!startupProfile,
-                    startupNameExists: !!startupProfile?.name,
-                    startupCountryExists: !!startupProfile?.country,
-                    willRedirectToForm2: !userProfile || !userProfile.government_id || !startupProfile || !startupProfile.name || !startupProfile.country,
-                    userProfileData: userProfile,
-                    startupProfileData: startupProfile
-                });
-                
-                if (!userProfile || !currentUser) {
-                    // No user profile found - user needs to complete Form 2
-                    console.log('No user profile found - redirecting to Form 2');
-                    onNavigateToCompleteRegistration();
-                    return;
-                } else if (!userProfile.government_id) {
-                    // User profile exists but government_id missing - user needs to complete Form 2
-                    console.log('User profile exists but government_id missing - redirecting to Form 2');
-                    console.log('Missing field:', { 
-                      govId: userProfile.government_id
-                    });
-                    onNavigateToCompleteRegistration();
-                    return;
-                } else if (currentUser.role === 'Startup' && (!startupProfile || !startupProfile.name || !startupProfile.country)) {
-                    // Only check startup profile for users with "Startup" role
-                    // User documents complete but startup profile missing - check if user has startup_name in profile
-                    console.log('User documents complete but startup profile missing - checking for startup_name in user profile');
-                    console.log('Missing startup fields:', { 
-                      companyName: startupProfile?.name,
-                      country: startupProfile?.country,
-                      userStartupName: userProfile?.startup_name
+                    
+                    const startupProfile = startupProfiles && startupProfiles.length > 0 ? startupProfiles[0] : null;
+                    
+                    console.log('Startup record check:', {
+                        found: !!startupProfile,
+                        hasName: !!startupProfile?.name,
+                        hasCountry: !!startupProfile?.country,
+                        startupName: startupProfile?.name,
+                        country: startupProfile?.country
                     });
                     
-                    // If user has startup_name in their profile, they might have completed Form 2 but startup record is missing
-                    // In this case, let them proceed to dashboard and the system will handle the missing startup record
-                    if (userProfile?.startup_name) {
-                        console.log('✅ User has startup_name in profile, allowing dashboard access');
-                        resolveAndLogin(user);
+                    if (!startupProfile || !startupProfile.name || !startupProfile.country) {
+                        // Startup profile incomplete - user needs to complete Form 2 again
+                        // (to create/update startup record)
+                        console.log('❌ Startup record missing or incomplete - redirecting to Form 2');
+                        onNavigateToCompleteRegistration();
                         return;
                     }
-                    
-                    // Otherwise, redirect to Form 2
-                    onNavigateToCompleteRegistration();
-                    return;
-                } else {
-                    // User is complete, proceed to dashboard
-                    // For non-Startup roles (Investment Advisor, Investor, etc.), they don't need startup profile
-                    console.log('User complete, proceeding to dashboard');
-                    console.log('User role:', currentUser.role, '- startup profile check skipped for non-Startup roles');
-                    resolveAndLogin(user);
-                    try { (window as any).forceDataRefresh?.(); } catch {}
                 }
+                
+                // ✅ All checks passed - user can proceed to dashboard
+                console.log('✅ ALL CHECKS PASSED - User Form 2 is complete, proceeding to dashboard');
+                console.log('User details:', {
+                    role: currentUser.role,
+                    email: currentUser.email,
+                    isProfileComplete: currentUser.is_profile_complete
+                });
+                resolveAndLogin(user);
+                try { (window as any).forceDataRefresh?.(); } catch {}
             } else if (loginError) {
                 setError(loginError);
                 

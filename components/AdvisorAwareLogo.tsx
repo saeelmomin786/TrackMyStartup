@@ -85,6 +85,7 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
 
   // Simple swapping logic: If advisor has logo, show it. Otherwise, show default.
   const shouldShowAdvisorLogo = advisorInfo?.logo_url && !loading;
+  const isSubdomain = isOnSubdomain();
   
   if (shouldShowAdvisorLogo) {
     return (
@@ -104,7 +105,7 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
             <h1 className={textClassName}>
               {advisorInfo.firm_name || advisorInfo.name || 'Advisor'}
             </h1>
-            {!isOnSubdomain() && (
+            {!isSubdomain && (
               <p className="text-xs text-blue-600 mt-1">Supported by Track My Startup</p>
             )}
           </div>
@@ -113,14 +114,21 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
     );
   }
 
-  // Default TrackMyStartup logo
-  // Default TrackMyStartup logo
-  // Do not show the Track My Startup fallback when the app is running on a client subdomain
-  if (isOnSubdomain()) {
-    // On subdomains we intentionally do not render the fallback branding
+  // On subdomains: show neutral skeleton while loading, nothing after loading completes
+  if (isSubdomain) {
+    if (loading) {
+      // Show neutral skeleton placeholder while fetching advisor logo
+      return (
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className={`${className} bg-slate-200 rounded-lg animate-pulse`} />
+        </div>
+      );
+    }
+    // After loading, don't show any fallback branding on subdomains
     return null;
   }
 
+  // Default TrackMyStartup logo (only for non-subdomain deployments)
   return (
     <div className="flex items-center gap-2 sm:gap-3">
       <img 

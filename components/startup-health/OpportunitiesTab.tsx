@@ -977,7 +977,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     {/* Application Questions - Only questions from the opportunity */}
                     {loadingQuestions ? (
                         <div className="border-b pb-4">
-                            <p className="text-sm text-slate-500 text-center">Loading questions...</p>
+                            <p className="text-sm text-slate-500 text-center font-bold">Loading questions...</p>
                         </div>
                     ) : opportunityQuestions.length === 0 ? (
                         <div className="border-b pb-4">
@@ -1101,7 +1101,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     
                     {/* Pitch Deck and Pitch Video inputs */}
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (link or upload)</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (link or upload) <span className="text-red-500 ml-1">*</span></label>
                         <CloudDriveInput
                             label=""
                             value={pitchDeckUrl}
@@ -1117,7 +1117,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Video (video URL)</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Video (video URL) <span className="text-slate-500 text-xs">(optional)</span></label>
                         <Input
                             type="url"
                             placeholder="https://youtube.com/... or https://vimeo.com/..."
@@ -1148,6 +1148,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                 opportunityQuestions.length === 0 ||
                                 (opportunityQuestions.some(q => q.isRequired && (!questionAnswers.get(q.questionId) || questionAnswers.get(q.questionId)?.trim() === '')))
                                 || isUploadingPitchDeck
+                                || !pitchDeckUrl
                             }
                         >
                             {isSubmittingApplication ? 'Submitting...' : 'Submit Application'}

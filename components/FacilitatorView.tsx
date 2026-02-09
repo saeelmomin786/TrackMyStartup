@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
@@ -3562,6 +3562,34 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 >
                   <Send className="h-4 w-4" />
                   Send Form 2
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    if (!selectedOpportunityId) {
+                      messageService.info('Select Opportunity', 'Please select an opportunity first to generate report');
+                      return;
+                    }
+                    if (filteredApplications.length === 0) {
+                      messageService.warning('No Applications', 'There are no applications to export for this program.');
+                      return;
+                    }
+                    try {
+                      const selectedOpportunity = myPostedOpportunities.find(opp => opp.id === selectedOpportunityId);
+                      if (selectedOpportunity) {
+                        const { generateAndDownloadReport } = await import('../lib/opportunityReportService');
+                        await generateAndDownloadReport(selectedOpportunityId, selectedOpportunity.programName, facilitatorId);
+                        messageService.success('Report Generated', `Report downloaded successfully for ${selectedOpportunity.programName}.`, 2500);
+                      }
+                    } catch (error) {
+                      console.error('Error generating report:', error);
+                      messageService.error('Report Generation Failed', 'Failed to generate report. Please try again.', 2500);
+                    }
+                  }}
+                  className="flex items-center gap-1"
+                >
+                  <Download className="h-4 w-4" />
+                  Generate Report
                 </Button>
               </div>
             </div>

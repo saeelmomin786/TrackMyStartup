@@ -1826,7 +1826,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       <Card className="w-full max-w-2xl">
         {/* Header with logout button */}
         <div className="relative">
-          <div className="absolute top-0 right-0">
+          <div className="absolute top-0 right-0 z-20 p-3">
             <Button
               type="button"
               variant="outline"

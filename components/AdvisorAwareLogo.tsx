@@ -114,6 +114,13 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
   }
 
   // Default TrackMyStartup logo
+  // Default TrackMyStartup logo
+  // Do not show the Track My Startup fallback when the app is running on a client subdomain
+  if (isOnSubdomain()) {
+    // On subdomains we intentionally do not render the fallback branding
+    return null;
+  }
+
   return (
     <div className="flex items-center gap-2 sm:gap-3">
       <img 
@@ -122,7 +129,6 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
         className={className}
         onClick={onClick}
       />
-      {/* Note: LogoTMS.svg already contains the "Track My Startup" text, so no additional text needed */}
     </div>
   );
 };

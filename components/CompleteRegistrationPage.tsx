@@ -8,7 +8,6 @@ import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2,
 import Select from './ui/Select';
 import { InvestmentType, StartupDomain, StartupStage, FundraisingDetails } from '../types';
 import { capTableService } from '../lib/capTableService';
-import LogoTMS from './public/logoTMS.svg';
 import { authService } from '../lib/auth';
 import { storageService } from '../lib/storage';
 import { complianceRulesComprehensiveService } from '../lib/complianceRulesComprehensiveService';
@@ -1842,10 +1841,9 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         </div>
         
         <div className="text-center mb-8">
-          <img src={LogoTMS} alt="TrackMyStartup" className="mx-auto h-40 w-40" />
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-900">Complete Your Registration</h2>
           <p className="mt-2 text-sm text-slate-600">
-            TrackMyStartup - Welcome, {userData.name}! Please upload your verification documents to complete your profile.
+            Welcome, {userData.name}! Please upload your verification documents to complete your profile.
           </p>
         </div>
 

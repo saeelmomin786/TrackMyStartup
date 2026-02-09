@@ -4311,20 +4311,9 @@ const App: React.FC = () => {
                             alt="Company Logo" 
                             className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded object-contain bg-white border border-gray-200 p-1"
                             onError={(e) => {
-                              // On subdomain: hide on error (no fallback)
-                              // On main domain: fallback to TrackMyStartup logo
-                              if (isOnSubdomain()) {
-                                e.currentTarget.style.display = 'none';
-                              } else {
-                                e.currentTarget.style.display = 'none';
-                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                              }
+                              e.currentTarget.style.display = 'none';
                             }}
                           />
-                          {/* Fallback logo only shown on main domain */}
-                          {!isOnSubdomain() && (
-                            <img src={LogoTMS} alt="TrackMyStartup" className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 object-contain hidden" />
-                          )}
                         </>
                       );
                     } else if (!isOnSubdomain()) {

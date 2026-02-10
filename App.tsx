@@ -964,119 +964,146 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
-    
     // Track focus/visibility timing to avoid instant re-inits on quick tab switches
     const lastHiddenAtRef = { current: 0 } as { current: number };
     const REFRESH_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
-    
     // SAFETY TIMEOUT: Prevent loading screen from hanging indefinitely
-    // If auth doesn't complete within 15 seconds, force clear loading state
-    // This handles cases where token refresh fails with 400 error
-    const LOADING_TIMEOUT_MS = 10000; // 10 seconds
-    
+    // If auth doesn't complete within 5 seconds, force clear loading state
+    const LOADING_TIMEOUT_MS = 5000; // 5 seconds (reduced from 8)
+
+    // NEW: Immediately check for existing session on mount AND try to authenticate
+    const checkSessionImmediately = async () => {
+      try {
+        const { data: sessionData } = await authService.supabase.auth.getSession();
+        if (sessionData?.session && sessionData.session.user) {
+          console.log('✅ Existing session detected, attempting immediate authentication...');
+          // Session exists, show loading spinner
+          setIsLoading(true);
+          setExistingSessionDetected(true);
+          setHasCheckedExistingSession(true);
+          
+          // Try to get current user immediately to speed up auth
+          try {
+            const currentAuthUser = await authService.getCurrentUser();
+            if (currentAuthUser && isMounted) {
+              console.log('✅ Fast auth successful:', currentAuthUser.email);
+              setCurrentUser(currentAuthUser);
+              setIsAuthenticated(true);
+              setIsLoading(false);
+              // Clear the loading timeout since we're done
+              if (loadingTimeoutRef.current) {
+                clearTimeout(loadingTimeoutRef.current);
+                loadingTimeoutRef.current = null;
+              }
+            }
+          } catch (getUserError) {
+            console.warn('⚠️ Fast auth failed, waiting for auth listener:', getUserError);
+            // Auth listener will handle it
+          }
+        } else {
+          // No session, show login page immediately
+          console.log('ℹ️ No existing session detected');
+          setIsLoading(false);
+          setIsAuthenticated(false);
+          setCurrentUser(null);
+          setExistingSessionDetected(false);
+          setHasCheckedExistingSession(true);
+        }
+      } catch (err) {
+        console.warn('⚠️ Session check failed:', err);
+        setIsLoading(false);
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setExistingSessionDetected(false);
+        setHasCheckedExistingSession(true);
+      }
+    };
+
+    // Start loading timeout
     const startLoadingTimeout = () => {
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-      loadingTimeoutRef.current = setTimeout(() => {
+      loadingTimeoutRef.current = setTimeout(async () => {
         if (isMounted && isLoading && !isAuthenticated) {
-          console.warn('⚠️ LOADING TIMEOUT: Auth state not resolved after 10 seconds');
-          console.warn('⚠️ This likely means token refresh failed or auth service is slow');
-          console.warn('⚠️ Forcing loading state to clear - user can manually refresh if needed');
-          setIsLoading(false);
-          setCurrentUser(null);
-          setIsAuthenticated(false);
+          // Retry session check before forcing UI out of loading
+          await checkSessionImmediately();
+          // If still not authenticated, show login page
+          if (!isAuthenticated) {
+            console.warn('⚠️ LOADING TIMEOUT: Auth state not resolved after 5 seconds');
+            setIsLoading(false);
+            setCurrentUser(null);
+            setIsAuthenticated(false);
+            setExistingSessionDetected(false);
+            setHasCheckedExistingSession(true);
+          }
         }
       }, LOADING_TIMEOUT_MS);
     };
-    
+
     const clearLoadingTimeout = () => {
       if (loadingTimeoutRef.current) {
         clearTimeout(loadingTimeoutRef.current);
         loadingTimeoutRef.current = null;
       }
     };
-    
-    // Start loading timeout
+
+    // Run immediate session check on mount
+    checkSessionImmediately();
     startLoadingTimeout();
-    
+
     const initializeAuth = async () => {
       try {
         console.log('Starting auth initialization...');
-        
-        // Remove timeout to prevent hanging
-        // const authTimeout = new Promise((_, reject) => {
-        //   setTimeout(() => reject(new Error('Auth initialization timeout')), 10000);
-        // });
-        
-        const authPromise = (async () => {
-          // Handle access token from email confirmation first
-          const hash = window.location.hash;
-          const searchParams = new URLSearchParams(window.location.search);
-          
-          // Check for access token in hash or query parameters
-          let accessToken = null;
-          if (hash.includes('access_token=')) {
-            accessToken = hash.split('access_token=')[1]?.split('&')[0];
-          } else if (searchParams.has('access_token')) {
-            accessToken = searchParams.get('access_token');
-          }
-          
-          if (accessToken) {
-            console.log('Found access token in URL');
-            try {
-              console.log('Setting session with access token...');
-              const { data, error } = await authService.supabase.auth.setSession({
-                access_token: accessToken,
-                refresh_token: ''
-              });
-              
-              if (error) {
-                console.error('Error setting session:', error);
-              } else if (data.user) {
-                console.log('Session set successfully, handling email confirmation...');
-                const { user, error: profileError } = await authService.handleEmailConfirmation();
-                if (user && isMounted) {
-                  console.log('Email confirmation successful, user:', user.email);
-                  setCurrentUser(user);
+        const hash = window.location.hash;
+        const searchParams = new URLSearchParams(window.location.search);
+        let accessToken = null;
+        if (hash.includes('access_token=')) {
+          accessToken = hash.split('access_token=')[1]?.split('&')[0];
+        } else if (searchParams.has('access_token')) {
+          accessToken = searchParams.get('access_token');
+        }
+        if (accessToken) {
+          console.log('Found access token in URL');
+          try {
+            console.log('Setting session with access token...');
+            const { data, error } = await authService.supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: ''
+            });
+            if (error) {
+              console.error('Error setting session:', error);
+            } else if (data.user) {
+              console.log('Session set successfully, handling email confirmation...');
+              const { user, error: profileError } = await authService.handleEmailConfirmation();
+              if (user && isMounted) {
+                console.log('Email confirmation successful, user:', user.email);
+                setCurrentUser(user);
+                setIsAuthenticated(true);
+              } else if (profileError) {
+                console.error('Email confirmation failed:', profileError);
+                console.log('Attempting to create profile manually...');
+                const { user: createdUser, error: createError } = await authService.createProfile(
+                  data.user.user_metadata?.name || 'Unknown',
+                  data.user.user_metadata?.role || 'Investor'
+                );
+                if (createdUser && isMounted) {
+                  console.log('Profile created manually:', createdUser.email);
+                  setCurrentUser(createdUser);
                   setIsAuthenticated(true);
-                  
-              // (Payment lock after email confirmation removed – user can proceed directly)
-                } else if (profileError) {
-                  console.error('Email confirmation failed:', profileError);
-                  // If profile creation failed, try to create it manually
-                  console.log('Attempting to create profile manually...');
-                  const { user: createdUser, error: createError } = await authService.createProfile(
-                    data.user.user_metadata?.name || 'Unknown',
-                    data.user.user_metadata?.role || 'Investor'
-                  );
-                  if (createdUser && isMounted) {
-                    console.log('Profile created manually:', createdUser.email);
-                    setCurrentUser(createdUser);
-                    setIsAuthenticated(true);
-                    
-                    // (Payment lock after manual profile creation removed – user can proceed directly)
-                  } else {
-                    console.error('Manual profile creation failed:', createError);
-                  }
+                } else {
+                  console.error('Manual profile creation failed:', createError);
                 }
               }
-              
-              // Clean up the URL
-              window.history.replaceState({}, document.title, window.location.pathname);
-            } catch (error) {
-              console.error('Error during email confirmation:', error);
             }
+            window.history.replaceState({}, document.title, window.location.pathname);
+          } catch (error) {
+            console.error('Error during email confirmation:', error);
           }
-
-          // Don't call getCurrentUser here - let the auth state listener handle it
-          console.log('Auth initialization complete, waiting for auth state...');
-        })();
-        
-        await authPromise;
-        
+        }
+        // Don't call getCurrentUser here - let the auth state listener handle it
+        console.log('Auth initialization complete, waiting for auth state...');
       } catch (error) {
         console.error('Error in auth initialization:', error);
       } finally {
-        // Don't set loading to false here - let the auth state change handle it
         if (isMounted) {
           console.log('Auth initialization complete');
         }
@@ -3818,13 +3845,14 @@ const App: React.FC = () => {
                       onNavigateToLogin={() => setCurrentPage('login')}
                       onNavigateToRegister={() => setCurrentPage('register')}
                     />
-                ) : currentPage === 'login' && existingSessionDetected ? (
-                    // MOBILE FIX: Show loading instead of login form if we detect an existing session
+                ) : currentPage === 'login' && (existingSessionDetected || !hasCheckedExistingSession) ? (
+                    // MOBILE FIX: Show loading instead of login form while checking for existing session
                     // This prevents user confusion on mobile refresh where they see login form briefly
+                    // Show loading if: (1) we detected a session, OR (2) we haven't checked yet
                     <div className="flex flex-col items-center gap-4">
                       <BarChart3 className="w-16 h-16 animate-pulse text-brand-primary" />
                       <p className="text-xl font-semibold text-slate-800">Loading your dashboard...</p>
-                      <p className="text-sm text-slate-600">You are already logged in</p>
+                      <p className="text-sm text-slate-600">{existingSessionDetected ? 'You are already logged in' : 'Checking authentication...'}</p>
                     </div>
                 ) : currentPage === 'login' ? (
                     <LoginPage 

@@ -908,6 +908,31 @@ const App: React.FC = () => {
     return () => { if (t) clearTimeout(t); };
   }, [isLoading]);
 
+  // Mobile Chrome: if authenticated but data doesn't load within 10s, log out
+  useEffect(() => {
+    if (!isMobileChrome()) return;
+    if (!isAuthenticated || hasInitialDataLoaded) return;
+    const t = setTimeout(async () => {
+      if (isAuthenticatedRef.current && !hasInitialDataLoadedRef.current) {
+        console.warn('⚠️ Mobile Chrome data timeout: logging out after 10s');
+        try {
+          await authService.signOut();
+        } catch {}
+        authService.clearCache();
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setAssignedInvestmentAdvisor(null);
+        setSelectedStartup(null);
+        setCurrentPage('login');
+        setView('investor');
+        setHasInitialDataLoaded(false);
+        setIgnoreAuthEvents(false);
+      }
+    }, 10000);
+
+    return () => clearTimeout(t);
+  }, [isAuthenticated, hasInitialDataLoaded]);
+
   // Disable any accidental full page reloads in development to prevent refresh loops
   useEffect(() => {
     try {
@@ -4549,20 +4574,6 @@ const App: React.FC = () => {
     return (
       <>
         <MessageContainer />
-        {isMobileChrome() && (() => {
-          const cached = getCachedUser();
-          const cacheAgeMs = cached?.cachedAt ? Date.now() - cached.cachedAt : null;
-          const cacheAgeSec = cacheAgeMs !== null ? Math.round(cacheAgeMs / 1000) : null;
-          return (
-            <div className="fixed bottom-3 right-3 z-[9999] bg-black/80 text-white text-xs rounded px-3 py-2 shadow">
-              <div>mobile chrome debug</div>
-              <div>auth: {isAuthenticated ? 'yes' : 'no'} | loading: {isLoading ? 'yes' : 'no'}</div>
-              <div>page: {currentPage} | view: {view}</div>
-              <div>role: {currentUser?.role || 'none'} | data: {hasInitialDataLoaded ? 'yes' : 'no'}</div>
-              <div>cache: {cached ? 'yes' : 'no'}{cacheAgeSec !== null ? ` (${cacheAgeSec}s)` : ''}</div>
-            </div>
-          );
-        })()}
         <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col overflow-x-hidden">
         <header className="bg-white shadow-sm sticky top-0 z-50">
           <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

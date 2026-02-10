@@ -1776,6 +1776,46 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 console.log('📋 Startup will appear in advisor\'s pending requests for approval');
               }
             }
+
+            // Check if user registered from an opportunity link and create the application record immediately
+            const opportunityIdFromSession = sessionStorage.getItem('applyToOpportunityId');
+            if (opportunityIdFromSession && startup?.id) {
+              try {
+                console.log('🎯 User registered from opportunity link, creating opportunity_applications record now...');
+                console.log('📊 Recording details:', {
+                  startup_id: startup.id,
+                  opportunity_id: opportunityIdFromSession,
+                  status: 'pending'
+                });
+
+                // Create the opportunity_applications record NOW during registration
+                // This prevents RLS timing issues when user tries to submit the form later
+                const { data: appRecord, error: appError } = await authService.supabase
+                  .from('opportunity_applications')
+                  .insert({
+                    startup_id: startup.id,
+                    opportunity_id: opportunityIdFromSession,
+                    status: 'pending'
+                  })
+                  .select()
+                  .single();
+
+                if (appError) {
+                  console.error('❌ Error creating opportunity_applications record during registration:', appError);
+                  // Don't throw - registration is already complete, user can still manually apply
+                } else if (appRecord) {
+                  console.log('✅ Opportunity application record created during registration:', {
+                    id: appRecord.id,
+                    startup_id: appRecord.startup_id,
+                    opportunity_id: appRecord.opportunity_id,
+                    status: appRecord.status
+                  });
+                }
+              } catch (error) {
+                console.error('❌ Exception while creating opportunity_applications record:', error);
+                // Don't throw - registration is already complete
+              }
+            }
           }
         } catch (error: any) {
           console.error('❌ ========== STARTUP DATA SAVE ERROR ==========');
@@ -1785,46 +1825,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
           console.error('❌ =============================================');
           // Re-throw error so it's caught by outer catch block and shown to user
           throw new Error(`Failed to save startup data: ${error?.message || 'Unknown error'}`);
-        }
-      }
-
-      // Check if user registered from an opportunity link and create the application record immediately
-      const opportunityIdFromSession = sessionStorage.getItem('applyToOpportunityId');
-      if (opportunityIdFromSession && startup?.id) {
-        try {
-          console.log('🎯 User registered from opportunity link, creating opportunity_applications record now...');
-          console.log('📊 Recording details:', {
-            startup_id: startup.id,
-            opportunity_id: opportunityIdFromSession,
-            status: 'pending'
-          });
-
-          // Create the opportunity_applications record NOW during registration
-          // This prevents RLS timing issues when user tries to submit the form later
-          const { data: appRecord, error: appError } = await authService.supabase
-            .from('opportunity_applications')
-            .insert({
-              startup_id: startup.id,
-              opportunity_id: opportunityIdFromSession,
-              status: 'pending'
-            })
-            .select()
-            .single();
-
-          if (appError) {
-            console.error('❌ Error creating opportunity_applications record during registration:', appError);
-            // Don't throw - registration is already complete, user can still manually apply
-          } else if (appRecord) {
-            console.log('✅ Opportunity application record created during registration:', {
-              id: appRecord.id,
-              startup_id: appRecord.startup_id,
-              opportunity_id: appRecord.opportunity_id,
-              status: appRecord.status
-            });
-          }
-        } catch (error) {
-          console.error('❌ Exception while creating opportunity_applications record:', error);
-          // Don't throw - registration is already complete
         }
       }
 

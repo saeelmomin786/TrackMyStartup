@@ -835,6 +835,15 @@ const App: React.FC = () => {
       return null;
     }
   };
+
+  const getCachedAuthUserId = () => {
+    try {
+      const cached = getCachedUser();
+      return cached?.authUserId || null;
+    } catch {
+      return null;
+    }
+  };
   const loadingStallTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Additional refs for fetchData dependencies
@@ -2003,12 +2012,18 @@ const App: React.FC = () => {
       try {
         // IMPORTANT: startups table uses auth_user_id, not profile ID!
         // Get auth_user_id from auth session
-        const { data: { user: authUser } } = await authService.supabase.auth.getUser();
-        if (!authUser) {
+        let authUserId = null as string | null;
+        if (isMobileChrome()) {
+          authUserId = getCachedAuthUserId();
+        }
+        if (!authUserId) {
+          const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+          authUserId = authUser?.id || null;
+        }
+        if (!authUserId) {
           console.warn('No auth user found, skipping startup fetch');
           return;
         }
-        const authUserId = authUser.id;
         console.log('🔍 Fetching startup for auth_user_id:', authUserId, 'Profile ID:', cu.id, 'Profile startup_name:', cu.startup_name);
         
         // CRITICAL FIX: First try to find startup by user_id only (more flexible)
@@ -2282,8 +2297,14 @@ const App: React.FC = () => {
        if (currentUser?.role === 'Investment Advisor' && currentUser?.id) {
          try {
            // CRITICAL FIX: getPendingInvestmentAdvisorRelationships expects auth_user_id, not profile_id
-           const { data: { user: authUser } } = await authService.supabase.auth.getUser();
-           const authUserId = authUser?.id;
+           let authUserId = null as string | null;
+           if (isMobileChrome()) {
+             authUserId = getCachedAuthUserId();
+           }
+           if (!authUserId) {
+             const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+             authUserId = authUser?.id || null;
+           }
            if (!authUserId) {
              console.error('❌ No auth user found for pending relationships');
              return;

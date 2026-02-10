@@ -1017,6 +1017,32 @@ const App: React.FC = () => {
     // NEW: Immediately check for existing session on mount AND try to authenticate
     const checkSessionImmediately = async () => {
       try {
+        // Mobile Chrome: use cache first to avoid slow getSession().
+        if (isMobileChrome()) {
+          const cached = getCachedUser();
+          if (cached && cached.user) {
+            console.log('⚡ Mobile Chrome cache restore (skip slow getSession)');
+            if (isMounted) {
+              setCurrentUser(cached.user);
+              setIsAuthenticated(true);
+              setIsLoading(false);
+              setExistingSessionDetected(true);
+              setHasCheckedExistingSession(true);
+              if (cached.profileComplete === false) {
+                setCurrentPage('complete-registration');
+              }
+              if (cached.advisor) {
+                setAssignedInvestmentAdvisor(cached.advisor);
+              } else if (cached.user.investment_advisor_code_entered) {
+                fetchAssignedInvestmentAdvisor(cached.user.investment_advisor_code_entered).catch(() => {});
+              }
+            }
+            // Validate session in background without blocking UI.
+            authService.supabase.auth.getSession().catch(() => {});
+            return;
+          }
+        }
+
         const { data: sessionData } = await authService.supabase.auth.getSession();
         if (sessionData?.session && sessionData.session.user) {
           console.log('✅ Existing session detected, attempting immediate authentication...');
@@ -1037,6 +1063,11 @@ const App: React.FC = () => {
                 setIsLoading(false);
                 if (cached.profileComplete === false) {
                   setCurrentPage('complete-registration');
+                }
+                if (cached.advisor) {
+                  setAssignedInvestmentAdvisor(cached.advisor);
+                } else if (cached.user.investment_advisor_code_entered) {
+                  fetchAssignedInvestmentAdvisor(cached.user.investment_advisor_code_entered).catch(() => {});
                 }
               }
             }
@@ -1880,14 +1911,17 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated || !currentUser || !hasInitialDataLoaded) return;
+    if (!isAuthenticated || !currentUser) return;
+    if (!hasInitialDataLoaded && !isMobileChrome()) return;
 
     let cancelled = false;
     (async () => {
       try {
         const { data: { user: authUser } } = await authService.supabase.auth.getUser();
         if (!authUser || cancelled) return;
-        const profileComplete = await authService.isProfileComplete(currentUser.id);
+        const profileComplete = hasInitialDataLoaded
+          ? await authService.isProfileComplete(currentUser.id)
+          : null;
         if (cancelled) return;
         const payload = {
           authUserId: authUser.id,
@@ -1898,8 +1932,10 @@ const App: React.FC = () => {
             name: currentUser.name,
             role: currentUser.role,
             startup_name: currentUser.startup_name,
-            registration_date: currentUser.registration_date
+            registration_date: currentUser.registration_date,
+            investment_advisor_code_entered: (currentUser as any).investment_advisor_code_entered
           },
+          advisor: assignedInvestmentAdvisor || null,
           cachedAt: Date.now()
         };
         localStorage.setItem(CACHED_USER_KEY, JSON.stringify(payload));
@@ -1911,7 +1947,7 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, currentUser?.id, hasInitialDataLoaded]);
+  }, [isAuthenticated, currentUser?.id, hasInitialDataLoaded, assignedInvestmentAdvisor]);
 
 
   // Fetch assigned investment advisor data
@@ -4482,6 +4518,18 @@ const App: React.FC = () => {
     return (
       <>
         <MessageContainer />
+        {isMobileChrome() && (() => {
+          const cached = getCachedUser();
+          const cacheAgeMs = cached?.cachedAt ? Date.now() - cached.cachedAt : null;
+          const cacheAgeSec = cacheAgeMs !== null ? Math.round(cacheAgeMs / 1000) : null;
+          return (
+            <div className="fixed bottom-3 right-3 z-[9999] bg-black/80 text-white text-xs rounded px-3 py-2 shadow">
+              <div>mobile chrome debug</div>
+              <div>auth: {isAuthenticated ? 'yes' : 'no'} | loading: {isLoading ? 'yes' : 'no'}</div>
+              <div>cache: {cached ? 'yes' : 'no'}{cacheAgeSec !== null ? ` (${cacheAgeSec}s)` : ''}</div>
+            </div>
+          );
+        })()}
         <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col overflow-x-hidden">
         <header className="bg-white shadow-sm sticky top-0 z-50">
           <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

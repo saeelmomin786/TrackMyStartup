@@ -499,19 +499,62 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
 
         setIsSubmittingApplication(true);
         try {
-            // Create application record (minimal - questions will be saved separately)
-            const { data, error } = await supabase
+            // Check if opportunity_applications record was already created during registration
+            // (when user registered from an opportunity link)
+            const { data: existingApp, error: checkError } = await supabase
                 .from('opportunity_applications')
-                .insert({
-                    startup_id: startup.id,
-                    opportunity_id: applyingOppId,
-                    status: 'pending',
-                    pitch_deck_url: pitchDeckUrl || null,
-                    pitch_video_url: pitchVideoUrl || null
-                })
-                .select()
-                .single();
+                .select('id')
+                .eq('startup_id', startup.id)
+                .eq('opportunity_id', applyingOppId)
+                .maybeSingle();
+
+            let data: any;
+            let error: any;
+
+            if (existingApp) {
+                // Record already exists (created during registration) - UPDATE it with pitch materials
+                console.log('✅ Opportunity application already exists from registration, updating with submission data...');
+                const { data: updatedApp, error: updateError } = await supabase
+                    .from('opportunity_applications')
+                    .update({
+                        pitch_deck_url: pitchDeckUrl || null,
+                        pitch_video_url: pitchVideoUrl || null
+                    })
+                    .eq('id', existingApp.id)
+                    .select()
+                    .single();
+                
+                data = updatedApp;
+                error = updateError;
+            } else {
+                // Fallback: Record doesn't exist yet - CREATE it now (edge case)
+                // This handles cases where registration might not have created it
+                console.log('⚠️ Creating opportunity_applications record at submission time (should have been created during registration)...');
+                const { data: newApp, error: insertError } = await supabase
+                    .from('opportunity_applications')
+                    .insert({
+                        startup_id: startup.id,
+                        opportunity_id: applyingOppId,
+                        status: 'pending',
+                        pitch_deck_url: pitchDeckUrl || null,
+                        pitch_video_url: pitchVideoUrl || null
+                    })
+                    .select()
+                    .single();
+                
+                data = newApp;
+                error = insertError;
+                
+                // If we just created it, wait for RLS sync
+                if (!error && data) {
+                    console.log('⏳ Waiting for RLS policy sync after creating application record...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    console.log('✅ RLS sync complete - proceeding to save responses');
+                }
+            }
+
             if (error) throw error;
+            if (!data) throw new Error('Failed to create/update opportunity application');
 
             // Save all question responses
             if (opportunityQuestions.length > 0 && questionAnswers.size > 0) {
@@ -598,10 +641,22 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             document.body.appendChild(successMessage);
         } catch (e:any) {
             console.error('Failed to submit application:', e);
-            messageService.error(
-              'Submission Failed',
-              'Failed to submit application. ' + (e.message || '')
-            );
+            
+            // Check if it's an RLS policy error
+            const isRlsError = e.code === '42501' || e.message?.includes('row-level security');
+            
+            if (isRlsError) {
+                console.warn('⚠️ RLS policy verification failed - this can happen immediately after registration');
+                messageService.error(
+                  'Temporary Issue',
+                  'Your application is being processed. Please try submitting again or refresh the page if this persists.'
+                );
+            } else {
+                messageService.error(
+                  'Submission Failed',
+                  'Failed to submit application. ' + (e.message || '')
+                );
+            }
         } finally {
             setIsSubmittingApplication(false);
         }

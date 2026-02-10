@@ -174,12 +174,6 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack, 
         });
         
         console.log('✅ Free plan saved successfully');
-        
-        // Refresh page after 1 second to ensure all RLS data is committed
-        setTimeout(() => {
-          console.log('🔄 Reloading page to sync RLS relationships...');
-          location.reload();
-        }, 1000);
       } catch (error) {
         console.error('❌ Error saving free plan:', error);
         alert('Error saving plan. Please try again.');

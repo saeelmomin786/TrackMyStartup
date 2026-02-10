@@ -255,6 +255,12 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
         setPortfolioUrl('');
         setIsApplyModalOpen(true);
         
+        // Refresh page after 1 second to ensure all RLS data is committed and synced
+        setTimeout(() => {
+            console.log('🔄 Reloading page to sync RLS relationships before form submission...');
+            location.reload();
+        }, 1000);
+        
         // Generate public fundraising card URL (if startup has active fundraising)
         try {
             const { data: fundraisingData } = await supabase

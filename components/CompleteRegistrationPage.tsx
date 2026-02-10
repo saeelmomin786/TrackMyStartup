@@ -4,7 +4,7 @@ import Button from './ui/Button';
 import Input from './ui/Input';
 import CloudDriveInput from './ui/CloudDriveInput';
 import { UserRole } from '../types';
-import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2, LogOut, Briefcase, Link2, MapPin } from 'lucide-react';
+import { FileText, Users, CheckCircle, Building2, Globe, PieChart, Plus, Trash2, LogOut, Briefcase, Link2, MapPin, Loader } from 'lucide-react';
 import Select from './ui/Select';
 import { InvestmentType, StartupDomain, StartupStage, FundraisingDetails } from '../types';
 import { capTableService } from '../lib/capTableService';
@@ -54,6 +54,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   newProfileId
 }) => {
   const [userData, setUserData] = useState<any>(null);
+  const [submissionId, setSubmissionId] = useState<string | null>(null);
   const [countryComplianceInfo, setCountryComplianceInfo] = useState<CountryComplianceInfo[]>([]);
   const [selectedCountryInfo, setSelectedCountryInfo] = useState<CountryComplianceInfo | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<{
@@ -206,6 +207,50 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     console.log('✅ Company types for', countryCode, ':', companyTypes);
     return companyTypes;
   }, [rulesMap, profileData.country]);
+
+  // Idempotency key management helpers
+  const SUBMISSION_KEY_PREFIX = 'form2_submission_';
+  
+  // Generate or retrieve submissionId (idempotency key)
+  const getOrCreateSubmissionId = () => {
+    // Check if there's an existing submissionId in state
+    if (submissionId) return submissionId;
+    
+    // Check localStorage for in-progress submission
+    const storedId = localStorage.getItem(SUBMISSION_KEY_PREFIX + userData?.id);
+    if (storedId) {
+      console.log('🔑 Retrieved existing submissionId from localStorage:', storedId);
+      setSubmissionId(storedId);
+      return storedId;
+    }
+    
+    // Generate new UUID v4 for idempotency
+    const newId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    console.log('🔑 Generated new submissionId:', newId);
+    setSubmissionId(newId);
+    localStorage.setItem(SUBMISSION_KEY_PREFIX + userData?.id, newId);
+    return newId;
+  };
+  
+  // Clear submissionId on success
+  const clearSubmissionId = () => {
+    if (userData?.id) {
+      localStorage.removeItem(SUBMISSION_KEY_PREFIX + userData.id);
+    }
+    setSubmissionId(null);
+    console.log('✅ Cleared submissionId from localStorage');
+  };
+  
+  // Check for resumable submission on mount and show warning
+  useEffect(() => {
+    if (userData?.id) {
+      const storedId = localStorage.getItem(SUBMISSION_KEY_PREFIX + userData.id);
+      if (storedId) {
+        console.log('⚠️ Incomplete submission detected, resumable:', storedId);
+        // Optionally show toast/banner that we can resume the submission
+      }
+    }
+  }, [userData?.id]);
 
   useEffect(() => {
     checkUserAndRedirect();
@@ -924,6 +969,11 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     e.preventDefault();
     console.log('🚀 ========== HANDLESUBMIT STARTED ==========');
     console.log('🚀 Form submission started for profile:', userData?.id, userData?.role);
+    
+    // Get or create idempotency key at the very start
+    const idempotencyKey = getOrCreateSubmissionId();
+    console.log('🔑 Using idempotency key:', idempotencyKey);
+    
     setIsLoading(true);
     setError(null);
 
@@ -1047,98 +1097,104 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     }
 
     try {
-      // Upload documents to storage
+      // Upload documents to storage (parallelized for speed)
       let governmentIdUrl = '';
       let roleSpecificUrl = '';
+      let licenseUrl = '';
+      let logoUrl = '';
 
-      console.log('📁 Starting file uploads...', { 
-        govId: uploadedFiles.govId, 
+      console.log('📁 Starting file uploads (parallel)...', {
+        govId: uploadedFiles.govId,
         roleSpecific: uploadedFiles.roleSpecific,
+        license: uploadedFiles.license,
+        logo: uploadedFiles.logo,
         govIdUrl: cloudDriveUrls.govId,
-        roleSpecificUrl: cloudDriveUrls.roleSpecific
+        roleSpecificUrl: cloudDriveUrls.roleSpecific,
+        licenseUrl: cloudDriveUrls.license,
+        logoUrl: cloudDriveUrls.logo
       });
 
-      // Handle Government ID - either uploaded file or cloud drive URL
+      const uploadPromises: Array<Promise<any>> = [];
+
+      // Government ID
       if (cloudDriveUrls.govId) {
         governmentIdUrl = cloudDriveUrls.govId;
         console.log('✅ Government ID cloud drive URL provided:', governmentIdUrl);
       } else if (uploadedFiles.govId) {
-        console.log('📤 Uploading government ID...');
-        const result = await storageService.uploadVerificationDocument(
-          uploadedFiles.govId, 
-          userData.email, 
-          'government-id'
+        uploadPromises.push(
+          storageService.uploadVerificationDocument(uploadedFiles.govId, userData.email, 'government-id')
+            .then(res => ({ key: 'governmentId', res }))
+            .catch(err => ({ key: 'governmentId', err }))
         );
-        if (result.success && result.url) {
-          governmentIdUrl = result.url;
-          console.log('✅ Government ID uploaded successfully:', governmentIdUrl);
-        } else {
-          console.error('❌ Government ID upload failed:', result);
-        }
       }
 
-      // Handle Role-specific document - either uploaded file or cloud drive URL
+      // Role-specific
       if (cloudDriveUrls.roleSpecific) {
         roleSpecificUrl = cloudDriveUrls.roleSpecific;
         console.log('✅ Role-specific document cloud drive URL provided:', roleSpecificUrl);
       } else if (uploadedFiles.roleSpecific) {
         const roleDocType = getRoleSpecificDocumentType(userData.role);
-        console.log('📤 Uploading role-specific document:', roleDocType);
-        const result = await storageService.uploadVerificationDocument(
-          uploadedFiles.roleSpecific, 
-          userData.email, 
-          roleDocType
+        uploadPromises.push(
+          storageService.uploadVerificationDocument(uploadedFiles.roleSpecific, userData.email, roleDocType)
+            .then(res => ({ key: 'roleSpecific', res }))
+            .catch(err => ({ key: 'roleSpecific', err }))
         );
-        if (result.success && result.url) {
-          roleSpecificUrl = result.url;
-          console.log('✅ Role-specific document uploaded successfully:', roleSpecificUrl);
-        } else {
-          console.error('❌ Role-specific document upload failed:', result);
-        }
       }
 
-      // Upload additional files for Investment Advisors
-      let licenseUrl = '';
-      let logoUrl = '';
-
+      // Investment Advisor extras
       if (userData.role === 'Investment Advisor') {
-        // Handle License - either uploaded file or cloud drive URL
         if (cloudDriveUrls.license) {
           licenseUrl = cloudDriveUrls.license;
           console.log('✅ License cloud drive URL provided:', licenseUrl);
         } else if (uploadedFiles.license) {
-          console.log('📤 Uploading license document...');
-          const result = await storageService.uploadVerificationDocument(
-            uploadedFiles.license, 
-            userData.email, 
-            'license'
+          uploadPromises.push(
+            storageService.uploadVerificationDocument(uploadedFiles.license, userData.email, 'license')
+              .then(res => ({ key: 'license', res }))
+              .catch(err => ({ key: 'license', err }))
           );
-          if (result.success && result.url) {
-            licenseUrl = result.url;
-            console.log('✅ License document uploaded successfully:', licenseUrl);
-          } else {
-            console.error('❌ License document upload failed:', result);
-          }
         }
 
-        // Handle Logo - either uploaded file or cloud drive URL
         if (cloudDriveUrls.logo) {
           logoUrl = cloudDriveUrls.logo;
           console.log('✅ Logo cloud drive URL provided:', logoUrl);
         } else if (uploadedFiles.logo) {
-          console.log('📤 Uploading company logo...');
-          const result = await storageService.uploadVerificationDocument(
-            uploadedFiles.logo, 
-            userData.email, 
-            'logo'
+          uploadPromises.push(
+            storageService.uploadVerificationDocument(uploadedFiles.logo, userData.email, 'logo')
+              .then(res => ({ key: 'logo', res }))
+              .catch(err => ({ key: 'logo', err }))
           );
-          if (result.success && result.url) {
-            logoUrl = result.url;
-            console.log('✅ Company logo uploaded successfully:', logoUrl);
-          } else {
-            console.error('❌ Company logo upload failed:', result);
-          }
         }
+      }
+
+      if (uploadPromises.length > 0) {
+        // Run uploads in parallel and apply results
+        const settled = await Promise.allSettled(uploadPromises);
+        settled.forEach(item => {
+          if (item.status === 'fulfilled') {
+            const payload = item.value;
+            const { key, res } = payload;
+            if (res && res.success && res.url) {
+              if (key === 'governmentId') governmentIdUrl = res.url;
+              if (key === 'roleSpecific') roleSpecificUrl = res.url;
+              if (key === 'license') licenseUrl = res.url;
+              if (key === 'logo') logoUrl = res.url;
+              console.log(`✅ ${key} uploaded successfully:`, res.url);
+            } else if (res && res.url) {
+              // Fallback if service returns url without success flag
+              if (key === 'governmentId') governmentIdUrl = res.url;
+              if (key === 'roleSpecific') roleSpecificUrl = res.url;
+              if (key === 'license') licenseUrl = res.url;
+              if (key === 'logo') logoUrl = res.url;
+              console.log(`✅ ${key} uploaded (no success flag) :`, res.url);
+            } else {
+              console.error('❌ Upload returned unexpected result for', payload.key, payload.res || payload.err);
+            }
+          } else {
+            // Rejected promise - try to surface useful info
+            const payload = (item as any).reason || item;
+            console.error('❌ Upload failed:', payload);
+          }
+        });
       }
 
       console.log('📊 Upload results:', { governmentIdUrl, roleSpecificUrl, licenseUrl, logoUrl });
@@ -1293,6 +1349,50 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
         console.log('✅ Updated profile data:', updateResult[0]);
         // Update userData.id to the correct profile ID for subsequent operations
         userData.id = profileIdToUpdate;
+        
+        // Record submission in form2_submissions table for idempotency tracking
+        try {
+          const submissionPayload = {
+            country: profileData.country,
+            company_type: profileData.companyType,
+            registration_date: profileData.registrationDate,
+            currency: profileData.currency,
+            ca_service_code: profileData.caServiceCode,
+            cs_service_code: profileData.csServiceCode,
+            investment_advisor_code: profileData.investmentAdvisorCode,
+            center_name: profileData.centerName,
+            firm_name: profileData.firmName,
+            website: profileData.website
+          };
+          
+          const fileUrls = {
+            governmentId: governmentIdUrl,
+            roleSpecific: roleSpecificUrl,
+            license: licenseUrl,
+            logo: logoUrl
+          };
+          
+          await (authService.supabase as any)
+            .from('form2_submissions')
+            .upsert({
+              idempotency_key: idempotencyKey,
+              auth_user_id: currentAuthUser?.id,
+              profile_id: profileIdToUpdate,
+              user_role: userData.role,
+              payload: submissionPayload,
+              file_urls: fileUrls,
+              status: 'completed',
+              completed_at: new Date().toISOString()
+            }, {
+              onConflict: 'idempotency_key'
+            })
+            .select()
+            .single();
+          
+          console.log('📝 Submission recorded in form2_submissions for idempotency tracking, key:', idempotencyKey);
+        } catch (idempotencyError) {
+          console.warn('⚠️ Failed to record submission in form2_submissions (non-blocking):', idempotencyError);
+        }
       }
 
       // For Investment Advisors, also save firm_name and website to investment_advisor_profiles table
@@ -1519,13 +1619,20 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
             // Generate compliance tasks after saving profile data
             try {
-              console.log('🔄 Generating compliance tasks for startup after profile save...');
-              const { complianceRulesIntegrationService } = await import('../lib/complianceRulesIntegrationService');
-              await complianceRulesIntegrationService.forceRegenerateComplianceTasks(startup.id);
-              console.log('✅ Compliance tasks generated successfully');
+              console.log('🔄 Triggering compliance task generation (non-blocking) for startup after profile save...');
+              // Fire-and-forget the compliance regeneration to avoid blocking user flow
+              (async () => {
+                try {
+                  const { complianceRulesIntegrationService } = await import('../lib/complianceRulesIntegrationService');
+                  complianceRulesIntegrationService.forceRegenerateComplianceTasks(startup.id)
+                    .then(() => console.log('✅ Compliance tasks generation completed (background)'))
+                    .catch(err => console.error('❌ Compliance generation error (background):', err));
+                } catch (err) {
+                  console.error('❌ Failed to import complianceRulesIntegrationService (background):', err);
+                }
+              })();
             } catch (complianceError) {
-              console.error('❌ Error generating compliance tasks:', complianceError);
-              // Don't throw error here as the main registration is complete
+              console.error('❌ Error scheduling compliance generation:', complianceError);
             }
 
             // Also save shares data to startup_shares table for Cap Table compatibility
@@ -1829,6 +1936,10 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       }
 
       console.log('🎉 Registration complete! Redirecting to dashboard...');
+      
+      // Clear submissionId from localStorage on success
+      clearSubmissionId();
+      
       onNavigateToDashboard();
       
     } catch (error: any) {
@@ -1843,6 +1954,18 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       setIsLoading(false);
     }
   };
+
+  // Prevent accidental reload/close while completing registration
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isLoading) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [isLoading]);
 
   if (isCheckingUser) {
     return (
@@ -2657,7 +2780,14 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             className="w-full"
             disabled={isLoading}
           >
-            {isLoading ? 'Completing Registration...' : 'Complete Registration'}
+            {isLoading ? (
+              <>
+                <Loader className="mr-2 h-4 w-4 animate-spin text-white" />
+                Creating your profile...
+              </>
+            ) : (
+              'Complete Registration'
+            )}
           </Button>
         </form>
       </Card>

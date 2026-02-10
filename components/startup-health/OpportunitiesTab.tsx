@@ -658,10 +658,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                         </svg>
                     </div>
                     <h3 class="text-lg font-semibold text-gray-900 mb-2">Application Submitted!</h3>
-                    <p class="text-gray-600 mb-4">Your application has been sent to the facilitator.${whatsappHtml}`
-                    + `</p>
+                    <p class="text-gray-600 mb-4">Your application has been sent to the facilitator.</p>
                     ${whatsappHtml}
-                    <button onclick="this.parentElement.parentElement.remove()" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors" style="${whatsappHtml ? 'display:block;width:100%;' : ''}">
+                    <button onclick="this.parentElement.parentElement.remove()" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors w-full">
                         Continue
                     </button>
                 </div>
@@ -778,9 +777,24 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                 </Button>
                                             )
                                         ) : (
-                                            <Button type="button" className="w-full mt-3" variant="secondary" disabled>
-                                                <Check className="h-4 w-4 mr-2" /> You have applied for this program
-                                            </Button>
+                                            <div className="flex gap-2 mt-3">
+                                                <Button type="button" className="flex-1" variant="secondary" disabled>
+                                                    <Check className="h-4 w-4 mr-2" /> You have applied for this program
+                                                </Button>
+                                                {selectedOpportunity.whatsappLink && (
+                                                    <a
+                                                        href={selectedOpportunity.whatsappLink}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z"/>
+                                                            </svg>
+                                                        Join Group
+                                                    </a>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
                                 </div>
@@ -912,9 +926,24 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     </Button>
                                                 )
                                             ) : (
-                                                <Button type="button" className="w-full" variant="secondary" disabled>
-                                                    <Check className="h-4 w-4 mr-2" /> Applied
-                                                </Button>
+                                                <div className="flex gap-2">
+                                                    <Button type="button" className="flex-1" variant="secondary" disabled>
+                                                        <Check className="h-4 w-4 mr-2" /> Applied
+                                                    </Button>
+                                                    {opp.whatsappLink && (
+                                                        <a
+                                                            href={opp.whatsappLink}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z"/>
+                                                            </svg>
+                                                            Join
+                                                        </a>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                         {/* per-application materials are collected in modal; no prerequisite */}
@@ -1247,9 +1276,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                     aria-label="Join WhatsApp group"
                                     className="inline-flex justify-center items-center gap-2 w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z" strokeWidth="0"/>
-                                    </svg>
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z"/>
+                                                            </svg>
                                     Join Group
                                 </a>
                             </div>

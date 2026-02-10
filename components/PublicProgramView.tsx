@@ -53,10 +53,21 @@ const PublicProgramView: React.FC = () => {
                 }
 
                 if (data) {
+                    // Sanitize description: remove WhatsApp chat links and any preceding label
+                    let desc: string = data.description || '';
+                    try {
+                        // Remove patterns like "WhatsApp group: https://chat.whatsapp.com/..." or raw chat links
+                        desc = desc.replace(/(?:WhatsApp\s*group[:\-\s]*\s*)?https?:\/\/(?:www\.)?chat\.whatsapp\.com\/\S+/gi, '');
+                        // Collapse multiple blank lines and trim
+                        desc = desc.replace(/\n{2,}/g, '\n\n').trim();
+                    } catch (e) {
+                        console.warn('Failed to sanitize program description', e);
+                    }
+
                     setOpportunity({
                         id: data.id,
                         programName: data.program_name,
-                        description: data.description || '',
+                        description: desc,
                         deadline: data.deadline || '',
                         posterUrl: data.poster_url || undefined,
                         videoUrl: data.video_url || undefined,

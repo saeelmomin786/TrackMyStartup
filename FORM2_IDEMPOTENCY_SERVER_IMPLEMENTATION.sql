@@ -1,0 +1,346 @@
+-- ============================================================================
+-- Server-Side Idempotency Handling for Form 2 Submissions
+-- ============================================================================
+--
+-- This document describes how to handle idempotency on the server side using
+-- the new form2_submissions table.
+--
+-- Key principle: Store idempotency keys in form2_submissions table with status
+-- tracking, ensuring that duplicate requests return the same result without
+-- re-processing.
+--
+-- ============================================================================
+
+-- 1. HANDLE IDEMPOTENCY IN SUPABASE FUNCTIONS
+-- ============================================================================
+-- 
+-- Create a Supabase Function that:
+-- a) Accepts idempotency_key in request body
+-- b) Checks if submission with this key already exists in form2_submissions
+-- c) If found and completed → return success with existing data
+-- d) If found and processing → return 202 Accepted (wait or retry later)
+-- e) If not found → insert with status='pending', process in background, return 202
+--
+-- Pseudocode for Supabase Function (TypeScript):
+--
+-- import { createClient } from '@supabase/supabase-js'
+--
+-- export const submitForm2Comprehensive = async (req, res) => {
+--   const {
+--     idempotencyKey,    // UUID or string from client
+--     profileId,
+--     authUserId,
+--     userRole,          // 'Startup', 'Investor', 'Incubation', 'Investment Advisor', etc.
+--     payload,           // Form data (country, company_type, founders, etc.)
+--     fileUrls           // File URLs from storage
+--   } = req.body;
+--
+--   if (!idempotencyKey) {
+--     return res.status(400).json({ error: 'idempotencyKey is required' });
+--   }
+--
+--   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+--
+--   try {
+--     // 1. Check if submission exists with this idempotency key
+--     const { data: existingSubmission, error: lookupError } = await supabase
+--       .from('form2_submissions')
+--       .select('*')
+--       .eq('idempotency_key', idempotencyKey)
+--       .maybeSingle();
+--
+--     if (lookupError) throw lookupError;
+--
+--     // 2a. If found and completed → return 200
+--     if (existingSubmission && existingSubmission.status === 'completed') {
+--       console.log('✅ Idempotent request - submission already completed, returning 200');
+--       return res.status(200).json({
+--         success: true,
+--         message: 'Submission already completed',
+--         submissionId: existingSubmission.id,
+--         status: 'completed'
+--       });
+--     }
+--
+--     // 2b. If found and processing → return 202 (let client poll or wait)
+--     if (existingSubmission && existingSubmission.status === 'processing') {
+--       console.log('⏳ Idempotent request - submission still processing, returning 202');
+--       return res.status(202).json({
+--         success: true,
+--         message: 'Submission is being processed',
+--         submissionId: existingSubmission.id,
+--         status: 'processing'
+--       });
+--     }
+--
+--     // 3. If found but failed, optionally retry by resetting to pending
+--     if (existingSubmission && existingSubmission.status === 'failed') {
+--       console.log('🔄 Retrying failed submission:', idempotencyKey);
+--       await supabase
+--         .from('form2_submissions')
+--         .update({
+--           status: 'pending',
+--           retry_count: (existingSubmission.retry_count || 0) + 1,
+--           updated_at: new Date().toISOString()
+--         })
+--         .eq('id', existingSubmission.id);
+--       // Fall through to enqueue for processing
+--     }
+--
+--     // 4. If NOT found, create a new submission record
+--     if (!existingSubmission) {
+--       const { data: newSubmission, error: insertError } = await supabase
+--         .from('form2_submissions')
+--         .insert({
+--           idempotency_key: idempotencyKey,
+--           auth_user_id: authUserId,
+--           profile_id: profileId,
+--           user_role: userRole,
+--           payload: payload,
+--           file_urls: fileUrls,
+--           status: 'pending',
+--           client_ip: req.ip || null,
+--           client_version: req.headers['user-agent'] || null
+--         })
+--         .select()
+--         .single();
+--
+--       if (insertError) throw insertError;
+--       console.log('📝 Created new form2_submission:', newSubmission.id, 'key:', idempotencyKey);
+--     }
+--
+--     // 5. Enqueue background job for processing (heavy DB work)
+--     // Option A: Firebase Cloud Tasks
+--     // Option B: Bull/Redis queue
+--     // Option C: Postgres pg_boss job queue
+--     // Option D: Custom job table with worker poll
+--     const submissionId = existingSubmission?.id || newSubmission?.id;
+--     await enqueueBackgroundJob({
+--       type: 'process_form2_submission',
+--       submissionId: submissionId,
+--       idempotencyKey: idempotencyKey,
+--       userRole: userRole
+--     });
+--
+--     // 6. Return 202 Accepted (job is queued, processing will continue)
+--     return res.status(202).json({
+--       success: true,
+--       message: 'Submission accepted for processing',
+--       submissionId: submissionId,
+--       status: 'processing',
+--       estimatedWaitTime: '2-5 seconds'
+--     });
+--
+--   } catch (error) {
+--     console.error('Error in submitForm2Comprehensive:', error);
+--     return res.status(500).json({
+--       error: 'Submission failed',
+--       message: error.message
+--     });
+--   }
+-- };
+--
+-- ============================================================================
+
+-- 2. BACKGROUND WORKER PSEUDOCODE
+-- ============================================================================
+-- 
+-- The background worker processes form2_submissions with status='pending'
+-- and performs heavy DB work (creating startups, founders, compliance tasks).
+--
+-- Pseudocode:
+--
+-- const processForm2Background = async (submissionId, idempotencyKey, userRole) => {
+--   try {
+--     // 1. Update status to 'processing'
+--     await supabase
+--       .from('form2_submissions')
+--       .update({ status: 'processing', updated_at: new Date().toISOString() })
+--       .eq('id', submissionId);
+--
+--     // 2. Get submission data
+--     const { data: submission } = await supabase
+--       .from('form2_submissions')
+--       .select('*')
+--       .eq('id', submissionId)
+--       .single();
+--
+--     const { auth_user_id, profile_id, payload, file_urls } = submission;
+--
+--     // 3. Extract payload
+--     const {
+--       country, company_type, registration_date, currency,
+--       ca_service_code, cs_service_code, investment_advisor_code,
+--       center_name, firm_name, website,
+--       founders, shares, subsidiaries, international_ops
+--     } = payload;
+--
+--     // 4. Perform heavy DB operations (in transaction for consistency)
+--     await supabase.rpc('start_transaction');
+--
+--     try {
+--       // 4a. Update user_profiles with Form 2 data
+--       await supabase
+--         .from('user_profiles')
+--         .update({
+--           country, company_type, registration_date, currency,
+--           ca_service_code, cs_service_code, investment_advisor_code,
+--           center_name, firm_name, website,
+--           is_profile_complete: true,
+--           government_id: file_urls?.governmentId,
+--           ca_license: file_urls?.roleSpecific,
+--           logo_url: file_urls?.logo,
+--           financial_advisor_license_url: file_urls?.license
+--         })
+--         .eq('id', profile_id);
+--
+--       // 4b. Create/update startup (only for Startup role)
+--       if (userRole === 'Startup') {
+--         const { data: startup } = await supabase
+--           .from('startups')
+--           .upsert({
+--             user_id: auth_user_id,
+--             country, company_type, registration_date, currency,
+--             total_shares: shares?.totalShares,
+--             price_per_share: shares?.pricePerShare,
+--             esop_reserved_shares: shares?.esopReservedShares
+--           }, { onConflict: 'user_id' })
+--           .select()
+--           .single();
+--
+--         // 4c. Insert founders (batch upsert)
+--         if (founders && founders.length > 0) {
+--           await supabase
+--             .from('founders')
+--             .upsert(
+--               founders.map(f => ({
+--                 startup_id: startup.id,
+--                 name: f.name,
+--                 email: f.email,
+--                 shares: f.shares,
+--                 equity_percentage: f.equity,
+--                 mentor_code: f.mentorCode
+--               })),
+--               { onConflict: 'startup_id,email' }  // Avoid duplicates
+--             );
+--         }
+--
+--         // 4d. Generate compliance tasks (async, non-blocking within transaction)
+--         await generateComplianceTasks(startup.id);
+--       }
+--
+--       // 4e. Insert subsidiaries and international ops (if any)
+--       if (subsidiaries && subsidiaries.length > 0) {
+--         // Batch insert
+--         await supabase.from('subsidiaries').insert(subsidiaries);
+--       }
+--
+--       // Commit transaction
+--       await supabase.rpc('commit_transaction');
+--
+--     } catch (trxError) {
+--       await supabase.rpc('rollback_transaction');
+--       throw trxError;
+--     }
+--
+--     // 5. Mark submission as completed
+--     await supabase
+--       .from('form2_submissions')
+--       .update({
+--         status: 'completed',
+--         completed_at: new Date().toISOString(),
+--         updated_at: new Date().toISOString()
+--       })
+--       .eq('id', submissionId);
+--
+--     console.log('✅ Form 2 submission processed successfully:', submissionId);
+--
+--   } catch (error) {
+--     console.error('❌ Error processing Form 2 submission:', error);
+--     // Mark as failed, optionally retry
+--     await supabase
+--       .from('form2_submissions')
+--       .update({
+--         status: 'failed',
+--         error_message: error.message,
+--         error_details: { stack: error.stack },
+--         updated_at: new Date().toISOString()
+--       })
+--       .eq('id', submissionId);
+--
+--     // Optionally notify user via email or dashboard
+--     await notifyUserOfFailure(submission.auth_user_id, error);
+--   }
+-- };
+--
+-- ============================================================================
+
+-- 3. OPTIONAL: ADD POLLING ENDPOINT FOR CLIENT RESUME
+-- ============================================================================
+-- 
+-- Allow clients to check submission status and resume if needed.
+--
+-- Endpoint: GET /api/form2-submissions/:submissionId
+--
+-- Pseudocode:
+--
+-- export const checkForm2SubmissionStatus = async (req, res) => {
+--   const { submissionId } = req.params;
+--
+--   const { data: submission, error } = await supabase
+--     .from('form2_submissions')
+--     .select('id, status, completed_at, error_message')
+--     .eq('id', submissionId)
+--     .maybeSingle();
+--
+--   if (error || !submission) {
+--     return res.status(404).json({ error: 'Submission not found' });
+--   }
+--
+--   return res.status(200).json({
+--     status: submission.status,
+--     completed: submission.completed_at,
+--     error: submission.error_message
+--   });
+-- };
+--
+-- Client can poll this endpoint to check if background processing is complete
+-- and then redirect to dashboard when status='completed'.
+--
+-- ============================================================================
+
+-- 4. VERIFICATION: Check for duplicates before idempotency
+-- ============================================================================
+-- 
+-- Query to find any duplicate submissions (for troubleshooting):
+--
+-- SELECT 
+--   idempotency_key,
+--   COUNT(*) as submission_count,
+--   array_agg(id) as submission_ids,
+--   status
+-- FROM form2_submissions
+-- GROUP BY idempotency_key, status
+-- HAVING COUNT(*) > 1
+-- ORDER BY created_at DESC;
+--
+-- ============================================================================
+
+-- 5. DATA RETENTION POLICY (Optional)
+-- ============================================================================
+-- 
+-- Keep form2_submissions for 30 days for auditing, then archive:
+--
+-- CREATE OR REPLACE FUNCTION cleanup_old_form2_submissions()
+-- RETURNS void AS $$
+-- BEGIN
+--   DELETE FROM form2_submissions
+--   WHERE created_at < now() - interval '30 days'
+--   AND status IN ('completed', 'failed');
+-- END;
+-- $$ LANGUAGE plpgsql;
+--
+-- -- Schedule cleanup to run daily (requires pg_cron extension):
+-- -- SELECT cron.schedule('cleanup_form2_submissions', '0 2 * * *', 'SELECT cleanup_old_form2_submissions()');
+--
+-- ============================================================================

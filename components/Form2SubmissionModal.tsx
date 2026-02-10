@@ -43,6 +43,11 @@ export const Form2SubmissionModal: React.FC<Form2SubmissionModalProps> = ({
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
+  const [submissionIdempotencyKey, setSubmissionIdempotencyKey] = useState<string>(() => {
+    // Generate idempotency key once per modal instance
+    return `form2_${applicationId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  });
+  const QUEUE_PREFIX = 'form2_queue_';
 
   // Load Form 2 questions and config
   useEffect(() => {
@@ -150,14 +155,40 @@ export const Form2SubmissionModal: React.FC<Form2SubmissionModalProps> = ({
         return;
       }
 
+      // Queue the submission locally first to survive refresh/close (with idempotency key)
+      const queueId = `f2_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+      const payload = { 
+        applicationId, 
+        opportunityId, 
+        opportunityName, 
+        responses,
+        idempotencyKey: submissionIdempotencyKey,  // Include idempotency key in queue
+        queuedAt: new Date().toISOString() 
+      };
+      try {
+        localStorage.setItem(QUEUE_PREFIX + queueId, JSON.stringify(payload));
+      } catch (e) {
+        console.warn('Could not persist queued submission:', e);
+      }
+
       setSubmitting(true);
+      console.log('🔑 Form2 submission with idempotency key:', submissionIdempotencyKey);
 
-      // Save all responses
-      await form2ResponseService.saveForm2Submission(applicationId, responses);
+      // Attempt to submit now if online; otherwise it will be retried when online
+      if (!navigator.onLine) {
+        messageService.info('Offline', 'You are offline — submission has been queued and will be sent when network is available');
+        setSubmitting(false);
+        return;
+      }
 
-      messageService.success('Success', 'Form 2 submitted successfully!');
-      onSuccess?.();
-      onClose();
+      // Try sending and remove queue on success
+      await (async () => {
+        await form2ResponseService.saveForm2Submission(applicationId, responses, submissionIdempotencyKey);
+        try { localStorage.removeItem(QUEUE_PREFIX + queueId); } catch {}
+        messageService.success('Success', 'Form 2 submitted successfully!');
+        onSuccess?.();
+        onClose();
+      })();
     } catch (error) {
       console.error('Error submitting Form 2:', error);
       messageService.error('Error', 'Failed to submit Form 2');
@@ -165,6 +196,59 @@ export const Form2SubmissionModal: React.FC<Form2SubmissionModalProps> = ({
       setSubmitting(false);
     }
   };
+
+  // Prevent modal close while submitting
+  const safeOnClose = () => {
+    if (submitting) return;
+    onClose();
+  };
+
+  // Retry any queued submissions (called on mount and when browser goes online)
+  const retryQueuedSubmissions = async () => {
+    try {
+      const keys = Object.keys(localStorage).filter(k => k.startsWith(QUEUE_PREFIX));
+      for (const key of keys) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) { localStorage.removeItem(key); continue; }
+          const item = JSON.parse(raw);
+          // Attempt to resend with idempotency key
+          await form2ResponseService.saveForm2Submission(
+            item.applicationId, 
+            item.responses,
+            item.idempotencyKey  // Include idempotency key in retry
+          );
+          localStorage.removeItem(key);
+          messageService.success('Success', 'Previously queued Form 2 submitted');
+        } catch (e) {
+          console.warn('Retry failed for queued submission', key, e);
+          // keep in queue for next attempt
+        }
+      }
+    } catch (e) {
+      console.warn('Error while retrying queued submissions', e);
+    }
+  };
+
+  useEffect(() => {
+    // On mount, try to resend any queued submissions
+    retryQueuedSubmissions();
+    const onOnline = () => retryQueuedSubmissions();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
+
+  // Prevent accidental reload/close while submitting
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (submitting) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [submitting]);
 
   const renderQuestionInput = (question: Form2QuestionDisplay) => {
     const response = responses[question.question_id] || {};
@@ -348,11 +432,19 @@ export const Form2SubmissionModal: React.FC<Form2SubmissionModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={safeOnClose}
       title={`Form 2: ${opportunityName}`}
       className="max-w-2xl"
     >
       <div className="space-y-6">
+        {submitting && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+            <div className="flex flex-col items-center p-6">
+              <Loader className="h-12 w-12 animate-spin text-white" />
+              <p className="mt-3 text-white text-center">Creating your profile... Please do not refresh or close the page.</p>
+            </div>
+          </div>
+        )}
         {form2Config?.form2_description && (
           <Card padding="md" className="bg-blue-50 border border-blue-200">
             <p className="text-sm text-slate-700">{form2Config.form2_description}</p>
@@ -378,6 +470,7 @@ export const Form2SubmissionModal: React.FC<Form2SubmissionModalProps> = ({
           <Button
             onClick={onClose}
             variant="outline"
+            disabled={submitting || loading}
           >
             Cancel
           </Button>

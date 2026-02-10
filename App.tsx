@@ -1344,7 +1344,14 @@ const App: React.FC = () => {
                     
                     if (!isProfileComplete) {
                       console.log('⏭️ Profile incomplete - skipping startup creation. User should complete Form 2 first.');
-                      // Don't create startup - let Form 2 handle it when profile is completed
+                      // CRITICAL FIX: Always set auth state before returning to prevent UI lock on mobile/refresh
+                      if (isMounted) {
+                        setCurrentUser(completeUser);
+                        setIsAuthenticated(true);
+                        setHasInitialDataLoaded(true);
+                        setIsLoading(false);
+                        setCurrentPage('complete-registration');
+                      }
                       return;
                     }
                     
@@ -1436,6 +1443,8 @@ const App: React.FC = () => {
                     }
                   }
                   
+                  // CRITICAL FIX: Guard with isMounted to prevent memory leak on mobile unmount
+                  if (!isMounted) return;
                   setCurrentUser(completeUser);
                   
                   // CHECK: Is Form 2 complete before allowing dashboard access?
@@ -1449,18 +1458,27 @@ const App: React.FC = () => {
                   
                   if (!isProfileComplete) {
                     console.log('❌ Form 2 NOT complete - redirecting to complete-registration');
-                    setCurrentPage('complete-registration');
-                    setIsLoading(false);
-                    setIsProcessingAuthChange(false);
+                    // CRITICAL FIX: Set auth state before returning to prevent state lock
+                    // Guard with isMounted to prevent memory leak on mobile unmount
+                    if (isMounted) {
+                      setCurrentUser(completeUser);
+                      setIsAuthenticated(true);
+                      setCurrentPage('complete-registration');
+                      setIsLoading(false);
+                      setIsProcessingAuthChange(false);
+                    }
                     return;
                   }
                   
-                  setIsAuthenticated(true);
-                  setIsLoading(false);
+                  // CRITICAL FIX: Guard with isMounted to prevent memory leak on mobile unmount
+                  if (isMounted) {
+                    setIsAuthenticated(true);
+                    setIsLoading(false);
+                  }
                   
                   // CROSS-TAB COORDINATION: Broadcast login success to other tabs
                   // This allows other tabs waiting on login to detect and sync
-                  if (session?.user?.id) {
+                  if (session?.user?.id && isMounted) {
                     try {
                       const signal = {
                         timestamp: Date.now(),
@@ -1520,20 +1538,27 @@ const App: React.FC = () => {
                         registration_date: newProfile.registration_date
                       };
                       
+                      // CRITICAL FIX: Guard with isMounted to prevent memory leak on mobile unmount
+                      if (!isMounted) return;
                       setCurrentUser(mappedUser);
                       
                       // CHECK: Is Form 2 complete?
                       const newUserIsProfileComplete = await authService.isProfileComplete(newProfile.id);
                       if (!newUserIsProfileComplete) {
                         console.log('❌ New user - Form 2 NOT complete, redirecting to complete-registration');
-                        setCurrentPage('complete-registration');
-                        setIsLoading(false);
-                        setIsProcessingAuthChange(false);
+                        if (isMounted) {
+                          setCurrentPage('complete-registration');
+                          setIsLoading(false);
+                          setIsProcessingAuthChange(false);
+                        }
                         return;
                       }
                       
-                      setIsAuthenticated(true);
-                      setIsLoading(false);
+                      // CRITICAL FIX: Guard with isMounted to prevent memory leak on mobile unmount
+                      if (isMounted) {
+                        setIsAuthenticated(true);
+                        setIsLoading(false);
+                      }
                       
                       // CROSS-TAB COORDINATION: Broadcast login success to other tabs
                       if (session?.user?.id) {
@@ -1570,9 +1595,12 @@ const App: React.FC = () => {
                       startup_name: session.user.user_metadata?.startupName || undefined,
                       registration_date: new Date().toISOString().split('T')[0]
                     };
-                    setCurrentUser(basicUser);
-                    setIsLoading(false);
-                    setIsProcessingAuthChange(false);
+                    // CRITICAL FIX: Guard with isMounted to prevent memory leak on mobile unmount
+                    if (isMounted) {
+                      setCurrentUser(basicUser);
+                      setIsLoading(false);
+                      setIsProcessingAuthChange(false);
+                    }
                     // For basic user, don't auto-authenticate until form 2 is checked
                     // This prevents showing dashboard with incomplete profile
                   }
@@ -1587,9 +1615,12 @@ const App: React.FC = () => {
                   startup_name: session.user.user_metadata?.startupName || undefined,
                   registration_date: new Date().toISOString().split('T')[0]
                 };
-                setCurrentUser(basicUser);
-                setIsLoading(false);
-                setIsProcessingAuthChange(false);
+                // CRITICAL FIX: Guard with isMounted to prevent memory leak on mobile unmount
+                if (isMounted) {
+                  setCurrentUser(basicUser);
+                  setIsLoading(false);
+                  setIsProcessingAuthChange(false);
+                }
                 // Don't set authenticated - let Form 2 check handle it
               }
               

@@ -253,12 +253,11 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
         setApplyingOppId(opportunityId);
         setQuestionAnswers(new Map());
         setPortfolioUrl('');
-        setIsApplyModalOpen(true);
         
-        // Refresh page after 1 second to ensure all RLS data is committed and synced
+        // Wait 1 second for RLS data to sync before opening form
         setTimeout(() => {
-            console.log('🔄 Reloading page to sync RLS relationships before form submission...');
-            location.reload();
+            setIsApplyModalOpen(true);
+            console.log('✅ Application form ready - RLS data synced');
         }, 1000);
         
         // Generate public fundraising card URL (if startup has active fundraising)

@@ -815,6 +815,7 @@ const App: React.FC = () => {
 
 
   const [loadingProgress, setLoadingProgress] = useState<string>('Initializing...');
+  const [showResetButton, setShowResetButton] = useState<boolean>(false);
   const CACHED_USER_KEY = 'tms_cached_user';
 
   const isMobileChrome = () => {
@@ -887,6 +888,16 @@ const App: React.FC = () => {
       }
     };
   }, [isLoading]);
+
+  // Mobile Chrome: show reset button only after 5s on the auth-loading screen
+  useEffect(() => {
+    if (!(isMobileChrome() && isAuthenticated && currentUser && !hasInitialDataLoaded)) {
+      setShowResetButton(false);
+      return;
+    }
+    const t = setTimeout(() => setShowResetButton(true), 5000);
+    return () => clearTimeout(t);
+  }, [isAuthenticated, currentUser?.id, hasInitialDataLoaded]);
 
   // Mobile Chrome safety: if we stay in loading too long, perform a one-time hard refresh
   useEffect(() => {
@@ -3867,6 +3878,25 @@ const App: React.FC = () => {
           <BarChart3 className="w-16 h-16 animate-pulse" />
           <p className="text-xl font-semibold text-slate-800">Loading your dashboard...</p>
           <p className="text-sm text-slate-600">Checking authentication</p>
+          {showResetButton && (
+            <button
+              onClick={() => {
+                try { authService.clearCache(); } catch {}
+                try { localStorage.clear(); } catch {}
+                try { sessionStorage.clear(); } catch {}
+                try {
+                  deleteCookie('lastAuthUserId');
+                  deleteCookie('lastAuthTimestamp');
+                  deleteCookie('currentView');
+                } catch {}
+                try { localStorage.removeItem(CACHED_USER_KEY); } catch {}
+                try { window.location.reload(); } catch {}
+              }}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm"
+            >
+              Reset & Reload
+            </button>
+          )}
         </div>
       </div>
     );
@@ -4587,20 +4617,6 @@ const App: React.FC = () => {
     return (
       <>
         <MessageContainer />
-        {isMobileChrome() && (() => {
-          const cached = getCachedUser();
-          const cacheAgeMs = cached?.cachedAt ? Date.now() - cached.cachedAt : null;
-          const cacheAgeSec = cacheAgeMs !== null ? Math.round(cacheAgeMs / 1000) : null;
-          return (
-            <div className="fixed bottom-3 right-3 z-[9999] bg-black/80 text-white text-xs rounded px-3 py-2 shadow">
-              <div>mobile chrome debug</div>
-              <div>auth: {isAuthenticated ? 'yes' : 'no'} | loading: {isLoading ? 'yes' : 'no'}</div>
-              <div>page: {currentPage} | view: {view}</div>
-              <div>role: {currentUser?.role || 'none'} | data: {hasInitialDataLoaded ? 'yes' : 'no'}</div>
-              <div>cache: {cached ? 'yes' : 'no'}{cacheAgeSec !== null ? ` (${cacheAgeSec}s)` : ''}</div>
-            </div>
-          );
-        })()}
         <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col overflow-x-hidden">
         <header className="bg-white shadow-sm sticky top-0 z-50">
           <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

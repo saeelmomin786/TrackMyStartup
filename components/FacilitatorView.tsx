@@ -61,6 +61,7 @@ type IncubationOpportunity = {
   deadline: string; // YYYY-MM-DD
   posterUrl?: string;
   videoUrl?: string;
+  whatsappLink?: string;
   facilitatorId: string;
   createdAt?: string;
 };
@@ -102,6 +103,7 @@ const initialNewOppState = {
   videoUrl: '',
   facilitatorDescription: '',
   facilitatorWebsite: '',
+  whatsappLink: '',
 };
 
 const SummaryCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -1705,6 +1707,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             deadline: row.deadline,
             posterUrl: row.poster_url || undefined,
             videoUrl: row.video_url || undefined,
+            whatsappLink: row.whatsapp_link || undefined,
             facilitatorId: row.facilitator_id,
             createdAt: row.created_at
           }));
@@ -3420,6 +3423,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         deadline: newOpportunity.deadline,
         poster_url: posterUrlToSave || null,
         video_url: newOpportunity.videoUrl || null,
+        whatsapp_link: newOpportunity.whatsappLink || null,
         facilitator_id: facilitatorId
       };
 
@@ -3439,6 +3443,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           deadline: data.deadline,
           posterUrl: data.poster_url || undefined,
           videoUrl: data.video_url || undefined,
+          whatsappLink: data.whatsapp_link || undefined,
           facilitatorId: data.facilitator_id,
           createdAt: data.created_at
         };
@@ -3468,6 +3473,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           deadline: data.deadline,
           posterUrl: data.poster_url || undefined,
           videoUrl: data.video_url || undefined,
+          whatsappLink: data.whatsapp_link || undefined,
           facilitatorId: data.facilitator_id,
           createdAt: data.created_at
         };
@@ -5947,6 +5953,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 <textarea id="facilitatorDescription" name="facilitatorDescription" value={newOpportunity.facilitatorDescription} onChange={handleInputChange} required rows={3} className="block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm" />
               </div>
               <Input label="Organization Website" id="facilitatorWebsite" name="facilitatorWebsite" type="url" placeholder="https://..." value={newOpportunity.facilitatorWebsite} onChange={handleInputChange} />
+              <Input label="WhatsApp Group Link" id="whatsappLink" name="whatsappLink" type="url" placeholder="https://chat.whatsapp.com/..." value={newOpportunity.whatsappLink} onChange={handleInputChange} />
                 </div>
                 
             {/* Question Selector */}

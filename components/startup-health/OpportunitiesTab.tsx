@@ -31,6 +31,7 @@ interface OpportunityItem {
     deadline: string;
     posterUrl?: string;
     videoUrl?: string;
+    whatsappLink?: string;
     facilitatorName?: string;
 }
 
@@ -156,6 +157,8 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     const [isReferenceDraftModalOpen, setIsReferenceDraftModalOpen] = useState(false);
     // Draft Answers modal state
     const [isDraftAnswersModalOpen, setIsDraftAnswersModalOpen] = useState(false);
+    // WhatsApp link for current application
+    const [currentWhatsappLink, setCurrentWhatsappLink] = useState<string | undefined>(undefined);
     // Application questions state
     const [opportunityQuestions, setOpportunityQuestions] = useState<OpportunityQuestion[]>([]);
     const [questionAnswers, setQuestionAnswers] = useState<Map<string, string>>(new Map());
@@ -185,6 +188,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     deadline: row.deadline || '',
                     posterUrl: row.poster_url || undefined,
                     videoUrl: row.video_url || undefined,
+                    whatsappLink: row.whatsapp_link || undefined,
                     facilitatorName: 'Program Facilitator'
                 }));
                 setOpportunities(mapped);
@@ -251,6 +255,13 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     const openApplyModal = async (opportunityId: string) => {
         if (appliedIds.has(opportunityId)) return;
         setApplyingOppId(opportunityId);
+        
+        // Get and set the WhatsApp link for this opportunity
+        const opp = opportunities.find(o => o.id === opportunityId);
+        if (opp) {
+            setCurrentWhatsappLink(opp.whatsappLink);
+        }
+        
         setQuestionAnswers(new Map());
         setPortfolioUrl('');
         
@@ -481,9 +492,13 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
         });
 
         if (missingRequired.length > 0) {
+            const missingFieldsList = missingRequired
+                .map((q, idx) => `${idx + 1}. ${q.question?.questionText || 'Unknown question'}`)
+                .join('\n');
+            
             messageService.warning(
-                'Required Questions',
-                `Please answer all required questions (${missingRequired.length} missing).`
+                'Missing Required Fields',
+                `Please fill in the following required fields:\n\n${missingFieldsList}`
             );
             return;
         }
@@ -614,6 +629,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
 
             setIsApplyModalOpen(false);
             setApplyingOppId(null);
+            setCurrentWhatsappLink(undefined);
             setOpportunityQuestions([]);
             setQuestionAnswers(new Map());
             setPortfolioUrl('');
@@ -624,6 +640,16 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
 
             const successMessage = document.createElement('div');
             successMessage.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+            const selectedOpp = opportunities.find(o => o.id === applyingOppId);
+            const whatsappHtml = selectedOpp?.whatsappLink ? `
+                <div class="mt-6 pt-4 border-t border-gray-200">
+                    <p class="text-sm text-gray-600 mb-3">Join the group for updates:</p>
+                    <a href="${selectedOpp.whatsappLink}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 bg-green-100 text-green-700 px-4 py-2 rounded-md hover:bg-green-200 transition-colors">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421-7.403h-.004c-1.025 0-2.04-.312-2.923-.903 2.712-.275 5.325 1.894 5.325 4.74 0 .46-.054.913-.155 1.354-1.916-1.49-2.668-4.191-2.243-5.191z"/></svg>
+                        Join WhatsApp Group
+                    </a>
+                </div>
+            ` : '';
             successMessage.innerHTML = `
                 <div class="bg-white rounded-lg p-6 max-w-sm mx-4 text-center">
                     <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -632,8 +658,10 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                         </svg>
                     </div>
                     <h3 class="text-lg font-semibold text-gray-900 mb-2">Application Submitted!</h3>
-                    <p class="text-gray-600 mb-4">Your application has been sent to the facilitator.</p>
-                    <button onclick="this.parentElement.parentElement.remove()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors">
+                    <p class="text-gray-600 mb-4">Your application has been sent to the facilitator.${whatsappHtml}`
+                    + `</p>
+                    ${whatsappHtml}
+                    <button onclick="this.parentElement.parentElement.remove()" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors" style="${whatsappHtml ? 'display:block;width:100%;' : ''}">
                         Continue
                     </button>
                 </div>
@@ -1021,7 +1049,8 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             <Modal isOpen={isApplyModalOpen} onClose={() => { 
                 if (!isSubmittingApplication) { 
                     setIsApplyModalOpen(false); 
-                    setApplyingOppId(null); 
+                    setApplyingOppId(null);
+                    setCurrentWhatsappLink(undefined);
                     setPortfolioUrl(''); 
                     setStartupWebsiteUrl(null);
                     
@@ -1054,13 +1083,17 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                 if (!question) return null;
                                 
                                 const answer = questionAnswers.get(oq.questionId) || '';
+                                const isMissing = oq.isRequired && (!answer || answer.trim() === '');
                                 
                                 return (
-                                    <div key={oq.questionId} className="space-y-2">
+                                    <div key={oq.questionId} className={`space-y-2 p-3 rounded-md ${isMissing ? 'bg-red-50 border border-red-200' : ''}`}>
                                         <label className="block text-sm font-medium text-slate-700">
                                             {question.questionText}
                                             {oq.isRequired && <span className="text-red-500 ml-1">*</span>}
                                         </label>
+                                        {isMissing && (
+                                            <p className="text-xs text-red-600 font-medium">This field is required</p>
+                                        )}
                                         {question.questionType === 'textarea' ? (
                                             <textarea
                                                 value={answer}
@@ -1069,7 +1102,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     newMap.set(oq.questionId, e.target.value);
                                                     setQuestionAnswers(newMap);
                                                 }}
-                                                className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
+                                                className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary sm:text-sm ${isMissing ? 'border-red-400 bg-white' : 'border-slate-300'}`}
                                                 rows={4}
                                                 required={oq.isRequired}
                                             />
@@ -1081,7 +1114,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     newMap.set(oq.questionId, e.target.value);
                                                     setQuestionAnswers(newMap);
                                                 }}
-                                                className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
+                                                className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary sm:text-sm ${isMissing ? 'border-red-400 bg-white' : 'border-slate-300'}`}
                                                 required={oq.isRequired}
                                             >
                                                 <option value="">Select an option</option>
@@ -1128,6 +1161,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     newMap.set(oq.questionId, e.target.value);
                                                     setQuestionAnswers(newMap);
                                                 }}
+                                                className={isMissing ? 'border-red-400 bg-red-50' : ''}
                                                 required={oq.isRequired}
                                             />
                                         ) : question.questionType === 'date' ? (
@@ -1139,6 +1173,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     newMap.set(oq.questionId, e.target.value);
                                                     setQuestionAnswers(newMap);
                                                 }}
+                                                className={isMissing ? 'border-red-400 bg-red-50' : ''}
                                                 required={oq.isRequired}
                                             />
                                         ) : (
@@ -1150,6 +1185,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     newMap.set(oq.questionId, e.target.value);
                                                     setQuestionAnswers(newMap);
                                                 }}
+                                                className={isMissing ? 'border-red-400 bg-red-50' : ''}
                                                 required={oq.isRequired}
                                             />
                                         )}
@@ -1160,8 +1196,11 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     )}
                     
                     {/* Pitch Deck and Pitch Video inputs */}
-                    <div>
+                    <div className={`${!pitchDeckUrl ? 'p-3 rounded-md bg-red-50 border border-red-200' : ''}`}>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Pitch Deck (link or upload) <span className="text-red-500 ml-1">*</span></label>
+                        {!pitchDeckUrl && (
+                            <p className="text-xs text-red-600 font-medium mb-2">This field is required</p>
+                        )}
                         <CloudDriveInput
                             label=""
                             value={pitchDeckUrl}
@@ -1187,6 +1226,36 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                         />
                     </div>
                     
+                    {/* WhatsApp Group Link (shown after pitch video) */}
+                    {currentWhatsappLink && (
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 bg-gradient-to-r from-green-50 to-white border border-green-100 rounded-lg">
+                            <div className="flex-shrink-0">
+                                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-600">
+                                    <path d="M20.5 3.5C18.2 1.2 15 0 12 0 5.4 0 0 5.4 0 12c0 2.1.6 4.1 1.8 5.8L0 24l6.6-1.7C8.3 23.5 10.1 24 12 24c6.6 0 12-5.4 12-12 0-3-1.2-6.1-3.5-8.3z" fill="currentColor" opacity="0.08"/>
+                                    <path d="M17.2 14.3c-.3-.1-1.8-.9-2.1-1-.3-.1-.5-.1-.7.2-.2.3-.7.9-.9 1.1-.2.2-.4.3-.7.1-.3-.1-1.3-.4-2.5-1.4-.9-.8-1.5-1.8-1.6-2-.2-.3 0-.4.1-.6.1-.1.3-.3.5-.5.2-.2.3-.3.5-.5.1-.1.1-.2 0-.4-.1-.1-.5-1.1-.7-1.5-.2-.4-.4-.3-.6-.3-.2 0-.4 0-.7 0-.2 0-.5.1-.8.4-.3.3-1.1 1-1.1 2.4 0 1.4 1 2.7 1.2 2.9.2.2 1.8 3 4.4 4.2.6.3 1.1.5 1.5.6.6.2 1.1.1 1.6.1.5 0 1.7-.6 1.9-1.2.2-.6.2-1.1.2-1.3 0-.2-.1-.3-.3-.4m-4.2-7.4c-.8 0-1.6-.2-2.3-.5 2.1-.2 4.1 1.4 4.1 3.5 0 .3-.1.7-.1 1-.8-.7-1.1-2-1-2.6z" fill="currentColor"/>
+                                </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-slate-800">Join the program WhatsApp group</p>
+                                <p className="text-xs text-slate-600 mt-1">Get real-time updates, clarifications and Q&amp;A from the facilitator.</p>
+                            </div>
+                            <div className="flex-shrink-0 w-full sm:w-auto">
+                                <a
+                                    href={currentWhatsappLink}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    aria-label="Join WhatsApp group"
+                                    className="inline-flex justify-center items-center gap-2 w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z" strokeWidth="0"/>
+                                    </svg>
+                                    Join Group
+                                </a>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex justify-end gap-3 pt-2">
                         <Button variant="secondary" type="button" onClick={() => { 
                             if (!isSubmittingApplication) { 

@@ -1023,11 +1023,15 @@ const App: React.FC = () => {
           if (cached && cached.user) {
             console.log('⚡ Mobile Chrome cache restore (skip slow getSession)');
             if (isMounted) {
+              currentUserRef.current = cached.user;
+              isAuthenticatedRef.current = true;
               setCurrentUser(cached.user);
               setIsAuthenticated(true);
               setIsLoading(false);
               setExistingSessionDetected(true);
               setHasCheckedExistingSession(true);
+              setHasInitialDataLoaded(false);
+              hasInitialDataLoadedRef.current = false;
               if (cached.profileComplete === false) {
                 setCurrentPage('complete-registration');
               }
@@ -1036,6 +1040,7 @@ const App: React.FC = () => {
               } else if (cached.user.investment_advisor_code_entered) {
                 fetchAssignedInvestmentAdvisor(cached.user.investment_advisor_code_entered).catch(() => {});
               }
+              try { fetchData(true).catch(() => {}); } catch {}
             }
             // Validate session in background without blocking UI.
             authService.supabase.auth.getSession().catch(() => {});
@@ -1058,9 +1063,13 @@ const App: React.FC = () => {
               usedCache = true;
               console.log('⚡ Using cached user for fast mobile restore');
               if (isMounted) {
+                currentUserRef.current = cached.user;
+                isAuthenticatedRef.current = true;
                 setCurrentUser(cached.user);
                 setIsAuthenticated(true);
                 setIsLoading(false);
+                setHasInitialDataLoaded(false);
+                hasInitialDataLoadedRef.current = false;
                 if (cached.profileComplete === false) {
                   setCurrentPage('complete-registration');
                 }
@@ -1069,6 +1078,7 @@ const App: React.FC = () => {
                 } else if (cached.user.investment_advisor_code_entered) {
                   fetchAssignedInvestmentAdvisor(cached.user.investment_advisor_code_entered).catch(() => {});
                 }
+                try { fetchData(true).catch(() => {}); } catch {}
               }
             }
           }
@@ -4526,6 +4536,8 @@ const App: React.FC = () => {
             <div className="fixed bottom-3 right-3 z-[9999] bg-black/80 text-white text-xs rounded px-3 py-2 shadow">
               <div>mobile chrome debug</div>
               <div>auth: {isAuthenticated ? 'yes' : 'no'} | loading: {isLoading ? 'yes' : 'no'}</div>
+              <div>page: {currentPage} | view: {view}</div>
+              <div>role: {currentUser?.role || 'none'} | data: {hasInitialDataLoaded ? 'yes' : 'no'}</div>
               <div>cache: {cached ? 'yes' : 'no'}{cacheAgeSec !== null ? ` (${cacheAgeSec}s)` : ''}</div>
             </div>
           );

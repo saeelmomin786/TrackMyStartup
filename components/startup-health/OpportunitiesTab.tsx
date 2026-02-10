@@ -90,6 +90,7 @@ interface OpportunitiesTabProps {
 const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, onProgramAddedToCRM, authUserId: propAuthUserId }) => {
     const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
     const [applications, setApplications] = useState<ApplicationItem[]>([]);
+    const [applicationsLoaded, setApplicationsLoaded] = useState(false);
     const [selectedOpportunity, setSelectedOpportunity] = useState<OpportunityItem | null>(null);
     const [adminPosts, setAdminPosts] = useState<AdminProgramPost[]>([]);
     const [authUserId, setAuthUserId] = useState<string>(propAuthUserId || '');
@@ -209,6 +210,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     pitchVideoUrl: a.pitch_video_url || undefined
                 })));
             }
+            setApplicationsLoaded(true);
 
             // One-time pitch materials removed; per-application upload handled in modal
             try {
@@ -225,6 +227,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             // Close any open forms and reset state
             setIsApplyModalOpen(false);
             setApplyingOppId(null);
+            setApplicationsLoaded(false);
         };
     }, [startup.id]);
 
@@ -253,7 +256,15 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     // One-time pitch materials functions removed
 
     const openApplyModal = async (opportunityId: string) => {
-        if (appliedIds.has(opportunityId)) return;
+        if (appliedIds.has(opportunityId)) {
+            const opp = opportunities.find(o => o.id === opportunityId);
+            const programName = opp?.programName || 'this program';
+            messageService.info(
+                'Already Applied',
+                `You have already applied for ${programName}. You cannot apply again.`
+            );
+            return;
+        }
         setApplyingOppId(opportunityId);
         
         // Get and set the WhatsApp link for this opportunity
@@ -372,6 +383,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     // Auto-open application form if user just logged in to apply for a program
     useEffect(() => {
         if (opportunities.length === 0) return;
+        if (!applicationsLoaded) return; // Wait for applications to load
         
         // Check if this opportunity was already auto-opened
         const alreadyAutoOpened = getAutoOpenedOppId();
@@ -391,7 +403,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
         if (opportunityIdToOpen && !isApplyModalOpen) {
             const targetOpportunity = opportunities.find(o => o.id === opportunityIdToOpen);
             if (targetOpportunity && !appliedIds.has(opportunityIdToOpen)) {
-                console.log('🎯 Auto-opening application form for opportunity:', opportunityIdToOpen);
+                console.log('🎯 Auto-opening application form for opportunity:', opportunityIdToOpen, '(Applications loaded, user has not applied yet)');
                 // Auto-open the application form
                 openApplyModal(opportunityIdToOpen);
                 // Mark this opportunity as auto-opened to prevent re-triggering
@@ -404,10 +416,15 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 url.searchParams.delete('programName');
                 url.searchParams.delete('tab');
                 window.history.replaceState({}, document.title, url.toString());
+            } else if (targetOpportunity && appliedIds.has(opportunityIdToOpen)) {
+                console.log('🎯 User already applied to this opportunity, skipping auto-open:', opportunityIdToOpen);
+                // Clear the stored items to prevent future auto-open attempts
+                sessionStorage.removeItem('applyToOpportunityId');
+                setAutoOpenedOppIdInStorage(opportunityIdToOpen);
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [opportunities, isApplyModalOpen, appliedIds]);
+    }, [opportunities, isApplyModalOpen, appliedIds, applicationsLoaded]);
 
     useEffect(() => {
         // Only set the query param if selectedOpportunity has a value

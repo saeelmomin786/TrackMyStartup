@@ -1985,22 +1985,20 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 py-12">
+    <div className="min-h-screen flex items-start sm:items-center justify-center bg-slate-50 px-4 sm:px-6 py-8 sm:py-12">
       <Card className="w-full max-w-2xl">
         {/* Header with logout button */}
-        <div className="relative">
-          <div className="absolute top-0 right-0 z-20 p-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleLogout}
-              className="flex items-center gap-2 text-slate-600 hover:text-slate-800"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
-          </div>
+        <div className="flex justify-end mb-4">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleLogout}
+            className="flex w-full items-center justify-center gap-2 text-slate-600 hover:text-slate-800 sm:w-auto"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout
+          </Button>
         </div>
         
         <div className="text-center mb-8">

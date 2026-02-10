@@ -296,15 +296,15 @@ export default function SubscriptionPlansPage({ userId, onPlanSelected, onBack, 
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         {/* Header with logout button */}
-        <div className="relative mb-12">
+        <div className="mb-12">
           {onLogout && (
-            <div className="absolute top-0 right-0">
+            <div className="flex justify-end mb-4">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={onLogout}
-                className="flex items-center gap-2 text-slate-600 hover:text-slate-800"
+                className="flex w-full items-center justify-center gap-2 text-slate-600 hover:text-slate-800 sm:w-auto"
               >
                 <LogOut className="h-4 w-4" />
                 Logout

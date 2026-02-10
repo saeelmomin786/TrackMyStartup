@@ -580,6 +580,7 @@ const App: React.FC = () => {
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [hasCheckedExistingSession, setHasCheckedExistingSession] = useState(false);
   const [existingSessionDetected, setExistingSessionDetected] = useState(false);
+  const [loadingStalled, setLoadingStalled] = useState(false);
 
   // MOBILE FIX: Check for existing session before showing login page
   // On mobile refresh, if user is still logged in to Supabase but isAuthenticated is false,
@@ -814,6 +815,27 @@ const App: React.FC = () => {
 
 
   const [loadingProgress, setLoadingProgress] = useState<string>('Initializing...');
+  const CACHED_USER_KEY = 'tms_cached_user';
+
+  const isMobileChrome = () => {
+    try {
+      const ua = navigator.userAgent || '';
+      return /Chrome\/\d+/.test(ua) && /Mobile/.test(ua);
+    } catch {
+      return false;
+    }
+  };
+
+  const getCachedUser = () => {
+    try {
+      const raw = localStorage.getItem(CACHED_USER_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+  const loadingStallTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Additional refs for fetchData dependencies
   const isAuthenticatedRef = useRef<boolean>(false);
@@ -830,16 +852,37 @@ const App: React.FC = () => {
     hasInitialDataLoadedRef.current = hasInitialDataLoaded;
   }, [hasInitialDataLoaded]);
 
+  // If loading takes too long, show a retry option instead of getting stuck
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingStalled(false);
+      if (loadingStallTimerRef.current) {
+        clearTimeout(loadingStallTimerRef.current);
+        loadingStallTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (loadingStallTimerRef.current) {
+      clearTimeout(loadingStallTimerRef.current);
+    }
+
+    loadingStallTimerRef.current = setTimeout(() => {
+      setLoadingStalled(true);
+    }, 15000);
+
+    return () => {
+      if (loadingStallTimerRef.current) {
+        clearTimeout(loadingStallTimerRef.current);
+        loadingStallTimerRef.current = null;
+      }
+    };
+  }, [isLoading]);
+
   // Mobile Chrome safety: if we stay in loading too long, perform a one-time hard refresh
   useEffect(() => {
     if (autoReloadGuardRef.current) return;
-    const isMobileChrome = (() => {
-      try {
-        const ua = navigator.userAgent || '';
-        return /Chrome\/\d+/.test(ua) && /Mobile/.test(ua);
-      } catch { return false; }
-    })();
-    if (!isMobileChrome) return;
+    if (!isMobileChrome()) return;
     let t: any = null;
     const arm = () => {
       if (t) clearTimeout(t);
@@ -981,7 +1024,24 @@ const App: React.FC = () => {
           setIsLoading(true);
           setExistingSessionDetected(true);
           setHasCheckedExistingSession(true);
-          
+
+          let usedCache = false;
+          if (isMobileChrome()) {
+            const cached = getCachedUser();
+            if (cached && cached.authUserId === sessionData.session.user.id && cached.user) {
+              usedCache = true;
+              console.log('⚡ Using cached user for fast mobile restore');
+              if (isMounted) {
+                setCurrentUser(cached.user);
+                setIsAuthenticated(true);
+                setIsLoading(false);
+                if (cached.profileComplete === false) {
+                  setCurrentPage('complete-registration');
+                }
+              }
+            }
+          }
+
           // Try to get current user immediately to speed up auth
           try {
             const currentAuthUser = await authService.getCurrentUser();
@@ -990,15 +1050,17 @@ const App: React.FC = () => {
               setCurrentUser(currentAuthUser);
               setIsAuthenticated(true);
               setIsLoading(false);
-              // Clear the loading timeout since we're done
               if (loadingTimeoutRef.current) {
                 clearTimeout(loadingTimeoutRef.current);
                 loadingTimeoutRef.current = null;
               }
+            } else if (!usedCache) {
+              console.warn('⚠️ Fast auth returned no user, waiting for auth listener');
             }
           } catch (getUserError) {
-            console.warn('⚠️ Fast auth failed, waiting for auth listener:', getUserError);
-            // Auth listener will handle it
+            if (!usedCache) {
+              console.warn('⚠️ Fast auth failed, waiting for auth listener:', getUserError);
+            }
           }
         } else {
           // No session, show login page immediately
@@ -1715,9 +1777,36 @@ const App: React.FC = () => {
     // When one tab logs in successfully, other tabs should detect it and sync
     // This prevents stuck login state when multiple tabs try to log in simultaneously
     const handleStorageEvent = (e: StorageEvent) => {
+      if (!isMounted) return;
+      
+      // Handle logout events from other tabs
+      if (e.key === 'tms_auth_logout' && e.newValue) {
+        console.log('🚪 CROSS-TAB LOGOUT: Another tab logged out, syncing logout...');
+        // Force logout in this tab too
+        setTimeout(async () => {
+          if (isMounted) {
+            try {
+              await authService.signOut();
+              authService.clearCache();
+              setIsAuthenticated(false);
+              setCurrentUser(null);
+              setAssignedInvestmentAdvisor(null);
+              setSelectedStartup(null);
+              setCurrentPage('login');
+              setHasInitialDataLoaded(false);
+              deleteCookie('lastAuthUserId');
+              deleteCookie('lastAuthTimestamp');
+              console.log('✅ Cross-tab logout complete');
+            } catch (error) {
+              console.error('Cross-tab logout failed:', error);
+            }
+          }
+        }, 100);
+        return;
+      }
+      
       // Only care about auth success signals
       if (e.key !== 'tms_auth_success') return;
-      if (!isMounted) return;
       
       // Parse the signal (contains timestamp and user_id to avoid self-triggers)
       let signal: any = null;
@@ -1789,6 +1878,40 @@ const App: React.FC = () => {
       window.removeEventListener('storage', handleStorageEvent); // Clean up storage listener
     };
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser || !hasInitialDataLoaded) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: { user: authUser } } = await authService.supabase.auth.getUser();
+        if (!authUser || cancelled) return;
+        const profileComplete = await authService.isProfileComplete(currentUser.id);
+        if (cancelled) return;
+        const payload = {
+          authUserId: authUser.id,
+          profileComplete,
+          user: {
+            id: currentUser.id,
+            email: currentUser.email,
+            name: currentUser.name,
+            role: currentUser.role,
+            startup_name: currentUser.startup_name,
+            registration_date: currentUser.registration_date
+          },
+          cachedAt: Date.now()
+        };
+        localStorage.setItem(CACHED_USER_KEY, JSON.stringify(payload));
+      } catch (e) {
+        console.warn('⚠️ Failed to cache user for fast restore:', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, currentUser?.id, hasInitialDataLoaded]);
 
 
   // Fetch assigned investment advisor data
@@ -2229,6 +2352,48 @@ const App: React.FC = () => {
     }
   }, [fetchAssignedInvestmentAdvisor]);
 
+  const handleLoadingRetry = useCallback(async () => {
+    setLoadingStalled(false);
+
+    // If already authenticated, retry data fetch
+    if (isAuthenticatedRef.current && currentUserRef.current) {
+      setIsLoading(true);
+      try {
+        await fetchData(true);
+      } catch (error) {
+        console.warn('Loading retry failed:', error);
+      }
+      return;
+    }
+
+    // Otherwise, re-check session and unblock login if no session exists
+    try {
+      const { data: sessionData } = await authService.supabase.auth.getSession();
+      if (sessionData?.session && sessionData.session.user) {
+        setIsLoading(true);
+        try {
+          const currentAuthUser = await authService.getCurrentUser();
+          if (currentAuthUser) {
+            setCurrentUser(currentAuthUser);
+            setIsAuthenticated(true);
+            setIsLoading(false);
+          }
+        } catch (e) {
+          console.warn('Retry auth check failed, waiting for auth listener:', e);
+        }
+      } else {
+        setIsLoading(false);
+        setExistingSessionDetected(false);
+        setHasCheckedExistingSession(true);
+      }
+    } catch (error) {
+      console.warn('Retry session check failed:', error);
+      setIsLoading(false);
+      setExistingSessionDetected(false);
+      setHasCheckedExistingSession(true);
+    }
+  }, [fetchData]);
+
   // Fetch data when authenticated - with small post-refresh delay for mobile
   useEffect(() => {
     if (isAuthenticated && currentUser && !hasInitialDataLoaded) {
@@ -2526,6 +2691,23 @@ const App: React.FC = () => {
       deleteCookie('lastAuthUserId');
       deleteCookie('lastAuthTimestamp');
       deleteCookie('currentView');
+      try {
+        localStorage.removeItem(CACHED_USER_KEY);
+      } catch {}
+      
+      // Broadcast logout to other tabs
+      try {
+        const logoutSignal = {
+          timestamp: Date.now(),
+          action: 'logout'
+        };
+        localStorage.setItem('tms_auth_logout', JSON.stringify(logoutSignal));
+        // Remove immediately to allow re-trigger
+        setTimeout(() => localStorage.removeItem('tms_auth_logout'), 100);
+        console.log('📢 Broadcast logout to other tabs');
+      } catch (e) {
+        console.warn('⚠️ Could not broadcast logout to other tabs:', e);
+      }
       
       // Clear any localStorage/sessionStorage that might contain user data
       // Note: Be careful not to clear everything as some data might be needed
@@ -3656,8 +3838,6 @@ const App: React.FC = () => {
             }}
           />
         </div>
-        {/* Footer for complete-registration page */}
-        <Footer />
       </div>
     );
   }
@@ -3695,7 +3875,6 @@ const App: React.FC = () => {
             onLogout={handleLogout}
           />
         </div>
-        <Footer />
       </div>
     );
   }
@@ -3779,8 +3958,6 @@ const App: React.FC = () => {
             }}
           />
         </div>
-        {/* Footer for payment page */}
-        <Footer />
       </div>
     );
   }
@@ -3801,8 +3978,6 @@ const App: React.FC = () => {
             }}
           />
         </div>
-        {/* Footer for reset-password page */}
-        <Footer />
       </div>
     );
   }
@@ -3993,6 +4168,14 @@ const App: React.FC = () => {
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary mx-auto mb-4"></div>
             <p className="text-slate-600">Loading your dashboard...</p>
+            {loadingStalled && (
+              <div className="mt-4">
+                <p className="text-sm text-slate-500 mb-3">Still loading? Try again.</p>
+                <Button type="button" variant="outline" onClick={handleLoadingRetry}>
+                  Retry Loading
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       );

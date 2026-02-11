@@ -42,6 +42,7 @@ interface ApplicationItem {
     status: 'pending' | 'accepted' | 'rejected';
     pitchDeckUrl?: string;
     pitchVideoUrl?: string;
+    is_shortlisted?: boolean;
 }
 
 interface OpportunitiesTabProps {
@@ -90,6 +91,7 @@ interface OpportunitiesTabProps {
 const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, onProgramAddedToCRM, authUserId: propAuthUserId }) => {
     const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
     const [applications, setApplications] = useState<ApplicationItem[]>([]);
+    const [applicationsLoaded, setApplicationsLoaded] = useState(false);
     const [selectedOpportunity, setSelectedOpportunity] = useState<OpportunityItem | null>(null);
     const [adminPosts, setAdminPosts] = useState<AdminProgramPost[]>([]);
     const [authUserId, setAuthUserId] = useState<string>(propAuthUserId || '');
@@ -195,19 +197,25 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             }
 
             // Load applications for this startup
-            const { data: apps } = await supabase
+            console.log('📋 Loading applications for startup:', startup.id);
+            const { data: apps, error: appsError } = await supabase
                 .from('opportunity_applications')
                 .select('*')
                 .eq('startup_id', startup.id);
+            console.log('📋 Applications query result:', { apps, appsError, count: apps?.length });
             if (Array.isArray(apps)) {
-                setApplications(apps.map((a: any) => ({ 
+                const mapped = apps.map((a: any) => ({ 
                     id: a.id, 
                     startupId: a.startup_id, 
                     opportunityId: a.opportunity_id, 
                     status: (a.status || 'pending') as any,
                     pitchDeckUrl: a.pitch_deck_url || undefined,
-                    pitchVideoUrl: a.pitch_video_url || undefined
-                })));
+                    pitchVideoUrl: a.pitch_video_url || undefined,
+                    is_shortlisted: a.is_shortlisted || false
+                }));
+                console.log('📋 Mapped applications:', mapped);
+                setApplications(mapped);
+                setApplicationsLoaded(true);
             }
 
             // One-time pitch materials removed; per-application upload handled in modal
@@ -236,9 +244,28 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
 
     // Check if user has applied with shortlisted or approved status
     const hasSuccessfullyApplied = (opportunityId: string): boolean => {
+        console.log(`🔍 Checking applications array (${applications.length} items):`, applications.map(a => ({ id: a.opportunityId, status: a.status, is_shortlisted: a.is_shortlisted })));
+        const application = applications.find(a => a.opportunityId === opportunityId);
+        if (!application) {
+            console.log('✅ No previous application found for opportunity:', opportunityId);
+            return false;
+        }
+        const isSuccessful = application.status === 'shortlisted' || application.status === 'approved' || application.is_shortlisted === true;
+        console.log(`📋 Checking application for ${opportunityId}: status=${application.status}, is_shortlisted=${application.is_shortlisted} → ${isSuccessful ? 'BLOCK' : 'ALLOW'}`);
+        return isSuccessful;
+    };
+
+    // Check if user can edit their application (only if status is pending or not shortlisted)
+    const canEditApplication = (opportunityId: string): boolean => {
         const application = applications.find(a => a.opportunityId === opportunityId);
         if (!application) return false;
-        return application.status === 'shortlisted' || application.status === 'approved';
+        // Can edit if status is 'pending' OR 'rejected' OR is_shortlisted is false
+        return (application.status === 'pending' || application.status === 'rejected') || application.is_shortlisted === false;
+    };
+
+    // Get application for an opportunity
+    const getApplication = (opportunityId: string): ApplicationItem | undefined => {
+        return applications.find(a => a.opportunityId === opportunityId);
     };
 
     const getYoutubeEmbedUrl = (url?: string): string | null => {
@@ -259,8 +286,9 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
 
     // One-time pitch materials functions removed
 
-    const openApplyModal = async (opportunityId: string) => {
-        if (hasSuccessfullyApplied(opportunityId)) {
+    const openApplyModal = async (opportunityId: string, isEditMode: boolean = false) => {
+        // If not in edit mode and user has successfully applied, show message
+        if (!isEditMode && hasSuccessfullyApplied(opportunityId)) {
             const opp = opportunities.find(o => o.id === opportunityId);
             const programName = opp?.programName || 'this program';
             messageService.info(
@@ -269,6 +297,18 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             );
             return;
         }
+
+        // If in edit mode, check if editing is allowed
+        if (isEditMode && !canEditApplication(opportunityId)) {
+            const opp = opportunities.find(o => o.id === opportunityId);
+            const programName = opp?.programName || 'this program';
+            messageService.warning(
+                'Cannot Edit Application',
+                `Your application for ${programName} has been ${getApplication(opportunityId)?.status}. You cannot edit it anymore.`
+            );
+            return;
+        }
+
         setApplyingOppId(opportunityId);
         
         // Get and set the WhatsApp link for this opportunity
@@ -277,8 +317,26 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             setCurrentWhatsappLink(opp.whatsappLink);
         }
         
-        setQuestionAnswers(new Map());
-        setPortfolioUrl('');
+        // If editing, load existing answers
+        if (isEditMode) {
+            const existingApp = getApplication(opportunityId);
+            if (existingApp) {
+                setPitchDeckUrl(existingApp.pitchDeckUrl || '');
+                setPitchVideoUrl(existingApp.pitchVideoUrl || '');
+                // Load saved responses from database
+                try {
+                    const responses = await questionBankService.getApplicationResponses(existingApp.id);
+                    const answersMap = new Map<string, string>();
+                    responses.forEach(r => answersMap.set(r.question_id, r.answer));
+                    setQuestionAnswers(answersMap);
+                } catch (error) {
+                    console.error('Error loading saved responses:', error);
+                }
+            }
+        } else {
+            setQuestionAnswers(new Map());
+            setPortfolioUrl('');
+        }
         
         // Wait 1 second for RLS data to sync before opening form
         setTimeout(() => {
@@ -386,14 +444,16 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
 
     // Auto-open application form if user just logged in to apply for a program
     useEffect(() => {
+        // Wait for both opportunities AND applications to load before checking
         if (opportunities.length === 0) return;
         
-        // Check if this opportunity was already auto-opened
-        const alreadyAutoOpened = getAutoOpenedOppId();
-        if (alreadyAutoOpened) {
-            console.log('🎯 Opportunity already auto-opened, skipping:', alreadyAutoOpened);
-            return; // Skip if already opened
+        // CRITICAL: Don't auto-open until applications have been loaded from database
+        // This prevents race condition where form opens before we check application status
+        if (!applicationsLoaded) {
+            console.log('⏳ Applications not yet loaded, waiting...');
+            return;
         }
+        console.log('✅ Auto-open check: applications loaded, checking status...');
         
         // Check sessionStorage first (for post-login redirect)
         let opportunityIdToOpen = sessionStorage.getItem('applyToOpportunityId');
@@ -405,8 +465,26 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
         
         if (opportunityIdToOpen && !isApplyModalOpen) {
             const targetOpportunity = opportunities.find(o => o.id === opportunityIdToOpen);
+            
+            // FIRST: Check if user has shortlisted/approved application
+            if (targetOpportunity && hasSuccessfullyApplied(opportunityIdToOpen)) {
+                console.log('🎯 User already applied with shortlisted/approved status, skipping auto-open:', opportunityIdToOpen);
+                // Clear the stored items to prevent future auto-open attempts
+                sessionStorage.removeItem('applyToOpportunityId');
+                setAutoOpenedOppIdInStorage(opportunityIdToOpen);
+                return;
+            }
+            
+            // SECOND: Check if this opportunity was already auto-opened in this session
+            const alreadyAutoOpened = getAutoOpenedOppId();
+            if (alreadyAutoOpened) {
+                console.log('🎯 Opportunity already auto-opened in this session, skipping:', alreadyAutoOpened);
+                return; // Skip if already opened
+            }
+            
+            // THIRD: Open the form if user hasn't applied or only has pending/rejected application
             if (targetOpportunity && !hasSuccessfullyApplied(opportunityIdToOpen)) {
-                console.log('🎯 Auto-opening application form for opportunity:', opportunityIdToOpen, '(Applications loaded, user has not applied yet)');
+                console.log('🎯 Auto-opening application form for opportunity:', opportunityIdToOpen, '(User can apply)');
                 // Auto-open the application form
                 openApplyModal(opportunityIdToOpen);
                 // Mark this opportunity as auto-opened to prevent re-triggering
@@ -419,15 +497,10 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 url.searchParams.delete('programName');
                 url.searchParams.delete('tab');
                 window.history.replaceState({}, document.title, url.toString());
-            } else if (targetOpportunity && hasSuccessfullyApplied(opportunityIdToOpen)) {
-                console.log('🎯 User already applied with shortlisted/approved status, skipping auto-open:', opportunityIdToOpen);
-                // Clear the stored items to prevent future auto-open attempts
-                sessionStorage.removeItem('applyToOpportunityId');
-                setAutoOpenedOppIdInStorage(opportunityIdToOpen);
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [opportunities, isApplyModalOpen, appliedIds]);
+    }, [opportunities, applicationsLoaded, isApplyModalOpen, appliedIds]);
 
     useEffect(() => {
         // Only set the query param if selectedOpportunity has a value
@@ -797,22 +870,37 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                 </Button>
                                             )
                                         ) : (
-                                            <div className="flex gap-2 mt-3">
-                                                <Button type="button" className="flex-1" variant="secondary" disabled>
-                                                    <Check className="h-4 w-4 mr-2" /> You have applied for this program
-                                                </Button>
-                                                {selectedOpportunity.whatsappLink && (
-                                                    <a
-                                                        href={selectedOpportunity.whatsappLink}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                                            <div className="space-y-2 mt-3">
+                                                <div className="flex gap-2">
+                                                    <Button type="button" className="flex-1" variant="secondary" disabled>
+                                                        <Check className="h-4 w-4 mr-2" /> Applied - {getApplication(selectedOpportunity.id)?.status ? getApplication(selectedOpportunity.id)!.status.charAt(0).toUpperCase() + getApplication(selectedOpportunity.id)!.status.slice(1) : 'Pending'}
+                                                    </Button>
+                                                    {selectedOpportunity.whatsappLink && (
+                                                        <a
+                                                            href={selectedOpportunity.whatsappLink}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z"/>
+                                                                </svg>
+                                                            Join Group
+                                                        </a>
+                                                    )}
+                                                </div>
+                                                {canEditApplication(selectedOpportunity.id) && (
+                                                    <Button 
+                                                        type="button" 
+                                                        className="w-full" 
+                                                        variant="outline"
+                                                        onClick={() => openApplyModal(selectedOpportunity.id, true)}
                                                     >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                                                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z"/>
-                                                            </svg>
-                                                        Join Group
-                                                    </a>
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                                                        </svg>
+                                                        Edit Application
+                                                    </Button>
                                                 )}
                                             </div>
                                         )}
@@ -946,22 +1034,37 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                     </Button>
                                                 )
                                             ) : (
-                                                <div className="flex gap-2">
-                                                    <Button type="button" className="flex-1" variant="secondary" disabled>
-                                                        <Check className="h-4 w-4 mr-2" /> Applied
-                                                    </Button>
-                                                    {opp.whatsappLink && (
-                                                        <a
-                                                            href={opp.whatsappLink}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                                                <div className="space-y-2">
+                                                    <div className="flex gap-2">
+                                                        <Button type="button" className="flex-1" variant="secondary" disabled>
+                                                            <Check className="h-4 w-4 mr-2" /> Applied - {getApplication(opp.id)?.status ? getApplication(opp.id)!.status.charAt(0).toUpperCase() + getApplication(opp.id)!.status.slice(1) : 'Pending'}
+                                                        </Button>
+                                                        {opp.whatsappLink && (
+                                                            <a
+                                                                href={opp.whatsappLink}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z"/>
+                                                                </svg>
+                                                                Join
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                    {canEditApplication(opp.id) && (
+                                                        <Button 
+                                                            type="button" 
+                                                            className="w-full" 
+                                                            variant="outline"
+                                                            onClick={() => openApplyModal(opp.id, true)}
                                                         >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                                                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-4-.9L3 21l1.9-5.6a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 4.7-7.6A8.38 8.38 0 0 1 18.5 3 8.5 8.5 0 0 1 21 11.5z"/>
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
                                                             </svg>
-                                                            Join
-                                                        </a>
+                                                            Edit Application
+                                                        </Button>
                                                     )}
                                                 </div>
                                             )}

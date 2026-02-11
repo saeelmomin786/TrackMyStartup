@@ -585,6 +585,7 @@ class QuestionBankService {
 
   /**
    * Save application responses (when startup submits application)
+   * Uses UPSERT to handle cases where responses already exist from auto-creation
    */
   async saveApplicationResponses(
     applicationId: string,
@@ -598,7 +599,9 @@ class QuestionBankService {
 
     const { error } = await supabase
       .from(this.applicationResponsesTable)
-      .insert(inserts);
+      .upsert(inserts, {
+        onConflict: 'application_id,question_id'
+      });
 
     if (error) throw error;
   }

@@ -90,7 +90,6 @@ interface OpportunitiesTabProps {
 const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, onProgramAddedToCRM, authUserId: propAuthUserId }) => {
     const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
     const [applications, setApplications] = useState<ApplicationItem[]>([]);
-    const [applicationsLoaded, setApplicationsLoaded] = useState(false);
     const [selectedOpportunity, setSelectedOpportunity] = useState<OpportunityItem | null>(null);
     const [adminPosts, setAdminPosts] = useState<AdminProgramPost[]>([]);
     const [authUserId, setAuthUserId] = useState<string>(propAuthUserId || '');
@@ -210,7 +209,6 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                     pitchVideoUrl: a.pitch_video_url || undefined
                 })));
             }
-            setApplicationsLoaded(true);
 
             // One-time pitch materials removed; per-application upload handled in modal
             try {
@@ -227,7 +225,6 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
             // Close any open forms and reset state
             setIsApplyModalOpen(false);
             setApplyingOppId(null);
-            setApplicationsLoaded(false);
         };
     }, [startup.id]);
 
@@ -236,6 +233,13 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     const todayStr = new Date().toISOString().split('T')[0];
     const isPast = (dateStr: string) => new Date(dateStr) < new Date(todayStr);
     const isToday = (dateStr: string) => dateStr === todayStr;
+
+    // Check if user has applied with shortlisted or approved status
+    const hasSuccessfullyApplied = (opportunityId: string): boolean => {
+        const application = applications.find(a => a.opportunityId === opportunityId);
+        if (!application) return false;
+        return application.status === 'shortlisted' || application.status === 'approved';
+    };
 
     const getYoutubeEmbedUrl = (url?: string): string | null => {
         if (!url) return null;
@@ -256,7 +260,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     // One-time pitch materials functions removed
 
     const openApplyModal = async (opportunityId: string) => {
-        if (appliedIds.has(opportunityId)) {
+        if (hasSuccessfullyApplied(opportunityId)) {
             const opp = opportunities.find(o => o.id === opportunityId);
             const programName = opp?.programName || 'this program';
             messageService.info(
@@ -383,7 +387,6 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
     // Auto-open application form if user just logged in to apply for a program
     useEffect(() => {
         if (opportunities.length === 0) return;
-        if (!applicationsLoaded) return; // Wait for applications to load
         
         // Check if this opportunity was already auto-opened
         const alreadyAutoOpened = getAutoOpenedOppId();
@@ -402,7 +405,7 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
         
         if (opportunityIdToOpen && !isApplyModalOpen) {
             const targetOpportunity = opportunities.find(o => o.id === opportunityIdToOpen);
-            if (targetOpportunity && !appliedIds.has(opportunityIdToOpen)) {
+            if (targetOpportunity && !hasSuccessfullyApplied(opportunityIdToOpen)) {
                 console.log('🎯 Auto-opening application form for opportunity:', opportunityIdToOpen, '(Applications loaded, user has not applied yet)');
                 // Auto-open the application form
                 openApplyModal(opportunityIdToOpen);
@@ -416,15 +419,15 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                 url.searchParams.delete('programName');
                 url.searchParams.delete('tab');
                 window.history.replaceState({}, document.title, url.toString());
-            } else if (targetOpportunity && appliedIds.has(opportunityIdToOpen)) {
-                console.log('🎯 User already applied to this opportunity, skipping auto-open:', opportunityIdToOpen);
+            } else if (targetOpportunity && hasSuccessfullyApplied(opportunityIdToOpen)) {
+                console.log('🎯 User already applied with shortlisted/approved status, skipping auto-open:', opportunityIdToOpen);
                 // Clear the stored items to prevent future auto-open attempts
                 sessionStorage.removeItem('applyToOpportunityId');
                 setAutoOpenedOppIdInStorage(opportunityIdToOpen);
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [opportunities, isApplyModalOpen, appliedIds, applicationsLoaded]);
+    }, [opportunities, isApplyModalOpen, appliedIds]);
 
     useEffect(() => {
         // Only set the query param if selectedOpportunity has a value

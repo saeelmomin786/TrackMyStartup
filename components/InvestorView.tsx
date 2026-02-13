@@ -550,8 +550,20 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         const fetchActiveFundraisingStartups = async () => {
             setIsLoadingPitches(true);
             try {
-                const startups = await investorService.getActiveFundraisingStartups();
+                // Get the investment advisor code from currentUser
+                const advisorCode = (currentUser as any)?.investment_advisor_code_entered;
+                
+                if (advisorCode) {
+                    console.log(`🔍 InvestorView: Fetching pitches filtered by advisor code: ${advisorCode}`);
+                } else {
+                    console.log('🔍 InvestorView: Fetching all pitches (no advisor code)');
+                }
+                
+                // Pass advisor code to filter startups under same advisor
+                const startups = await investorService.getActiveFundraisingStartups(advisorCode);
                 setActiveFundraisingStartups(startups);
+                
+                console.log(`🔍 InvestorView: Loaded ${startups.length} pitches`);
             } catch (error) {
                 console.error('Error fetching active fundraising startups:', error);
             } finally {
@@ -560,7 +572,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
         };
 
         fetchActiveFundraisingStartups();
-    }, []);
+    }, [currentUser]);
 
     // Load favorited pitches from database
     useEffect(() => {
@@ -3692,6 +3704,17 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               if (showOnlyDueDiligence) {
                 filteredPitches = filteredPitches.filter(inv => dueDiligenceStartups.has(inv.id));
               }
+              
+              // Deduplicate by startup ID to prevent duplicate key errors
+              const seenIds = new Set<number>();
+              filteredPitches = filteredPitches.filter(pitch => {
+                if (seenIds.has(pitch.id)) {
+                  console.warn(`🔍 Duplicate pitch detected and filtered out: ${pitch.name} (ID: ${pitch.id})`);
+                  return false;
+                }
+                seenIds.add(pitch.id);
+                return true;
+              });
               
               if (filteredPitches.length === 0) {
                 // Check if all pitches have offers submitted

@@ -28,44 +28,51 @@ export interface ActiveFundraisingStartup {
 }
 
 class InvestorService {
-  // Cache to prevent duplicate simultaneous calls
-  private static activeFetchPromise: Promise<ActiveFundraisingStartup[]> | null = null;
-  private static lastFetchTime = 0;
+  // Cache to prevent duplicate simultaneous calls - keyed by advisor code
+  private static activeFetchPromises: Map<string, Promise<ActiveFundraisingStartup[]>> = new Map();
+  private static lastFetchTimes: Map<string, number> = new Map();
   private static readonly FETCH_CACHE_MS = 5000; // 5 second cache
   
   // Fetch all active fundraising startups with their pitch data
-  async getActiveFundraisingStartups(): Promise<ActiveFundraisingStartup[]> {
-    // Check if there's an active fetch in progress
-    if (InvestorService.activeFetchPromise) {
-      console.log('⏭️ Active fetch already in progress, reusing promise');
-      return InvestorService.activeFetchPromise;
+  // If investmentAdvisorCode is provided, only shows startups under that advisor
+  async getActiveFundraisingStartups(investmentAdvisorCode?: string): Promise<ActiveFundraisingStartup[]> {
+    const cacheKey = investmentAdvisorCode || 'all';
+    
+    // Check if there's an active fetch in progress for this advisor code
+    if (InvestorService.activeFetchPromises.has(cacheKey)) {
+      console.log(`⏭️ Active fetch already in progress for advisor: ${cacheKey}, reusing promise`);
+      return InvestorService.activeFetchPromises.get(cacheKey)!;
     }
     
     // Check cache
     const now = Date.now();
-    if (now - InvestorService.lastFetchTime < InvestorService.FETCH_CACHE_MS && InvestorService.activeFetchPromise) {
-      console.log('⏭️ Using cached fetch result');
-      return InvestorService.activeFetchPromise;
+    const lastFetchTime = InvestorService.lastFetchTimes.get(cacheKey) || 0;
+    if (now - lastFetchTime < InvestorService.FETCH_CACHE_MS && InvestorService.activeFetchPromises.has(cacheKey)) {
+      console.log(`⏭️ Using cached fetch result for advisor: ${cacheKey}`);
+      return InvestorService.activeFetchPromises.get(cacheKey)!;
     }
     
     // Create new fetch promise
-    const fetchPromise = this._doFetch();
-    InvestorService.activeFetchPromise = fetchPromise;
-    InvestorService.lastFetchTime = now;
+    const fetchPromise = this._doFetch(investmentAdvisorCode);
+    InvestorService.activeFetchPromises.set(cacheKey, fetchPromise);
+    InvestorService.lastFetchTimes.set(cacheKey, now);
     
     // Clear promise when done
     fetchPromise.finally(() => {
-      if (InvestorService.activeFetchPromise === fetchPromise) {
-        InvestorService.activeFetchPromise = null;
+      if (InvestorService.activeFetchPromises.get(cacheKey) === fetchPromise) {
+        InvestorService.activeFetchPromises.delete(cacheKey);
       }
     });
     
     return fetchPromise;
   }
   
-  private async _doFetch(): Promise<ActiveFundraisingStartup[]> {
+  private async _doFetch(investmentAdvisorCode?: string): Promise<ActiveFundraisingStartup[]> {
     try {
       console.log('🔍 investorService.getActiveFundraisingStartups() called');
+      if (investmentAdvisorCode) {
+        console.log(`🔍 Filtering by investment advisor code: ${investmentAdvisorCode}`);
+      }
       
       const { data, error } = await supabase
         .from('fundraising_details')
@@ -79,7 +86,8 @@ class InvestorService {
             compliance_status,
             startup_nation_validated,
             validation_date,
-            created_at
+            created_at,
+            user_id
           )
         `)
         .eq('active', true)
@@ -95,7 +103,7 @@ class InvestorService {
       console.log('🔍 Raw data length:', data?.length || 0);
       console.log('🔍 Raw data sample:', data?.[0]);
 
-      const filteredData = (data || []).filter(item => {
+      let filteredData = (data || []).filter(item => {
         const hasStartup = item.startups !== null;
         // Reduced logging - only log if there's an issue
         if (!hasStartup) {
@@ -107,7 +115,56 @@ class InvestorService {
         return hasStartup;
       });
 
-      console.log('🔍 Filtered data length:', filteredData.length);
+      console.log('🔍 Filtered data length (after null check):', filteredData.length);
+
+      // STEP 1: Deduplicate FIRST to prevent duplicate processing
+      // Keep only the most recent fundraising record per startup
+      let startupMap = new Map<number, typeof filteredData[0]>();
+      filteredData.forEach(item => {
+        const startupId = item.startups.id;
+        const existing = startupMap.get(startupId);
+        
+        const itemDate = item.created_at ? new Date(item.created_at) : new Date(0);
+        const existingDate = existing?.created_at ? new Date(existing.created_at) : new Date(0);
+        
+        if (!existing || itemDate > existingDate) {
+          startupMap.set(startupId, item);
+        }
+      });
+      
+      filteredData = Array.from(startupMap.values());
+      console.log(`🔍 After deduplication: ${filteredData.length} unique startups`);
+
+      // STEP 2: Filter by investment advisor code if provided
+      if (investmentAdvisorCode) {
+        // Get user IDs of startups that have this investment advisor code
+        const userIds = filteredData.map(item => item.startups.user_id).filter(Boolean);
+        
+        if (userIds.length > 0) {
+          // Query user_profiles to find which users have this advisor code
+          const { data: userProfilesData, error: userProfilesError } = await supabase
+            .from('user_profiles')
+            .select('auth_user_id')
+            .in('auth_user_id', userIds)
+            .eq('investment_advisor_code_entered', investmentAdvisorCode);
+
+          if (userProfilesError) {
+            console.error('❌ Error fetching user profiles for advisor filtering:', userProfilesError);
+          } else {
+            const allowedUserIds = new Set(userProfilesData?.map(up => up.auth_user_id) || []);
+            console.log(`🔍 Found ${allowedUserIds.size} users under advisor ${investmentAdvisorCode}`);
+            
+            // Filter to only include startups whose user_id matches
+            filteredData = filteredData.filter(item => 
+              item.startups.user_id && allowedUserIds.has(item.startups.user_id)
+            );
+            
+            console.log(`🔍 After advisor filtering: ${filteredData.length} startups`);
+          }
+        }
+      }
+
+      console.log('🔍 Final filtered data length:', filteredData.length);
 
       // Get startup IDs for domain lookup
       const startupIds = filteredData?.map(item => item.startups.id) || [];
@@ -156,28 +213,8 @@ class InvestorService {
         console.error('Background sector update failed:', error);
       });
 
-      // Deduplicate by startup_id - keep only the most recent fundraising record per startup
-      const startupMap = new Map<number, typeof filteredData[0]>();
-      filteredData.forEach(item => {
-        const startupId = item.startups.id;
-        const existing = startupMap.get(startupId);
-        
-        // Use fundraising_details.created_at (from the fundraising record itself) for comparison
-        const itemDate = item.created_at ? new Date(item.created_at) : new Date(0);
-        const existingDate = existing?.created_at ? new Date(existing.created_at) : new Date(0);
-        
-        // If no existing record, or this one is more recent, use this one
-        if (!existing || itemDate > existingDate) {
-          startupMap.set(startupId, item);
-        }
-      });
-
-      // Convert map values to array and map to ActiveFundraisingStartup format
-      const uniqueStartups = Array.from(startupMap.values());
-      console.log(`🔍 Deduplicated: ${filteredData.length} records -> ${uniqueStartups.length} unique startups`);
-
-      // Show ALL active fundraising startups, but mark their validation status
-      return uniqueStartups.map(item => {
+      // Data is already deduplicated above, so just map to the final format
+      return filteredData.map(item => {
         // Use domain from applications/fundraising, fallback to startup sector, then to 'Unknown'
         const finalSector = domainMap[item.startups.id] || item.startups.sector || 'Unknown';
         // Reduced logging - only log if sector changed

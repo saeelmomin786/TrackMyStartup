@@ -13,7 +13,6 @@ import { investmentService } from '../lib/database';
 import { currencyRates } from '../lib/currencyUtils';
 import ProfilePage from './ProfilePage';
 import AdvisorAwareLogo from './AdvisorAwareLogo';
-import AdvisorAwareLogo from './AdvisorAwareLogo';
 import ContactDetailsModal from './ContactDetailsModal';
 import { supabase } from '../lib/supabase';
 import { paymentService } from '../lib/paymentService';
@@ -2576,12 +2575,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 py-4 sm:py-6">
-            <div className="flex items-center gap-3">
-              <AdvisorAwareLogo
-                currentUser={currentUser}
-                showText={false}
-                className="h-9 w-9 sm:h-10 sm:w-10 object-contain"
-              />
+            <div className="flex items-center">
               <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Investor Dashboard</h1>
             </div>
             <div className="flex items-center">

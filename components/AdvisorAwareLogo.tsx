@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import LogoTMS from './public/logoTMS.svg';
 import { investmentService } from '../lib/database';
-import { supabase } from '../lib/supabase';
 
 interface AdvisorAwareLogoProps {
   currentUser?: any;
@@ -23,14 +22,6 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
   const [advisorInfo, setAdvisorInfo] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
-  const normalizeDomain = (domain: string): string =>
-    domain
-      .toLowerCase()
-      .replace(/^https?:\/\//, '')
-      .replace(/^www\./, '')
-      .replace(/\/.*$/, '')
-      .trim();
-
   // Detect if we're on a subdomain
   const isOnSubdomain = (): boolean => {
     if (typeof window === 'undefined') return false;
@@ -51,64 +42,46 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
 
   useEffect(() => {
     const fetchAdvisorInfo = async () => {
-      setLoading(true);
-      try {
-        if (isOnSubdomain()) {
-          const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
-          const normalizedDomain = normalizeDomain(hostname);
+      console.log('🔍 AdvisorAwareLogo: Checking user data:', {
+        hasUser: !!currentUser,
+        role: currentUser?.role,
+        advisorCodeEntered: currentUser?.investment_advisor_code_entered
+      });
 
-          console.log('🔍 AdvisorAwareLogo: Fetching advisor by domain:', normalizedDomain);
-
-          const { data: profileData } = await supabase
-            .from('user_profiles')
-            .select('auth_user_id, name, firm_name, logo_url, investor_advisor_domain')
-            .eq('role', 'Investment Advisor')
-            .ilike('investor_advisor_domain', normalizedDomain)
-            .maybeSingle();
-
-          if (profileData?.logo_url) {
-            setAdvisorInfo(profileData);
-            return;
-          }
-
-          const { data: userData } = await supabase
-            .from('users')
-            .select('id, name, firm_name, logo_url, investor_advisor_domain')
-            .eq('role', 'Investment Advisor')
-            .ilike('investor_advisor_domain', normalizedDomain)
-            .maybeSingle();
-
-          setAdvisorInfo(userData || null);
-          return;
-        }
-
-        const userAdvisorCode = currentUser?.investment_advisor_code_entered || currentUser?.investment_advisor_code;
-        console.log('🔍 AdvisorAwareLogo: Fetching advisor by code:', userAdvisorCode);
-
-        if (!userAdvisorCode) {
+      // Only fetch if user has an investment advisor code
+      if (currentUser?.investment_advisor_code_entered && 
+          (currentUser?.role === 'Investor' || currentUser?.role === 'Startup')) {
+        setLoading(true);
+        try {
+          console.log('🔍 AdvisorAwareLogo: Fetching advisor for code:', currentUser.investment_advisor_code_entered);
+          // Add cache-busting timestamp to force refresh when advisor updates logo
+          const advisor = await investmentService.getInvestmentAdvisorByCode(currentUser.investment_advisor_code_entered);
+          console.log('🔍 AdvisorAwareLogo: Advisor data received:', advisor);
+          setAdvisorInfo(advisor);
+        } catch (error) {
+          console.error('Error fetching advisor info:', error);
           setAdvisorInfo(null);
-          return;
+        } finally {
+          setLoading(false);
         }
-
-        const advisor = await investmentService.getInvestmentAdvisorByCode(userAdvisorCode);
-        setAdvisorInfo(advisor);
-      } catch (error) {
-        console.error('Error fetching advisor info:', error);
+      } else {
+        console.log('🔍 AdvisorAwareLogo: No advisor code or wrong role, using default logo');
         setAdvisorInfo(null);
-      } finally {
-        setLoading(false);
       }
     };
 
     fetchAdvisorInfo();
-
+    
     // Refresh advisor info every 30 seconds to pick up logo updates
     const refreshInterval = setInterval(() => {
-      fetchAdvisorInfo();
+      if (currentUser?.investment_advisor_code_entered && 
+          (currentUser?.role === 'Investor' || currentUser?.role === 'Startup')) {
+        fetchAdvisorInfo();
+      }
     }, 30000); // 30 seconds
 
     return () => clearInterval(refreshInterval);
-  }, [currentUser?.investment_advisor_code_entered, currentUser?.investment_advisor_code, currentUser?.role]);
+  }, [currentUser?.investment_advisor_code_entered, currentUser?.role]);
 
   // Simple swapping logic: If advisor has logo, show it. Otherwise, show default.
   const shouldShowAdvisorLogo = advisorInfo?.logo_url && !loading;
@@ -141,16 +114,21 @@ const AdvisorAwareLogo: React.FC<AdvisorAwareLogoProps> = ({
     );
   }
 
-  // On subdomains: show neutral skeleton while loading, default logo if no advisor logo
-  if (isSubdomain && loading) {
-    return (
-      <div className="flex items-center gap-2 sm:gap-3">
-        <div className={`${className} bg-slate-200 rounded-lg animate-pulse`} />
-      </div>
-    );
+  // On subdomains: show neutral skeleton while loading, nothing after loading completes
+  if (isSubdomain) {
+    if (loading) {
+      // Show neutral skeleton placeholder while fetching advisor logo
+      return (
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className={`${className} bg-slate-200 rounded-lg animate-pulse`} />
+        </div>
+      );
+    }
+    // After loading, don't show any fallback branding on subdomains
+    return null;
   }
 
-  // Default TrackMyStartup logo (fallback when no advisor logo is found)
+  // Default TrackMyStartup logo (only for non-subdomain deployments)
   return (
     <div className="flex items-center gap-2 sm:gap-3">
       <img 

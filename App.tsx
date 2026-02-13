@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Analytics } from '@vercel/analytics/react';
 import { Startup, NewInvestment, ComplianceStatus, StartupAdditionRequest, FundraisingDetails, InvestmentRecord, InvestmentType, UserRole, Founder, User, VerificationRequest, InvestmentOffer } from './types';
 import { authService, AuthUser } from './lib/auth';
-import { startupService, investmentService, verificationService, userService, realtimeService, startupAdditionService } from './lib/database';
+import { startupService, investmentService, verificationService, userService, realtimeService, startupAdditionService, subdomainService } from './lib/database';
 import { caService } from './lib/caService';
 import { csService } from './lib/csService';
 import { dataMigrationService } from './lib/dataMigration';
@@ -439,9 +439,68 @@ const App: React.FC = () => {
   
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [assignedInvestmentAdvisor, setAssignedInvestmentAdvisor] = useState<AuthUser | null>(null);
+  
+  // Initialize subdomain config from cache immediately (before first render)
+  const [subdomainConfig, setSubdomainConfig] = useState<any>(() => {
+    // Try to load from cache synchronously for instant display
+    const subdomain = subdomainService.getCurrentSubdomain();
+    if (subdomain) {
+      // Check memory cache first
+      if (subdomainService._cacheKey === subdomain && subdomainService._cache) {
+        console.log('⚡ Instant load: Using memory cache');
+        return subdomainService._cache;
+      }
+      // Check localStorage cache
+      const cached = subdomainService.getFromLocalStorageCache(subdomain);
+      if (cached) {
+        console.log('⚡ Instant load: Using localStorage cache');
+        // Also populate memory cache
+        subdomainService._cache = cached;
+        subdomainService._cacheKey = subdomain;
+        return cached;
+      }
+    }
+    return null; // Will fetch from database in useEffect below
+  });
+  
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [subscriptionChecked, setSubscriptionChecked] = useState(false);
+
+  // Fetch subdomain configuration from database if not cached
+  useEffect(() => {
+    // Only fetch if not already loaded from cache
+    if (!subdomainConfig) {
+      const initSubdomain = async () => {
+        const config = await subdomainService.getCurrentSubdomainConfig();
+        if (config) {
+          console.log('✅ Subdomain config loaded from database:', config);
+          setSubdomainConfig(config);
+        } else {
+          console.log('ℹ️ No subdomain config (main domain)');
+        }
+      };
+      
+      initSubdomain();
+    } else {
+      console.log('✅ Subdomain config already loaded from cache - header will show immediately');
+    }
+  }, []); // Empty array = runs once on mount
+
+  // Ensure subdomain branding is refreshed at login time
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const refreshSubdomainConfig = async () => {
+      const config = await subdomainService.getCurrentSubdomainConfig();
+      if (config) {
+        console.log('✅ Subdomain config refreshed at login:', config);
+        setSubdomainConfig(config);
+      }
+    };
+
+    refreshSubdomainConfig();
+  }, [isAuthenticated]);
 
   // Check Form 2 completion when navigating to dashboard via back button or when accessing dashboard
   useEffect(() => {
@@ -4621,125 +4680,45 @@ const App: React.FC = () => {
         <header className="bg-white shadow-sm sticky top-0 z-50">
           <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-              {/* Show investment advisor logo if user is an Investment Advisor OR has an assigned investment advisor */}
+              {/* Simple subdomain-based white-label branding */}
               {(() => {
-                const isInvestmentAdvisor = currentUser?.role === 'Investment Advisor' && (currentUser as any)?.logo_url;
-                const hasAssignedAdvisor = assignedInvestmentAdvisor && (currentUser?.role === 'Investor' || currentUser?.role === 'Startup');
-                const shouldShowAdvisorLogo = Boolean(isInvestmentAdvisor || hasAssignedAdvisor);
-                
-                // Check if on subdomain
-                const isOnSubdomain = (): boolean => {
-                  if (typeof window === 'undefined') return false;
-                  const hostname = window.location.hostname;
-                  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
-                    return false;
-                  }
-                  const parts = hostname.split('.');
-                  if (parts.length >= 3) {
-                    const subdomain = parts[0];
-                    if (subdomain && subdomain !== 'www') {
-                      return true;
-                    }
-                  }
-                  return false;
-                };
-                
-                console.log('🔍 Header logo display check:', {
-                  currentUserRole: currentUser?.role,
-                  currentUserLogo: (currentUser as any)?.logo_url,
-                  assignedAdvisor: !!assignedInvestmentAdvisor,
-                  assignedAdvisorLogo: assignedInvestmentAdvisor?.logo_url,
-                  isInvestmentAdvisor,
-                  hasAssignedAdvisor,
-                  shouldShowAdvisorLogo,
-                  isOnSubdomain: isOnSubdomain()
-                });
-                return shouldShowAdvisorLogo;
-              })() ? (
+                const isSubdomain = Boolean(subdomainService.getCurrentSubdomain());
+
+                if (subdomainConfig?.logo_url) {
+                  return (
                 <div className="flex items-center gap-3">
-                  {(() => {
-                    const isOnSubdomain = (): boolean => {
-                      if (typeof window === 'undefined') return false;
-                      const hostname = window.location.hostname;
-                      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
-                        return false;
-                      }
-                      const parts = hostname.split('.');
-                      if (parts.length >= 3) {
-                        const subdomain = parts[0];
-                        if (subdomain && subdomain !== 'www') {
-                          return true;
-                        }
-                      }
-                      return false;
-                    };
-
-                    const hasLogo = currentUser?.role === 'Investment Advisor' 
-                      ? (currentUser as any)?.logo_url 
-                      : assignedInvestmentAdvisor?.logo_url;
-
-                    if (hasLogo) {
-                      return (
-                        <>
-                          <img 
-                            src={currentUser?.role === 'Investment Advisor' 
-                              ? (currentUser as any).logo_url 
-                              : assignedInvestmentAdvisor?.logo_url} 
-                            alt="Company Logo" 
-                            className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded object-contain bg-white border border-gray-200 p-1"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                        </>
-                      );
-                    } else if (!isOnSubdomain()) {
-                      // Show IA badge only on main domain if no logo
-                      return (
-                        <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded bg-purple-100 border border-purple-200 flex items-center justify-center">
-                          <span className="text-purple-600 font-semibold text-sm sm:text-base md:text-lg">IA</span>
-                        </div>
-                      );
-                    } else {
-                      // On subdomain with no logo: show blank space
-                      return (
-                        <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded bg-transparent" />
-                      );
-                    }
-                  })()}
+                  <img 
+                    src={subdomainConfig.logo_url} 
+                    alt={subdomainConfig.name || 'Company Logo'} 
+                    className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded object-contain bg-white border border-gray-200 p-1"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
                   <div className="min-w-0">
                     <h1 className="text-sm sm:text-lg font-semibold text-gray-800 truncate">
-                      {currentUser?.role === 'Investment Advisor' 
-                        ? (currentUser as any).firm_name || (currentUser as any).name || 'Investment Advisor'
-                        : assignedInvestmentAdvisor?.firm_name || assignedInvestmentAdvisor?.name || 'Investment Advisor'}
+                      {subdomainConfig.name}
                     </h1>
-                    {!(() => {
-                      const isOnSubdomain = (): boolean => {
-                        if (typeof window === 'undefined') return false;
-                        const hostname = window.location.hostname;
-                        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost:')) {
-                          return false;
-                        }
-                        const parts = hostname.split('.');
-                        if (parts.length >= 3) {
-                          const subdomain = parts[0];
-                          if (subdomain && subdomain !== 'www') {
-                            return true;
-                          }
-                        }
-                        return false;
-                      };
-                      return isOnSubdomain();
-                    })() && (
+                    {!isSubdomain && (
                       <p className="text-[10px] sm:text-xs text-blue-600 truncate">
                         Supported by Track My Startup
                       </p>
                     )}
                   </div>
                 </div>
-              ) : (
-                <img src={LogoTMS} alt="TrackMyStartup" className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 object-contain" />
-              )}
+                  );
+                }
+
+                if (isSubdomain) {
+                  return (
+                    <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 rounded bg-slate-200 animate-pulse" />
+                  );
+                }
+
+                return (
+                  <img src={LogoTMS} alt="TrackMyStartup" className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-28 lg:w-28 object-contain" />
+                );
+              })()}
             </div>
              {/* Desktop header actions */}
              <div className="hidden sm:flex flex-wrap items-center justify-end gap-2 sm:gap-3 w-full sm:w-auto">

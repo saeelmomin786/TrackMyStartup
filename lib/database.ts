@@ -4512,3 +4512,140 @@ export const realtimeService = {
       .subscribe()
   }
 }
+
+// Subdomain Configuration Service
+export const subdomainService = {
+  // In-memory cache for subdomain config (lasts for session)
+  _cache: null as any,
+  _cacheKey: null as string | null,
+
+  // LocalStorage cache key
+  _localStorageKey: 'subdomain_config_cache',
+
+  // Get from localStorage cache (public method for App.tsx)
+  getFromLocalStorageCache(subdomain: string) {
+    try {
+      const cached = localStorage.getItem(this._localStorageKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.subdomain === subdomain && parsed.config) {
+          console.log('⚡ Using localStorage cached config');
+          return parsed.config;
+        }
+      }
+    } catch (error) {
+      console.error('Error reading from localStorage:', error);
+    }
+    return null;
+  },
+
+  // Save to localStorage cache
+  _saveToLocalStorage(subdomain: string, config: any) {
+    try {
+      localStorage.setItem(this._localStorageKey, JSON.stringify({ subdomain, config }));
+      console.log('💾 Saved subdomain config to localStorage');
+    } catch (error) {
+      console.error('Error saving to localStorage:', error);
+    }
+  },
+
+  // Get subdomain configuration by subdomain (with multi-level caching)
+  async getSubdomainConfig(subdomain: string) {
+    try {
+      // Check memory cache first (fastest)
+      if (this._cacheKey === subdomain && this._cache) {
+        console.log('✅ Using memory cached subdomain config');
+        return this._cache;
+      }
+
+      // Check localStorage cache (fast)
+      const localCached = this.getFromLocalStorageCache(subdomain);
+      if (localCached) {
+        this._cache = localCached;
+        this._cacheKey = subdomain;
+        return localCached;
+      }
+
+      console.log('🔍 Fetching subdomain config from database for:', subdomain);
+      
+      const { data, error } = await supabase
+        .from('subdomain_configs')
+        .select('*')
+        .eq('subdomain', subdomain)
+        .maybeSingle();
+
+      if (error) {
+        console.error('❌ Error fetching subdomain config:', error);
+        return null;
+      }
+
+      if (data) {
+        console.log('✅ Subdomain config found in database:', data);
+        // Cache in memory
+        this._cache = data;
+        this._cacheKey = subdomain;
+        // Cache in localStorage for next visit
+        this._saveToLocalStorage(subdomain, data);
+      } else {
+        console.log('ℹ️ No config found for subdomain:', subdomain);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('❌ Error in getSubdomainConfig:', error);
+      return null;
+    }
+  },
+
+  // Get current subdomain from window.location
+  getCurrentSubdomain(): string | null {
+    if (typeof window === 'undefined') return null;
+    
+    const hostname = window.location.hostname;
+    
+    // Handle main localhost (no subdomain)
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return null;
+    }
+    
+    // Extract subdomain
+    const parts = hostname.split('.');
+    
+    // Handle localhost development subdomains (e.g., vhelpcapital.localhost)
+    if (parts.length === 2 && parts[1] === 'localhost') {
+      const subdomain = parts[0];
+      if (subdomain && subdomain !== 'www') {
+        return subdomain;
+      }
+    }
+    
+    // Handle production subdomains (e.g., xyz.trackmystartup.com)
+    if (parts.length >= 3) {
+      const subdomain = parts[0];
+      if (subdomain && subdomain !== 'www') {
+        return subdomain;
+      }
+    }
+    
+    return null;
+  },
+
+  // Get configuration for current subdomain (with caching)
+  async getCurrentSubdomainConfig() {
+    const subdomain = this.getCurrentSubdomain();
+    if (!subdomain) return null;
+    
+    return await this.getSubdomainConfig(subdomain);
+  },
+
+  // Clear all caches (useful for testing or when config changes)
+  clearCache() {
+    this._cache = null;
+    this._cacheKey = null;
+    try {
+      localStorage.removeItem(this._localStorageKey);
+    } catch (error) {
+      console.error('Error clearing localStorage:', error);
+    }
+  }
+}

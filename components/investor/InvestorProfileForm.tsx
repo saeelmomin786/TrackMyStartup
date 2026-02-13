@@ -413,6 +413,8 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
         updated_at: new Date().toISOString()
       };
 
+      console.log('Saving investor profile:', profileData);
+
       const { data, error } = await supabase
         .from('investor_profiles')
         .upsert(profileData, {
@@ -423,7 +425,8 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
 
       if (error) {
         console.error('Error saving profile:', error);
-        alert('Failed to save profile');
+        console.error('Profile data sent:', profileData);
+        alert('Failed to save profile: ' + error.message);
         return;
       }
 

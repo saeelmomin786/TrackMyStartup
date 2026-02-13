@@ -16,6 +16,7 @@ import { facilitatorStartupService, StartupDashboardData } from '../lib/facilita
 import { facilitatorCodeService } from '../lib/facilitatorCodeService';
 import { FacilitatorCodeDisplay } from './FacilitatorCodeDisplay';
 import ProfilePage from './ProfilePage';
+import AdvisorAwareLogo from './AdvisorAwareLogo';
 import { capTableService } from '../lib/capTableService';
 import IncubationMessagingModal from './IncubationMessagingModal';
 import ContractManagementModal from './ContractManagementModal';
@@ -5880,13 +5881,18 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       <div className="space-y-6">
       {/* Header with facilitator code display */}
       <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Welcome {currentUser?.center_name || 'Facilitation Center'}
-          </h1>
-          <h2 className="text-lg font-semibold text-slate-800">Facilitation Center Dashboard</h2>
-
-
+        <div className="flex items-center gap-3">
+          <AdvisorAwareLogo
+            currentUser={currentUser}
+            showText={false}
+            className="h-9 w-9 sm:h-10 sm:w-10 object-contain"
+          />
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Welcome {currentUser?.center_name || 'Facilitation Center'}
+            </h1>
+            <h2 className="text-lg font-semibold text-slate-800">Facilitation Center Dashboard</h2>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <FacilitatorCodeDisplay currentUser={currentUser} />

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS public.investor_profiles (
     ticket_size_max DECIMAL(15,2), -- Maximum investment amount
     currency VARCHAR(10) DEFAULT 'USD', -- Currency for ticket sizes (USD, EUR, INR, etc.)
     investment_stages TEXT[], -- Array of stages (Pre-Seed, Seed, Series A, etc.)
+    domain TEXT[], -- Array of investment domains/sectors (e.g., Agriculture, AI, Climate, E-commerce, etc.)
     investment_thesis TEXT, -- Description of investment thesis
     
     -- Funding Requirements
@@ -48,6 +49,9 @@ CREATE INDEX IF NOT EXISTS idx_investor_profiles_investment_stages ON public.inv
 
 -- Create index on geography for filtering (using GIN index for array)
 CREATE INDEX IF NOT EXISTS idx_investor_profiles_geography ON public.investor_profiles USING GIN(geography);
+
+-- Create index on domain for filtering (using GIN index for array)
+CREATE INDEX IF NOT EXISTS idx_investor_profiles_domain ON public.investor_profiles USING GIN(domain);
 
 -- Enable RLS (Row Level Security)
 ALTER TABLE public.investor_profiles ENABLE ROW LEVEL SECURITY;
@@ -117,5 +121,6 @@ COMMENT ON COLUMN public.investor_profiles.firm_type IS 'Type of investment firm
 COMMENT ON COLUMN public.investor_profiles.geography IS 'Array of countries/regions where the investor is interested in investing';
 COMMENT ON COLUMN public.investor_profiles.currency IS 'Currency code for ticket sizes (USD, EUR, INR, etc.)';
 COMMENT ON COLUMN public.investor_profiles.investment_stages IS 'Array of investment stages the investor focuses on';
+COMMENT ON COLUMN public.investor_profiles.domain IS 'Array of investment domains/sectors the investor focuses on (e.g., Agriculture, AI, Climate, E-commerce, etc.)';
 COMMENT ON COLUMN public.investor_profiles.media_type IS 'Type of media to display: logo or video';
 

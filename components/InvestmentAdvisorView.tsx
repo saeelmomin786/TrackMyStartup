@@ -262,6 +262,9 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
   const [advisorAddedStartups, setAdvisorAddedStartups] = useState<AdvisorAddedStartup[]>([]);
   const [loadingAddedStartups, setLoadingAddedStartups] = useState(false);
   const [showAddStartupModal, setShowAddStartupModal] = useState(false);
+  const [showInAllDiscover, setShowInAllDiscover] = useState(true);
+  const [loadingDiscoverVisibility, setLoadingDiscoverVisibility] = useState(false);
+  const [savingDiscoverVisibility, setSavingDiscoverVisibility] = useState(false);
   
   // State for Launching Soon modal
   const [showLaunchingSoonModal, setShowLaunchingSoonModal] = useState(false);
@@ -374,6 +377,93 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     };
     loadAdvisorAddedStartups();
   }, [currentUser?.id, activeTab]); // Load when currentUser changes or tab changes to management
+
+  // Load advisor visibility setting for All Discover Pitches
+  useEffect(() => {
+    const loadDiscoverVisibility = async () => {
+      if (!currentUser?.id) {
+        return;
+      }
+
+      setLoadingDiscoverVisibility(true);
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser?.id) {
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('investment_advisor_profiles')
+          .select('show_startups_in_all_discover')
+          .eq('user_id', authUser.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error loading discover visibility:', error);
+          return;
+        }
+
+        if (data && typeof data.show_startups_in_all_discover !== 'undefined') {
+          setShowInAllDiscover(data.show_startups_in_all_discover !== false);
+        }
+      } catch (error) {
+        console.error('Error loading discover visibility:', error);
+      } finally {
+        setLoadingDiscoverVisibility(false);
+      }
+    };
+
+    loadDiscoverVisibility();
+  }, [currentUser?.id]);
+
+  const handleDiscoverVisibilityToggle = async (nextValue: boolean) => {
+    if (savingDiscoverVisibility) {
+      return;
+    }
+
+    const previousValue = showInAllDiscover;
+    setShowInAllDiscover(nextValue);
+    setSavingDiscoverVisibility(true);
+
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser?.id) {
+        setShowInAllDiscover(previousValue);
+        return;
+      }
+
+      let advisorName = (currentUser as any)?.name as string | undefined;
+      if (!advisorName) {
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('name')
+          .eq('auth_user_id', authUser.id)
+          .maybeSingle();
+        advisorName = profileData?.name || 'Investment Advisor';
+      }
+
+      const { error } = await supabase
+        .from('investment_advisor_profiles')
+        .upsert({
+          user_id: authUser.id,
+          advisor_name: advisorName || 'Investment Advisor',
+          show_startups_in_all_discover: nextValue,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+      if (error) {
+        console.error('Error saving discover visibility:', error);
+        setShowInAllDiscover(previousValue);
+        alert('Failed to update discover visibility. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error saving discover visibility:', error);
+      setShowInAllDiscover(previousValue);
+      alert('Failed to update discover visibility. Please try again.');
+    } finally {
+      setSavingDiscoverVisibility(false);
+    }
+  };
 
   // Load advisor credits (only when credits tab is active or on initial load)
   useEffect(() => {
@@ -2626,26 +2716,6 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     checkAuthHealth();
   }, []);
 
-  // Fetch active fundraising startups for Discovery tab, Investment Interests tab, and Mandate tab
-  useEffect(() => {
-    const loadActiveFundraisingStartups = async () => {
-      if (activeTab === 'discovery' || activeTab === 'interests' || activeTab === 'mandate') {
-        setIsLoadingPitches(true);
-        try {
-          const startups = await investorService.getActiveFundraisingStartups();
-          setActiveFundraisingStartups(startups);
-        } catch (error) {
-          console.error('Error loading active fundraising startups:', error);
-          // Set empty array on error to prevent UI issues
-          setActiveFundraisingStartups([]);
-        } finally {
-          setIsLoadingPitches(false);
-        }
-      }
-    };
-
-    loadActiveFundraisingStartups();
-  }, [activeTab]);
 
   // Load received recommendations from investors/collaborators
   useEffect(() => {
@@ -2940,6 +3010,27 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     console.log('⚠️ advisorCode useMemo: No advisor code available');
     return null;
   }, [currentUser?.investment_advisor_code, advisorCodeFromDB]);
+
+  // Fetch active fundraising startups for Discovery tab, Investment Interests tab, and Mandate tab
+  useEffect(() => {
+    const loadActiveFundraisingStartups = async () => {
+      if (activeTab === 'discovery' || activeTab === 'interests' || activeTab === 'mandate') {
+        setIsLoadingPitches(true);
+        try {
+          const startups = await investorService.getActiveFundraisingStartups(undefined, advisorCode || undefined);
+          setActiveFundraisingStartups(startups);
+        } catch (error) {
+          console.error('Error loading active fundraising startups:', error);
+          // Set empty array on error to prevent UI issues
+          setActiveFundraisingStartups([]);
+        } finally {
+          setIsLoadingPitches(false);
+        }
+      }
+    };
+
+    loadActiveFundraisingStartups();
+  }, [activeTab, advisorCode]);
 
   // Get pending startup requests - FIXED VERSION
   const pendingStartupRequests = useMemo(() => {
@@ -10201,13 +10292,34 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   Startups that have accepted your advisory services
                 </p>
               </div>
-              <button
-                onClick={handleAddStartup}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs sm:text-sm font-medium w-full sm:w-auto"
-              >
-                <PlusCircle className="h-4 w-4" />
-                Add Startup
-              </button>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 w-full sm:w-auto">
+                <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md w-full sm:w-auto">
+                  <span className="text-xs sm:text-sm font-medium text-slate-700">
+                    Show in All Discover
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={showInAllDiscover}
+                    onClick={() => handleDiscoverVisibilityToggle(!showInAllDiscover)}
+                    disabled={loadingDiscoverVisibility || savingDiscoverVisibility}
+                    className={`${showInAllDiscover ? 'bg-blue-600' : 'bg-gray-300'} relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed`}
+                    title={showInAllDiscover ? 'Hide from All Discover Pitches' : 'Show in All Discover Pitches'}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`${showInAllDiscover ? 'translate-x-4' : 'translate-x-0'} pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+                    />
+                  </button>
+                </div>
+                <button
+                  onClick={handleAddStartup}
+                  className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs sm:text-sm font-medium w-full sm:w-auto"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  Add Startup
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">

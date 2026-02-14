@@ -35,8 +35,9 @@ class InvestorService {
   
   // Fetch all active fundraising startups with their pitch data
   // If investmentAdvisorCode is provided, only shows startups under that advisor
-  async getActiveFundraisingStartups(investmentAdvisorCode?: string): Promise<ActiveFundraisingStartup[]> {
-    const cacheKey = investmentAdvisorCode || 'all';
+  // viewerAdvisorCode allows an advisor to still see their own startups when hidden globally
+  async getActiveFundraisingStartups(investmentAdvisorCode?: string, viewerAdvisorCode?: string): Promise<ActiveFundraisingStartup[]> {
+    const cacheKey = `${investmentAdvisorCode || 'all'}::viewer:${viewerAdvisorCode || 'none'}`;
     
     // Check if there's an active fetch in progress for this advisor code
     if (InvestorService.activeFetchPromises.has(cacheKey)) {
@@ -53,7 +54,7 @@ class InvestorService {
     }
     
     // Create new fetch promise
-    const fetchPromise = this._doFetch(investmentAdvisorCode);
+    const fetchPromise = this._doFetch(investmentAdvisorCode, viewerAdvisorCode);
     InvestorService.activeFetchPromises.set(cacheKey, fetchPromise);
     InvestorService.lastFetchTimes.set(cacheKey, now);
     
@@ -67,7 +68,7 @@ class InvestorService {
     return fetchPromise;
   }
   
-  private async _doFetch(investmentAdvisorCode?: string): Promise<ActiveFundraisingStartup[]> {
+  private async _doFetch(investmentAdvisorCode?: string, viewerAdvisorCode?: string): Promise<ActiveFundraisingStartup[]> {
     try {
       console.log('🔍 investorService.getActiveFundraisingStartups() called');
       if (investmentAdvisorCode) {
@@ -160,6 +161,92 @@ class InvestorService {
             );
             
             console.log(`🔍 After advisor filtering: ${filteredData.length} startups`);
+          }
+        }
+      }
+
+      // STEP 3: Hide advisor-managed startups from global discovery unless advisor allows it
+      if (!investmentAdvisorCode) {
+        const startupUserIds = filteredData.map(item => item.startups.user_id).filter(Boolean);
+
+        if (startupUserIds.length > 0) {
+          const { data: startupProfiles, error: startupProfilesError } = await supabase
+            .from('user_profiles')
+            .select('auth_user_id, investment_advisor_code_entered')
+            .in('auth_user_id', startupUserIds);
+
+          if (startupProfilesError) {
+            console.error('❌ Error fetching startup profiles for advisor visibility:', startupProfilesError);
+          } else {
+            const advisorCodeByStartupUserId = new Map<string, string>();
+            const advisorCodes = new Set<string>();
+
+            (startupProfiles || []).forEach(profile => {
+              const code = (profile.investment_advisor_code_entered || '').trim();
+              if (profile.auth_user_id && code) {
+                advisorCodeByStartupUserId.set(profile.auth_user_id, code);
+                advisorCodes.add(code);
+              }
+            });
+
+            if (advisorCodes.size > 0) {
+              const { data: advisorUsers, error: advisorUsersError } = await supabase
+                .from('user_profiles')
+                .select('auth_user_id, investment_advisor_code')
+                .in('investment_advisor_code', Array.from(advisorCodes))
+                .eq('role', 'Investment Advisor');
+
+              if (advisorUsersError) {
+                console.error('❌ Error fetching advisor users for visibility:', advisorUsersError);
+              } else {
+                const advisorUserIdByCode = new Map<string, string>();
+                (advisorUsers || []).forEach(user => {
+                  if (user.investment_advisor_code && user.auth_user_id) {
+                    advisorUserIdByCode.set(user.investment_advisor_code.trim(), user.auth_user_id);
+                  }
+                });
+
+                const advisorUserIds = Array.from(new Set(advisorUserIdByCode.values()));
+                let advisorVisibilityByUserId = new Map<string, boolean>();
+
+                if (advisorUserIds.length > 0) {
+                  const { data: advisorProfiles, error: advisorProfilesError } = await supabase
+                    .from('investment_advisor_profiles')
+                    .select('user_id, show_startups_in_all_discover')
+                    .in('user_id', advisorUserIds);
+
+                  if (advisorProfilesError) {
+                    console.error('❌ Error fetching advisor visibility settings:', advisorProfilesError);
+                  } else {
+                    (advisorProfiles || []).forEach(profile => {
+                      if (profile.user_id) {
+                        advisorVisibilityByUserId.set(profile.user_id, profile.show_startups_in_all_discover !== false);
+                      }
+                    });
+                  }
+                }
+
+                filteredData = filteredData.filter(item => {
+                  const startupUserId = item.startups.user_id;
+                  const code = startupUserId ? advisorCodeByStartupUserId.get(startupUserId) : undefined;
+                  if (!code) {
+                    return true;
+                  }
+
+                  if (viewerAdvisorCode && code === viewerAdvisorCode) {
+                    return true;
+                  }
+
+                  const advisorUserId = advisorUserIdByCode.get(code);
+                  if (!advisorUserId) {
+                    return true;
+                  }
+
+                  const allowInAll = advisorVisibilityByUserId.get(advisorUserId);
+                  return allowInAll !== false;
+                });
+              }
+            }
           }
         }
       }

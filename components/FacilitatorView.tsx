@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, MessageCircle, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, Mail, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import Badge from './ui/Badge';
@@ -76,6 +76,8 @@ type ReceivedApplication = {
   pitchVideoUrl?: string;
   diligenceStatus: 'none' | 'requested' | 'approved';
   agreementUrl?: string;
+  founderEmail?: string;
+  founderPhone?: string;
   sector?: string;
   stage?: string;
   createdAt?: string;
@@ -93,6 +95,18 @@ type ReportMandate = {
   target_startups: string[];
   source: 'existing' | 'startup';
   created_at: string;
+};
+
+type EmailDraft = {
+  id: string;
+  facilitatorId: string;
+  name: string;
+  subject: string;
+  body: string;
+  cc?: string;
+  bcc?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 const initialNewOppState = {
@@ -283,6 +297,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [selectedApplicationForMessaging, setSelectedApplicationForMessaging] = useState<ReceivedApplication | null>(null);
   const [selectedApplicationForContract, setSelectedApplicationForContract] = useState<ReceivedApplication | null>(null);
   const [selectedApplicationForDiligence, setSelectedApplicationForDiligence] = useState<ReceivedApplication | null>(null);
+  const [emailDrafts, setEmailDrafts] = useState<EmailDraft[]>([]);
+  const [isEmailDraftsModalOpen, setIsEmailDraftsModalOpen] = useState(false);
+  const [isEmailDraftSelectModalOpen, setIsEmailDraftSelectModalOpen] = useState(false);
+  const [selectedEmailDraftId, setSelectedEmailDraftId] = useState<string>('');
+  const [selectedApplicationForEmail, setSelectedApplicationForEmail] = useState<ReceivedApplication | null>(null);
+  const [isSavingEmailDraft, setIsSavingEmailDraft] = useState(false);
+  const [editingEmailDraftId, setEditingEmailDraftId] = useState<string | null>(null);
+  const [emailDraftForm, setEmailDraftForm] = useState({
+    name: '',
+    subject: '',
+    body: '',
+    cc: '',
+    bcc: ''
+  });
   
   // New state for startup invitation functionality
   const [isAddStartupModalOpen, setIsAddStartupModalOpen] = useState(false);
@@ -383,6 +411,176 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const handleCloseMessaging = () => {
     setIsMessagingModalOpen(false);
     setSelectedApplicationForMessaging(null);
+  };
+
+  const resetEmailDraftForm = () => {
+    setEmailDraftForm({
+      name: '',
+      subject: '',
+      body: '',
+      cc: '',
+      bcc: ''
+    });
+    setEditingEmailDraftId(null);
+  };
+
+  const loadEmailDrafts = async (currentFacilitatorId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('facilitator_email_drafts')
+        .select('id, facilitator_id, name, subject, body, cc, bcc, created_at, updated_at')
+        .eq('facilitator_id', currentFacilitatorId)
+        .order('updated_at', { ascending: false });
+
+      if (error) throw error;
+
+      const mapped = (data || []).map((row: any) => ({
+        id: row.id,
+        facilitatorId: row.facilitator_id,
+        name: row.name,
+        subject: row.subject || '',
+        body: row.body || '',
+        cc: row.cc || '',
+        bcc: row.bcc || '',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      } as EmailDraft));
+      setEmailDrafts(mapped);
+    } catch (error) {
+      console.error('Error loading email drafts:', error);
+    }
+  };
+
+  const openEmailDraftsModal = () => {
+    setIsEmailDraftsModalOpen(true);
+    resetEmailDraftForm();
+  };
+
+  const handleEditEmailDraft = (draft: EmailDraft) => {
+    setEditingEmailDraftId(draft.id);
+    setEmailDraftForm({
+      name: draft.name,
+      subject: draft.subject,
+      body: draft.body,
+      cc: draft.cc || '',
+      bcc: draft.bcc || ''
+    });
+  };
+
+  const handleSaveEmailDraft = async () => {
+    if (!facilitatorId) return;
+    if (!emailDraftForm.name.trim()) {
+      messageService.warning('Draft Name Required', 'Please enter a draft name.');
+      return;
+    }
+
+    setIsSavingEmailDraft(true);
+    try {
+      if (editingEmailDraftId) {
+        const { error } = await supabase
+          .from('facilitator_email_drafts')
+          .update({
+            name: emailDraftForm.name.trim(),
+            subject: emailDraftForm.subject || '',
+            body: emailDraftForm.body || '',
+            cc: emailDraftForm.cc || null,
+            bcc: emailDraftForm.bcc || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingEmailDraftId);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('facilitator_email_drafts')
+          .insert({
+            facilitator_id: facilitatorId,
+            name: emailDraftForm.name.trim(),
+            subject: emailDraftForm.subject || '',
+            body: emailDraftForm.body || '',
+            cc: emailDraftForm.cc || null,
+            bcc: emailDraftForm.bcc || null
+          });
+
+        if (error) throw error;
+      }
+
+      await loadEmailDrafts(facilitatorId);
+      resetEmailDraftForm();
+      messageService.success('Draft Saved', 'Email draft saved successfully.');
+    } catch (error) {
+      console.error('Error saving email draft:', error);
+      messageService.error('Save Failed', 'Failed to save email draft.');
+    } finally {
+      setIsSavingEmailDraft(false);
+    }
+  };
+
+  const handleDeleteEmailDraft = async (draftId: string) => {
+    if (!confirm('Are you sure you want to delete this email draft?')) return;
+    try {
+      const { error } = await supabase
+        .from('facilitator_email_drafts')
+        .delete()
+        .eq('id', draftId);
+
+      if (error) throw error;
+      setEmailDrafts(prev => prev.filter(draft => draft.id !== draftId));
+      if (editingEmailDraftId === draftId) {
+        resetEmailDraftForm();
+      }
+      messageService.success('Draft Deleted', 'Email draft deleted successfully.');
+    } catch (error) {
+      console.error('Error deleting email draft:', error);
+      messageService.error('Delete Failed', 'Failed to delete email draft.');
+    }
+  };
+
+  const applyEmailPlaceholders = (template: string, app: ReceivedApplication) => {
+    const opportunity = myPostedOpportunities.find(o => o.id === app.opportunityId);
+    const replacements: Record<string, string> = {
+      startup_name: app.startupName || '',
+      program_name: opportunity?.programName || '',
+      startup_email: app.founderEmail || '',
+      startup_phone: app.founderPhone || ''
+    };
+    return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+      return Object.prototype.hasOwnProperty.call(replacements, key) ? replacements[key] : match;
+    });
+  };
+
+  const openGmailDraft = (draft: EmailDraft, app: ReceivedApplication) => {
+    const subject = applyEmailPlaceholders(draft.subject || '', app);
+    const body = applyEmailPlaceholders(draft.body || '', app);
+    const cc = applyEmailPlaceholders(draft.cc || '', app);
+    const bcc = applyEmailPlaceholders(draft.bcc || '', app);
+    const to = app.founderEmail || '';
+
+    const params = new URLSearchParams({
+      view: 'cm',
+      fs: '1',
+      to,
+      su: subject,
+      body
+    });
+    if (cc) params.append('cc', cc);
+    if (bcc) params.append('bcc', bcc);
+
+    window.open(`https://mail.google.com/mail/?${params.toString()}`, '_blank', 'noopener');
+  };
+
+  const handleOpenEmailDraftSelect = (app: ReceivedApplication) => {
+    if (!app.founderEmail) {
+      messageService.info('Email Not Available', 'Startup email is not available.');
+      return;
+    }
+    if (emailDrafts.length === 0) {
+      messageService.info('No Drafts', 'Please create an email draft first.');
+      return;
+    }
+    setSelectedApplicationForEmail(app);
+    setSelectedEmailDraftId(emailDrafts[0]?.id || '');
+    setIsEmailDraftSelectModalOpen(true);
   };
 
   // ============ FEATURE 1: SHORTLISTING SYSTEM ============
@@ -1072,12 +1270,40 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         if (pinnedOpp) {
           const apps = await supabase
             .from('opportunity_applications')
-            .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, form2_requested, startups!inner(id,name)')
+            .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, form2_requested, startups!inner(id,name,user_id, founders(email))')
             .eq('opportunity_id', pinnedOpp)
             .order('created_at', { ascending: false });
           
           if (apps.data) {
-            const appsMapped: ReceivedApplication[] = (apps.data || []).map((a: any) => ({
+            const startupUserIds = (apps.data || [])
+              .map((a: any) => a.startups?.user_id)
+              .filter((id: string | undefined) => !!id);
+            const uniqueUserIds = Array.from(new Set(startupUserIds));
+            const profilesByAuthId = new Map<string, { email?: string; phone?: string }>();
+
+            if (uniqueUserIds.length > 0) {
+              const { data: profileData, error: profileError } = await supabase
+                .from('user_profiles')
+                .select('auth_user_id, email, phone')
+                .in('auth_user_id', uniqueUserIds);
+
+              if (profileError) {
+                console.warn('⚠️ Error loading startup contact profiles:', profileError);
+              } else {
+                (profileData || []).forEach((profile: any) => {
+                  profilesByAuthId.set(profile.auth_user_id, {
+                    email: profile.email,
+                    phone: profile.phone
+                  });
+                });
+              }
+            }
+
+            const appsMapped: ReceivedApplication[] = (apps.data || []).map((a: any) => {
+              const profile = a.startups?.user_id ? profilesByAuthId.get(a.startups.user_id) : undefined;
+              const founderEmail = a.startups?.founders?.[0]?.email || profile?.email;
+              const founderPhone = profile?.phone;
+              return {
               id: a.id,
               startupId: a.startup_id,
               startupName: a.startups?.name || `Startup #${a.startup_id}`,
@@ -1087,12 +1313,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               pitchVideoUrl: a.pitch_video_url || undefined,
               diligenceStatus: a.diligence_status || 'none',
               agreementUrl: a.agreement_url || undefined,
+              founderEmail: founderEmail || undefined,
+              founderPhone: founderPhone || undefined,
               sector: a.domain,
               stage: a.stage,
               createdAt: a.created_at,
               diligenceUrls: a.diligence_urls || [],
               isShortlisted: a.is_shortlisted || false
-            }));
+              };
+            });
             
             setMyReceivedApplications(appsMapped);
           }
@@ -1719,7 +1948,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             try {
             const { data: apps, error: appsError } = await supabase
               .from('opportunity_applications')
-              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, startups!inner(id,name)')
+              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, startups!inner(id,name,user_id, founders(email))')
               .in('opportunity_id', oppIds)
               .order('created_at', { ascending: false });
             
@@ -1783,7 +2012,35 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     setShortlistedApplications(shortlistedIds);
                   }
             } else {
-              const appsMapped: ReceivedApplication[] = (apps || []).map((a: any) => ({
+              const startupUserIds = (apps || [])
+                .map((a: any) => a.startups?.user_id)
+                .filter((id: string | undefined) => !!id);
+              const uniqueUserIds = Array.from(new Set(startupUserIds));
+              const profilesByAuthId = new Map<string, { email?: string; phone?: string }>();
+
+              if (uniqueUserIds.length > 0) {
+                const { data: profileData, error: profileError } = await supabase
+                  .from('user_profiles')
+                  .select('auth_user_id, email, phone')
+                  .in('auth_user_id', uniqueUserIds);
+
+                if (profileError) {
+                  console.warn('⚠️ Error loading startup contact profiles:', profileError);
+                } else {
+                  (profileData || []).forEach((profile: any) => {
+                    profilesByAuthId.set(profile.auth_user_id, {
+                      email: profile.email,
+                      phone: profile.phone
+                    });
+                  });
+                }
+              }
+
+              const appsMapped: ReceivedApplication[] = (apps || []).map((a: any) => {
+                const profile = a.startups?.user_id ? profilesByAuthId.get(a.startups.user_id) : undefined;
+                const founderEmail = a.startups?.founders?.[0]?.email || profile?.email;
+                const founderPhone = profile?.phone;
+                return {
                 id: a.id,
                 startupId: a.startup_id,
                 startupName: a.startups?.name || `Startup #${a.startup_id}`,
@@ -1793,12 +2050,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 pitchVideoUrl: a.pitch_video_url || undefined,
                 diligenceStatus: a.diligence_status || 'none',
                 agreementUrl: a.agreement_url || undefined,
+                founderEmail: founderEmail || undefined,
+                founderPhone: founderPhone || undefined,
                 sector: a.domain,
                 stage: a.stage,
                 createdAt: a.created_at,
                 diligenceUrls: a.diligence_urls || [],
                 isShortlisted: a.is_shortlisted || false
-              }));
+                };
+              });
               
               if (mounted) {
                 setMyReceivedApplications(appsMapped);
@@ -2015,6 +2275,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     };
     loadAcceptedRequests();
   }, [activeTab, facilitatorId]);
+
+  useEffect(() => {
+    if (!facilitatorId) return;
+    loadEmailDrafts(facilitatorId);
+  }, [facilitatorId]);
 
   // Keep selected pitch in URL when on discover tab
   useEffect(() => {
@@ -3069,7 +3334,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         .update({
           status: 'accepted',
           agreement_url: urlData.publicUrl,
-          diligence_status: 'none'
+          diligence_status: 'none',
+          is_shortlisted: true
         })
         .eq('id', selectedApplication.id);
 
@@ -3081,9 +3347,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       // Update local state
       setMyReceivedApplications(prev => prev.map(app => 
         app.id === selectedApplication.id 
-          ? { ...app, status: 'accepted', agreementUrl: urlData.publicUrl, diligenceStatus: 'none' }
+          ? { ...app, status: 'accepted', agreementUrl: urlData.publicUrl, diligenceStatus: 'none', isShortlisted: true }
           : app
       ));
+
+      setShortlistedApplications(prev => {
+        const next = new Set(prev);
+        next.add(selectedApplication.id);
+        return next;
+      });
 
       setIsAcceptModalOpen(false);
       setSelectedApplication(null);
@@ -3224,18 +3496,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             .from('startups')
             .select('id')
             .eq('id', record.startupId)
-          .single(),
-        
-        // Check user is facilitator
-        supabase
-          .from('user_profiles')
-          .select('id, role')
-          .eq('id', facilitatorId)
           .single()
       ]);
 
       // Check validation results
-      const [recordCheck, startupCheck, userCheck] = validationChecks;
+      const [recordCheck, startupCheck] = validationChecks;
       
       if (recordCheck.status === 'rejected' || !recordCheck.value.data) {
         console.error('❌ Recognition record not found in database:', recordCheck.status === 'rejected' ? recordCheck.reason : 'No data');
@@ -3255,24 +3520,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           return;
         }
         
-      if (userCheck.status === 'rejected' || !userCheck.value.data) {
-        console.error('❌ User not found in database:', userCheck.status === 'rejected' ? userCheck.reason : 'No data');
-            messageService.warning(
-              'User Not Found',
-              'User not found. Please try again.'
-            );
-            return;
-          }
-          
-      if (userCheck.value.data.role !== 'Startup Facilitation Center') {
-        console.error('❌ User is not a facilitator:', userCheck.value.data.role);
-            messageService.error(
-              'Unauthorized',
-              'User is not authorized as a facilitator. Please try again.'
-            );
-            return;
-          }
-          
       // Update the recognition request status in the database
         const { error: updateError } = await supabase
           .from('recognition_records')
@@ -3290,11 +3537,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           return;
         }
         
-        // Add startup to facilitator's portfolio
-        const portfolioEntry = await facilitatorStartupService.addStartupToPortfolio(
+        // Add startup to facilitator's portfolio WITH program name to sync with Intake Management
+        const portfolioEntry = await facilitatorStartupService.addStartupToPortfolioWithProgram(
         facilitatorId,
           record.startupId,
-        dbId
+        dbId,
+        record.programName // Pass program name to link with opportunity_applications
         );
         
         if (portfolioEntry) {
@@ -3540,6 +3788,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 </button>
               </div>
               <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={openEmailDraftsModal}
+                  className="flex items-center gap-1"
+                >
+                  <Mail className="h-4 w-4" />
+                  Email Drafts
+                </Button>
                 <Button
                   size="sm"
                   onClick={() => {
@@ -3842,6 +4099,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   View Startup
                                 </Button>
                               )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  handleOpenEmailDraftSelect(app);
+                                }}
+                                disabled={!app.founderEmail}
+                                className="flex items-center gap-1.5 hover:bg-blue-50 text-blue-600 border-blue-600"
+                                title={app.founderEmail ? `Email ${app.founderEmail}` : 'Email not available'}
+                              >
+                                <Mail className="h-4 w-4" />
+                                <span>Email</span>
+                              </Button>
                               </div>
                             </td>
                           </tr>
@@ -3870,7 +4140,28 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             {/* CRM View (Kanban Board) */}
             {intakeViewMode === 'crm' && (
               <Card className="p-6">
-                <h3 className="text-lg font-semibold mb-4 text-slate-700">Applications CRM</h3>
+                <div className="flex flex-col gap-3 mb-4 md:flex-row md:items-center md:justify-between">
+                  <h3 className="text-lg font-semibold text-slate-700">Applications CRM</h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Program</span>
+                    <select
+                      value={selectedOpportunityId || ''}
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        setSelectedOpportunityId(nextValue || null);
+                      }}
+                      className="text-sm px-2 py-1.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
+                      aria-label="Select program for CRM view"
+                    >
+                      <option value="">All Programs</option>
+                      {myPostedOpportunities.map(opportunity => (
+                        <option key={opportunity.id} value={opportunity.id}>
+                          {opportunity.programName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 <IntakeCRMBoard
                   facilitatorId={facilitatorId}
                   opportunityId={selectedOpportunityId || ''}
@@ -3932,19 +4223,30 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-lg font-semibold text-slate-700">Accepted Startups by Program</h3>
                   {selectedOpportunityId && (
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        const selectedOpportunity = myPostedOpportunities.find(opp => opp.id === selectedOpportunityId);
-                        if (selectedOpportunity) {
-                          openProgramQuestionsConfig(selectedOpportunity.programName);
-                        }
-                      }}
-                      className="flex items-center gap-1"
-                    >
-                      <Settings className="h-4 w-4" />
-                      Configure Questions
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={openEmailDraftsModal}
+                        className="flex items-center gap-1"
+                      >
+                        <Mail className="h-4 w-4" />
+                        Email Drafts
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          const selectedOpportunity = myPostedOpportunities.find(opp => opp.id === selectedOpportunityId);
+                          if (selectedOpportunity) {
+                            openProgramQuestionsConfig(selectedOpportunity.programName);
+                          }
+                        }}
+                        className="flex items-center gap-1"
+                      >
+                        <Settings className="h-4 w-4" />
+                        Configure Questions
+                      </Button>
+                    </div>
                   )}
                 </div>
                 
@@ -3999,13 +4301,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       <tbody className="bg-white divide-y divide-slate-200">
                         {filteredAcceptedApps.map(app => {
                           const opportunity = myPostedOpportunities.find(opp => opp.id === app.opportunityId);
+                          const signedAgreementUrl = recognitionRecords.find(record =>
+                            record.startupId === app.startupId &&
+                            record.programName === opportunity?.programName &&
+                            record.signedAgreementUrl
+                          )?.signedAgreementUrl;
+                          const agreementUrl = signedAgreementUrl || app.agreementUrl;
                           return (
                             <tr key={app.id} className="hover:bg-slate-50 transition-colors">
                               <td className="px-4 py-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="h-10 w-10 rounded-full bg-gradient-to-br from-brand-primary to-brand-secondary flex items-center justify-center text-white font-semibold text-sm">
-                                    {app.startupName.charAt(0).toUpperCase()}
-                                  </div>
                                   <div>
                                     <div className="text-sm font-medium text-slate-900">{app.startupName}</div>
                                     <div className="text-xs text-slate-500">{app.sector || 'Sector not specified'}</div>
@@ -4019,9 +4324,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 )}
                               </td>
                               <td className="px-4 py-4 text-center">
-                                {app.agreementUrl ? (
+                                {agreementUrl ? (
                                   <a
-                                    href={app.agreementUrl}
+                                    href={agreementUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 transition-colors"
@@ -4038,16 +4343,42 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 )}
                               </td>
                               <td className="px-4 py-4 text-center">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleViewApplicationResponses(app)}
-                                  className="flex items-center gap-1.5 hover:bg-blue-50 text-blue-600 border-blue-600"
-                                  title="View Application Responses"
-                                >
-                                  <FileQuestion className="h-4 w-4" />
-                                  <span>View Responses</span>
-                                </Button>
+                                <div className="flex items-center justify-center gap-2 flex-wrap">
+                                  {app.pitchDeckUrl && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handleViewPitchDeck(app.pitchDeckUrl!)}
+                                      className="flex items-center gap-1.5 hover:bg-slate-100"
+                                      title="View Pitch Deck"
+                                    >
+                                      <FileText className="h-4 w-4" />
+                                      <span>Pitch Deck</span>
+                                    </Button>
+                                  )}
+                                  {app.pitchVideoUrl && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handleViewPitchVideo(app.pitchVideoUrl!)}
+                                      className="flex items-center gap-1.5 hover:bg-slate-100"
+                                      title="View Pitch Video"
+                                    >
+                                      <Film className="h-4 w-4" />
+                                      <span>Pitch Video</span>
+                                    </Button>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleViewApplicationResponses(app)}
+                                    className="flex items-center gap-1.5 hover:bg-blue-50 text-blue-600 border-blue-600"
+                                    title="View Application Responses"
+                                  >
+                                    <FileQuestion className="h-4 w-4" />
+                                    <span>View Responses</span>
+                                  </Button>
+                                </div>
                               </td>
                               <td className="px-4 py-4">
                                 <div className="flex justify-center items-center gap-2 flex-wrap">
@@ -4090,14 +4421,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                     size="sm"
                                     variant="outline"
                                     onClick={() => {
-                                      setSelectedApplicationForMessaging(app);
-                                      setIsMessagingModalOpen(true);
+                                      handleOpenEmailDraftSelect(app);
                                     }}
+                                    disabled={!app.founderEmail}
                                     className="flex items-center gap-1.5 hover:bg-blue-50 text-blue-600 border-blue-600"
-                                    title="Message Startup"
+                                    title={app.founderEmail ? `Email ${app.founderEmail}` : 'Email not available'}
                                   >
-                                    <MessageCircle className="h-4 w-4" />
-                                    <span>Message</span>
+                                    <Mail className="h-4 w-4" />
+                                    <span>Email</span>
                                   </Button>
                                 </div>
                               </td>
@@ -5982,6 +6313,175 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             <Button type="submit">{editingIndex !== null ? 'Save Changes' : 'Post Opportunity'}</Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Email Drafts Modal */}
+      <Modal
+        isOpen={isEmailDraftsModalOpen}
+        onClose={() => {
+          setIsEmailDraftsModalOpen(false);
+          resetEmailDraftForm();
+        }}
+        title="Email Drafts"
+        size="3xl"
+      >
+        <div className="space-y-6">
+          <Card>
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-900">Saved Drafts</h4>
+                <p className="text-xs text-slate-500">Pick a draft to edit or delete.</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={resetEmailDraftForm}>
+                New Draft
+              </Button>
+            </div>
+            {emailDrafts.length === 0 ? (
+              <div className="text-sm text-slate-500 mt-4">No drafts yet.</div>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {emailDrafts.map(draft => (
+                  <div key={draft.id} className="flex items-center justify-between gap-3 border border-slate-200 rounded-md px-3 py-2">
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">{draft.name}</div>
+                      <div className="text-xs text-slate-500">{draft.subject || 'No subject'}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" onClick={() => handleEditEmailDraft(draft)}>
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleDeleteEmailDraft(draft.id)} className="text-red-600 border-red-600 hover:bg-red-50">
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card>
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-900">{editingEmailDraftId ? 'Edit Draft' : 'Create Draft'}</h4>
+                <p className="text-xs text-slate-500">
+                  Use placeholders like {'{{startup_name}}'}, {'{{program_name}}'}, {'{{startup_email}}'}, {'{{startup_phone}}'}.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Draft Name"
+                  value={emailDraftForm.name}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmailDraftForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g. Welcome Email"
+                />
+                <Input
+                  label="Subject"
+                  value={emailDraftForm.subject}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmailDraftForm(prev => ({ ...prev, subject: e.target.value }))}
+                  placeholder="Subject line"
+                />
+                <Input
+                  label="CC"
+                  value={emailDraftForm.cc}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmailDraftForm(prev => ({ ...prev, cc: e.target.value }))}
+                  placeholder="comma-separated"
+                />
+                <Input
+                  label="BCC"
+                  value={emailDraftForm.bcc}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmailDraftForm(prev => ({ ...prev, bcc: e.target.value }))}
+                  placeholder="comma-separated"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Body</label>
+                <textarea
+                  value={emailDraftForm.body}
+                  onChange={(e) => setEmailDraftForm(prev => ({ ...prev, body: e.target.value }))}
+                  rows={6}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                  placeholder="Write your email..."
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={resetEmailDraftForm}>
+                  Clear
+                </Button>
+                <Button onClick={handleSaveEmailDraft} disabled={isSavingEmailDraft}>
+                  {isSavingEmailDraft ? 'Saving...' : 'Save Draft'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </Modal>
+
+      {/* Email Draft Select Modal */}
+      <Modal
+        isOpen={isEmailDraftSelectModalOpen}
+        onClose={() => {
+          setIsEmailDraftSelectModalOpen(false);
+          setSelectedApplicationForEmail(null);
+        }}
+        title={`Select Email Draft - ${selectedApplicationForEmail?.startupName || ''}`}
+        size="2xl"
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-slate-600">
+            To: <span className="font-medium text-slate-900">{selectedApplicationForEmail?.founderEmail || 'N/A'}</span>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Choose Draft</label>
+            <select
+              value={selectedEmailDraftId}
+              onChange={(e) => setSelectedEmailDraftId(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            >
+              {emailDrafts.map(draft => (
+                <option key={draft.id} value={draft.id}>{draft.name}</option>
+              ))}
+            </select>
+          </div>
+          {selectedApplicationForEmail && selectedEmailDraftId && (() => {
+            const draft = emailDrafts.find(d => d.id === selectedEmailDraftId);
+            if (!draft) return null;
+            const previewSubject = applyEmailPlaceholders(draft.subject || '', selectedApplicationForEmail);
+            const previewBody = applyEmailPlaceholders(draft.body || '', selectedApplicationForEmail);
+            return (
+              <Card>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-slate-500">Subject:</span> <span className="text-slate-900">{previewSubject || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Body:</span>
+                    <div className="mt-2 whitespace-pre-wrap text-slate-700">{previewBody || '—'}</div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })()}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setIsEmailDraftSelectModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!selectedApplicationForEmail) return;
+                const draft = emailDrafts.find(d => d.id === selectedEmailDraftId);
+                if (!draft) return;
+                openGmailDraft(draft, selectedApplicationForEmail);
+                setIsEmailDraftSelectModalOpen(false);
+              }}
+            >
+              Open Gmail
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* Accept Application Modal */}

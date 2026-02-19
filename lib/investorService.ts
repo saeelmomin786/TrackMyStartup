@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { DomainUpdateService } from './domainUpdateService';
 import { NewInvestment, InvestmentType, ComplianceStatus } from '../types';
+import { getVideoEmbedUrl } from './videoUtils';
 
 export interface ActiveFundraisingStartup {
   id: number;
@@ -409,28 +410,16 @@ class InvestorService {
     }
   }
 
-  // Get YouTube embed URL from various YouTube URL formats
+  // Get embeddable video URL from supported video platforms
   getYoutubeEmbedUrl(url?: string): string | null {
     if (!url) return null;
-    
-    // Handle various YouTube URL formats
-    const patterns = [
-      // YouTube watch URLs: youtube.com/watch?v=VIDEO_ID
-      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]+)/,
-      // YouTube watch URLs with additional parameters: youtube.com/watch?param=value&v=VIDEO_ID
-      /youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]+)/,
-      // YouTube Shorts URLs: youtube.com/shorts/VIDEO_ID
-      /youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/
-    ];
-    
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match) {
-        return `https://www.youtube.com/embed/${match[1]}`;
-      }
+
+    const videoEmbedInfo = getVideoEmbedUrl(url);
+    if (!videoEmbedInfo || videoEmbedInfo.source === 'unknown') {
+      return null;
     }
-    
-    return null;
+
+    return videoEmbedInfo.embedUrl;
   }
 
   // Format currency for display

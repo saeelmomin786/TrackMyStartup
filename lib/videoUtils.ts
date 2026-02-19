@@ -18,8 +18,10 @@ export interface VideoEmbedInfo {
 export function getVideoEmbedUrl(url?: string | null, autoplay: boolean = false): VideoEmbedInfo | null {
   if (!url) return null;
 
+  const trimmedUrl = url.trim();
+
   try {
-    const urlObj = new URL(url.trim());
+    const urlObj = new URL(trimmedUrl);
 
     // YouTube URLs
     if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
@@ -75,26 +77,6 @@ export function getVideoEmbedUrl(url?: string | null, autoplay: boolean = false)
     if (urlObj.hostname.includes('drive.google.com')) {
       let fileId: string | null = null;
       
-      // If URL already contains /preview, it might already be an embed URL
-      // Check if it's already in the correct format
-      if (urlObj.pathname.includes('/preview')) {
-        const pathParts = urlObj.pathname.split('/').filter(p => p);
-        const dIndex = pathParts.indexOf('d');
-        if (dIndex >= 0 && dIndex + 1 < pathParts.length) {
-          fileId = pathParts[dIndex + 1].split('?')[0].split('#')[0].trim();
-        }
-        // If we found a fileId and URL already has preview, return as-is (with autoplay if needed)
-        if (fileId) {
-          const autoplayParam = autoplay ? (url.includes('?') ? '&autoplay=1' : '?autoplay=1') : '';
-          const embedUrl = url + autoplayParam;
-          return {
-            embedUrl,
-            source: 'google_drive',
-            videoId: fileId
-          };
-        }
-      }
-      
       // Pattern: drive.google.com/file/d/FILE_ID/view
       // Pattern: drive.google.com/file/d/FILE_ID/view?usp=sharing
       const pathParts = urlObj.pathname.split('/').filter(p => p);
@@ -124,9 +106,9 @@ export function getVideoEmbedUrl(url?: string | null, autoplay: boolean = false)
       }
       
       if (fileId && fileId.length > 0) {
-        // Google Drive video embed URL - use preview endpoint
-        const autoplayParam = autoplay ? '&autoplay=1' : '';
-        const embedUrl = `https://drive.google.com/file/d/${fileId}/preview?usp=sharing${autoplayParam}`;
+        // Always normalize to canonical preview endpoint (avoid /view and usp redirect variants)
+        const autoplayParam = autoplay ? '?autoplay=1' : '';
+        const embedUrl = `https://drive.google.com/file/d/${fileId}/preview${autoplayParam}`;
         return {
           embedUrl,
           source: 'google_drive',
@@ -178,10 +160,10 @@ export function getVideoEmbedUrl(url?: string | null, autoplay: boolean = false)
     }
 
     // If URL already contains 'embed', assume it's already an embed URL
-    if (url.includes('embed') || url.includes('player')) {
-      const autoplayParam = autoplay ? (url.includes('?') ? '&autoplay=1' : '?autoplay=1') : '';
+    if (trimmedUrl.includes('embed') || trimmedUrl.includes('player')) {
+      const autoplayParam = autoplay ? (trimmedUrl.includes('?') ? '&autoplay=1' : '?autoplay=1') : '';
       return {
-        embedUrl: url + autoplayParam,
+        embedUrl: trimmedUrl + autoplayParam,
         source: 'unknown',
         videoId: undefined
       };
@@ -189,12 +171,22 @@ export function getVideoEmbedUrl(url?: string | null, autoplay: boolean = false)
 
     // Unknown format - return as is
     return {
-      embedUrl: url,
+      embedUrl: trimmedUrl,
       source: 'unknown',
       videoId: undefined
     };
 
   } catch (error) {
+    const driveMatch = trimmedUrl.match(/(?:drive\.google\.com\/file\/d\/|open\?id=|uc\?id=)([a-zA-Z0-9_-]+)/);
+    if (driveMatch?.[1]) {
+      const autoplayParam = autoplay ? '?autoplay=1' : '';
+      return {
+        embedUrl: `https://drive.google.com/file/d/${driveMatch[1]}/preview${autoplayParam}`,
+        source: 'google_drive',
+        videoId: driveMatch[1]
+      };
+    }
+
     console.error('Error parsing video URL:', error);
     return null;
   }

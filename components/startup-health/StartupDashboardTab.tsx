@@ -879,8 +879,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         const investorName = offer.investorName || 
                            offer.investor?.name || 
                            offer.investor?.company_name || 
-                           offer.investorEmail || 
-                           'Unknown Investor';
+                           'Investor';
         
         // Ensure we have valid numbers for amount and equity
         const amount = Number(offer.offerAmount || offer.amount) || 0;
@@ -954,18 +953,26 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             ? '🟣 Stage 2: Startup Advisor Approval'
             : '⚡ Stage 2: Auto-Processing';
         } else if (stage === 3) {
-          stageStatus = '✅ Stage 3: Ready for Startup Review';
+          stageStatus = '✅ Stage 3: Startup Approval';
           stageColor = 'bg-green-100 text-green-800';
         } else if (stage === 4) {
-          stageStatus = '🎉 Stage 4: Approved';
+          stageStatus = '🎉 Stage 4 (Legacy): Approved';
           stageColor = 'bg-emerald-100 text-emerald-800';
         }
         
+        const totalInvestmentAmount = Number(opp.investment_amount) || 0;
+        const remainingForCoInvestment = Number(opp.maximum_co_investment) || 0;
+        const leadInvestorAmount = Math.max(totalInvestmentAmount - remainingForCoInvestment, 0);
+        const totalEquityPercentage = Number(opp.equity_percentage) || 0;
+        const leadInvestorEquity = totalInvestmentAmount > 0
+          ? (totalEquityPercentage * (leadInvestorAmount / totalInvestmentAmount))
+          : 0;
+
         return {
           id: `co_investment_opp_${opp.id}`,
-          from: opp.listed_by_user?.name || 'Lead Investor',
+          from: opp.listed_by_user?.name || opp.listed_by_user_name || 'Lead Investor',
           type: 'Investment' as const,
-          offerDetails: `Co-investment opportunity: ${formatCurrency(opp.minimum_co_investment, startupCurrency)} - ${formatCurrency(opp.maximum_co_investment, startupCurrency)} available`,
+          offerDetails: `Lead offer: ${formatCurrency(leadInvestorAmount, startupCurrency)} for ${leadInvestorEquity.toFixed(2)}% equity`,
           status: opp.startup_approval_status === 'approved' ? 'accepted' : 
                   opp.startup_approval_status === 'rejected' ? 'rejected' : 'pending',
           code: `co-opp-${opp.id}`,
@@ -973,8 +980,8 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           isCoInvestmentOpportunity: true,
           coInvestmentOpportunityId: opp.id,
           description: opp.description,
-          totalInvestmentAmount: opp.investment_amount,
-          equityPercentage: opp.equity_percentage,
+          totalInvestmentAmount,
+          equityPercentage: totalEquityPercentage,
           stage: stage,
           stageStatus: stageStatus,
           stageColor: stageColor
@@ -982,12 +989,12 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       });
 
       // Load co-investment OFFERS (actual offers made by investors on co-investment opportunities)
-      // These are offers that need startup approval after passing Investor Advisor and Lead Investor approval
-      // IMPORTANT: Only show offers that have passed Investor Advisor and Lead Investor approval
+      // These are offers that need startup approval after passing co-investor advisor and startup advisor approval
+      // IMPORTANT: Only show offers that have passed co-investor advisor and startup advisor approval
       let coInvestmentOffersFormatted: OfferReceived[] = [];
       try {
-        // Fetch co-investment offers that have passed investor advisor and lead investor approval
-        // Only show offers that are ready for startup approval or already accepted/rejected by startup
+        // Fetch consolidated co-investment offers that are ready for startup founder decision
+        // Stage 3 is reached after startup advisor approval in consolidated flow
         const { data: coInvestmentOffersData, error: coInvestmentOffersError } = await supabase
           .from('co_investment_offers')
           .select(`
@@ -997,18 +1004,38 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             co_investment_opportunity:co_investment_opportunities(id, investment_amount, equity_percentage)
           `)
           .eq('startup_id', startup.id)
-          // Show offers where investor advisor has approved OR where investor has no advisor (not_required)
-          .in('investor_advisor_approval_status', ['approved', 'not_required'])
-          // Only show offers where lead investor has approved
-          .eq('lead_investor_approval_status', 'approved')
-          // Only show offers that are ready for startup approval or already processed by startup
-          // Status should be pending_startup_approval (ready for startup), accepted, or rejected (startup already responded)
-          .in('status', ['pending_startup_approval', 'accepted', 'rejected'])
+          .eq('is_consolidated', true)
+          // Stage 3 = startup founder review stage (post startup advisor approval)
+          .eq('stage', 3)
+          // Include pending + final outcomes for visibility/history
+          .in('status', ['pending_startup_approval', 'approved', 'rejected'])
           .order('created_at', { ascending: false });
 
         if (!coInvestmentOffersError) {
+          const investorIds = [...new Set((coInvestmentOffersData || []).map((o: any) => o.investor_id).filter(Boolean))] as string[];
+          let investorNamesById: Record<string, string> = {};
+
+          if (investorIds.length > 0) {
+            const { data: investorProfiles } = await supabase
+              .from('user_profiles')
+              .select('auth_user_id, name')
+              .in('auth_user_id', investorIds)
+              .eq('role', 'Investor');
+
+            investorNamesById = (investorProfiles || []).reduce((acc: Record<string, string>, profile: any) => {
+              if (profile?.auth_user_id && profile?.name) {
+                acc[profile.auth_user_id] = profile.name;
+              }
+              return acc;
+            }, {});
+          }
+
           coInvestmentOffersFormatted = (coInvestmentOffersData || []).map((offer: any) => {
-            const investorName = offer.investor?.name || offer.investor_name || offer.investor_email || 'Unknown Investor';
+            const investorName =
+              offer.investor?.name ||
+              offer.investor_name ||
+              investorNamesById[offer.investor_id] ||
+              'Investor';
             const amount = Number(offer.offer_amount) || 0;
             const equityPercentage = Number(offer.equity_percentage) || 0;
             const offerCurrency = offer.currency || offer.startup?.currency || startupCurrency || 'USD';
@@ -1017,7 +1044,7 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
               id: `co_investment_offer_${offer.id}`,
               from: investorName,
               type: 'Investment' as const,
-              offerDetails: `${formatCurrency(amount, offerCurrency)} for ${equityPercentage}% equity (Co-investment offer)`,
+              offerDetails: `${formatCurrency(amount, offerCurrency)} for ${equityPercentage}% equity`,
               status: offer.startup_approval_status === 'approved' ? 'accepted' : 
                       offer.startup_approval_status === 'rejected' ? 'rejected' : 'pending',
               code: `co-offer-${offer.id}`,
@@ -1695,15 +1722,18 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     try {
       console.log('💰 Accepting co-investment offer:', offer.coInvestmentOfferId);
       
-      // Use the proper database function to approve co-investment offer
-      const { data, error } = await supabase.rpc('approve_co_investment_offer_startup', {
+      // Consolidated flow: Stage 3 startup founder approval on co_investment_offers table
+      const { data, error } = await supabase.rpc('approve_consolidated_co_investment_offer_startup_founder', {
         p_offer_id: offer.coInvestmentOfferId,
         p_approval_action: 'approve'
       });
 
       if (error) {
-        console.error('❌ Error approving co-investment offer:', error);
         throw error;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Failed to approve co-investment offer');
       }
       
       messageService.success(
@@ -1729,15 +1759,18 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
     try {
       console.log('💰 Rejecting co-investment offer:', offer.coInvestmentOfferId);
       
-      // Use the proper database function to reject co-investment offer
-      const { data, error } = await supabase.rpc('approve_co_investment_offer_startup', {
+      // Consolidated flow: Stage 3 startup founder approval on co_investment_offers table
+      const { data, error } = await supabase.rpc('approve_consolidated_co_investment_offer_startup_founder', {
         p_offer_id: offer.coInvestmentOfferId,
         p_approval_action: 'reject'
       });
 
       if (error) {
-        console.error('❌ Error rejecting co-investment offer:', error);
         throw error;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Failed to reject co-investment offer');
       }
       
       messageService.success(
@@ -2842,7 +2875,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                       {offer.from}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      {offer.type}
+                      {(offer.isCoInvestmentOpportunity || offer.isCoInvestmentOffer || offer.isSeekingCoInvestment)
+                        ? 'Co-Investment'
+                        : offer.type}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                       {offer.offerDetails}
@@ -2942,18 +2977,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                        ((!offer.isCoInvestmentOpportunity || (offer.isCoInvestmentOpportunity && offer.stage === 3)) || 
                         (offer.isCoInvestmentOffer && offer.status === 'pending')) && (
                         <div className="flex gap-2">
-                          {/* View Details button for co-investment offers */}
-                          {offer.isCoInvestmentOffer && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleViewCoInvestmentDetails(offer)}
-                              className="border-blue-300 text-blue-600 hover:bg-blue-50"
-                            >
-                              <FileText className="h-4 w-4 mr-1" />
-                              View Details
-                            </Button>
-                          )}
                           <Button
                             size="sm"
                             onClick={() => handleAcceptInvestmentOffer(offer)}
@@ -2979,18 +3002,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
                             <Check className="h-4 w-4" />
                             Accepted
                           </span>
-                          {/* View Details button for accepted co-investment offers */}
-                          {offer.isCoInvestmentOffer && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleViewCoInvestmentDetails(offer)}
-                              className="border-blue-300 text-blue-600 hover:bg-blue-50"
-                            >
-                              <FileText className="h-4 w-4 mr-1" />
-                              View Details
-                            </Button>
-                          )}
                           {/* Only show View Contact Details for regular investment offers, not co-investment offers */}
                           {!offer.isCoInvestmentOffer && (
                             <Button

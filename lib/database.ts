@@ -1053,72 +1053,103 @@ export const investmentService = {
       }
     }
     
-    // Check if this is a co-investment offer
+    // Check if this is a co-investment offer (applying to existing opportunity)
     if (offerData.co_investment_opportunity_id) {
-      // Use the new co_investment_offers table for co-investment offers
-      console.log('🔄 Creating co-investment offer using co_investment_offers table');
+      // Use the NEW consolidated approach: create ONE consolidated offer in co_investment_offers table
+      // This offer contains all co-investment details in co_investment_offers table ONLY
+      // investment_offers table remains completely unchanged
+      console.log('🔄 Creating CONSOLIDATED co-investment offer in co_investment_offers table');
       
       const coInvestmentId = Number(offerData.co_investment_opportunity_id);
       
-      // Call the new SQL function for co-investment offers
-      const { data: newOfferId, error: rpcError } = await supabase.rpc('create_co_investment_offer', {
-        p_co_investment_opportunity_id: coInvestmentId,
+      // Get current auth user ID for investor
+      let investorId = offerData.investor_id;
+      if (!investorId) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          investorId = user?.id || undefined;
+        } catch (e) {
+          console.warn('⚠️ Unable to read auth user for investor_id:', e);
+        }
+      }
+      
+      if (!investorId) {
+        throw new Error('Unable to determine investor ID for co-investment offer');
+      }
+      
+      // Call the new consolidated SQL function
+      // This creates ONE offer in co_investment_offers table with all co-investment details
+      const { data: resultJson, error: rpcError } = await supabase.rpc('create_consolidated_co_investment_offer', {
+        p_investor_id: investorId,
         p_investor_email: offerData.investor_email,
-        p_startup_name: offerData.startup_name,
+        p_investor_name: offerData.investor_name || null,
+        p_startup_id: offerData.startup_id ?? null as number | null,
+        p_co_investment_opportunity_id: coInvestmentId,
         p_offer_amount: Number(offerData.offer_amount),
         p_equity_percentage: Number(offerData.equity_percentage),
-        p_currency: offerData.currency || 'USD',
-        p_startup_id: null as number | null,
-        p_investment_id: offerData.investment_id != null ? Number(offerData.investment_id) : null as number | null
+        p_currency: offerData.currency || 'USD'
       });
       
       if (rpcError) {
-        console.error('❌ Error creating co-investment offer:', rpcError);
+        console.error('❌ Error creating consolidated co-investment offer:', rpcError);
         throw rpcError;
       }
       
-      console.log('✅ Co-investment offer created with ID:', newOfferId);
+      console.log('✅ Consolidated co-investment offer result:', resultJson);
       
-      // Try to get the created offer from co_investment_offers table
-      const { data: createdOffer, error: fetchError } = await supabase
-        .from('co_investment_offers')
-        .select('*')
-        .eq('id', newOfferId)
-        .single();
-      
-      if (fetchError) {
-        console.error('⚠️ Error fetching created co-investment offer, but offer was created:', fetchError);
-        console.log('⚠️ This might be due to RLS policies. Offer ID:', newOfferId);
+      if (resultJson && resultJson.success && resultJson.offer_id) {
+        // Fetch the created offer from co_investment_offers table (NOT investment_offers)
+        const { data: createdOffer, error: fetchError } = await supabase
+          .from('co_investment_offers')
+          .select('*')
+          .eq('id', resultJson.offer_id)
+          .single();
         
-        // If we can't fetch it, construct a basic offer object from what we know
-        // This allows the frontend to work even if RLS blocks the read
-        const basicOffer = {
-          id: newOfferId,
-          co_investment_opportunity_id: coInvestmentId,
-          investor_email: offerData.investor_email,
-          startup_name: offerData.startup_name,
-          offer_amount: Number(offerData.offer_amount),
-          equity_percentage: Number(offerData.equity_percentage),
-          currency: offerData.currency || 'USD',
-          status: 'pending_lead_investor_approval', // Default status
-          created_at: new Date().toISOString()
+        if (fetchError) {
+          console.error('⚠️ Error fetching created consolidated offer:', fetchError);
+          console.log('⚠️ Offer ID:', resultJson.offer_id);
+          
+          // Return basic offer from RPC result
+          const basicOffer = {
+            id: resultJson.offer_id,
+            co_investment_opportunity_id: coInvestmentId,
+            investor_email: offerData.investor_email,
+            investor_name: offerData.investor_name,
+            investor_id: investorId,
+            startup_name: offerData.startup_name,
+            startup_id: offerData.startup_id,
+            offer_amount: Number(offerData.offer_amount),
+            equity_percentage: Number(offerData.equity_percentage),
+            currency: offerData.currency || 'USD',
+            is_consolidated: true,
+            status: 'pending',
+            created_at: new Date().toISOString(),
+            lead_investor_id: resultJson.offer?.lead_investor_id,
+            lead_investor_name: resultJson.offer?.lead_investor_name,
+            lead_investor_email: resultJson.offer?.lead_investor_email,
+            lead_investor_amount: resultJson.offer?.lead_investor_amount,
+            remaining_co_investment_amount: resultJson.offer?.remaining_co_investment_amount
+          };
+          
+          console.log('✅ Returning consolidated offer (from RPC):', basicOffer);
+          return basicOffer;
+        }
+        
+        console.log('✅ Consolidated co-investment offer created successfully:', createdOffer);
+        
+        // Format the offer for return
+        const formattedOffer = {
+          ...createdOffer,
+          offer_amount: Number(createdOffer?.offer_amount) || 0,
+          equity_percentage: Number(createdOffer?.equity_percentage) || 0,
+          is_consolidated: true,
+          created_at: createdOffer?.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString()
         };
         
-        console.log('✅ Returning basic offer object:', basicOffer);
-        return basicOffer;
+        return formattedOffer;
+      } else {
+        throw new Error(resultJson?.error || 'Failed to create consolidated co-investment offer');
       }
-      
-      console.log('✅ Co-investment offer created successfully:', createdOffer);
-      
-      // Format the offer for return
-      const formattedOffer = {
-        ...createdOffer,
-        offer_amount: Number(createdOffer?.offer_amount) || 0,
-        equity_percentage: Number(createdOffer?.equity_percentage) || 0,
-        created_at: createdOffer?.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString()
-      };
-      
-      return formattedOffer;
     } else {
       // Regular investment offer - direct insert with RLS-compatible fields
       console.log('🔄 Creating regular investment offer via direct insert with fees');
@@ -1564,22 +1595,22 @@ export const investmentService = {
   // Approve co-investment offer by investor advisor
   async approveCoInvestmentOfferInvestorAdvisor(offerId: number, action: 'approve' | 'reject') {
     try {
-      console.log('🔍 Calling approve_co_investment_offer_investor_advisor with params:', {
+      console.log('🔍 Calling approve_consolidated_co_investment_offer_co_investor_advisor with params:', {
         p_offer_id: offerId,
         p_approval_action: action
       });
       
-      // The SQL function now works with co_investment_offers table
+      // The SQL function works with co_investment_offers table
       // Verify parameters are correct: p_offer_id (INTEGER), p_approval_action (TEXT)
       console.log('🔍 RPC call parameters:', {
-        function: 'approve_co_investment_offer_investor_advisor',
+        function: 'approve_consolidated_co_investment_offer_co_investor_advisor',
         p_offer_id: offerId,
         p_offer_id_type: typeof offerId,
         p_approval_action: action,
         p_approval_action_type: typeof action
       });
       
-      const { data, error } = await supabase.rpc('approve_co_investment_offer_investor_advisor', {
+      const { data, error } = await supabase.rpc('approve_consolidated_co_investment_offer_co_investor_advisor', {
         p_offer_id: Number(offerId), // Ensure it's a number
         p_approval_action: String(action) // Ensure it's a string
       });
@@ -1597,9 +1628,9 @@ export const investmentService = {
         let errorMessage = error.message || 'Unknown error occurred';
         
         if (error.message?.includes('schema cache') || error.message?.includes('Could not find the function')) {
-          errorMessage = 'Function not found. Please run FIX_APPROVE_CO_INVESTMENT_OFFER_INVESTOR_ADVISOR.sql in Supabase SQL Editor.';
+          errorMessage = 'Function not found. Please run CONSOLIDATE_CO_INVESTMENT_SINGLE_OFFER.sql in Supabase SQL Editor.';
           console.error('💡 Schema cache issue detected. Try:');
-          console.error('   1. Run FIX_APPROVE_CO_INVESTMENT_OFFER_INVESTOR_ADVISOR.sql in Supabase SQL Editor');
+          console.error('   1. Run CONSOLIDATE_CO_INVESTMENT_SINGLE_OFFER.sql in Supabase SQL Editor');
           console.error('   2. Restart your Supabase project');
           console.error('   3. Or wait a few minutes for schema cache to refresh');
         } else if (error.message?.includes('not found')) {
@@ -1609,7 +1640,7 @@ export const investmentService = {
         } else if (error.code === 'PGRST116') {
           errorMessage = `Database error: ${error.message}. ${error.hint || ''}`;
         } else if (error.code === '42883') {
-          errorMessage = 'Function does not exist. Please run FIX_APPROVE_CO_INVESTMENT_OFFER_INVESTOR_ADVISOR.sql in Supabase SQL Editor.';
+          errorMessage = 'Function does not exist. Please run CONSOLIDATE_CO_INVESTMENT_SINGLE_OFFER.sql in Supabase SQL Editor.';
         }
         
         // Create enhanced error object
@@ -1626,6 +1657,32 @@ export const investmentService = {
       return data;
     } catch (error) {
       console.error('Error approving co-investment offer by investor advisor:', error);
+      throw error;
+    }
+  },
+
+  // Approve co-investment offer by startup advisor
+  async approveCoInvestmentOfferStartupAdvisor(offerId: number, action: 'approve' | 'reject') {
+    try {
+      console.log('🔍 Calling approve_consolidated_co_investment_offer_startup_advisor with params:', {
+        p_offer_id: offerId,
+        p_approval_action: action
+      });
+
+      const { data, error } = await supabase.rpc('approve_consolidated_co_investment_offer_startup_advisor', {
+        p_offer_id: Number(offerId),
+        p_approval_action: String(action)
+      });
+
+      if (error) {
+        console.error('❌ Error in approveCoInvestmentOfferStartupAdvisor:', error);
+        throw error;
+      }
+
+      console.log('✅ Co-investment offer startup advisor approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error approving co-investment offer by startup advisor:', error);
       throw error;
     }
   },
@@ -2423,6 +2480,25 @@ export const investmentService = {
             return acc;
           }, {} as { [email: string]: string | null });
         }
+
+        const missingInvestorEmails = investorEmails.filter((email) => !investorNames[email]);
+        if (missingInvestorEmails.length > 0) {
+          const { data: legacyUsersData, error: legacyUsersError } = await supabase
+            .from('users')
+            .select('email, name, investment_advisor_code')
+            .in('email', missingInvestorEmails);
+
+          if (!legacyUsersError && legacyUsersData) {
+            legacyUsersData.forEach((legacyUser: any) => {
+              if (legacyUser?.email && legacyUser?.name && !investorNames[legacyUser.email]) {
+                investorNames[legacyUser.email] = legacyUser.name;
+              }
+              if (legacyUser?.email && investorAdvisors[legacyUser.email] === undefined) {
+                investorAdvisors[legacyUser.email] = legacyUser.investment_advisor_code || null;
+              }
+            });
+          }
+        }
       }
 
       // Debug: Log raw data from database (development mode only)
@@ -3213,12 +3289,6 @@ export const investmentService = {
             id,
             name,
             investment_advisor_code
-          ),
-          lead_investor:user_profiles!fk_listed_by_user_id(
-            auth_user_id,
-            email,
-            name,
-            investment_advisor_code_entered
           )
         `)
         .eq('id', opportunityId)
@@ -3241,7 +3311,7 @@ export const investmentService = {
         startup_data_from_join: opportunity.startup,
         startup_has_data_from_join: !!opportunity.startup,
         startup_advisor_code_from_join: opportunity.startup?.investment_advisor_code,
-        lead_investor_data: opportunity.lead_investor
+        lead_investor_data: null
       });
       
       // IMPORTANT: Even if JOIN worked, we still fetch directly to ensure we have the latest data
@@ -4628,6 +4698,103 @@ export const subdomainService = {
     }
     
     return null;
+  },
+
+  // ============================================================================
+  // CONSOLIDATED CO-INVESTMENT APPROVAL FLOWS (in co_investment_offers table)
+  // 3-Stage Approval: Co-investor Advisor → Startup Advisor → Startup Founder
+  // investment_offers table remains completely unchanged
+  // ============================================================================
+
+  // Stage 1: Approve consolidated co-investment offer by co-investor advisor
+  async approveConsolidatedCoInvestmentCoInvestorAdvisor(offerId: number, action: 'approve' | 'reject') {
+    try {
+      console.log('🔍 Consolidate: Calling co-investor advisor approval for offer:', offerId);
+      
+      const { data, error } = await supabase.rpc('approve_consolidated_co_investment_offer_co_investor_advisor', {
+        p_offer_id: Number(offerId),
+        p_approval_action: String(action)
+      });
+
+      if (error) {
+        console.error('❌ Error in consolidate co-investor advisor approval:', error);
+        throw error;
+      }
+
+      console.log('✅ Consolidated co-investor advisor approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error with consolidated co-investor advisor approval:', error);
+      throw error;
+    }
+  },
+
+  // Stage 2: Approve consolidated co-investment offer by startup advisor
+  async approveConsolidatedCoInvestmentStartupAdvisor(offerId: number, action: 'approve' | 'reject') {
+    try {
+      console.log('🔍 Consolidate: Calling startup advisor approval for offer:', offerId);
+      
+      const { data, error } = await supabase.rpc('approve_consolidated_co_investment_offer_startup_advisor', {
+        p_offer_id: Number(offerId),
+        p_approval_action: String(action)
+      });
+
+      if (error) {
+        console.error('❌ Error in consolidate startup advisor approval:', error);
+        throw error;
+      }
+
+      console.log('✅ Consolidated startup advisor approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error with consolidated startup advisor approval:', error);
+      throw error;
+    }
+  },
+
+  // Stage 3: Approve consolidated co-investment offer by startup founder (Final)
+  async approveConsolidatedCoInvestmentStartupFounder(offerId: number, action: 'approve' | 'reject') {
+    try {
+      console.log('🔍 Consolidate: Calling startup founder approval for offer:', offerId);
+      
+      const { data, error } = await supabase.rpc('approve_consolidated_co_investment_offer_startup_founder', {
+        p_offer_id: Number(offerId),
+        p_approval_action: String(action)
+      });
+
+      if (error) {
+        console.error('❌ Error in consolidate startup founder approval:', error);
+        throw error;
+      }
+
+      console.log('✅ Consolidated startup founder approval result:', data);
+      return data;
+    } catch (error) {
+      console.error('Error with consolidated startup founder approval:', error);
+      throw error;
+    }
+  },
+
+  // Get consolidated co-investment offer display details
+  async getConsolidatedCoInvestmentDisplay(offerId: number) {
+    try {
+      console.log('🔍 Consolidate: Fetching display details for offer:', offerId);
+      
+      const { data, error } = await supabase.rpc('get_consolidated_co_investment_offer_summary', {
+        p_offer_id: Number(offerId)
+      });
+
+      if (error) {
+        console.error('❌ Error fetching consolidated offer display:', error);
+        throw error;
+      }
+
+      console.log('✅ Consolidated offer display details:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching consolidated co-investment display:', error);
+      throw error;
+    }
   },
 
   // Get configuration for current subdomain (with caching)

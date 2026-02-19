@@ -104,9 +104,9 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
   // Share and equity information
   const [shareData, setShareData] = useState({
-    totalShares: 1000000,
-    pricePerShare: 10,
-    esopReservedShares: 10000  // Fixed: Changed from 100000 to 10000 to match database default
+    totalShares: 0,
+    pricePerShare: 0,
+    esopReservedShares: 0
   });
 
   // Auto-calculate founder shares when total shares or ESOP reserved shares change
@@ -1016,12 +1016,22 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
     }
 
     if (userData.role === 'Startup') {
-      const invalidFounders = founders.filter(f => !f.name.trim() || !f.email.trim());
+      const providedFounders = founders.filter(f =>
+        !!f.name.trim() ||
+        !!f.email.trim() ||
+        !!f.mentorCode?.trim() ||
+        (f.shares || 0) > 0 ||
+        (f.equity || 0) > 0
+      );
+
+      const invalidFounders = providedFounders.filter(f => !f.name.trim() || !f.email.trim());
       if (invalidFounders.length > 0) {
-        setError('Please fill in all founder details');
+        setError('Please complete name and email for each founder you add');
         setIsLoading(false);
         return;
       }
+
+      const hasShareInfo = (shareData.totalShares > 0) || (shareData.pricePerShare > 0);
 
       // Optional fundraising validation if user fills it
       // Validate fundraising fields if active fundraising is enabled
@@ -1053,46 +1063,47 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
       }
 
       // Validate that all founders have shares specified
-      const foundersWithoutShares = founders.filter(f => !f.shares || f.shares <= 0);
+      const foundersWithoutShares = providedFounders.filter(f => !f.shares || f.shares <= 0);
       if (foundersWithoutShares.length > 0) {
-        setError('Please specify the number of shares for all founders');
+        setError('Please specify the number of shares for each founder you add');
         setIsLoading(false);
         return;
       }
 
-      // Validate share data
-      if (shareData.totalShares <= 0 || shareData.pricePerShare <= 0) {
-        setError('Please enter valid share information');
-        setIsLoading(false);
-        return;
-      }
+      if (hasShareInfo) {
+        // Validate share data only when user provides share info
+        if (shareData.totalShares <= 0 || shareData.pricePerShare <= 0) {
+          setError('Please enter valid share information');
+          setIsLoading(false);
+          return;
+        }
 
-      // Validate that allocated shares don't exceed total authorized shares
-      const totalFounderShares = founders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
-      const esopReservedShares = shareData.esopReservedShares || 0;
-      const totalAllocatedShares = totalFounderShares + esopReservedShares;
-      
-      // Allow allocated shares to be less than total shares (remaining shares available for future allocation)
-      if (totalAllocatedShares > shareData.totalShares) {
-        setError(`Total allocated shares (${totalAllocatedShares.toLocaleString()}) cannot exceed total authorized shares (${shareData.totalShares.toLocaleString()}). Please reduce founder shares or ESOP reserved shares.`);
-        setIsLoading(false);
-        return;
-      }
+        // Validate that allocated shares don't exceed total authorized shares
+        const totalFounderShares = providedFounders.reduce((sum, founder) => sum + (founder.shares || 0), 0);
+        const esopReservedShares = shareData.esopReservedShares || 0;
+        const totalAllocatedShares = totalFounderShares + esopReservedShares;
+        
+        if (totalAllocatedShares > shareData.totalShares) {
+          setError(`Total allocated shares (${totalAllocatedShares.toLocaleString()}) cannot exceed total authorized shares (${shareData.totalShares.toLocaleString()}). Please reduce founder shares or ESOP reserved shares.`);
+          setIsLoading(false);
+          return;
+        }
 
-      // Validate that total founder equity doesn't exceed 100%
-      const totalFounderEquity = founders.reduce((sum, founder) => sum + (founder.equity || 0), 0);
-      if (totalFounderEquity > 100) {
-        setError(`Total founder equity (${totalFounderEquity.toFixed(1)}%) exceeds 100%. Please adjust founder equity percentages.`);
-        setIsLoading(false);
-        return;
-      }
+        // Validate that total founder equity doesn't exceed 100%
+        const totalFounderEquity = providedFounders.reduce((sum, founder) => sum + (founder.equity || 0), 0);
+        if (totalFounderEquity > 100) {
+          setError(`Total founder equity (${totalFounderEquity.toFixed(1)}%) exceeds 100%. Please adjust founder equity percentages.`);
+          setIsLoading(false);
+          return;
+        }
 
-      // Validate that all founders have equity specified
-      const foundersWithoutEquity = founders.filter(f => !f.equity || f.equity <= 0);
-      if (foundersWithoutEquity.length > 0) {
-        setError('Please specify equity percentage for all founders');
-        setIsLoading(false);
-        return;
+        // Validate that all founders have equity specified
+        const foundersWithoutEquity = providedFounders.filter(f => !f.equity || f.equity <= 0);
+        if (foundersWithoutEquity.length > 0) {
+          setError('Please specify equity percentage for each founder you add');
+          setIsLoading(false);
+          return;
+        }
       }
     }
 
@@ -1549,8 +1560,16 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
 
           if (startup) {
             // Create founders with equity information
-            if (founders.length > 0) {
-            const foundersData = founders.map(founder => ({
+            const foundersToSave = founders.filter(founder =>
+              !!founder.name.trim() ||
+              !!founder.email.trim() ||
+              !!founder.mentorCode?.trim() ||
+              (founder.shares || 0) > 0 ||
+              (founder.equity || 0) > 0
+            );
+
+            if (foundersToSave.length > 0) {
+            const foundersData = foundersToSave.map(founder => ({
               startup_id: startup.id,
               name: founder.name,
               email: founder.email,
@@ -2335,17 +2354,17 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-slate-900 flex items-center">
                 <PieChart className="h-5 w-5 mr-2" />
-                Share Information
+                Share Information (Optional)
               </h3>
               <p className="text-sm text-slate-600">
-                Define your company's share structure and equity distribution.
+                Optional: define your company's share structure now, or set it later in Equity Allocation.
               </p>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Input
                   label="Total Shares Issued"
                   type="number"
-                  min="1"
+                  min="0"
                   value={shareData.totalShares}
                   onChange={(e) => {
                     const newTotalShares = parseInt(e.target.value) || 0;
@@ -2367,17 +2386,15 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                       }));
                     }
                   }}
-                  required
                 />
                 
                 <Input
                   label={`Price Per Share (${profileData.currency})`}
                   type="number"
-                  min="0.01"
+                  min="0"
                   step="0.01"
                   value={shareData.pricePerShare}
                   onChange={(e) => setShareData(prev => ({ ...prev, pricePerShare: parseFloat(e.target.value) || 0 }))}
-                  required
                 />
                 
                 <Input
@@ -2392,7 +2409,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                     // Auto-calculate founder shares when ESOP reserved shares change
                     autoCalculateFounderShares(shareData.totalShares, newEsopReservedShares);
                   }}
-                  required
                 />
               </div>
             </div>
@@ -2403,10 +2419,10 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-slate-900 flex items-center">
                 <Users className="h-5 w-5 mr-2" />
-                Founder Information
+                Founder Information (Optional)
               </h3>
               <p className="text-sm text-slate-600">
-                Please provide the details of all founders.
+                Optional: add founder details now, or skip and add later.
               </p>
               
               <div className="space-y-4">
@@ -2430,14 +2446,12 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                         label="Name"
                         value={founder.name}
                         onChange={(e) => updateFounder(founder.id, 'name', e.target.value)}
-                        required
                       />
                       <Input
                         label="Email"
                         type="email"
                         value={founder.email}
                         onChange={(e) => updateFounder(founder.id, 'email', e.target.value)}
-                        required
                       />
                       <Input
                         label="Number of Shares"
@@ -2457,7 +2471,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                             setTimeout(() => setIsUpdating(false), 10);
                           }
                         }}
-                        required
                       />
                       <Input
                         label={isInitialized ? "Equity (%) (auto-calculated)" : "Equity (%)"}
@@ -2481,7 +2494,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                             setTimeout(() => setIsUpdating(false), 10);
                           }
                         }}
-                        required
                         readOnly={false}
                       />
                       <Input
@@ -2621,45 +2633,6 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                   </div>
                 </>
               )}
-            </div>
-          )}
-
-          {/* Service Provider Codes (TMS-allocated codes, optional) - Only for Startup role */}
-          {userData.role === 'Startup' && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-slate-900 flex items-center">
-                <CheckCircle className="h-5 w-5 mr-2" />
-                Service Provider Codes (Optional)
-              </h3>
-              <p className="text-sm text-slate-600">
-                Enter CA/CS codes allocated by TrackMyStartup if you have them. You can leave these blank and add them later.
-              </p>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">CA Code (optional)</label>
-                  <input
-                    type="text"
-                    value={profileData.caServiceCode || ''}
-                    onChange={(e) => setProfileData(prev => ({ ...prev, caServiceCode: e.target.value }))}
-                    placeholder="Enter TMS-allocated CA code (e.g., CA-XXXX)"
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Leave blank if not assigned yet.</p>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">CS Code (optional)</label>
-                  <input
-                    type="text"
-                    value={profileData.csServiceCode || ''}
-                    onChange={(e) => setProfileData(prev => ({ ...prev, csServiceCode: e.target.value }))}
-                    placeholder="Enter TMS-allocated CS code (e.g., CS-XXXX)"
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Leave blank if not assigned yet.</p>
-                </div>
-              </div>
             </div>
           )}
 

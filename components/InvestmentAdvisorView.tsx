@@ -3817,6 +3817,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       // Stage 2: Waiting for startup advisor approval (investor advisor already approved)
       // Stage 3: Ready for startup review (investor advisor already approved, startup has no advisor)
       // Stage 4: Accepted by startup
+      // Note: New co-investment offers are in co_investment_offers table (separate), not here
       const { data: offersData, error: offersError } = await supabase
         .from('investment_offers')
         .select('*')
@@ -3885,9 +3886,12 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           // This allows advisors to see their approved/rejected offers for tracking
           finalCoInvestmentData = coInvestmentOffersData.filter((offer: any) => {
             const needsApproval = offer.status === 'pending_investor_advisor_approval' || 
-                                 offer.investor_advisor_approval_status === 'pending';
-            const wasApproved = offer.investor_advisor_approval_status === 'approved';
+                                 offer.investor_advisor_approval_status === 'pending' ||
+                                 offer.co_investor_advisor_approval_status === 'pending';
+            const wasApproved = offer.investor_advisor_approval_status === 'approved' ||
+                               offer.co_investor_advisor_approval_status === 'approved';
             const wasRejected = offer.investor_advisor_approval_status === 'rejected' ||
+                               offer.co_investor_advisor_approval_status === 'rejected' ||
                                offer.status === 'investor_advisor_rejected';
             // Show if it needs approval OR was approved/rejected by this advisor (for tracking)
             const shouldShow = needsApproval || wasApproved || wasRejected;
@@ -3895,6 +3899,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
               id: offer.id,
               status: offer.status,
               investor_advisor_approval_status: offer.investor_advisor_approval_status,
+              co_investor_advisor_approval_status: offer.co_investor_advisor_approval_status,
               needsApproval,
               wasApproved,
               wasRejected,
@@ -4030,6 +4035,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         return acc;
       }, {} as any);
 
+      const investorsByIdMap = (investorsData || []).reduce((acc, investor) => {
+        acc[investor.id] = investor;
+        return acc;
+      }, {} as any);
+
       // Create startup maps - one by ID, one by name for flexible lookup
       const startupsMap = (startupsData || []).reduce((acc, startup) => {
         acc[startup.id] = startup;
@@ -4074,18 +4084,25 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             return false;
           }
           // CRITICAL FIX: Strict validation to prevent random matches
+          // Allow either entered code or assigned advisor code to match
           const enteredCode = investor.investment_advisor_code_entered;
+          const assignedCode = investor.investment_advisor_code;
           const advisorCode = currentUser?.investment_advisor_code;
-          const investorHasThisAdvisor = advisorCode && 
-            enteredCode && 
-            typeof enteredCode === 'string' && 
-            enteredCode.trim() !== '' && 
-            enteredCode.trim() === advisorCode.trim();
+          const normalizedAdvisorCode = typeof advisorCode === 'string' ? advisorCode.trim() : '';
+          const normalizedEnteredCode = typeof enteredCode === 'string' ? enteredCode.trim() : '';
+          const normalizedAssignedCode = typeof assignedCode === 'string' ? assignedCode.trim() : '';
+          const investorHasThisAdvisor = !!normalizedAdvisorCode && (
+            (normalizedEnteredCode && normalizedEnteredCode === normalizedAdvisorCode) ||
+            (normalizedAssignedCode && normalizedAssignedCode === normalizedAdvisorCode)
+          );
           // Show co-investment offers that need approval OR have been approved/rejected by this advisor
           const needsApproval = offer.status === 'pending_investor_advisor_approval' || 
-                               offer.investor_advisor_approval_status === 'pending';
-          const wasApproved = offer.investor_advisor_approval_status === 'approved';
+                               offer.investor_advisor_approval_status === 'pending' ||
+                               offer.co_investor_advisor_approval_status === 'pending';
+          const wasApproved = offer.investor_advisor_approval_status === 'approved' ||
+                             offer.co_investor_advisor_approval_status === 'approved';
           const wasRejected = offer.investor_advisor_approval_status === 'rejected' ||
+                             offer.co_investor_advisor_approval_status === 'rejected' ||
                              offer.status === 'investor_advisor_rejected';
           const shouldShow = investorHasThisAdvisor && (needsApproval || wasApproved || wasRejected);
           
@@ -4099,6 +4116,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             needsApproval,
             status: offer.status,
             investor_advisor_approval_status: offer.investor_advisor_approval_status,
+            co_investor_advisor_approval_status: offer.co_investor_advisor_approval_status,
             shouldShow
           });
           
@@ -4193,9 +4211,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         const investorHasThisAdvisor = investor?.investment_advisor_code_entered === currentUser?.investment_advisor_code;
         const startupHasThisAdvisor = startup?.investment_advisor_code === currentUser?.investment_advisor_code;
         
-        // For co-investment offers, always show in Investor Offers section if investor has this advisor
+        // Check if this is a co-investment offer
         const isCoInvestment = !!(offer as any).is_co_investment;
-        const isInvestorOfferForCoInvestment = isCoInvestment && investorHasThisAdvisor;
+        // Check if co-investment offer is from lead investor (should show in Startup Offers, not Co-Investment tab)
+        const isLeadInvestorOffer = isCoInvestment && offer.investor_id === (offer as any).lead_investor_id;
+        
+        // For co-investment offers:
+        // - Lead investor offers: Show in Startup Offers at stage 2+ (treat like regular offers)
+        // - Co-investor offers: Stage 1 ONLY in Investor Offers, Stage 2+ in Co-Investment tab
+        const isInvestorOfferForCoInvestment = isCoInvestment && !isLeadInvestorOffer && investorHasThisAdvisor && Number(offer.stage) === 1;
         
         return {
         ...offer,
@@ -4209,26 +4233,32 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         // Mark as co-investment for display
         isCoInvestment: isCoInvestment, // Use camelCase for UI compatibility
         is_co_investment: isCoInvestment, // Keep snake_case for consistency
+        isLeadInvestorOffer: isLeadInvestorOffer, // Flag for lead investor offers (show in Startup Offers, not Co-Investment)
         // Add flags to identify if this is an investor offer or startup offer
-        // Co-investment offers: Always go to Investor Offers if investor has this advisor
+        // Co-investment offers from LEAD INVESTOR: Treat like regular offers (show in Startup Offers at stage 2+)
+        // Co-investment offers from CO-INVESTORS: Stage 1 in Investor Offers, Stage 2+ in Co-Investment tab
         // Regular offers: 
         //   - Stage 1: Always show if investor has this advisor (waiting for approval)
         //   - Stage 2: Show if investor has this advisor AND investor advisor approved (moved to startup advisor)
         //   - Stage 3: Show if investor has this advisor AND investor advisor approved (ready for startup, no startup advisor)
         //   - Stage 4: Show if investor has this advisor (accepted by startup)
-        isInvestorOffer: isInvestorOfferForCoInvestment || (investorHasThisAdvisor && (
+        isInvestorOffer: isInvestorOfferForCoInvestment || ((!isCoInvestment || isLeadInvestorOffer) && investorHasThisAdvisor && (
           offer.stage === 1 || // Waiting for investor advisor approval
           offer.stage === 2 || // Investor advisor approved or pending at startup advisor
           offer.stage === 3 || // Investor advisor approved, ready for startup
           offer.stage === 4 // Accepted by startup
         )),
-        // Startup offers: Stage 2 and Stage 3 offers where startup has this advisor OR where investor advisor needs to see their offers in startup review
+        // Startup offers: Regular investment offers (NOT co-investment) at Stage 2+ where startup has this advisor
+        // ** IMPORTANT EXCEPTION: Lead investor co-investment offers also show here (treat like regular offers) **
+        // Shows in "Startup Offers" tab in Startup Advisor dashboard
+        // ** Co-investor offers (NOT lead investor) are handled separately in "Active Investments → Co-Investment" tab **
         // This includes:
-        // 1. Offers on startups this advisor manages at stage 2 (startup_advisor_approval needed)
-        // 2. Offers advisor made directly at stage 2 (advisor is investor but startup has different advisor)
-        // 3. Offers at stage 3 where investor approved and startup is waiting (either advisor manages startup or advisor is investor)
-        // 4. Offers at stage 4 where startup advisor can see final accepted offers
-        isStartupOffer: !isCoInvestment && (
+        // 1. Lead investor offers on startups this advisor manages at stage 2 (startup_advisor_approval needed)
+        // 2. Lead investor co-investment offers at stage 2 (treat same as regular offers)
+        // 3. Offers advisor made directly at stage 2 (advisor is investor but startup has different advisor)
+        // 4. Offers at stage 3 where investor approved and startup is waiting
+        // 5. Offers at stage 4 where startup advisor can see final accepted offers
+        isStartupOffer: (!isCoInvestment || isLeadInvestorOffer) && (
           (startupHasThisAdvisor && (offer.stage === 2 || offer.stage === 3)) || // Startup advisor needs to approve (stage 2) or can see pending approval (stage 3)
           (advisorIsTheInvestor && (offer.stage === 2 || offer.stage === 3)) || // Advisor made offer directly, now at startup review (stage 2 or 3)
           (startupHasThisAdvisor && offer.stage === 4) // Startup advisor can see final accepted offers
@@ -4236,188 +4266,98 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         };
       });
 
-      // Now fetch co-investment opportunities for this advisor
-      // Stage 1: Lead investor advisor approval needed
-      const { data: coInvestmentStage1, error: coInvestmentStage1Error } = await supabase
-        .from('co_investment_opportunities')
-        .select('*')
-        .eq('status', 'active')
-        .eq('stage', 1)
-        .eq('lead_investor_advisor_approval_status', 'pending')
-        .order('created_at', { ascending: false });
-
-      if (coInvestmentStage1Error) {
-        console.error('Error fetching Stage 1 co-investment opportunities:', coInvestmentStage1Error);
-      }
-
-      // Stage 2: Startup advisor approval needed
-      const { data: coInvestmentStage2, error: coInvestmentStage2Error } = await supabase
-        .from('co_investment_opportunities')
-        .select('*')
-        .eq('status', 'active')
-        .eq('stage', 2)
-        .eq('startup_advisor_approval_status', 'pending')
-        .order('created_at', { ascending: false });
-
-      if (coInvestmentStage2Error) {
-        console.error('Error fetching Stage 2 co-investment opportunities:', coInvestmentStage2Error);
-      }
-
-      // Fetch startup data separately for both stages (manual join - no FK constraints after migration)
-      const allStageStartupIds = [
-        ...new Set([
-          ...(coInvestmentStage1 || []).map((opp: any) => opp.startup_id).filter(Boolean),
-          ...(coInvestmentStage2 || []).map((opp: any) => opp.startup_id).filter(Boolean)
-        ])
-      ];
-      
-      if (allStageStartupIds.length > 0) {
-        const { data: startupsData } = await supabase
-          .from('startups')
-          .select('id, name, investment_advisor_code, currency')
-          .in('id', allStageStartupIds);
-        
-        const startupsMap = new Map((startupsData || []).map((s: any) => [s.id, s]));
-        
-        // Attach startup data to Stage 1 opportunities
-        if (coInvestmentStage1) {
-          coInvestmentStage1.forEach((opp: any) => {
-            opp.startup = startupsMap.get(opp.startup_id);
-          });
-        }
-        
-        // Attach startup data to Stage 2 opportunities
-        if (coInvestmentStage2) {
-          coInvestmentStage2.forEach((opp: any) => {
-            opp.startup = startupsMap.get(opp.startup_id);
-          });
-        }
-      }
-
-      // Fetch user profile data for listed_by_user_id (manual join - no FK constraints after migration)
-      const allListedByUserIds = [
-        ...new Set([
-          ...(coInvestmentStage1 || []).map((opp: any) => opp.listed_by_user_id).filter(Boolean),
-          ...(coInvestmentStage2 || []).map((opp: any) => opp.listed_by_user_id).filter(Boolean)
-        ])
-      ];
-      
-      if (allListedByUserIds.length > 0) {
-        // Use direct user_profiles query (RLS is now simple and non-recursive)
-        const { data: userProfilesData } = await supabase
-          .from('user_profiles')
-          .select('auth_user_id, name, email, investment_advisor_code_entered, role')
-          .in('auth_user_id', allListedByUserIds)
-          .eq('role', 'Investor');
-        
-        const userProfilesMap = new Map((userProfilesData || []).map((up: any) => [up.auth_user_id, up]));
-        
-        // Attach user profile data to Stage 1 opportunities
-        if (coInvestmentStage1) {
-          coInvestmentStage1.forEach((opp: any) => {
-            opp.listed_by_user = userProfilesMap.get(opp.listed_by_user_id);
-          });
-        }
-        
-        // Attach user profile data to Stage 2 opportunities
-        if (coInvestmentStage2) {
-          coInvestmentStage2.forEach((opp: any) => {
-            opp.listed_by_user = userProfilesMap.get(opp.listed_by_user_id);
-          });
-        }
-      }
-
-      // Filter and format co-investment opportunities
+      // Filter and format co-investment OFFERS from co_investment_offers table
+      // These are actual co-investor offers, not opportunities
       const coInvestmentOffers: any[] = [];
 
-      // Stage 1 co-investments: Filter by lead investor advisor code
-      if (coInvestmentStage1) {
-        const filteredStage1 = coInvestmentStage1.filter((opp: any) => {
-          const leadInvestorCode = opp.listed_by_user?.investment_advisor_code_entered;
-          return leadInvestorCode === currentUser?.investment_advisor_code;
-        });
+      // Fetch co-investment offers at stage 2 and stage 3
+      // Stage 2: pending startup advisor review
+      // Stage 3: already approved by startup advisor (lead investment can be shown first)
+      const { data: coInvestmentStageOffers, error: stage2Error } = await supabase
+        .from('co_investment_offers')
+        .select('*')
+        .in('stage', [2, 3])
+        .order('created_at', { ascending: false });
 
-        filteredStage1.forEach((opp: any) => {
-          const startup = opp.startup;
-          const leadInvestor = opp.listed_by_user;
-          
-          // Format as an "offer" object similar to investment offers
-          coInvestmentOffers.push({
-            id: `co_inv_${opp.id}`, // Unique ID to avoid conflicts
-            co_investment_id: opp.id,
-            startup_id: opp.startup_id,
-            startup_name: startup?.name || 'Unknown Startup',
-            investor_name: leadInvestor?.name || 'Unknown Investor',
-            investor_email: leadInvestor?.email || null,
-            offer_amount: opp.investment_amount,
-            equity_percentage: opp.equity_percentage,
-            currency: startup?.currency || 'USD',
-            created_at: opp.created_at,
-            stage: opp.stage,
-            lead_investor_advisor_approval_status: opp.lead_investor_advisor_approval_status,
-            startup_advisor_approval_status: opp.startup_advisor_approval_status,
-            startup_approval_status: opp.startup_approval_status,
-            // Mark as co-investment
-            isCoInvestment: true,
-            isInvestorOffer: true, // Stage 1 co-investments go to Investor Offers
-            isStartupOffer: false,
-            // Add startup and investor data
-            startup: startup,
-            investor: leadInvestor,
-            // Co-investment specific fields
-            minimum_co_investment: opp.minimum_co_investment,
-            maximum_co_investment: opp.maximum_co_investment,
-            description: opp.description,
-            listed_by_user_id: opp.listed_by_user_id
-          });
-        });
+      if (stage2Error) {
+        console.error('Error fetching stage 2 co-investment offers:', stage2Error);
+      } else {
+        console.log('✅ Fetched stage 2/3 co-investment offers:', coInvestmentStageOffers?.length || 0);
       }
 
-      // Stage 2 co-investments: Filter by startup advisor code
-      if (coInvestmentStage2) {
-        const filteredStage2 = coInvestmentStage2.filter((opp: any) => {
-          const startup = opp.startup;
+      // Fetch startup data for co-investment offers
+      const coInvestStartupIds = [...new Set((coInvestmentStageOffers || []).map((o: any) => o.startup_id).filter(Boolean))];
+      let coInvestStartupsData: any[] = [];
+      if (coInvestStartupIds.length > 0) {
+        const { data: coStartups } = await supabase
+          .from('startups')
+          .select('id, name, investment_advisor_code, currency')
+          .in('id', coInvestStartupIds);
+        coInvestStartupsData = coStartups || [];
+      }
+
+      const coInvestStartupsMap = coInvestStartupsData.reduce((acc, s) => {
+        acc[s.id] = s;
+        return acc;
+      }, {} as any);
+
+      // Filter and format stage 2/3 co-investment offers for startup advisor
+      // Show ALL offers for managed startups (lead investor + co-investors)
+      if (coInvestmentStageOffers && coInvestmentStageOffers.length > 0) {
+        const filteredStage2 = coInvestmentStageOffers.filter((offer: any) => {
+          const startup = coInvestStartupsMap[offer.startup_id];
+          // Show if this advisor manages the startup
           return startup?.investment_advisor_code === currentUser?.investment_advisor_code;
         });
 
-        filteredStage2.forEach((opp: any) => {
-          const startup = opp.startup;
-          const leadInvestor = opp.listed_by_user;
+        console.log('✅ Stage 2 co-investment offers for this advisor (lead + co-investors):', filteredStage2.length);
+
+        filteredStage2.forEach((offer: any) => {
+          const startup = coInvestStartupsMap[offer.startup_id];
+          const investorData = investorsMap[offer.investor_email] || investorsByIdMap[offer.investor_id];
+          const leadInvestorData = investorsMap[offer.lead_investor_email] || investorsByIdMap[offer.lead_investor_id];
           
-          // Format as an "offer" object similar to investment offers
+          // Format as co-investment offer for display in Active Investments → Co-Investment tab
           coInvestmentOffers.push({
-            id: `co_inv_${opp.id}`, // Unique ID to avoid conflicts
-            co_investment_id: opp.id,
-            startup_id: opp.startup_id,
-            startup_name: startup?.name || 'Unknown Startup',
-            investor_name: leadInvestor?.name || 'Unknown Investor',
-            investor_email: leadInvestor?.email || null,
-            offer_amount: opp.investment_amount,
-            equity_percentage: opp.equity_percentage,
-            currency: startup?.currency || 'USD',
-            created_at: opp.created_at,
-            stage: opp.stage,
-            lead_investor_advisor_approval_status: opp.lead_investor_advisor_approval_status,
-            startup_advisor_approval_status: opp.startup_advisor_approval_status,
-            startup_approval_status: opp.startup_approval_status,
+            id: offer.id, // Use actual offer ID from co_investment_offers table
+            co_investment_id: offer.co_investment_opportunity_id,
+            startup_id: offer.startup_id,
+            startup_name: offer.startup_name || startup?.name || 'Unknown Startup',
+            investor_name: investorData?.name || offer.investor_name || offer.investor_email || 'Unknown Investor',
+            investor_email: investorData?.email || offer.investor_email,
+            investor_id: offer.investor_id,
+            lead_investor_name: leadInvestorData?.name || offer.lead_investor_name || 'Lead Investor',
+            lead_investor_email: leadInvestorData?.email || offer.lead_investor_email,
+            lead_investor_id: offer.lead_investor_id,
+            offer_amount: offer.offer_amount,
+            investment_amount: offer.offer_amount, // Alias for display
+            equity_percentage: offer.equity_percentage,
+            currency: offer.currency || startup?.currency || 'USD',
+            created_at: offer.created_at,
+            stage: offer.stage,
+            status: offer.status,
+            investor_advisor_approval_status: offer.investor_advisor_approval_status,
+            startup_advisor_approval_status: offer.startup_advisor_approval_status,
+            startup_approval_status: offer.startup_approval_status,
+            co_investor_advisor_approval_status: offer.co_investor_advisor_approval_status,
             // Mark as co-investment
             isCoInvestment: true,
+            is_co_investment: true,
             isInvestorOffer: false,
-            isStartupOffer: true, // Stage 2 co-investments go to Startup Offers
-            // Add startup and investor data
-            startup: startup,
-            investor: leadInvestor,
+            isStartupOffer: false, // This goes to Co-Investment tab, not Startup Offers
+            // Add startup data
+            startup: startup || null,
             // Co-investment specific fields
-            minimum_co_investment: opp.minimum_co_investment,
-            maximum_co_investment: opp.maximum_co_investment,
-            description: opp.description,
-            listed_by_user_id: opp.listed_by_user_id
+            minimum_co_investment_amount: offer.minimum_co_investment_amount,
+            maximum_co_investment_amount: offer.maximum_co_investment_amount,
+            remaining_co_investment_amount: offer.remaining_co_investment_amount,
+            isLeadInvestorOffer: offer.investor_id === offer.lead_investor_id
           });
         });
       }
 
-      // Combine regular offers and co-investment opportunities
-      const allOffers = [...filteredOffers, ...coInvestmentOffers];
+      // Combine regular offers and co-investment offers (co-investment offers NOT included in offersMade)
+      const allOffers = [...filteredOffers];
 
       // Set the properly filtered offers (no debugging fallback)
       setOffersMade(allOffers);
@@ -4979,7 +4919,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           return matches;
         });
 
-        // Also fetch Stage 4 fully approved opportunities (startup approved)
+        // Also fetch Stage 3 fully approved opportunities (startup approved)
         // These are visible to all advisors and investors
         const { data: stage4Opps, error: stage4Error } = await supabase
           .from('co_investment_opportunities')
@@ -4998,11 +4938,11 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
             created_at
           `)
           .eq('status', 'active')
-          .eq('stage', 4)
+          .eq('stage', 3)
           .eq('startup_approval_status', 'approved')
           .order('created_at', { ascending: false });
 
-        // Fetch startup data separately for Stage 4 (manual join - no FK constraints after migration)
+        // Fetch startup data separately for Stage 3 (manual join - no FK constraints after migration)
         if (stage4Opps && stage4Opps.length > 0) {
           const startupIds = [...new Set(stage4Opps.map((opp: any) => opp.startup_id).filter(Boolean))];
           if (startupIds.length > 0) {
@@ -5018,7 +4958,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
           }
         }
         
-        // Calculate lead investor invested and remaining amounts for Stage 4 opportunities
+        // Calculate lead investor invested and remaining amounts for Stage 3 opportunities
         if (stage4Opps) {
           stage4Opps.forEach((opp: any) => {
             const totalInvestment = Number(opp.investment_amount) || 0;
@@ -5029,7 +4969,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
         }
         
         if (stage4Error) {
-          console.error('Error fetching Stage 4 co-investment opportunities:', stage4Error);
+          console.error('Error fetching Stage 3 co-investment opportunities:', stage4Error);
         }
 
         // Combine both sets
@@ -5982,6 +5922,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       
       // Check if this is a co-investment offer (could be is_co_investment or isCoInvestment)
       const isCoInvestment = !!(offer as any)?.is_co_investment || !!(offer as any)?.isCoInvestment;
+      const isCoInvestmentOpportunity = !!(offer as any)?.co_investment_id ||
+        (typeof offer.id === 'string' && offer.id.startsWith('co_inv_'));
       
       // For co-investment offers, use the actual offer.id (from co_investment_offers table)
       // For regular offers, also use offer.id (from investment_offers table)
@@ -5997,20 +5939,33 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       
       let result;
       if (isCoInvestment) {
-        // Handle co-investment offer approval
-        // For co-investment offers, we need to approve the offer itself, not the opportunity
-        console.log(`🔍 Calling co-investment offer approval function: ${type === 'investor' ? 'approveCoInvestmentOfferInvestorAdvisor' : 'approveCoInvestmentOfferStartupAdvisor'}`);
-        if (type === 'investor') {
-          // Investor advisor approval for co-investment offer
-          // Use actualOfferId which is the ID from co_investment_offers table
-          result = await investmentService.approveCoInvestmentOfferInvestorAdvisor(actualOfferId, action);
+        if (isCoInvestmentOpportunity) {
+          const opportunityId = Number((offer as any).co_investment_id || String(offer.id).replace('co_inv_', ''));
+          console.log('🔍 Calling co-investment opportunity approval:', {
+            opportunityId,
+            type,
+            action
+          });
+          if (type === 'investor') {
+            // Stage 1: Lead investor advisor approval (opportunity)
+            result = await investmentService.approveLeadInvestorAdvisorCoInvestment(opportunityId, action);
+          } else {
+            // Stage 2: Startup advisor approval (opportunity)
+            result = await investmentService.approveStartupAdvisorCoInvestment(opportunityId, action);
+          }
+          console.log('✅ Co-investment opportunity approval result:', result);
         } else {
-          // Startup advisor approval for co-investment offer
-          // Note: Co-investment offers typically don't go through startup advisor approval
-          // If they do, use the regular startup advisor approval flow
-          result = await investmentService.approveStartupAdvisorOffer(actualOfferId, action);
+          // Handle consolidated co-investment offer approval (co_investment_offers table)
+          console.log(`🔍 Calling consolidated co-investment offer approval function: ${type === 'investor' ? 'approveCoInvestmentOfferInvestorAdvisor' : 'approveCoInvestmentOfferStartupAdvisor'}`);
+          if (type === 'investor') {
+            // Stage 1: Co-investor advisor approval
+            result = await investmentService.approveCoInvestmentOfferInvestorAdvisor(actualOfferId, action);
+          } else {
+            // Stage 2: Startup advisor approval
+            result = await investmentService.approveCoInvestmentOfferStartupAdvisor(actualOfferId, action);
+          }
+          console.log('✅ Consolidated co-investment offer approval result:', result);
         }
-        console.log('✅ Co-investment offer approval result:', result);
       } else {
         // Handle regular investment offer approval
         console.log(`🔍 Calling regular offer approval function: ${type === 'investor' ? 'approveInvestorAdvisorOffer' : 'approveStartupAdvisorOffer'}`);
@@ -7333,6 +7288,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         const investorAdvisorStatus = (offer as any).investor_advisor_approval_status;
                         const startupAdvisorStatus = (offer as any).startup_advisor_approval_status;
                         const hasContactDetails = (offer as any).contact_details_revealed;
+                        const isCoInvestmentOpportunity = !!(offer as any).co_investment_id;
+                        const startupAskAmount = Number(offer.offer_amount) || 0;
+                        const startupAskEquity = Number(offer.equity_percentage) || 0;
+                        const remainingAmount = Number((offer as any).maximum_co_investment) || 0;
+                        const leadOfferAmount = Math.max(startupAskAmount - remainingAmount, 0);
+                        const leadOfferEquity = startupAskAmount > 0
+                          ? (startupAskEquity * (leadOfferAmount / startupAskAmount))
+                          : 0;
                         
                         return (
                           <tr key={offer.id}>
@@ -7352,7 +7315,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </td>
                             <td className="px-2 sm:px-6 py-4 text-xs sm:text-sm text-gray-500">
                                 <div className="text-xs sm:text-sm font-medium text-gray-900">
-                                  {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
+                                  {isCoInvestmentOpportunity ? (
+                                    <>
+                                      Lead offer: {formatCurrency(leadOfferAmount, offer.currency || 'USD')} for {leadOfferEquity.toFixed(2)}% equity
+                                    </>
+                                  ) : (
+                                    <>
+                                      {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
+                                    </>
+                                  )}
                                   {(offer as any).isCoInvestment && (offer as any).minimum_co_investment && (
                                     <div className="text-xs text-gray-500 mt-1">
                                       Co-investment: {formatCurrency(Number((offer as any).minimum_co_investment) || 0, offer.currency || 'USD')} - {formatCurrency(Number((offer as any).maximum_co_investment) || 0, offer.currency || 'USD')}
@@ -7363,13 +7334,25 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             <td className="px-2 sm:px-6 py-4 text-xs sm:text-sm text-gray-500">
                               <div className="text-xs sm:text-sm font-medium text-gray-900">
                                 {(() => {
+                                  if (isCoInvestmentOpportunity) {
+                                    const currency = offer.currency || 'USD';
+                                    if (startupAskAmount === 0 && startupAskEquity === 0) {
+                                      return (
+                                        <span className="text-gray-500 italic">
+                                          Funding ask not specified
+                                        </span>
+                                      );
+                                    }
+                                    return `Seeking ${formatCurrency(startupAskAmount, currency)} for ${startupAskEquity}% equity`;
+                                  }
+
                                   // Use the correct column names from fundraising_details table
                                   const investmentValue = Number(offer.fundraising?.value) || 0;
                                   const equityAllocation = Number(offer.fundraising?.equity) || 0;
-                                  
+
                                   // Get currency from startup table
                                   const currency = offer.startup?.currency || offer.currency || 'USD';
-                                  
+
                                   if (investmentValue === 0 && equityAllocation === 0) {
                                     return (
                                       <span className="text-gray-500 italic">
@@ -7377,7 +7360,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                       </span>
                                     );
                                   }
-                                  
+
                                   return `Seeking ${formatCurrency(investmentValue, currency)} for ${equityAllocation}% equity`;
                                 })()}
                               </div>
@@ -7390,38 +7373,47 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 // For co-investment offers, check status field
                                 if (isCoInvestment) {
                                   const coStatus = (offer as any).status || 'pending';
-                                  if (coStatus === 'pending_investor_advisor_approval') {
-                                  return (
-                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                  const coInvestorAdvisorStatus = (offer as any).co_investor_advisor_approval_status || 'not_required';
+
+                                  if (coInvestorAdvisorStatus === 'pending' || coStatus === 'pending_investor_advisor_approval') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
                                         🔵 Co-Investment: Investor Advisor Approval
-                              </span>
-                                  );
-                                }
-                                  if (coStatus === 'pending_lead_investor_approval') {
-                                  return (
-                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                                        🟠 Co-Investment: Lead Investor Approval
-                                    </span>
-                                  );
-                                }
-                                  if (coStatus === 'pending_startup_approval') {
-                                  return (
-                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                        🟢 Co-Investment: Startup Review
-                                    </span>
-                                  );
-                                }
-                                  if (coStatus === 'investor_advisor_rejected') {
+                                      </span>
+                                    );
+                                  }
+                                  if (coInvestorAdvisorStatus === 'approved') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                        ✅ Co-Investment: Investor Advisor Approved
+                                      </span>
+                                    );
+                                  }
+                                  if (coInvestorAdvisorStatus === 'rejected' || coStatus === 'investor_advisor_rejected') {
                                     return (
                                       <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
                                         ❌ Rejected by Investor Advisor
                                       </span>
                                     );
                                   }
-                                  if (coStatus === 'lead_investor_rejected') {
+                                  if (coStatus === 'pending_startup_advisor_approval' || coStatus === 'pending_lead_investor_approval') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                                        🟠 Co-Investment: Startup Advisor Approval
+                                      </span>
+                                    );
+                                  }
+                                  if (coStatus === 'pending_startup_approval') {
+                                    return (
+                                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                        🟢 Co-Investment: Startup Review
+                                      </span>
+                                    );
+                                  }
+                                  if (coStatus === 'startup_advisor_rejected' || coStatus === 'lead_investor_rejected') {
                                     return (
                                       <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                                        ❌ Rejected by Lead Investor
+                                        ❌ Rejected by Startup Advisor
                                       </span>
                                     );
                                   }
@@ -7597,22 +7589,26 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                 const isCoInvestment = !!(offer as any).is_co_investment || !!(offer as any).co_investment_opportunity_id;
                                 const coStatus = (offer as any).status || 'pending';
                                 const investorAdvisorStatus = (offer as any).investor_advisor_approval_status || 'not_required';
+                                const coInvestorAdvisorStatus = (offer as any).co_investor_advisor_approval_status || 'not_required';
                                 const startupAdvisorStatus = (offer as any).startup_advisor_approval_status || 'not_required';
                                 
                                 // Get offer stage (default to 1 if not set)
                                 const offerStage = (offer as any).stage || 1;
                                 const offerStatus = (offer as any).status || 'pending';
                                 
-                                // For co-investment offers: Only show Accept/Decline if status is still pending_investor_advisor_approval
+                                // For co-investment offers: Only show Accept/Decline if co-investor advisor approval is pending
                                 if (isCoInvestment) {
                                   // Check if offer is rejected
                                   const isRejected = investorAdvisorStatus === 'rejected' || 
+                                                    coInvestorAdvisorStatus === 'rejected' ||
                                                     coStatus === 'investor_advisor_rejected' || 
                                                     coStatus === 'lead_investor_rejected' || 
                                                     coStatus === 'rejected';
                                   
                                   // If already approved by investor advisor, don't show action buttons
-                                  if (coStatus !== 'pending_investor_advisor_approval' || investorAdvisorStatus === 'approved' || investorAdvisorStatus === 'rejected') {
+                                  if ((coStatus !== 'pending_investor_advisor_approval' && coInvestorAdvisorStatus !== 'pending') ||
+                                      coInvestorAdvisorStatus === 'approved' ||
+                                      coInvestorAdvisorStatus === 'rejected') {
                                     return (
                                       <div className="flex flex-col space-y-1">
                                         <button
@@ -7645,14 +7641,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                         )}
                                         {!isRejected && (
                                           <span className="text-xs text-gray-500 mt-1">
-                                            {investorAdvisorStatus === 'approved' ? '✅ Approved' : 'No actions'}
+                                            {coInvestorAdvisorStatus === 'approved' ? '✅ Approved' : 'No actions'}
                                           </span>
                                         )}
                                       </div>
                                     );
                                   }
                                   
-                                  // Show Accept/Decline buttons only when status is pending_investor_advisor_approval
+                                  // Show Accept/Decline buttons only when co-investor advisor approval is pending
                                   return (
                                     <div className="flex flex-col space-y-1">
                                       <button
@@ -7683,7 +7679,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                             co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
                                             passed_offerId: offerId,
                                             status: coStatus,
-                                            investor_advisor_status: investorAdvisorStatus
+                                            investor_advisor_status: investorAdvisorStatus,
+                                            co_investor_advisor_status: coInvestorAdvisorStatus
                                           });
                                           handleAdvisorApproval(offerId, 'approve', 'investor');
                                         }}
@@ -7702,7 +7699,8 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                             co_investment_opportunity_id: (offer as any).co_investment_opportunity_id,
                                             passed_offerId: offerId,
                                             status: coStatus,
-                                            investor_advisor_status: investorAdvisorStatus
+                                            investor_advisor_status: investorAdvisorStatus,
+                                            co_investor_advisor_status: coInvestorAdvisorStatus
                                           });
                                           handleAdvisorApproval(offerId, 'reject', 'investor');
                                         }}
@@ -7979,6 +7977,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                         const investorAdvisorStatus = (offer as any).investor_advisor_approval_status;
                         const startupAdvisorStatus = (offer as any).startup_advisor_approval_status;
                         const hasContactDetails = (offer as any).contact_details_revealed;
+                        const isCoInvestmentOpportunity = !!(offer as any).co_investment_id;
+                        const startupAskAmount = Number(offer.offer_amount) || 0;
+                        const startupAskEquity = Number(offer.equity_percentage) || 0;
+                        const remainingAmount = Number((offer as any).maximum_co_investment) || 0;
+                        const leadOfferAmount = Math.max(startupAskAmount - remainingAmount, 0);
+                        const leadOfferEquity = startupAskAmount > 0
+                          ? (startupAskEquity * (leadOfferAmount / startupAskAmount))
+                          : 0;
                         
                         // Check if this offer was created by the current investment advisor (as investor)
                         const isFromAdvisor = (offer as any).investor_id === currentUser?.id;
@@ -8018,7 +8024,15 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             </td>
                             <td className="px-3 py-4 text-xs sm:text-sm text-gray-500">
                               <div className="text-xs sm:text-sm font-medium text-gray-900">
-                                {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
+                                {isCoInvestmentOpportunity ? (
+                                  <>
+                                    Lead offer: {formatCurrency(leadOfferAmount, offer.currency || 'USD')} for {leadOfferEquity.toFixed(2)}% equity
+                                  </>
+                                ) : (
+                                  <>
+                                    {formatCurrency(Number(offer.offer_amount) || 0, offer.currency || 'USD')} for {Number(offer.equity_percentage) || 0}% equity
+                                  </>
+                                )}
                                 {(offer.upfront_fee || offer.success_fee) && (
                                   <div className="text-xs text-gray-600 mt-1 space-y-0.5">
                                     {offer.upfront_fee && (
@@ -8039,6 +8053,18 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                             <td className="px-3 py-4 text-xs sm:text-sm text-gray-500">
                               <div className="text-xs sm:text-sm font-medium text-gray-900">
                                 {(() => {
+                                  if (isCoInvestmentOpportunity) {
+                                    const currency = offer.startup?.currency || offer.currency || 'USD';
+                                    if (startupAskAmount === 0 && startupAskEquity === 0) {
+                                      return (
+                                        <span className="text-gray-500 italic">
+                                          Funding ask not specified
+                                        </span>
+                                      );
+                                    }
+                                    return `Seeking ${formatCurrency(startupAskAmount, currency)} for ${startupAskEquity}% equity`;
+                                  }
+
                                   const investmentValue = Number(offer.fundraising?.value) || 0;
                                   const equityAllocation = Number(offer.fundraising?.equity) || 0;
                                   const currency = offer.startup?.currency || offer.currency || 'USD';
@@ -8070,10 +8096,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                     </span>
                                   );
                                 }
-                                  if (coStatus === 'pending_lead_investor_approval') {
+                                  if (coStatus === 'pending_startup_advisor_approval' || coStatus === 'pending_lead_investor_approval') {
                                   return (
                                       <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                                        🟠 Co-Investment: Lead Investor Approval
+                                        🟠 Co-Investment: Startup Advisor Approval
                                     </span>
                                   );
                                 }
@@ -8091,10 +8117,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                                       </span>
                                     );
                                   }
-                                  if (coStatus === 'lead_investor_rejected') {
+                                  if (coStatus === 'startup_advisor_rejected' || coStatus === 'lead_investor_rejected') {
                                     return (
                                       <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                                        ❌ Rejected by Lead Investor
+                                        ❌ Rejected by Startup Advisor
                                       </span>
                                     );
                                   }
@@ -9412,67 +9438,121 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                     </div>
                   </div>
                   
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Startup</th>
-                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Investor</th>
-                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Investment Amount</th>
-                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {!coInvestmentOffers || coInvestmentOffers.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="px-3 sm:px-6 py-8 text-center text-gray-500">
-                              <div className="flex flex-col items-center">
-                                <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a3 3 0 00-.879-2.121M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2a3 3 0 01.879-2.121M12 12a4 4 0 100-8 4 4 0 000 8zm0 0a4 4 0 01-3.121 1.5H9a3 3 0 013 3v1" />
-                                </svg>
-                                <h3 className="text-lg font-medium text-gray-900 mb-2">No Co-Investment Opportunities</h3>
-                                <p className="text-sm text-gray-500">
-                                  No co-investment offers at the moment. Check back soon for partnership opportunities.
-                                </p>
+                  {!coInvestmentOffers || coInvestmentOffers.length === 0 ? (
+                    <div className="py-8 text-center text-gray-500">
+                      <div className="flex flex-col items-center">
+                        <svg className="h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a3 3 0 00-.879-2.121M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2a3 3 0 01.879-2.121M12 12a4 4 0 100-8 4 4 0 000 8zm0 0a4 4 0 01-3.121 1.5H9a3 3 0 013 3v1" />
+                        </svg>
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">No Co-Investment Opportunities</h3>
+                        <p className="text-sm text-gray-500">
+                          No co-investment offers at the moment. Check back soon for partnership opportunities.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {Object.values(
+                        (coInvestmentOffers || []).reduce((acc: Record<string, any>, offer: any) => {
+                          const groupKey = String(offer.co_investment_id || `startup-${offer.startup_id}`);
+                          if (!acc[groupKey]) {
+                            acc[groupKey] = {
+                              key: groupKey,
+                              startup_name: offer.startup_name,
+                              startup_id: offer.startup_id,
+                              currency: offer.currency,
+                              offers: [] as any[]
+                            };
+                          }
+                          acc[groupKey].offers.push(offer);
+                          return acc;
+                        }, {})
+                      ).map((group: any) => {
+                        const orderedOffers = [...(group.offers || [])].sort((a: any, b: any) => {
+                          const score = (offer: any) => {
+                            const isLead = !!offer.isLeadInvestorOffer;
+                            const isLeadApproved = isLead && (
+                              offer.startup_advisor_approval_status === 'approved' ||
+                              Number(offer.stage) === 3
+                            );
+                            if (isLeadApproved) return 0;
+                            if (isLead) return 1;
+                            return 2;
+                          };
+
+                          const scoreDiff = score(a) - score(b);
+                          if (scoreDiff !== 0) return scoreDiff;
+
+                          const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+                          const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+                          return bTime - aTime;
+                        });
+
+                        const leadOffer = orderedOffers.find((offer: any) => offer.isLeadInvestorOffer);
+                        const coInvestorOffers = orderedOffers.filter((offer: any) => !offer.isLeadInvestorOffer);
+
+                        return (
+                          <div key={group.key} className="border border-gray-200 rounded-lg p-4 sm:p-5 bg-gray-50">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                              <div>
+                                <h4 className="text-sm sm:text-base font-semibold text-gray-900">{group.startup_name || 'Unknown Startup'}</h4>
+                                <p className="text-xs text-gray-500">Co-Investment Opportunity #{group.key}</p>
                               </div>
-                            </td>
-                          </tr>
-                        ) : (
-                          coInvestmentOffers.map((coInvest) => (
-                            <tr key={coInvest.id}>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
-                                {coInvest.startup_name || 'Unknown Startup'}
-                              </td>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-500">
-                                {coInvest.lead_investor_name || 'Unknown Investor'}
-                              </td>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900">
-                                {formatCurrency(Number(coInvest.investment_amount) || 0, coInvest.currency || 'USD')}
-                              </td>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                  coInvest.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                                  coInvest.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                                  'bg-yellow-100 text-yellow-800'
-                                }`}>
-                                  {coInvest.status || 'pending'}
-                                </span>
-                              </td>
-                              <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium">
-                                <button
-                                  onClick={() => handleViewInvestmentDetails(coInvest)}
-                                  className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 sm:px-3 py-1 rounded-md text-xs font-medium transition-colors"
-                                >
-                                  View Details
-                                </button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                              <span className="text-xs sm:text-sm text-gray-600">{orderedOffers.length} offer(s)</span>
+                            </div>
+
+                            {leadOffer && (
+                              <div className="mb-3 p-3 rounded-md border border-indigo-200 bg-indigo-50">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                  <div>
+                                    <div className="text-xs font-medium text-indigo-700 mb-1">Lead Investor Offer</div>
+                                    <div className="text-sm font-medium text-gray-900">{leadOffer.investor_name || leadOffer.lead_investor_name || 'Lead Investor'}</div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-sm font-semibold text-gray-900">
+                                      {formatCurrency(Number(leadOffer.investment_amount) || 0, leadOffer.currency || group.currency || 'USD')}
+                                    </div>
+                                    {leadOffer.equity_percentage && (
+                                      <div className="text-xs text-indigo-600 font-medium">
+                                        {Number(leadOffer.equity_percentage).toFixed(2)}% equity
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="space-y-2">
+                              {coInvestorOffers.length === 0 ? (
+                                <div className="text-xs text-gray-500">No co-investor offers yet for this startup.</div>
+                              ) : (
+                                coInvestorOffers.map((offer: any) => (
+                                  <div key={offer.id} className="p-3 rounded-md border border-gray-200 bg-white">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                      <div>
+                                        <div className="text-xs font-medium text-gray-600 mb-1">Co-Investor Offer</div>
+                                        <div className="text-sm font-medium text-gray-900">{offer.investor_name || 'Investor'}</div>
+                                      </div>
+                                      <div className="text-right">
+                                        <div className="text-sm font-semibold text-gray-900">
+                                          {formatCurrency(Number(offer.investment_amount) || 0, offer.currency || group.currency || 'USD')}
+                                        </div>
+                                        {offer.equity_percentage && (
+                                          <div className="text-xs text-gray-600 font-medium">
+                                            {Number(offer.equity_percentage).toFixed(2)}% equity
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

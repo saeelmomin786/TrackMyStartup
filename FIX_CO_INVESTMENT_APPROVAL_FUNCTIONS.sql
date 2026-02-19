@@ -10,7 +10,7 @@ ADD COLUMN IF NOT EXISTS startup_approval_at TIMESTAMP WITH TIME ZONE;
 -- Step 2: Ensure all approval status columns exist and are TEXT type (not enum)
 -- First, add columns if they don't exist
 ALTER TABLE public.co_investment_opportunities 
-ADD COLUMN IF NOT EXISTS stage INTEGER DEFAULT 1 CHECK (stage >= 1 AND stage <= 4),
+ADD COLUMN IF NOT EXISTS stage INTEGER DEFAULT 1 CHECK (stage >= 1 AND stage <= 3),
 ADD COLUMN IF NOT EXISTS lead_investor_advisor_approval_status TEXT DEFAULT 'not_required',
 ADD COLUMN IF NOT EXISTS startup_advisor_approval_status TEXT DEFAULT 'not_required',
 ADD COLUMN IF NOT EXISTS startup_approval_status TEXT DEFAULT 'pending';
@@ -293,11 +293,11 @@ BEGIN
     
     -- Set approval status
     IF p_approval_action = 'approve' THEN
-        -- Move to stage 4 (final approval)
-        new_stage := 4;
+        -- Move to stage 3 (final approval)
+        new_stage := 3;
         new_status := 'approved';
         
-        -- Update the opportunity to Stage 4 with approved status
+        -- Update the opportunity to Stage 3 with approved status
         -- IMPORTANT: Set status to 'active' to make it visible in public dashboards
         UPDATE public.co_investment_opportunities 
         SET 

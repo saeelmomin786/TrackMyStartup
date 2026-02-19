@@ -472,7 +472,7 @@ const StartupView: React.FC<StartupViewProps> = ({
                     <div className="flex justify-between items-start mb-3 sm:mb-4">
                       <div className="flex-1 min-w-0">
                         <h3 className="text-base sm:text-lg font-semibold text-slate-900 truncate">{offer.startup_name}</h3>
-                        <p className="text-xs sm:text-sm text-slate-600 truncate">From: {offer.investor_email}</p>
+                        <p className="text-xs sm:text-sm text-slate-600 truncate">From: {offer.investor_name || 'Investor'}</p>
                       </div>
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ml-2 flex-shrink-0 ${
                         offer.status === 'accepted' 

@@ -520,7 +520,7 @@ const App: React.FC = () => {
 
   // NEW: Check subscription in background after login (non-blocking)
   // Shows dashboard immediately, then checks subscription in background
-  // Only redirects to subscription page if user has NO subscription
+  // Never redirects to subscription page and does not create subscription here
   useEffect(() => {
     const checkSubscriptionAfterLogin = async () => {
       if (isAuthenticated && currentUser && currentUser.role === 'Startup' && !isLoading) {
@@ -530,10 +530,13 @@ const App: React.FC = () => {
           const subscription = await subscriptionService.getUserSubscription(currentUser.id);
           
           if (!subscription) {
-            // No subscription found - redirect to subscription page
-            console.log('❌ No subscription found → redirecting to subscription page');
-            setCurrentPage('subscription');
-            setQueryParam('page', 'subscription', true);
+            console.log('ℹ️ No subscription found at login check (no creation here; Form 2 flow handles free plan setup).');
+
+            // Keep user on dashboard/login flow
+            if (currentPage !== 'login') {
+              setCurrentPage('login');
+              setQueryParam('page', 'login', false);
+            }
             return;
           }
           
@@ -571,9 +574,8 @@ const App: React.FC = () => {
     }
   }, [isLoading, isAuthenticated, currentUser]);
 
-  // EXISTING: Check if Startup user has selected a subscription plan (MANDATORY)
-  // This is a secondary check - only fires if we're already on login page
-  // Prevents showing subscription page if user already has a subscription
+  // EXISTING: Secondary background subscription health check (non-blocking)
+  // This check never locks dashboard access.
   useEffect(() => {
     // First handle case where user is loaded but not yet authenticated (Form 2 check needed)
     if (currentUser && !isAuthenticated && isLoading === false) {
@@ -598,25 +600,22 @@ const App: React.FC = () => {
       return;
     }
     
-    // Second: Check if Startup user has selected a subscription plan
+    // Second: Check startup subscription state in background
     const checkSubscriptionSelection = async () => {
       if (isAuthenticated && currentUser && currentUser.role === 'Startup' && !isLoading && currentPage === 'login') {
         try {
-          console.log('🔍 Secondary: Checking subscription plan selection for Startup user...');
+          console.log('🔍 Secondary: Checking startup subscription state...');
           const { subscriptionService } = await import('./lib/subscriptionService');
           const subscription = await subscriptionService.getUserSubscription(currentUser.id);
           
           if (subscription) {
-            // ✅ Subscription found - keep dashboard showing
             console.log('✅ Secondary: Subscription plan found:', subscription.plan_tier);
             setSubscriptionChecked(true);
             return;
           }
           
-          // No subscription found - redirect to subscription page
-          console.log('❌ Secondary: No subscription plan found → forcing plan selection');
-          setCurrentPage('subscription');
-          setQueryParam('page', 'subscription', true);
+          console.log('ℹ️ Secondary: No subscription found (no creation here; Form 2 flow handles free plan setup).');
+
           setSubscriptionChecked(true);
         } catch (error) {
           console.error('❌ Secondary: Error checking subscription:', error);
@@ -3445,53 +3444,59 @@ const App: React.FC = () => {
     });
     
     try {
-      // Check if user already has an offer for this startup
-      const existingOffers = await investmentService.getUserOffers(currentUserRef.current.email);
-      const existingOffer = existingOffers.find(offer => 
-        offer.startup_name === opportunity.name || 
-        offer.startup_id === opportunity.id
-      );
-      
-      if (existingOffer) {
-        // If there's an existing offer, ask user if they want to update it
-        const shouldUpdate = window.confirm(
-          `You already have an offer for ${opportunity.name}:\n` +
-          `Amount: ${existingOffer.offer_amount} ${existingOffer.currency || 'USD'}\n` +
-          `Equity: ${existingOffer.equity_percentage}%\n\n` +
-          `Do you want to update this offer with your new details?\n\n` +
-          `New Amount: ${offerAmount} ${currency || 'USD'}\n` +
-          `New Equity: ${equityPercentage}%\n` +
-          `Co-investment: ${wantsCoInvestment ? 'Yes' : 'No'}`
+      // IMPORTANT: Skip "update existing offer" logic when this is a co-investment offer
+      // Co-investment offers go into co_investment_offers table (separate from regular offers)
+      // An investor can have BOTH a regular offer AND a co-investment offer for the same startup
+      if (!coInvestmentOpportunityId) {
+        // Check if user already has a REGULAR offer for this startup
+        const existingOffers = await investmentService.getUserOffers(currentUserRef.current.email);
+        const existingOffer = existingOffers.find(offer => 
+          offer.startup_name === opportunity.name || 
+          offer.startup_id === opportunity.id
         );
         
-        if (shouldUpdate) {
-          // Update the existing offer
-          const updatedOffer = await investmentService.updateInvestmentOffer(existingOffer.id, {
-            offer_amount: offerAmount,
-            equity_percentage: equityPercentage,
-            currency: currency || 'USD',
-            wants_co_investment: wantsCoInvestment
-          });
-          
-          // Update local state
-          setInvestmentOffers(prev => 
-            prev.map(offer => 
-              offer.id === existingOffer.id ? { ...offer, ...updatedOffer } : offer
-            )
+        if (existingOffer) {
+          // If there's an existing offer, ask user if they want to update it
+          const shouldUpdate = window.confirm(
+            `You already have an offer for ${opportunity.name}:\n` +
+            `Amount: ${existingOffer.offer_amount} ${existingOffer.currency || 'USD'}\n` +
+            `Equity: ${existingOffer.equity_percentage}%\n\n` +
+            `Do you want to update this offer with your new details?\n\n` +
+            `New Amount: ${offerAmount} ${currency || 'USD'}\n` +
+            `New Equity: ${equityPercentage}%\n` +
+            `Co-investment: ${wantsCoInvestment ? 'Yes' : 'No'}`
           );
           
-          // Notification removed - offer updated silently
-          
-          return;
-        } else {
-          // Notification removed - offer cancelled silently
-          return;
+          if (shouldUpdate) {
+            // Update the existing offer
+            const updatedOffer = await investmentService.updateInvestmentOffer(existingOffer.id, {
+              offer_amount: offerAmount,
+              equity_percentage: equityPercentage,
+              currency: currency || 'USD',
+              wants_co_investment: wantsCoInvestment
+            });
+            
+            // Update local state
+            setInvestmentOffers(prev => 
+              prev.map(offer => 
+                offer.id === existingOffer.id ? { ...offer, ...updatedOffer } : offer
+              )
+            );
+            
+            // Notification removed - offer updated silently
+            
+            return;
+          } else {
+            // Notification removed - offer cancelled silently
+            return;
+          }
         }
       }
       
       // CRITICAL FIX: If wantsCoInvestment is true, create co-investment opportunity FIRST
       // Then use its ID when creating the offer
       let finalCoInvestmentOpportunityId = coInvestmentOpportunityId;
+      const isJoiningExistingCoInvestment = !!coInvestmentOpportunityId;
       
       if (wantsCoInvestment && !coInvestmentOpportunityId) {
         const remainingAmount = opportunity.investmentValue - offerAmount;
@@ -3535,14 +3540,15 @@ const App: React.FC = () => {
           }
           
           // Calculate min/max co-investment amounts
-          // If remainingAmount is 0 or negative, set minimum to a small amount (1% of offer) and max to offer amount
-          // This allows the lead investor to still create the opportunity and potentially adjust later
-          const minCoInvestment = remainingAmount > 0 
-            ? Math.min(remainingAmount * 0.1, 10000) 
+          // For single consolidated lead-offer flow, initialize max to total investment
+          // so the lead offer can be created in co_investment_offers; we'll normalize remaining limits after creation.
+          const derivedMinCoInvestment = remainingAmount > 0
+            ? Math.min(remainingAmount * 0.1, 10000)
             : Math.max(offerAmount * 0.01, 1000); // 1% of offer or 1000 minimum
-          const maxCoInvestment = remainingAmount > 0 
-            ? remainingAmount 
-            : offerAmount; // If no remaining, allow up to the offer amount
+          // IMPORTANT: The first consolidated insert is the lead investor's own offer.
+          // Ensure initial minimum never exceeds that lead offer, then normalize after insert.
+          const minCoInvestment = Math.min(derivedMinCoInvestment, Math.max(offerAmount, 0));
+          const maxCoInvestment = opportunity.investmentValue;
           
           console.log('🔍 Co-investment opportunity parameters:', {
             startup_id: startupId,
@@ -3587,9 +3593,11 @@ const App: React.FC = () => {
       }
       
       // Use opportunity.id which is the new_investments.id
-      // IMPORTANT: If wantsCoInvestment is true, the lead investor's offer should be a REGULAR offer
-      // (not a co-investment offer). The co-investment opportunity is for OTHER investors to join.
-      // Only pass co_investment_opportunity_id if this is NOT the lead investor making the offer
+      // IMPORTANT:
+      // 1) If coInvestmentOpportunityId is provided, this is a co-investor joining an EXISTING opportunity.
+      // 2) If wantsCoInvestment is true and a new opportunity was created, this is the lead consolidated offer.
+      const shouldCreateCoInvestmentOffer = isJoiningExistingCoInvestment || (!!wantsCoInvestment && !!finalCoInvestmentOpportunityId);
+
       const createdOffer = await investmentService.createInvestmentOffer({
         investor_email: currentUserRef.current.email,
         startup_name: opportunity.name,
@@ -3598,15 +3606,12 @@ const App: React.FC = () => {
         offer_amount: offerAmount,
         equity_percentage: equityPercentage,
         currency: currency || 'USD',
-        // Don't pass co_investment_opportunity_id for lead investor's own offer
-        // The lead investor creates a regular offer, and the co-investment opportunity is for others
-        co_investment_opportunity_id: undefined // Lead investor's offer is always regular
+        // Trigger consolidated co_investment_offers flow when joining existing OR creating lead co-investment offer
+        co_investment_opportunity_id: shouldCreateCoInvestmentOffer ? finalCoInvestmentOpportunityId : undefined
       });
       
       // Format the offer to match the InvestmentOffer interface format (camelCase)
-      // IMPORTANT: Lead investor's offer is always a regular offer, even if they created a co-investment opportunity
-      // The co-investment opportunity is for OTHER investors to join
-      const isCoInvestment = false; // Lead investor's offer is never a co-investment offer
+      const isCoInvestment = shouldCreateCoInvestmentOffer;
       
       const formattedNewOffer: any = {
         id: createdOffer.id,
@@ -3621,9 +3626,9 @@ const App: React.FC = () => {
         currency: createdOffer.currency || currency || 'USD',
         createdAt: createdOffer.created_at ? new Date(createdOffer.created_at).toISOString() : new Date().toISOString(),
         // Co-investment fields
-        // Note: Lead investor's offer is always a regular offer, even if they created a co-investment opportunity
-        is_co_investment: isCoInvestment, // Flag to identify co-investment offers (false for lead investor)
-        co_investment_opportunity_id: null, // Lead investor's offer doesn't have co_investment_opportunity_id
+        // Single-offer flow: co-investment ON creates consolidated co_investment_offers entry
+        is_co_investment: isCoInvestment,
+        co_investment_opportunity_id: shouldCreateCoInvestmentOffer ? finalCoInvestmentOpportunityId : null,
         // Store the co-investment opportunity ID separately for reference (if created)
         created_co_investment_opportunity_id: finalCoInvestmentOpportunityId || null,
         lead_investor_approval_status: (createdOffer as any).lead_investor_approval_status || 'not_required',
@@ -3640,14 +3645,31 @@ const App: React.FC = () => {
       // Update local state
       setInvestmentOffers(prev => [formattedNewOffer, ...prev]);
       
-      // Handle co-investment opportunity creation
-      if (finalCoInvestmentOpportunityId) {
-        // Lead investor created a co-investment opportunity
-        // Their own offer is a regular offer (not a co-investment offer)
-        // The co-investment opportunity is for OTHER investors to join
-        console.log('✅ Co-investment opportunity created with ID:', finalCoInvestmentOpportunityId);
-        console.log('✅ Lead investor\'s regular offer created (ID:', formattedNewOffer.id, ')');
-        console.log('📋 Note: Lead investor\'s offer is regular, co-investment opportunity is for other investors');
+      // Normalize co-investment opportunity limits after lead consolidated offer creation
+      if (wantsCoInvestment && !isJoiningExistingCoInvestment && finalCoInvestmentOpportunityId) {
+        const remainingAfterLead = Math.max((opportunity.investmentValue || 0) - offerAmount, 0);
+        const normalizedMin = remainingAfterLead > 0
+          ? Math.min(remainingAfterLead * 0.1, 10000)
+          : 0;
+
+        const { error: normalizeError } = await supabase
+          .from('co_investment_opportunities')
+          .update({
+            minimum_co_investment: normalizedMin,
+            maximum_co_investment: remainingAfterLead,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', finalCoInvestmentOpportunityId);
+
+        if (normalizeError) {
+          console.warn('⚠️ Failed to normalize co-investment opportunity limits:', normalizeError);
+        } else {
+          console.log('✅ Co-investment opportunity limits normalized after lead offer:', {
+            opportunityId: finalCoInvestmentOpportunityId,
+            minimum: normalizedMin,
+            maximum: remainingAfterLead
+          });
+        }
       }
     } catch (error) {
       console.error('Error submitting offer:', error);
@@ -3984,10 +4006,10 @@ const App: React.FC = () => {
                   setCurrentUser(refreshedUser);
                   setIsAuthenticated(true);
                   
-                  // ⚠️ CRITICAL: ONLY show subscription page for Startup users
+                  // ⚠️ CRITICAL: ONLY apply startup free-plan bootstrap for Startup users
                   // Other roles (Mentor, Admin, Investor, etc.) should go directly to dashboard
                   if (refreshedUser.role === 'Startup') {
-                    console.log('✅ Startup user - checking for existing subscription...');
+                    console.log('✅ Startup user - checking/creating free subscription...');
                     
                     // Check if startup user already has an active subscription
                     try {
@@ -3996,19 +4018,54 @@ const App: React.FC = () => {
                       const existingSubscription = await subscriptionService.getUserSubscription(refreshedUser.id);
                       
                       if (existingSubscription && existingSubscription.status === 'active') {
-                        console.log('✅ Startup already has active subscription, skipping subscription page:', existingSubscription.plan_tier);
+                        console.log('✅ Startup already has active subscription:', existingSubscription.plan_tier);
                         setCurrentPage('login');
                         setQueryParam('page', 'login', false);
                       } else {
-                        console.log('✅ Startup has no active subscription - showing subscription page for plan selection');
-                        setCurrentPage('subscription');
-                        setQueryParam('page', 'subscription', false);
+                        console.log('🆓 No active subscription found - creating free subscription automatically');
+
+                        const now = new Date();
+                        const periodEnd = new Date(now);
+                        periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+                        const freeSubscription = await subscriptionService.upsertSubscription({
+                          user_id: refreshedUser.id,
+                          plan_tier: 'free',
+                          status: 'active',
+                          interval: 'monthly',
+                          current_period_start: now.toISOString(),
+                          current_period_end: periodEnd.toISOString(),
+                          amount: 0,
+                          currency: refreshedUser.currency || null,
+                          country: refreshedUser.country || null,
+                          payment_gateway: null,
+                          autopay_enabled: false,
+                          razorpay_mandate_id: null,
+                          payaid_subscription_id: null,
+                          mandate_status: null,
+                          mandate_created_at: null,
+                          next_billing_date: null,
+                          last_billing_date: null,
+                          billing_cycle_count: 0,
+                          total_paid: 0,
+                          previous_plan_tier: null,
+                          paid_by_advisor_id: null
+                        });
+
+                        if (freeSubscription) {
+                          console.log('✅ Free subscription created successfully:', freeSubscription.id);
+                        } else {
+                          console.warn('⚠️ Could not create free subscription, continuing without subscription page');
+                        }
+
+                        setCurrentPage('login');
+                        setQueryParam('page', 'login', false);
                       }
                     } catch (subError) {
-                      console.warn('⚠️ Error checking subscription status, defaulting to subscription page:', subError);
-                      // If there's an error checking subscription, default to showing subscription page
-                      setCurrentPage('subscription');
-                      setQueryParam('page', 'subscription', false);
+                      console.warn('⚠️ Error checking/creating startup subscription, continuing to dashboard:', subError);
+                      // Never force subscription page after Form 2 submission
+                      setCurrentPage('login');
+                      setQueryParam('page', 'login', false);
                     }
                   } else {
                     console.log('✅ Non-Startup user (role:', refreshedUser.role, ') - navigating directly to dashboard');

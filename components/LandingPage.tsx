@@ -110,7 +110,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
   const canonicalUrl = `${siteUrl}${window.location.pathname}`;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen w-full bg-slate-50">
       <SEOHead
         title="TrackMyStartup - Comprehensive Startup Tracking Platform for Investors, Founders & Professionals"
         description="Track your startup's growth journey with TrackMyStartup. Monitor compliance, track investments, manage your startup ecosystem. Connect startups, investors, mentors, and advisors in one unified platform."

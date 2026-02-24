@@ -403,25 +403,23 @@ const PublicStartupPage: React.FC = () => {
 
   const handleDocumentClick = async (url: string | undefined, documentType: string) => {
     if (!url || url === '#') return;
-    
-    // Double-check authentication status before proceeding
-    const authCheck = await authService.isAuthenticated();
-    const currentAuthUser = authCheck ? await authService.getCurrentUser() : null;
-    
-    if (!authCheck || !currentAuthUser) {
-      // Show message and redirect to login page
-      messageService.error('Login Required', `You must be logged in to view the ${documentType}. Please log in to continue.`, 3000);
-      // Store the current URL to redirect back after login (preserve SEO-friendly URL)
-      const currentUrl = window.location.href;
-      sessionStorage.setItem('redirectAfterLogin', currentUrl);
-      // Redirect to clean login page
-      const url = new URL(window.location.origin);
-      url.searchParams.set('page', 'login');
-      window.location.href = url.toString();
+    // Allow pitch deck to be viewed without login
+    if (documentType === 'Pitch Deck') {
+      window.open(url, '_blank', 'noopener,noreferrer');
       return;
     }
-    
-    // User is authenticated, open the document
+    // For other documents, require login
+    const authCheck = await authService.isAuthenticated();
+    const currentAuthUser = authCheck ? await authService.getCurrentUser() : null;
+    if (!authCheck || !currentAuthUser) {
+      messageService.error('Login Required', `You must be logged in to view the ${documentType}. Please log in to continue.`, 3000);
+      const currentUrl = window.location.href;
+      sessionStorage.setItem('redirectAfterLogin', currentUrl);
+      const urlObj = new URL(window.location.origin);
+      urlObj.searchParams.set('page', 'login');
+      window.location.href = urlObj.toString();
+      return;
+    }
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 

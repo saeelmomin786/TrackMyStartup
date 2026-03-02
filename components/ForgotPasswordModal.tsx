@@ -31,26 +31,28 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
     return null;
   };
 
-  const handleEmailChange = async (emailValue: string) => {
+  const checkEmailExistsNow = async (emailValue: string): Promise<boolean | null> => {
+    setIsCheckingEmail(true);
+    try {
+      const { exists } = await authService.checkEmailExists(emailValue.trim());
+      if (!exists) {
+        setEmailValidationError('User not registered yet');
+      } else {
+        setEmailValidationError(null);
+      }
+      return exists;
+    } catch (error) {
+      console.error('Error checking email:', error);
+      return null;
+    } finally {
+      setIsCheckingEmail(false);
+    }
+  };
+
+  const handleEmailChange = (emailValue: string) => {
     setEmail(emailValue);
     setEmailValidationError(null);
     setError(null); // Clear general error when email changes
-
-    // Only validate if email is not empty and looks like a valid email
-    if (emailValue && emailValue.includes('@')) {
-      setIsCheckingEmail(true);
-      try {
-        const { exists } = await authService.checkEmailExists(emailValue.trim());
-        if (!exists) {
-          setEmailValidationError('User not registered yet');
-        }
-      } catch (error) {
-        console.error('Error checking email:', error);
-        // Don't show error if check fails, just log it
-      } finally {
-        setIsCheckingEmail(false);
-      }
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,29 +60,13 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
     setIsLoading(true);
     setError(null);
 
-    // Check if email is registered before sending OTP
-    if (emailValidationError) {
-      setError(emailValidationError);
-      setIsLoading(false);
-      return;
-    }
-
-    // Re-check email if not already checked
-    if (!isCheckingEmail && email && email.includes('@')) {
-      setIsCheckingEmail(true);
-      try {
-        const { exists } = await authService.checkEmailExists(email.trim());
-        if (!exists) {
-          setEmailValidationError('User not registered yet');
-          setError('User not registered yet');
-          setIsLoading(false);
-          setIsCheckingEmail(false);
-          return;
-        }
-      } catch (error) {
-        console.error('Error checking email:', error);
-      } finally {
-        setIsCheckingEmail(false);
+    // Validate only when user clicks Send OTP
+    if (email && email.includes('@')) {
+      const exists = await checkEmailExistsNow(email);
+      if (exists === false) {
+        setError('User not registered yet');
+        setIsLoading(false);
+        return;
       }
     }
 
@@ -204,11 +190,6 @@ const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen, onClo
                   autoComplete="email"
                   value={email}
                   onChange={(e) => handleEmailChange(e.target.value)}
-                  onBlur={() => {
-                    if (email) {
-                      handleEmailChange(email);
-                    }
-                  }}
                   required
                   placeholder="Enter your email address"
                   className={emailValidationError ? 'border-red-500' : ''}

@@ -942,8 +942,6 @@ export const authService = {
   // Check if email exists
   async checkEmailExists(email: string): Promise<{ exists: boolean; error?: string }> {
     try {
-      console.log('Checking if email exists:', email);
-      
       // Use database function to check email existence (bypasses RLS using SECURITY DEFINER)
       // This is better than API endpoint - faster, no extra network call, works directly from frontend
       const { data, error } = await supabase.rpc('check_email_exists', {
@@ -966,20 +964,16 @@ export const authService = {
         }
 
         if (profiles && profiles.length > 0) {
-          console.log('Email already exists in user_profiles:', email);
           return { exists: true };
         } else {
-          console.log('Email is available:', email);
           return { exists: false };
         }
       }
 
       // RPC function returned result
       if (data === true) {
-        console.log('Email already exists in user_profiles:', email);
         return { exists: true };
       } else {
-        console.log('Email is available:', email);
         return { exists: false };
       }
     } catch (error: any) {

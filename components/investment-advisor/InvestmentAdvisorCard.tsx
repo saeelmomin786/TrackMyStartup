@@ -87,7 +87,10 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
     const baseUrl = window.location.origin;
     
     // Use SEO-friendly path-based URL
-    const shareUrl = createProfileUrl(baseUrl, 'advisor', slug, advisor.user_id || advisor.id);
+    const baseShareUrl = createProfileUrl(baseUrl, 'advisor', slug, advisor.user_id || advisor.id);
+    const shareUrl = advisor.user_id
+      ? `${baseShareUrl}${baseShareUrl.includes('?') ? '&' : '?'}userId=${encodeURIComponent(advisor.user_id)}`
+      : baseShareUrl;
     
     const displayName = advisor.firm_name || advisor.advisor_name || 'Investment Advisor';
     const shareText = `Investment Advisor: ${displayName}\nFirm: ${advisor.firm_name || 'N/A'}\nLocation: ${advisor.global_hq || 'N/A'}\nInvestment Range: ${advisor.minimum_investment && advisor.maximum_investment ? `${formatCurrency(advisor.minimum_investment, advisor.currency)} - ${formatCurrency(advisor.maximum_investment, advisor.currency)}` : 'N/A'}\n\nView advisor profile: ${shareUrl}`;
@@ -133,7 +136,10 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
       const baseUrl = window.location.origin;
       
       // Use SEO-friendly path-based URL
-      const url = createProfileUrl(baseUrl, 'advisor', slug, advisor.user_id || advisor.id);
+      const baseProfileUrl = createProfileUrl(baseUrl, 'advisor', slug, advisor.user_id || advisor.id);
+      const url = advisor.user_id
+        ? `${baseProfileUrl}${baseProfileUrl.includes('?') ? '&' : '?'}userId=${encodeURIComponent(advisor.user_id)}`
+        : baseProfileUrl;
       window.location.href = url;
     }
   };

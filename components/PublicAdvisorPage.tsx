@@ -54,26 +54,22 @@ const PublicAdvisorPage: React.FC = () => {
   
   useEffect(() => {
     const resolveAdvisorId = async () => {
+      // If explicit ID is present in query, always prefer it (prevents slug collision mismatches)
+      if (queryUserId || queryAdvisorId) {
+        setUserId(queryUserId || null);
+        setAdvisorId(queryAdvisorId || null);
+        return;
+      }
+
       if (pathProfile && pathProfile.view === 'advisor') {
         // Path-based URL: resolve slug to user_id
         const resolvedId = await resolveSlug('advisor', pathProfile.slug);
         if (resolvedId) {
           setUserId(String(resolvedId));
-          // Clean up any query parameters for SEO (keep URL clean)
-          if (window.history && (queryUserId || queryAdvisorId)) {
-            const newUrl = new URL(window.location.href);
-            newUrl.searchParams.delete('userId');
-            newUrl.searchParams.delete('advisorId');
-            window.history.replaceState({}, '', newUrl.toString());
-          }
         } else {
           setError('Advisor not found');
           setLoading(false);
         }
-      } else if (queryUserId || queryAdvisorId) {
-        // Query param URL (backward compatibility)
-        setUserId(queryUserId || null);
-        setAdvisorId(queryAdvisorId || null);
       } else {
         setError('Advisor identifier is missing.');
         setLoading(false);
@@ -99,7 +95,6 @@ const PublicAdvisorPage: React.FC = () => {
           .from('advisors_public_table')
           .select('*')
           .limit(1);
-        let usePublicTable = true;
 
         // Public table uses user_id as primary key
         const lookupId = userId || advisorId;
@@ -112,7 +107,6 @@ const PublicAdvisorPage: React.FC = () => {
         // Fallback to main table if public table doesn't exist or query fails
         if (error && (error.message.includes('does not exist') || error.code === '42P01')) {
           console.warn('[PublicAdvisorPage] Public table not available, falling back to main table');
-          usePublicTable = false;
           query = supabase
             .from('investment_advisor_profiles')
             .select('*')
@@ -133,8 +127,44 @@ const PublicAdvisorPage: React.FC = () => {
           throw error;
         }
 
+        const sourceData = (data || {}) as any;
+        const resolvedUserId = String(sourceData.user_id || userId || advisorId || '');
+
+        // Try to get canonical advisor profile fields (especially metrics) from main table
+        // This handles cases where advisors_public_table is missing some newer columns.
+        let canonicalProfile: any = null;
+        if (resolvedUserId) {
+          const { data: canonicalData } = await supabase
+            .from('investment_advisor_profiles')
+            .select(`
+              user_id,
+              startups_under_management,
+              investors_under_management,
+              successful_fundraises_startups,
+              verified_startups_under_management,
+              verified_investors_under_management,
+              verified_successful_fundraises_startups,
+              logo_url,
+              video_url,
+              media_type
+            `)
+            .eq('user_id', resolvedUserId)
+            .maybeSingle();
+
+          canonicalProfile = canonicalData;
+        }
+
+        const pickNumber = (...values: any[]): number | undefined => {
+          for (const value of values) {
+            if (value === null || value === undefined || value === '') continue;
+            const parsed = Number(value);
+            if (Number.isFinite(parsed)) return parsed;
+          }
+          return undefined;
+        };
+
         // Load firm_name from users table (from registration)
-        const userIdToFetch = advisorId ? data.user_id : userId;
+        const userIdToFetch = resolvedUserId;
         const { data: userData } = await supabase
           .from('users')
           .select('firm_name, name')
@@ -143,9 +173,48 @@ const PublicAdvisorPage: React.FC = () => {
 
         // Merge firm_name from users table into advisor profile
         const advisorWithFirmName = {
-          ...data,
+          ...sourceData,
+          ...canonicalProfile,
+          startups_under_management: pickNumber(
+            canonicalProfile?.startups_under_management,
+            sourceData?.startups_under_management,
+            sourceData?.startupsUnderManagement,
+            sourceData?.total_startups_under_management
+          ) ?? 0,
+          investors_under_management: pickNumber(
+            canonicalProfile?.investors_under_management,
+            sourceData?.investors_under_management,
+            sourceData?.investorsUnderManagement,
+            sourceData?.total_investors_under_management
+          ) ?? 0,
+          successful_fundraises_startups: pickNumber(
+            canonicalProfile?.successful_fundraises_startups,
+            sourceData?.successful_fundraises_startups,
+            sourceData?.successful_fundraises,
+            sourceData?.successfulFundraisesStartups
+          ) ?? 0,
+          verified_startups_under_management: pickNumber(
+            canonicalProfile?.verified_startups_under_management,
+            sourceData?.verified_startups_under_management,
+            sourceData?.verified_startups,
+            sourceData?.verifiedStartupsUnderManagement
+          ) ?? 0,
+          verified_investors_under_management: pickNumber(
+            canonicalProfile?.verified_investors_under_management,
+            sourceData?.verified_investors_under_management,
+            sourceData?.verified_investors,
+            sourceData?.verifiedInvestorsUnderManagement
+          ) ?? 0,
+          verified_successful_fundraises_startups: pickNumber(
+            canonicalProfile?.verified_successful_fundraises_startups,
+            sourceData?.verified_successful_fundraises_startups,
+            sourceData?.verified_successful_fundraises,
+            sourceData?.verified_fundraises,
+            sourceData?.verifiedSuccessfulFundraisesStartups
+          ) ?? 0,
           // Use firm_name from users table (registration) as primary, fallback to profile firm_name
-          firm_name: userData?.firm_name || data.firm_name,
+          firm_name: userData?.firm_name || canonicalProfile?.firm_name || sourceData?.firm_name,
+          advisor_name: sourceData?.advisor_name || userData?.name,
           user: userData ? { name: userData.name, email: '' } : undefined
         } as InvestmentAdvisorProfile;
 
@@ -159,7 +228,7 @@ const PublicAdvisorPage: React.FC = () => {
     };
 
     loadAdvisor();
-  }, []);
+  }, [userId, advisorId]);
 
   // Check connection status when advisor is loaded
   useEffect(() => {

@@ -150,7 +150,11 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
       onClick={!isPublicPage ? handleCardClick : undefined}
     >
       {/* Media Section */}
-      <div className="relative w-full aspect-[16/9] bg-gradient-to-br from-slate-100 to-slate-200 overflow-hidden">
+      <div
+        className={`relative w-full overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 ${
+          videoEmbedUrl ? 'aspect-[16/9]' : 'h-40 sm:h-44 md:h-48'
+        }`}
+      >
         {videoEmbedUrl ? (
           <div className="relative w-full h-full">
             <iframe
@@ -185,35 +189,35 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
       </div>
 
       {/* Content Section */}
-      <div className="p-5 sm:p-6 relative">
+      <div className="p-4 sm:p-6 relative">
         {/* Share Button */}
         <button
           onClick={(e) => {
             e.stopPropagation();
             handleShare();
           }}
-          className="absolute top-5 right-5 sm:top-6 sm:right-6 z-10 p-2 bg-white hover:bg-slate-50 rounded-full shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center border border-slate-200"
+          className="absolute top-3 right-3 sm:top-6 sm:right-6 z-10 p-2 bg-white hover:bg-slate-50 rounded-full shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center border border-slate-200"
           title="Share advisor profile"
         >
           <Share2 className="h-4 w-4 text-slate-700" />
         </button>
 
         {/* Header Section */}
-        <div className="mb-4 pr-10">
-          <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1">
+        <div className="mb-4 pr-10 sm:pr-12">
+          <h3 className="text-lg sm:text-2xl font-bold text-slate-900 mb-1 break-words leading-tight">
             {/* Priority: firm_name (from users table/registration) > advisor_name (from profile) > user.name > default */}
             {advisor.firm_name || advisor.advisor_name || advisor.user?.name || 'Investment Advisor'}
           </h3>
           {/* Show advisor_name as subtitle if firm_name is being used as main name */}
           {advisor.firm_name && advisor.advisor_name && advisor.advisor_name !== advisor.firm_name && (
-            <p className="text-sm text-slate-600">{advisor.advisor_name}</p>
+            <p className="text-xs sm:text-sm text-slate-600 break-words">{advisor.advisor_name}</p>
           )}
         </div>
 
         {/* Single Line: Firm Name, Location, Investment Range */}
-        <div className="flex flex-wrap items-center gap-3 text-sm mb-4 pb-4 border-b border-slate-200">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs sm:text-sm mb-4 pb-4 border-b border-slate-200">
           {advisor.firm_name && (
-            <span className="text-slate-700 font-medium">{advisor.firm_name}</span>
+            <span className="text-slate-700 font-medium break-words max-w-full">{advisor.firm_name}</span>
           )}
           {advisor.global_hq && (
             <>
@@ -237,20 +241,20 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
 
         {/* Contact Links */}
         {(advisor.website || advisor.linkedin_link) && (
-          <div className="flex flex-wrap items-center gap-4 mb-4 pb-4 border-b border-slate-200">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-4 pb-4 border-b border-slate-200">
             {advisor.website && (
               isAuthenticated ? (
                 <a
                   href={advisor.website}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-700 flex items-center gap-1.5 text-sm font-medium transition-colors"
+                  className="text-blue-600 hover:text-blue-700 flex items-center gap-1.5 text-xs sm:text-sm font-medium transition-colors"
                 >
                   <Globe className="h-4 w-4" />
                   Website
                 </a>
               ) : (
-                <span className="text-slate-400 flex items-center gap-1.5 text-sm font-medium cursor-not-allowed" title="Login to access">
+                <span className="text-slate-400 flex items-center gap-1.5 text-xs sm:text-sm font-medium cursor-not-allowed" title="Login to access">
                   <Globe className="h-4 w-4" />
                   Website
                 </span>
@@ -262,13 +266,13 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
                   href={advisor.linkedin_link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-700 flex items-center gap-1.5 text-sm font-medium transition-colors"
+                  className="text-blue-600 hover:text-blue-700 flex items-center gap-1.5 text-xs sm:text-sm font-medium transition-colors"
                 >
                   <Linkedin className="h-4 w-4" />
                   LinkedIn
                 </a>
               ) : (
-                <span className="text-slate-400 flex items-center gap-1.5 text-sm font-medium cursor-not-allowed" title="Login to access">
+                <span className="text-slate-400 flex items-center gap-1.5 text-xs sm:text-sm font-medium cursor-not-allowed" title="Login to access">
                   <Linkedin className="h-4 w-4" />
                   LinkedIn
                 </span>
@@ -370,7 +374,7 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
           ) : null}
 
           {/* Management Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 mt-2">
             <div className="bg-slate-50 rounded-lg p-3">
               <div className="text-xs text-slate-500">Startups Under Management</div>
               <div className="text-lg font-semibold text-slate-900">{advisor.startups_under_management ?? 0}</div>
@@ -386,7 +390,7 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
           </div>
 
           {/* Verified (On-Platform) */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 mt-2">
             <div className="bg-emerald-50 rounded-lg p-3">
               <div className="text-xs text-emerald-700">Verified Startups</div>
               <div className="text-lg font-semibold text-emerald-800">{advisor.verified_startups_under_management ?? 0}</div>

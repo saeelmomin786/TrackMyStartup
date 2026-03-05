@@ -163,13 +163,44 @@ const PublicAdvisorPage: React.FC = () => {
           return undefined;
         };
 
-        // Load firm_name from users table (from registration)
+        // Resolve user-facing profile fields from user_profiles first.
+        // Some deployments don't expose a public `users` table and return 404 for that endpoint.
         const userIdToFetch = resolvedUserId;
-        const { data: userData } = await supabase
-          .from('users')
-          .select('firm_name, name')
-          .eq('id', userIdToFetch)
-          .maybeSingle();
+        let userProfileData: any = null;
+        if (userIdToFetch) {
+          const userProfilesResult = await supabase
+            .from('user_profiles')
+            .select('firm_name, name, logo_url, updated_at, id, auth_user_id')
+            .or(`auth_user_id.eq.${userIdToFetch},id.eq.${userIdToFetch}`)
+            .order('updated_at', { ascending: false })
+            .limit(10);
+
+          const profileRows = (userProfilesResult.data || []) as Array<any>;
+          if (profileRows.length > 0) {
+            const hasUsableLogo = (row: any): boolean => {
+              const logo = row?.logo_url;
+              return !!(logo && typeof logo === 'string' && logo.trim() && logo.trim() !== '#');
+            };
+
+            // Prefer row with usable logo, fallback to most recently updated row
+            userProfileData = profileRows.find(hasUsableLogo) || profileRows[0];
+          }
+        }
+
+        const normalizeLogoUrl = (value: any): string | undefined => {
+          if (!value || typeof value !== 'string') return undefined;
+          const trimmed = value.trim();
+          if (!trimmed || trimmed === '#') return undefined;
+          return trimmed;
+        };
+
+        const resolvedLogoUrl =
+          normalizeLogoUrl(canonicalProfile?.logo_url) ||
+          normalizeLogoUrl(sourceData?.logo_url) ||
+          normalizeLogoUrl(userProfileData?.logo_url);
+
+        const resolvedVideoUrl = (sourceData?.video_url || canonicalProfile?.video_url) as string | undefined;
+        const resolvedMediaType = resolvedVideoUrl ? 'video' : (resolvedLogoUrl ? 'logo' : sourceData?.media_type);
 
         // Merge firm_name from users table into advisor profile
         const advisorWithFirmName = {
@@ -212,10 +243,14 @@ const PublicAdvisorPage: React.FC = () => {
             sourceData?.verified_fundraises,
             sourceData?.verifiedSuccessfulFundraisesStartups
           ) ?? 0,
+          logo_url: resolvedLogoUrl,
+          media_type: resolvedMediaType,
           // Use firm_name from users table (registration) as primary, fallback to profile firm_name
-          firm_name: userData?.firm_name || canonicalProfile?.firm_name || sourceData?.firm_name,
-          advisor_name: sourceData?.advisor_name || userData?.name,
-          user: userData ? { name: userData.name, email: '' } : undefined
+          firm_name: userProfileData?.firm_name || canonicalProfile?.firm_name || sourceData?.firm_name,
+          advisor_name: sourceData?.advisor_name || userProfileData?.name,
+          user: userProfileData
+            ? { name: userProfileData?.name, email: '' }
+            : undefined
         } as InvestmentAdvisorProfile;
 
         setAdvisor(advisorWithFirmName);

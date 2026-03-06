@@ -21,6 +21,8 @@ import BlogsPage from './pages/BlogsPage';
 import BlogDetailPage from './pages/BlogDetailPage';
 import EventsPage from './pages/EventsPage';
 import TMSVirtualConferenceDetailPage from './pages/TMSVirtualConferenceDetailPage';
+import EventDetailPage from './pages/EventDetailPage';
+import EventRegistrationPage from './pages/EventRegistrationPage';
 import PaymentPage from './PaymentPage';
 import MentorPaymentPage from './mentor/MentorPaymentPage';
 
@@ -68,13 +70,18 @@ const PageRouter: React.FC = () => {
     return <BlogDetailPage />;
   }
 
+  // Handle event registration pages (e.g., /events/some-event/register)
+  if (path.startsWith('/events/') && path.endsWith('/register')) {
+    return <EventRegistrationPage />;
+  }
+
   // Handle event detail pages (e.g., /events/tms-virtual-conference)
   if (path.startsWith('/events/') && path !== '/events') {
     const eventSlug = path.replace('/events/', '');
     if (eventSlug === 'tms-virtual-conference') {
       return <TMSVirtualConferenceDetailPage />;
     }
-    // Add more event detail pages here as needed
+    return <EventDetailPage />;
   }
 
   // Handle mentor payment page with query params

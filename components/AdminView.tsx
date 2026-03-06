@@ -21,6 +21,7 @@ import GeneralDataManager from './admin/GeneralDataManager';
 import FinancialTab from './admin/FinancialTab';
 import MentorPaymentsTab from './admin/MentorPaymentsTab';
 import CreditPricingTab from './admin/CreditPricingTab';
+import AdminEventsTab from './admin/AdminEventsTab';
 import { supabase } from '../lib/supabase';
 import { investmentService } from '../lib/database';
 import { AuthUser } from '../lib/auth';
@@ -38,7 +39,7 @@ interface AdminViewProps {
   onViewStartup: (id: number) => void;
 }
 
-type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList' | 'questionBank' | 'financial' | 'mentorPayments' | 'creditPricing';
+type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList' | 'questionBank' | 'financial' | 'mentorPayments' | 'creditPricing' | 'events';
 type TimeFilter = '30d' | '90d' | 'all';
 
 const SummaryCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -374,6 +375,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             case 'financial': return <FinancialTab />;
             case 'mentorPayments': return <MentorPaymentsTab />;
             case 'creditPricing': return <CreditPricingTab />;
+            case 'events': return <AdminEventsTab />;
             default: return null;
         }
     }
@@ -417,6 +419,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
                     <TabButton id="creditPricing" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Coins />}>Credit Pricing</TabButton>
                     <TabButton id="system" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Settings />}>System</TabButton>
                     <TabButton id="programs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Megaphone />}>Programs</TabButton>
+                    <TabButton id="events" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Calendar />}>Events</TabButton>
                     <TabButton id="blogs" activeTab={activeTab} setActiveTab={setActiveTab} icon={<FileText />}>Blogs</TabButton>
                     <TabButton id="investorList" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Building2 />}>Investor List</TabButton>
                     <TabButton id="questionBank" activeTab={activeTab} setActiveTab={setActiveTab} icon={<FileText />}>Question Bank</TabButton>

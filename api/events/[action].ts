@@ -79,6 +79,7 @@ async function sendEventConfirmationEmail(input: {
   eventStartAt: string;
   eventTimezone: string;
   meetLink?: string | null;
+  whatsappGroupLink?: string | null;
   amountPaid: number;
   currency: string;
   receiptNumber?: string | null;
@@ -117,6 +118,7 @@ async function sendEventConfirmationEmail(input: {
         <li><strong>Date & time:</strong> ${formattedDate}</li>
         <li><strong>Timezone:</strong> ${input.eventTimezone || 'UTC'}</li>
         ${input.meetLink ? `<li><strong>Google Meet:</strong> <a href="${input.meetLink}">${input.meetLink}</a></li>` : ''}
+        ${input.whatsappGroupLink ? `<li><strong>WhatsApp Group:</strong> <a href="${input.whatsappGroupLink}">${input.whatsappGroupLink}</a></li>` : ''}
       </ul>
 
       <h3 style="margin-top: 18px; margin-bottom: 8px;">Payment receipt</h3>
@@ -454,7 +456,7 @@ async function handleVerifyPayment(req: VercelRequest, res: VercelResponse): Pro
 
     const { data: eventData } = await supabase
       .from('events')
-      .select('title, start_at, timezone, meet_link, is_paid')
+      .select('title, start_at, timezone, meet_link, whatsapp_group_link, is_paid')
       .eq('id', registration.event_id)
       .single();
 
@@ -501,6 +503,7 @@ async function handleVerifyPayment(req: VercelRequest, res: VercelResponse): Pro
           eventStartAt: eventData?.start_at || new Date().toISOString(),
           eventTimezone: eventData?.timezone || 'UTC',
           meetLink: eventData?.is_paid ? eventData?.meet_link || null : null,
+          whatsappGroupLink: eventData?.whatsapp_group_link || null,
           amountPaid: amount,
           currency: registration.currency || 'INR',
           receiptNumber: refreshedReg?.receipt_number || registration.receipt_number || null,
@@ -700,7 +703,7 @@ async function handleWebhook(req: VercelRequest, res: VercelResponse): Promise<v
 
     const { data: eventData } = await supabase
       .from('events')
-      .select('title, start_at, timezone, meet_link, is_paid')
+      .select('title, start_at, timezone, meet_link, whatsapp_group_link, is_paid')
       .eq('id', registration.event_id)
       .single();
 
@@ -726,6 +729,7 @@ async function handleWebhook(req: VercelRequest, res: VercelResponse): Promise<v
             eventStartAt: eventData?.start_at || new Date().toISOString(),
             eventTimezone: eventData?.timezone || 'UTC',
             meetLink: eventData?.meet_link || null,
+            whatsappGroupLink: eventData?.whatsapp_group_link || null,
             amountPaid: Number(registration.amount_due || amountMajor),
             currency: registration.currency || currency,
             receiptNumber: registration.receipt_number || null,

@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS public.events (
   short_description TEXT,
   description TEXT,
   banner_image_url TEXT,
+  whatsapp_group_link TEXT,
   timezone TEXT NOT NULL DEFAULT 'UTC',
   start_at TIMESTAMPTZ NOT NULL,
   end_at TIMESTAMPTZ,

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Menu, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Mail, Menu, MessageCircle, X } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -17,6 +17,7 @@ type EventRow = {
   title: string;
   slug: string;
   banner_image_url: string | null;
+  whatsapp_group_link: string | null;
   short_description: string | null;
   start_at: string;
   timezone: string;
@@ -98,7 +99,7 @@ const EventRegistrationPage: React.FC = () => {
 
       const { data: eventRow, error: eventError } = await db
         .from('events')
-        .select('id, title, slug, banner_image_url, short_description, start_at, timezone, is_paid, amount, currency, is_published, is_active')
+        .select('id, title, slug, banner_image_url, whatsapp_group_link, short_description, start_at, timezone, is_paid, amount, currency, is_published, is_active')
         .eq('slug', eventSlug)
         .eq('is_published', true)
         .eq('is_active', true)
@@ -647,7 +648,7 @@ const EventRegistrationPage: React.FC = () => {
           </Card>
         ) : eventData ? (
           <Card>
-            {eventData.banner_image_url && (
+            {eventData.banner_image_url && !paymentDone && (
               <div className="mb-4">
                 <img
                   src={eventData.banner_image_url}
@@ -656,16 +657,60 @@ const EventRegistrationPage: React.FC = () => {
                 />
               </div>
             )}
-            <h1 className="text-2xl font-bold text-slate-900 text-center">{eventData.title}</h1>
-            {eventData.short_description && <p className="text-slate-700 mt-2">{eventData.short_description}</p>}
-            <p className="text-sm text-slate-500 mt-2">
-              Starts on {new Date(eventData.start_at).toLocaleString('en-IN')} ({eventData.timezone || 'UTC'})
-            </p>
-            <p className="text-sm text-slate-600 mt-1">
-              Fee: {eventData.is_paid ? `${eventData.currency} ${eventData.amount}` : 'Free'}
-            </p>
+            {!paymentDone && (
+              <>
+                <h1 className="text-2xl font-bold text-slate-900 text-center">{eventData.title}</h1>
+                {eventData.short_description && <p className="text-slate-700 mt-2">{eventData.short_description}</p>}
+                <p className="text-sm text-slate-500 mt-2">
+                  Starts on {new Date(eventData.start_at).toLocaleString('en-IN')} ({eventData.timezone || 'UTC'})
+                </p>
+                <p className="text-sm text-slate-600 mt-1">
+                  Fee: {eventData.is_paid ? `${eventData.currency} ${eventData.amount}` : 'Free'}
+                </p>
+              </>
+            )}
 
-            {message && (
+            {message && paymentDone && (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-600 mt-0.5" />
+                  <div>
+                    <h2 className="text-lg font-semibold text-emerald-900">Registration Successful</h2>
+                    <p className="text-emerald-800 mt-1">
+                      Registration confirmed and payment received. Receipt and event details will be sent to your email.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {eventData.whatsapp_group_link && (
+                    <a
+                      href={eventData.whatsapp_group_link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-white border border-emerald-200 px-4 py-3 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      Join WhatsApp Group
+                    </a>
+                  )}
+
+                  <a
+                    href="mailto:support@trackmystartup.com"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-white border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+                  >
+                    <Mail className="h-4 w-4" />
+                    support@trackmystartup.com
+                  </a>
+                </div>
+
+                <p className="text-xs text-slate-600 mt-3">
+                  If you did not receive email or need help, please reach out to us at support@trackmystartup.com.
+                </p>
+              </div>
+            )}
+
+            {message && !paymentDone && (
               <div className="mt-4 rounded-md bg-green-50 border border-green-200 p-3 text-green-800 text-sm">
                 {message}
               </div>

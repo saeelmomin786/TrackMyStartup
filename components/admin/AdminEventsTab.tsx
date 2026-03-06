@@ -11,6 +11,7 @@ type EventRow = {
   title: string;
   slug: string;
   banner_image_url: string | null;
+  whatsapp_group_link: string | null;
   short_description: string | null;
   description: string | null;
   timezone: string;
@@ -96,6 +97,7 @@ const AdminEventsTab: React.FC = () => {
     title: '',
     slug: '',
     bannerImageUrl: '',
+    whatsappGroupLink: '',
     shortDescription: '',
     description: '',
     timezone: 'UTC',
@@ -310,6 +312,7 @@ const AdminEventsTab: React.FC = () => {
       title: '',
       slug: '',
       bannerImageUrl: '',
+      whatsappGroupLink: '',
       shortDescription: '',
       description: '',
       timezone: 'UTC',
@@ -330,6 +333,7 @@ const AdminEventsTab: React.FC = () => {
       title: event.title,
       slug: event.slug,
       bannerImageUrl: event.banner_image_url || '',
+      whatsappGroupLink: event.whatsapp_group_link || '',
       shortDescription: event.short_description || '',
       description: event.description || '',
       timezone: event.timezone || 'UTC',
@@ -370,6 +374,7 @@ const AdminEventsTab: React.FC = () => {
         title: eventForm.title.trim(),
         slug,
         banner_image_url: eventForm.bannerImageUrl.trim() || null,
+        whatsapp_group_link: eventForm.whatsappGroupLink.trim() || null,
         short_description: eventForm.shortDescription.trim() || null,
         description: eventForm.description.trim() || null,
         timezone: eventForm.timezone.trim() || 'UTC',
@@ -598,6 +603,13 @@ const AdminEventsTab: React.FC = () => {
             value={eventForm.bannerImageUrl}
             onChange={(e) => setEventForm((p) => ({ ...p, bannerImageUrl: e.target.value }))}
             placeholder="https://.../event-poster.jpg"
+          />
+
+          <Input
+            label="WhatsApp Group Link (optional)"
+            value={eventForm.whatsappGroupLink}
+            onChange={(e) => setEventForm((p) => ({ ...p, whatsappGroupLink: e.target.value }))}
+            placeholder="https://chat.whatsapp.com/..."
           />
 
           <div>

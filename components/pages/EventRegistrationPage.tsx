@@ -695,16 +695,21 @@ const EventRegistrationPage: React.FC = () => {
                     </a>
                   )}
 
-                  <a
-                    href="mailto:support@trackmystartup.com"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-white border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
-                  >
-                    <Mail className="h-4 w-4" />
-                    support@trackmystartup.com
-                  </a>
+                  {email && (
+                    <a
+                      href={`mailto:${email}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-white border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+                    >
+                      <Mail className="h-4 w-4" />
+                      {email}
+                    </a>
+                  )}
                 </div>
 
                 <p className="text-xs text-slate-600 mt-3">
+                  We have sent confirmation details to {email || 'your registered email address'}.
+                </p>
+                <p className="text-xs text-slate-600 mt-1">
                   If you did not receive email or need help, please reach out to us at support@trackmystartup.com.
                 </p>
               </div>

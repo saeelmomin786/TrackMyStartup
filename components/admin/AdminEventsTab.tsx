@@ -73,6 +73,7 @@ const QUESTION_TYPES = [
   'short_text',
   'long_text',
   'email',
+  'link',
   'phone',
   'number',
   'dropdown',

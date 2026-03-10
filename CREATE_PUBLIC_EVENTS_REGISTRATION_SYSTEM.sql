@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS public.event_form_questions (
       'short_text',
       'long_text',
       'email',
+      'link',
       'phone',
       'number',
       'dropdown',

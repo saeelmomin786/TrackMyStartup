@@ -19,6 +19,7 @@ type EventRow = {
   banner_image_url: string | null;
   whatsapp_group_link: string | null;
   short_description: string | null;
+  description: string | null;
   start_at: string;
   timezone: string;
   is_paid: boolean;
@@ -52,9 +53,6 @@ const EventRegistrationPage: React.FC = () => {
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [companyName, setCompanyName] = useState('');
-  const [designation, setDesignation] = useState('');
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
   const [exploreDropdownOpen, setExploreDropdownOpen] = useState(false);
@@ -99,7 +97,7 @@ const EventRegistrationPage: React.FC = () => {
 
       const { data: eventRow, error: eventError } = await db
         .from('events')
-        .select('id, title, slug, banner_image_url, whatsapp_group_link, short_description, start_at, timezone, is_paid, amount, currency, is_published, is_active')
+        .select('id, title, slug, banner_image_url, whatsapp_group_link, short_description, description, start_at, timezone, is_paid, amount, currency, is_published, is_active')
         .eq('slug', eventSlug)
         .eq('is_published', true)
         .eq('is_active', true)
@@ -224,7 +222,6 @@ const EventRegistrationPage: React.FC = () => {
       prefill: {
         name: fullName,
         email,
-        contact: phone,
       },
       handler: async (response: any) => {
         const verifyResp = await fetch('/api/events/verify-payment', {
@@ -296,9 +293,6 @@ const EventRegistrationPage: React.FC = () => {
           eventSlug,
           fullName,
           email,
-          phone,
-          companyName,
-          designation,
           answers: payloadAnswers,
         }),
       });
@@ -406,6 +400,7 @@ const EventRegistrationPage: React.FC = () => {
 
     let inputType = 'text';
     if (q.question_type === 'email') inputType = 'email';
+    if (q.question_type === 'link') inputType = 'url';
     if (q.question_type === 'phone') inputType = 'tel';
     if (q.question_type === 'number') inputType = 'number';
     if (q.question_type === 'date') inputType = 'date';
@@ -660,13 +655,12 @@ const EventRegistrationPage: React.FC = () => {
             {!paymentDone && (
               <>
                 <h1 className="text-2xl font-bold text-slate-900 text-center">{eventData.title}</h1>
-                {eventData.short_description && <p className="text-slate-700 mt-2">{eventData.short_description}</p>}
-                <p className="text-sm text-slate-500 mt-2">
-                  Starts on {new Date(eventData.start_at).toLocaleString('en-IN')} ({eventData.timezone || 'UTC'})
-                </p>
-                <p className="text-sm text-slate-600 mt-1">
-                  Fee: {eventData.is_paid ? `${eventData.currency} ${eventData.amount}` : 'Free'}
-                </p>
+                {eventData.short_description && (
+                  <p className="text-slate-700 mt-2 whitespace-pre-wrap break-words">{eventData.short_description}</p>
+                )}
+                {eventData.description && (
+                  <p className="text-slate-700 mt-2 whitespace-pre-wrap break-words">{eventData.description}</p>
+                )}
               </>
             )}
 
@@ -729,9 +723,6 @@ const EventRegistrationPage: React.FC = () => {
               <form onSubmit={handleSubmit} className="mt-6 space-y-4">
                 <Input label="Full Name *" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
                 <Input label="Email *" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-                <Input label="Company Name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
-                <Input label="Designation" value={designation} onChange={(e) => setDesignation(e.target.value)} />
 
                 {questions.length > 0 && (
                   <div className="pt-2 space-y-4">

@@ -799,33 +799,6 @@ class CapTableService {
         if (!fundraisingData.equity || fundraisingData.equity <= 0 || fundraisingData.equity > 100) {
           throw new Error('Valid equity percentage (1-100%) is required when fundraising is active');
         }
-        
-        // For NEW registrations: Check subscription status before allowing activation
-        // Only check if this is a new fundraising record (no existing active record)
-        // This ensures existing startups are NOT affected - only new registrations
-        const hasExistingActive = existing.some(r => r.active);
-        
-        // If no existing active fundraising, this is likely a new registration
-        // Check subscription status before allowing activation
-        if (!hasExistingActive) {
-          const { data: startup } = await supabase
-            .from('startups')
-            .select('user_id')
-            .eq('id', startupId)
-            .single();
-          
-          if (startup?.user_id) {
-            const { featureAccessService } = await import('./featureAccessService');
-            const hasAccess = await featureAccessService.canAccessFeature(startup.user_id, 'fundraising_active');
-            
-            if (!hasAccess) {
-              // Force fundraising to inactive for new registrations without premium
-              console.log('⚠️ New registration: User does not have premium access. Setting fundraising.active = false');
-              fundraisingData.active = false;
-              // Don't throw error - just silently set to inactive so registration can continue
-            }
-          }
-        }
       }
       
       const updateData = {

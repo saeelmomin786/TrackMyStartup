@@ -19,14 +19,12 @@ import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
 import { DashboardMetricsService, DashboardMetrics } from '../../lib/dashboardMetricsService';
 import { complianceRulesIntegrationService } from '../../lib/complianceRulesIntegrationService';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus, Crown, AlertCircle, TrendingDown, Gauge, Clock, XCircle } from 'lucide-react';
+import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus, TrendingDown, Gauge, Clock, XCircle } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import FundraisingCRM from './FundraisingCRM';
 import OpportunitiesTab from './OpportunitiesTab';
-import FeatureGuard from '../FeatureGuard';
 import { supabase } from '../../lib/supabase';
-import { featureAccessService } from '../../lib/featureAccessService';
 import SubscriptionPlansPage from '../SubscriptionPlansPage';
 import { getQueryParam } from '../../lib/urlState';
 
@@ -98,56 +96,9 @@ function ActiveFundraisingToggle({
   isSaving: boolean;
   onToggle: (checked: boolean) => void;
 }) {
-  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
-  const [showPremiumModal, setShowPremiumModal] = useState(false);
-  const [showPlans, setShowPlans] = useState(false);
-
-  useEffect(() => {
-    const checkAccess = async () => {
-      if (!userId) {
-        setHasAccess(false);
-        return;
-      }
-      try {
-        const access = await featureAccessService.canAccessFeature(userId, 'fundraising_active');
-        setHasAccess(access);
-      } catch (error) {
-        console.error('Error checking feature access:', error);
-        setHasAccess(false);
-      }
-    };
-    checkAccess();
-  }, [userId]);
-
   const handleClick = () => {
     if (isSaving) return;
-
-    if (isActive) {
-      // Deactivation is always allowed
-      onToggle(false);
-      return;
-    }
-
-    // Currently deactivated -> try to activate
-    if (hasAccess) {
-      onToggle(true);
-    } else {
-      // Show premium feature modal (even if button appears disabled, we allow click to show modal)
-      setShowPremiumModal(true);
-    }
-  };
-
-  if (hasAccess === null) {
-    return (
-      <Button
-        disabled
-        size="lg"
-        variant="secondary"
-        className="opacity-70 cursor-wait px-6 py-3 text-base font-semibold"
-      >
-        Checking access...
-      </Button>
-    );
+    onToggle(!isActive);
   }
 
   // Toggle switch-style button with clear labels
@@ -172,15 +123,13 @@ function ActiveFundraisingToggle({
               relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500
               ${isActive 
                 ? 'bg-green-600 hover:bg-green-700 cursor-pointer' 
-                : hasAccess 
-                  ? 'bg-slate-300 hover:bg-slate-400 cursor-pointer' 
-                  : 'bg-slate-300 hover:bg-slate-400 cursor-pointer opacity-75'
+                : 'bg-slate-300 hover:bg-slate-400 cursor-pointer'
               }
               ${isSaving ? 'opacity-70 cursor-wait' : ''}
             `}
             role="switch"
             aria-checked={isActive}
-            aria-label={isActive ? 'Deactivate Fundraising' : hasAccess ? 'Activate Fundraising' : 'Upgrade to Activate Fundraising'}
+            aria-label={isActive ? 'Deactivate Fundraising' : 'Activate Fundraising'}
           >
             {/* Toggle Circle */}
             <span
@@ -199,232 +148,46 @@ function ActiveFundraisingToggle({
         <Button
           onClick={handleClick}
           disabled={isSaving}
-          variant={isActive ? 'primary' : (hasAccess ? 'primary' : 'secondary')}
+          variant="primary"
           size="lg"
           className={`
             px-6 py-3 text-base font-semibold min-w-[200px] relative
             ${isActive 
               ? 'bg-red-600 hover:bg-red-700 text-white shadow-md hover:shadow-lg transition-all duration-200' 
-              : hasAccess 
-                ? 'bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg transition-all duration-200' 
-                : 'bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white shadow-md hover:shadow-lg transition-all duration-200'
+              : 'bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg transition-all duration-200'
             }
             ${isSaving ? 'opacity-70 cursor-wait' : ''}
           `}
         >
-          <span className="flex items-center gap-2">
-            {!isActive && !hasAccess && <Crown className="w-4 h-4" />}
-            {buttonLabel}
-            {!isActive && !hasAccess && <span className="text-xs">(Premium)</span>}
-          </span>
+          <span className="flex items-center gap-2">{buttonLabel}</span>
         </Button>
       </div>
-
-      {/* Premium Feature Modal */}
-      <Modal
-        isOpen={showPremiumModal}
-        onClose={() => setShowPremiumModal(false)}
-        title="Premium Feature Required"
-        size="medium"
-      >
-        <div className="space-y-6">
-          {/* Icon and Header */}
-          <div className="flex flex-col items-center text-center space-y-4">
-            <div className="relative">
-              <div className="absolute inset-0 bg-yellow-100 rounded-full blur-xl opacity-50"></div>
-              <div className="relative bg-gradient-to-br from-yellow-400 to-orange-500 p-4 rounded-full">
-                <Crown className="w-12 h-12 text-white" />
-              </div>
-            </div>
-            <div>
-              <h3 className="text-2xl font-bold text-slate-900 mb-2">Unlock Premium Features</h3>
-              <p className="text-slate-600">Activate fundraising and share your portfolio</p>
-            </div>
-          </div>
-
-          {/* Message */}
-          <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg">
-            <div className="flex items-start space-x-3">
-              <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm text-blue-900 leading-relaxed">
-                  You have subscribed for these feature yet to activate fundraising and share your portfolio among network please activate fundraising
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Benefits List */}
-          <div className="space-y-3">
-            <h4 className="font-semibold text-slate-900 text-sm">Premium Benefits:</h4>
-            <ul className="space-y-2">
-              {[
-                'Activate fundraising campaigns',
-                'Share your portfolio with investors',
-                'Access to investor network',
-                'Enhanced visibility in discover tab'
-              ].map((benefit, index) => (
-                <li key={index} className="flex items-center space-x-3 text-sm text-slate-700">
-                  <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
-                  <span>{benefit}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-200">
-            <Button
-              onClick={() => setShowPremiumModal(false)}
-              variant="outline"
-              className="flex-1"
-            >
-              Close
-            </Button>
-            <Button
-              onClick={() => {
-                setShowPremiumModal(false);
-              setShowPlans(true);
-              }}
-              variant="primary"
-              className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
-            >
-              Upgrade to Premium
-            </Button>
-          </div>
-        </div>
-      </Modal>
-      {showPlans && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-2 sm:p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <h2 className="text-base sm:text-lg font-semibold text-slate-900">
-                Choose a Plan to Unlock Premium Features
-              </h2>
-              <button
-                onClick={() => setShowPlans(false)}
-                className="text-slate-500 hover:text-slate-700 text-sm"
-              >
-                Close
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <SubscriptionPlansPage
-                userId={userId}
-                onBack={() => setShowPlans(false)}
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
 
 // One Pager Button Component - Disabled for free users
 function OnePagerButton({ 
-  userId, 
-  feature,
   onClick, 
   disabled,
   label,
   variant
 }: { 
-  userId: string; 
-  feature: string;
   onClick: () => void;
   disabled: boolean;
   label: string;
   variant: 'primary' | 'secondary';
 }) {
-  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
-  const [showPlans, setShowPlans] = useState(false);
-
-  useEffect(() => {
-    const checkAccess = async () => {
-      if (!userId) {
-        setHasAccess(false);
-        return;
-      }
-      try {
-        const access = await featureAccessService.canAccessFeature(userId, feature);
-        setHasAccess(access);
-      } catch (error) {
-        console.error('Error checking feature access:', error);
-        setHasAccess(false);
-      }
-    };
-    checkAccess();
-  }, [userId, feature]);
-
-  const handleClick = () => {
-    if (hasAccess) {
-      onClick();
-    } else {
-      // Open subscription plans modal instead of just showing warning
-      setShowPlans(true);
-    }
-  };
-
-  if (hasAccess === null) {
-    return (
-      <Button
-        size="sm"
-        variant={variant}
-        disabled
-        className="whitespace-nowrap w-full sm:w-[200px] opacity-50"
-      >
-        {label}
-      </Button>
-    );
-  }
-
   return (
-    <>
-      <div className="relative group w-full sm:w-[200px]">
-        <Button
-          size="sm"
-          variant={variant}
-          onClick={handleClick}
-          disabled={disabled}
-          className={`whitespace-nowrap w-full ${!hasAccess ? 'opacity-60' : ''}`}
-          title={!hasAccess ? 'Premium Feature - Click to upgrade' : ''}
-        >
-          {label}
-        </Button>
-        {!hasAccess && (
-          <div className="absolute left-0 top-full mt-1 z-10 hidden group-hover:block">
-            <div className="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
-              Premium Feature - Click to upgrade
-              <div className="absolute -top-1 left-4 w-2 h-2 bg-slate-800 transform rotate-45"></div>
-            </div>
-          </div>
-        )}
-      </div>
-      {showPlans && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-2 sm:p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <h2 className="text-base sm:text-lg font-semibold text-slate-900">
-                Choose a Plan to Unlock Premium Features
-              </h2>
-              <button
-                onClick={() => setShowPlans(false)}
-                className="text-slate-500 hover:text-slate-700 text-sm"
-              >
-                Close
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <SubscriptionPlansPage
-                userId={userId}
-                onBack={() => setShowPlans(false)}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    <Button
+      size="sm"
+      variant={variant}
+      onClick={onClick}
+      disabled={disabled}
+      className="whitespace-nowrap w-full sm:w-[200px]"
+    >
+      {label}
+    </Button>
   );
 }
 
@@ -2743,8 +2506,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
               <div className="flex flex-col gap-2 sm:items-end">
                 {canEdit && (
                   <OnePagerButton
-                    userId={authUserId}
-                    feature="portfolio_fundraising"
                     onClick={handleSaveOnePager}
                     disabled={isSaving || isSavingToSupabase || isDownloading}
                     label={isSaving || isSavingToSupabase ? 'Saving...' : 'Save One-Pager'}
@@ -2752,8 +2513,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   />
                 )}
                 <OnePagerButton
-                  userId={authUserId}
-                  feature="portfolio_fundraising"
                   onClick={handleDownloadOnePager}
                   disabled={isDownloading || isSaving || isSavingToSupabase}
                   label={isDownloading ? 'Preparing PDF...' : 'Download PDF / Print'}

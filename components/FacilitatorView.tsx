@@ -6149,6 +6149,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 setMentorMgmtSubTab('assignments');
                                 setIsAssignModalOpen(true);
                               }}
+                              onToggleStatus={async (mentor) => {
+                                try {
+                                  await facilitatorMentorService.toggleMentorStatus(mentor.id!, !mentor.is_active);
+                                  await loadMentorManagementData();
+                                  messageService.success('Status Updated', `Mentor is now ${!mentor.is_active ? 'active' : 'inactive'}`);
+                                } catch (error) {
+                                  console.error('Error toggling mentor status:', error);
+                                  messageService.error('Error', 'Failed to update mentor status');
+                                }
+                              }}
+                              onViewHistory={(mentor) => {
+                                setSelectedMentorForPortfolio(mentor);
+                                setIsPortfolioModalOpen(true);
+                              }}
                             />
                           </>
                         )}

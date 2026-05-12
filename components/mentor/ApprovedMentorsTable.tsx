@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye, MoreVertical, ChevronDown } from 'lucide-react';
+import { Eye, Clock, Plus, MoreVertical, ChevronDown } from 'lucide-react';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 
@@ -19,12 +19,16 @@ interface ApprovedMentorsTableProps {
   mentors: ApprovedMentor[];
   onViewPortfolio: (mentor: ApprovedMentor) => void;
   onAssign: (mentor: ApprovedMentor) => void;
+  onToggleStatus?: (mentor: ApprovedMentor) => void;
+  onViewHistory?: (mentor: ApprovedMentor) => void;
 }
 
 const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
   mentors,
   onViewPortfolio,
-  onAssign
+  onAssign,
+  onToggleStatus,
+  onViewHistory
 }) => {
   if (mentors.length === 0) {
     return (
@@ -43,6 +47,7 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Email</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Expertise</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Status</th>
+            <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">History</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Actions</th>
           </tr>
         </thead>
@@ -91,9 +96,35 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
                 </div>
               </td>
               <td className="px-6 py-4">
-                <Badge variant={mentor.is_active ? 'success' : 'secondary'}>
-                  {mentor.is_active ? 'Active' : 'Inactive'}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant={mentor.is_active ? 'success' : 'secondary'}>
+                    {mentor.is_active ? 'Active' : 'Inactive'}
+                  </Badge>
+                  {onToggleStatus && (
+                    <Button
+                      size="sm"
+                      variant={mentor.is_active ? 'outline' : 'primary'}
+                      onClick={() => onToggleStatus(mentor)}
+                      className="whitespace-nowrap"
+                    >
+                      {mentor.is_active ? 'Deactivate' : 'Activate'}
+                    </Button>
+                  )}
+                </div>
+              </td>
+              <td className="px-6 py-4">
+                {onViewHistory ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onViewHistory(mentor)}
+                  >
+                    <Clock className="h-4 w-4 mr-1" />
+                    View
+                  </Button>
+                ) : (
+                  <span className="text-sm text-slate-400">-</span>
+                )}
               </td>
               <td className="px-6 py-4">
                 <div className="flex gap-2">
@@ -101,9 +132,19 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
                     size="sm"
                     variant="outline"
                     onClick={() => onViewPortfolio(mentor)}
+                    title="View mentor portfolio and details"
                   >
                     <Eye className="h-4 w-4 mr-1" />
-                    View Portfolio
+                    Portfolio
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => onAssign(mentor)}
+                    title="Assign this mentor to a startup"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Assign
                   </Button>
                 </div>
               </td>

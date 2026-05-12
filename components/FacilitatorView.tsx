@@ -4,9 +4,10 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, Mail, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, Mail, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download, GraduationCap, Calendar, Clock, Plus, ChevronDown, ChevronUp, BookOpen, AlertCircle } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
+import PortfolioHealthCharts from './charts/PortfolioHealthCharts';
 import Badge from './ui/Badge';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { supabase } from '../lib/supabase';
@@ -32,6 +33,9 @@ import QuestionSelector from './QuestionSelector';
 import { questionBankService, ApplicationQuestion } from '../lib/questionBankService';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
 import { reportsService } from '../lib/reportsService';
+import { facilitatorMentorService, FacilitatorMentor, FacilitatorMentorAssignment, MentorMeetingRecord, MentorFacilitatorAssociation } from '../lib/facilitatorMentorService';
+import ApprovedMentorsTable from './mentor/ApprovedMentorsTable';
+import MentorPortfolioModal from './mentor/MentorPortfolioModal';
 import { intakeCRMService } from '../lib/intakeCRMService';
 import { form2ResponseService } from '../lib/form2ResponseService';
 import { Form2SubmissionModal } from './Form2SubmissionModal';
@@ -51,7 +55,7 @@ interface FacilitatorViewProps {
   onLogout?: () => void;
 }
 
-type FacilitatorTab = 'dashboard' | 'discover' | 'intakeManagement' | 'trackMyStartups' | 'ourInvestments' | 'collaboration' | 'portfolio';
+type FacilitatorTab = 'dashboard' | 'discover' | 'intakeManagement' | 'trackMyStartups' | 'mentorManagement' | 'ourInvestments' | 'collaboration' | 'portfolio';
 
 // Local opportunity type for facilitator postings
 type IncubationOpportunity = {
@@ -83,6 +87,9 @@ type ReceivedApplication = {
   createdAt?: string;
   diligenceUrls?: string[]; // Array of uploaded diligence document URLs
   isShortlisted?: boolean; // For shortlist feature
+  fundingStage?: string;
+  startupStatus?: string;
+  timeline?: string;
 };
 
 type ReportMandate = {
@@ -224,7 +231,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   };
   const [activeTab, setActiveTab] = useState<FacilitatorTab>((() => {
     const fromUrl = (getQueryParam('tab') as FacilitatorTab) || 'dashboard';
-    const valid: FacilitatorTab[] = ['dashboard','discover','intakeManagement','trackMyStartups','ourInvestments','collaboration','portfolio'];
+    const valid: FacilitatorTab[] = ['dashboard','discover','intakeManagement','trackMyStartups','mentorManagement','ourInvestments','collaboration','portfolio'];
     return valid.includes(fromUrl) ? fromUrl : 'dashboard';
   })());
   // Keep URL in sync when tab changes
@@ -279,7 +286,38 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   
   // Portfolio state
   const [previewProfile, setPreviewProfile] = useState<any>(null);
-  
+
+  // ============ MENTOR MANAGEMENT STATE ============
+  const [mentorMgmtSubTab, setMentorMgmtSubTab] = useState<'mentors' | 'assignments' | 'meetings'>('mentors');
+  const [facilitatorMentors, setFacilitatorMentors] = useState<FacilitatorMentor[]>([]);
+  const [pendingMentorAssociations, setPendingMentorAssociations] = useState<any[]>([]);
+  const [approvedMentorAssociations, setApprovedMentorAssociations] = useState<any[]>([]);
+  const [mentorAssignments, setMentorAssignments] = useState<FacilitatorMentorAssignment[]>([]);
+  const [allMeetingRecords, setAllMeetingRecords] = useState<MentorMeetingRecord[]>([]);
+  const [isLoadingMentorMgmt, setIsLoadingMentorMgmt] = useState(false);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [assignMentorId, setAssignMentorId] = useState('');
+  const [assignStartupId, setAssignStartupId] = useState('');
+  const [assignNotes, setAssignNotes] = useState('');
+  const [isSavingAssignment, setIsSavingAssignment] = useState(false);
+  const [isMeetingModalOpen, setIsMeetingModalOpen] = useState(false);
+  const [selectedAssignmentForMeeting, setSelectedAssignmentForMeeting] = useState<FacilitatorMentorAssignment | null>(null);
+  const [meetingForm, setMeetingForm] = useState({
+    title: '',
+    meeting_date: new Date().toISOString().split('T')[0],
+    meeting_type: 'General',
+    duration_minutes: '',
+    notes: '',
+    outcomes: '',
+    next_steps: '',
+  });
+  const [isSavingMeeting, setIsSavingMeeting] = useState(false);
+  const [expandedAssignmentId, setExpandedAssignmentId] = useState<number | null>(null);
+  const [assignmentMeetings, setAssignmentMeetings] = useState<Record<number, MentorMeetingRecord[]>>({});
+  const [mentorSubTab, setMentorSubTab] = useState<'pending' | 'approved'>('approved');
+  const [isPortfolioModalOpen, setIsPortfolioModalOpen] = useState(false);
+  const [selectedMentorForPortfolio, setSelectedMentorForPortfolio] = useState<any>(null);
+
   const [myPostedOpportunities, setMyPostedOpportunities] = useState<IncubationOpportunity[]>([]);
   const [opportunityApplicationCounts, setOpportunityApplicationCounts] = useState<Map<string, number>>(new Map());
   const [myReceivedApplications, setMyReceivedApplications] = useState<ReceivedApplication[]>([]);
@@ -357,6 +395,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   
   // ============ FEATURE 4: REPORTS MANDATE WIZARD ============
   const [trackMyStartupsSubTab, setTrackMyStartupsSubTab] = useState<'portfolio' | 'reports'>('portfolio');
+
+  // ============ VIEW BY FILTER (Track My Startups Portfolio) ============
+  const [viewByFilter, setViewByFilter] = useState<'program' | 'stage' | 'funding-stage' | 'timeline' | 'status'>('program');
+  const [selectedStageTab, setSelectedStageTab] = useState<'Pre-Incubation' | 'Incubation' | 'Acceleration'>('Pre-Incubation');
+  const [selectedFundingStageTab, setSelectedFundingStageTab] = useState<'Pre-Seed' | 'Seed' | 'Series A'>('Pre-Seed');
+  const [selectedTimelineTab, setSelectedTimelineTab] = useState<string>('2025');
+  const [selectedStatusTab, setSelectedStatusTab] = useState<'active' | 'graduated'>('active');
+  const [appTimelines, setAppTimelines] = useState<Record<string, string>>({});
+  const [appStatuses, setAppStatuses] = useState<Record<string, string>>({});
   const [selectedReportIdForTracking, setSelectedReportIdForTracking] = useState<string | null>(null);
   const [isCreateReportModalOpen, setIsCreateReportModalOpen] = useState(false);
   const [reportStep, setReportStep] = useState<1 | 2 | 3>(1);
@@ -1948,7 +1995,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             try {
             const { data: apps, error: appsError } = await supabase
               .from('opportunity_applications')
-              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, startups!inner(id,name,user_id, founders(email))')
+              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, timeline, startup_status, startups!inner(id,name,user_id, founders(email))')
               .in('opportunity_id', oppIds)
               .order('created_at', { ascending: false });
             
@@ -1974,7 +2021,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   // Try without the inner join
                   const { data: fallbackApps, error: fallbackAppsError } = await supabase
                     .from('opportunity_applications')
-                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted')
+                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, timeline, startup_status')
                     .in('opportunity_id', oppIds)
                     .order('created_at', { ascending: false });
                   
@@ -1997,10 +2044,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       stage: a.stage,
                       createdAt: a.created_at,
                       diligenceUrls: a.diligence_urls || [],
-                      isShortlisted: a.is_shortlisted || false
+                      isShortlisted: a.is_shortlisted || false,
+                      timeline: a.timeline || undefined,
+                      startupStatus: a.startup_status || undefined,
                     }));
-                    
+
                     setMyReceivedApplications(fallbackAppsMapped);
+                    const tlInit: Record<string, string> = {};
+                    const stInit: Record<string, string> = {};
+                    fallbackAppsMapped.forEach(app => {
+                      if (app.timeline) tlInit[app.id] = app.timeline;
+                      if (app.startupStatus) stInit[app.id] = app.startupStatus;
+                    });
+                    setAppTimelines(tlInit);
+                    setAppStatuses(stInit);
                     
                     // Populate shortlist set from fallback applications
                     const shortlistedIds = new Set<string>();
@@ -2056,13 +2113,53 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 stage: a.stage,
                 createdAt: a.created_at,
                 diligenceUrls: a.diligence_urls || [],
-                isShortlisted: a.is_shortlisted || false
+                isShortlisted: a.is_shortlisted || false,
+                timeline: a.timeline || undefined,
+                startupStatus: a.startup_status || undefined,
                 };
               });
-              
+
               if (mounted) {
                 setMyReceivedApplications(appsMapped);
-                
+
+                // Initialise facilitator-set timeline/status from DB
+                const tlInit: Record<string, string> = {};
+                const stInit: Record<string, string> = {};
+                appsMapped.forEach(app => {
+                  if (app.timeline) tlInit[app.id] = app.timeline;
+                  if (app.startupStatus) stInit[app.id] = app.startupStatus;
+                });
+                setAppTimelines(tlInit);
+                setAppStatuses(stInit);
+
+                // Batch-load stage & funding stage from application responses
+                const acceptedIds = appsMapped.filter(a => a.status === 'accepted').map(a => a.id);
+                if (acceptedIds.length > 0) {
+                  const { data: respData } = await supabase
+                    .from('opportunity_application_responses')
+                    .select('application_id, answer_text, question:application_question_bank(question_text)')
+                    .in('application_id', acceptedIds);
+                  if (respData && mounted) {
+                    const stageMap: Record<string, string> = {};
+                    const fundingMap: Record<string, string> = {};
+                    for (const row of respData as any[]) {
+                      const qText = (row.question?.question_text || '').toLowerCase();
+                      const answer = row.answer_text || '';
+                      const appId = row.application_id;
+                      if (qText.includes('funding') && !fundingMap[appId]) {
+                        fundingMap[appId] = answer;
+                      } else if (qText.includes('stage') && !stageMap[appId]) {
+                        stageMap[appId] = answer;
+                      }
+                    }
+                    setMyReceivedApplications(prev => prev.map(app => ({
+                      ...app,
+                      stage: stageMap[app.id] !== undefined ? stageMap[app.id] : app.stage,
+                      fundingStage: fundingMap[app.id] !== undefined ? fundingMap[app.id] : app.fundingStage,
+                    })));
+                  }
+                }
+
                 // Populate shortlist set from loaded applications
                 const shortlistedIds = new Set<string>();
                 appsMapped.forEach(app => {
@@ -2654,6 +2751,116 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   }, [activeTab, trackMyStartupsSubTab, facilitatorId]);
 
+  // Load mentor management data when tab is active
+  useEffect(() => {
+    if (activeTab === 'mentorManagement' && facilitatorCode) {
+      loadMentorManagementData();
+    }
+  }, [activeTab, facilitatorCode]);
+
+  const loadMentorManagementData = async () => {
+    if (!facilitatorCode) return;
+    setIsLoadingMentorMgmt(true);
+    try {
+      const [mentors, assignments, meetings, pending, approved] = await Promise.all([
+        facilitatorMentorService.getMentorsForFacilitator(facilitatorCode),
+        facilitatorMentorService.getAssignmentsForFacilitator(facilitatorCode),
+        facilitatorMentorService.getAllMeetingRecords(facilitatorCode),
+        facilitatorMentorService.getAssociationsForFacilitator(facilitatorCode, 'pending'),
+        facilitatorMentorService.getAssociationsForFacilitator(facilitatorCode, 'approved'),
+      ]);
+      setFacilitatorMentors(mentors);
+      setMentorAssignments(assignments);
+      setAllMeetingRecords(meetings);
+      setPendingMentorAssociations(pending);
+      setApprovedMentorAssociations(approved);
+    } catch (err) {
+      console.error('Error loading mentor management data:', err);
+    } finally {
+      setIsLoadingMentorMgmt(false);
+    }
+  };
+
+  const handleAssignMentor = async () => {
+    if (!facilitatorCode || !assignMentorId || !assignStartupId) return;
+    setIsSavingAssignment(true);
+    try {
+      const result = await facilitatorMentorService.assignMentorToStartup(
+        facilitatorCode,
+        assignMentorId,
+        Number(assignStartupId),
+        assignNotes || undefined
+      );
+      if (result.success) {
+        setIsAssignModalOpen(false);
+        setAssignMentorId('');
+        setAssignStartupId('');
+        setAssignNotes('');
+        await loadMentorManagementData();
+        messageService.success('Mentor Assigned', 'Mentor has been assigned to the startup successfully.');
+      } else {
+        messageService.error('Assignment Failed', result.error || 'Failed to assign mentor.');
+      }
+    } finally {
+      setIsSavingAssignment(false);
+    }
+  };
+
+  const handleAddMeetingRecord = async () => {
+    if (!selectedAssignmentForMeeting || !meetingForm.title || !meetingForm.meeting_date) return;
+    setIsSavingMeeting(true);
+    try {
+      const result = await facilitatorMentorService.addMeetingRecord({
+        assignment_id: selectedAssignmentForMeeting.id,
+        facilitator_code: facilitatorCode,
+        mentor_user_id: selectedAssignmentForMeeting.mentor_user_id,
+        startup_id: selectedAssignmentForMeeting.startup_id,
+        title: meetingForm.title,
+        meeting_date: meetingForm.meeting_date,
+        meeting_type: meetingForm.meeting_type,
+        duration_minutes: meetingForm.duration_minutes ? Number(meetingForm.duration_minutes) : undefined,
+        notes: meetingForm.notes || undefined,
+        outcomes: meetingForm.outcomes || undefined,
+        next_steps: meetingForm.next_steps || undefined,
+      });
+      if (result.success) {
+        setIsMeetingModalOpen(false);
+        setMeetingForm({
+          title: '',
+          meeting_date: new Date().toISOString().split('T')[0],
+          meeting_type: 'General',
+          duration_minutes: '',
+          notes: '',
+          outcomes: '',
+          next_steps: '',
+        });
+        await loadMentorManagementData();
+        // Also refresh expanded assignment meetings
+        if (expandedAssignmentId === selectedAssignmentForMeeting.id) {
+          const updated = await facilitatorMentorService.getMeetingRecords(selectedAssignmentForMeeting.id);
+          setAssignmentMeetings(prev => ({ ...prev, [selectedAssignmentForMeeting.id]: updated }));
+        }
+        messageService.success('Meeting Recorded', 'Meeting record has been saved successfully.');
+      } else {
+        messageService.error('Failed', result.error || 'Failed to save meeting record.');
+      }
+    } finally {
+      setIsSavingMeeting(false);
+    }
+  };
+
+  const handleToggleAssignmentExpand = async (assignmentId: number) => {
+    if (expandedAssignmentId === assignmentId) {
+      setExpandedAssignmentId(null);
+      return;
+    }
+    setExpandedAssignmentId(assignmentId);
+    if (!assignmentMeetings[assignmentId]) {
+      const records = await facilitatorMentorService.getMeetingRecords(assignmentId);
+      setAssignmentMeetings(prev => ({ ...prev, [assignmentId]: records }));
+    }
+  };
+
   const handleOpenPostModal = () => {
     setEditingIndex(null);
     setNewOpportunity(initialNewOppState);
@@ -2727,6 +2934,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const handleViewPitchDeck = (deckUrl: string) => {
     setSelectedPitchDeck(deckUrl);
     setIsPitchDeckModalOpen(true);
+  };
+
+  const handleSetTimeline = async (appId: string, year: string) => {
+    setAppTimelines(prev => ({ ...prev, [appId]: year }));
+    await supabase.from('opportunity_applications').update({ timeline: year || null }).eq('id', appId);
+  };
+
+  const handleSetStatus = async (appId: string, status: string) => {
+    setAppStatuses(prev => ({ ...prev, [appId]: status }));
+    await supabase.from('opportunity_applications').update({ startup_status: status || null }).eq('id', appId);
   };
 
   const handleViewApplicationResponses = async (app: ReceivedApplication) => {
@@ -4178,10 +4395,30 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         // Filter accepted applications only
         const acceptedApplications = myReceivedApplications.filter(app => app.status === 'accepted');
         
-        // Get accepted applications for selected opportunity or all
-        const filteredAcceptedApps = selectedOpportunityId 
-          ? acceptedApplications.filter(app => app.opportunityId === selectedOpportunityId)
-          : acceptedApplications;
+        // Get filtered applications based on viewByFilter and selected sub-tab
+        let filteredAcceptedApps: ReceivedApplication[];
+        if (viewByFilter === 'program') {
+          filteredAcceptedApps = selectedOpportunityId
+            ? acceptedApplications.filter(app => app.opportunityId === selectedOpportunityId)
+            : acceptedApplications;
+        } else if (viewByFilter === 'stage') {
+          filteredAcceptedApps = acceptedApplications.filter(app =>
+            (app.stage || '').toLowerCase() === selectedStageTab.toLowerCase()
+          );
+        } else if (viewByFilter === 'funding-stage') {
+          filteredAcceptedApps = acceptedApplications.filter(app =>
+            (app.fundingStage || '').toLowerCase() === selectedFundingStageTab.toLowerCase().replace(/\s+/g, '-')
+          );
+        } else if (viewByFilter === 'timeline') {
+          filteredAcceptedApps = acceptedApplications.filter(app =>
+            (appTimelines[app.id] || '') === selectedTimelineTab
+          );
+        } else {
+          // status: filter by facilitator-set startup_status
+          filteredAcceptedApps = acceptedApplications.filter(app =>
+            (appStatuses[app.id] || '') === selectedStatusTab
+          );
+        }
 
         return (
           <div className="space-y-8 animate-fade-in">
@@ -4221,8 +4458,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             {trackMyStartupsSubTab === 'portfolio' && (
               <Card>
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-slate-700">Accepted Startups by Program</h3>
-                  {selectedOpportunityId && (
+                  <h3 className="text-lg font-semibold text-slate-700">Accepted Startups</h3>
+                  {viewByFilter === 'program' && selectedOpportunityId && (
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"
@@ -4249,42 +4486,133 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     </div>
                   )}
                 </div>
-                
-                {/* Program Tabs */}
-                <div className="border-b border-slate-200 mb-6">
-                  <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Program Tabs">
-                    <button 
-                      onClick={() => setSelectedOpportunityId(null)} 
-                      className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+
+                {/* View By Pill Filter */}
+                <div className="flex flex-wrap gap-2 mb-5">
+                  {([
+                    { value: 'program', label: '📋 By Program' },
+                    { value: 'stage', label: '🎯 By Stage' },
+                    { value: 'funding-stage', label: '💰 By Funding Stage' },
+                    { value: 'timeline', label: '📅 By Timeline' },
+                    { value: 'status', label: '✅ By Status' },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setViewByFilter(opt.value)}
+                      className={viewByFilter === opt.value
+                        ? 'bg-blue-600 text-white rounded-full px-4 py-1.5 text-sm font-medium'
+                        : 'border border-blue-600 text-blue-600 rounded-full px-4 py-1.5 text-sm'}
                     >
-                      <Users className="h-4 w-4" />
-                      All Startups ({acceptedApplications.length})
+                      {opt.label}
                     </button>
-                    {myPostedOpportunities.map(opportunity => {
-                      const acceptedCount = acceptedApplications.filter(app => app.opportunityId === opportunity.id).length;
-                      if (acceptedCount === 0) return null; // Only show programs with accepted startups
-                      return (
-                        <button 
-                          key={opportunity.id}
-                          onClick={() => setSelectedOpportunityId(opportunity.id)} 
-                          className={`${selectedOpportunityId === opportunity.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
-                        >
-                          <Gift className="h-4 w-4" />
-                          {opportunity.programName} ({acceptedCount})
-                        </button>
-                      );
-                    })}
-                  </nav>
+                  ))}
                 </div>
+
+                {/* Dynamic Sub-Tabs */}
+                {viewByFilter === 'program' && (
+                  <div className="border-b border-slate-200 mb-6">
+                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Program Tabs">
+                      <button
+                        onClick={() => setSelectedOpportunityId(null)}
+                        className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                      >
+                        <Users className="h-4 w-4" />
+                        All Startups ({acceptedApplications.length})
+                      </button>
+                      {myPostedOpportunities.map(opportunity => {
+                        const acceptedCount = acceptedApplications.filter(app => app.opportunityId === opportunity.id).length;
+                        if (acceptedCount === 0) return null;
+                        return (
+                          <button
+                            key={opportunity.id}
+                            onClick={() => setSelectedOpportunityId(opportunity.id)}
+                            className={`${selectedOpportunityId === opportunity.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                          >
+                            <Gift className="h-4 w-4" />
+                            {opportunity.programName} ({acceptedCount})
+                          </button>
+                        );
+                      })}
+                    </nav>
+                  </div>
+                )}
+
+                {viewByFilter === 'stage' && (
+                  <div className="border-b border-slate-200 mb-6">
+                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Stage Tabs">
+                      {(['Pre-Incubation', 'Incubation', 'Acceleration'] as const).map(stage => (
+                        <button
+                          key={stage}
+                          onClick={() => setSelectedStageTab(stage)}
+                          className={`${selectedStageTab === stage ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          {stage}
+                        </button>
+                      ))}
+                    </nav>
+                  </div>
+                )}
+
+                {viewByFilter === 'funding-stage' && (
+                  <div className="border-b border-slate-200 mb-6">
+                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Funding Stage Tabs">
+                      {(['Pre-Seed', 'Seed', 'Series A'] as const).map(fs => (
+                        <button
+                          key={fs}
+                          onClick={() => setSelectedFundingStageTab(fs)}
+                          className={`${selectedFundingStageTab === fs ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          {fs}
+                        </button>
+                      ))}
+                    </nav>
+                  </div>
+                )}
+
+                {viewByFilter === 'timeline' && (
+                  <div className="border-b border-slate-200 mb-6">
+                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Timeline Tabs">
+                      {(['2024', '2025', '2026'] as const).map(year => (
+                        <button
+                          key={year}
+                          onClick={() => setSelectedTimelineTab(year)}
+                          className={`${selectedTimelineTab === year ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          {year}
+                        </button>
+                      ))}
+                    </nav>
+                  </div>
+                )}
+
+                {viewByFilter === 'status' && (
+                  <div className="border-b border-slate-200 mb-6">
+                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Status Tabs">
+                      {(['active', 'graduated'] as const).map(st => (
+                        <button
+                          key={st}
+                          onClick={() => setSelectedStatusTab(st)}
+                          className={`${selectedStatusTab === st ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none capitalize`}
+                        >
+                          {st}
+                        </button>
+                      ))}
+                    </nav>
+                  </div>
+                )}
 
                 {/* Accepted Startups Table */}
                 <div className="overflow-x-auto">
                   {filteredAcceptedApps.length === 0 ? (
                     <div className="text-center py-12">
                       <Users className="h-16 w-16 text-slate-300 mx-auto mb-4" />
-                      <p className="text-slate-500 text-lg font-medium mb-2">No accepted startups yet</p>
+                      <p className="text-slate-500 text-lg font-medium mb-2">
+                        {viewByFilter === 'program' ? 'No accepted startups yet' : 'No startups in this category'}
+                      </p>
                       <p className="text-slate-400 text-sm">
-                        {selectedOpportunityId ? 'No startups have been accepted for this program yet.' : 'Accept startups from the Intake Management tab to track them here.'}
+                        {viewByFilter === 'program'
+                          ? (selectedOpportunityId ? 'No startups have been accepted for this program yet.' : 'Accept startups from the Intake Management tab to track them here.')
+                          : 'No startups match this filter. Try a different selection.'}
                       </p>
                     </div>
                   ) : (
@@ -4295,6 +4623,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Contact</th>
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Agreement</th>
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Responses</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Timeline</th>
+                          <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Status</th>
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Actions</th>
                         </tr>
                       </thead>
@@ -4379,6 +4709,29 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                     <span>View Responses</span>
                                   </Button>
                                 </div>
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                <select
+                                  value={appTimelines[app.id] || ''}
+                                  onChange={e => handleSetTimeline(app.id, e.target.value)}
+                                  className="text-xs border border-slate-300 rounded-md px-2 py-1.5 text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                >
+                                  <option value="">— Year —</option>
+                                  <option value="2024">2024</option>
+                                  <option value="2025">2025</option>
+                                  <option value="2026">2026</option>
+                                </select>
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                <select
+                                  value={appStatuses[app.id] || ''}
+                                  onChange={e => handleSetStatus(app.id, e.target.value)}
+                                  className="text-xs border border-slate-300 rounded-md px-2 py-1.5 text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                >
+                                  <option value="">— Status —</option>
+                                  <option value="active">Active</option>
+                                  <option value="graduated">Graduated</option>
+                                </select>
                               </td>
                               <td className="px-4 py-4">
                                 <div className="flex justify-center items-center gap-2 flex-wrap">
@@ -4684,6 +5037,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               <SummaryCard title="Opportunities Posted" value={myPostedOpportunities.length} icon={<Gift className="h-6 w-6 text-brand-primary" />} />
               <SummaryCard title="Applications Received" value={myReceivedApplications.length} icon={<FileText className="h-6 w-6 text-brand-primary" />} />
             </div>
+
+            {facilitatorId && myReceivedApplications.some(a => a.status === 'accepted') && (
+              <PortfolioHealthCharts
+                startups={Array.from(
+                  new Map(
+                    myReceivedApplications
+                      .filter(a => a.status === 'accepted' && a.startupId)
+                      .map(a => [a.startupId, { id: a.startupId, name: a.startupName }])
+                  ).values()
+                )}
+                facilitatorId={facilitatorId}
+              />
+            )}
 
             <div className="space-y-8">
               {/* Add New Startup Section */}
@@ -5585,10 +5951,621 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             )}
           </div>
         );
+      case 'mentorManagement': {
+        const meetingTypes = ['General', 'Strategy', 'Technical', 'Financial', 'Marketing', 'HR', 'Investor Prep', 'Review', 'Other'];
+        const activeAssignments = mentorAssignments.filter(a => a.status === 'active');
+        const completedAssignments = mentorAssignments.filter(a => a.status === 'completed');
+
+        return (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">Mentor Management</h2>
+                <p className="text-slate-600 mt-1">
+                  Assign mentors to startups and track all mentoring activities from one place.
+                </p>
+              </div>
+              {mentorMgmtSubTab === 'assignments' && (
+                <Button
+                  size="sm"
+                  onClick={() => setIsAssignModalOpen(true)}
+                  disabled={facilitatorMentors.length === 0 || portfolioStartups.length === 0}
+                  className="flex items-center gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Assign Mentor
+                </Button>
+              )}
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="border-b border-slate-200">
+              <nav className="-mb-px flex space-x-6" aria-label="Mentor Management Sub-tabs">
+                {[
+                  { key: 'mentors', label: 'Registered Mentors', icon: <Users className="h-4 w-4" /> },
+                  { key: 'assignments', label: 'Assignments', icon: <GraduationCap className="h-4 w-4" /> },
+                  { key: 'meetings', label: 'Meeting Records', icon: <BookOpen className="h-4 w-4" /> },
+                ].map(({ key, label, icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => setMentorMgmtSubTab(key as any)}
+                    className={`${mentorMgmtSubTab === key ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                  >
+                    {icon}{label}
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            {isLoadingMentorMgmt ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary"></div>
+                <span className="ml-3 text-slate-600">Loading mentor data...</span>
+              </div>
+            ) : (
+              <>
+                {/* ---- Registered Mentors ---- */}
+                {mentorMgmtSubTab === 'mentors' && (
+                  <div className="space-y-6">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-sm text-blue-800">
+                        <strong>How it works:</strong> Mentors associate themselves with your incubation center by entering your center code (<strong>{facilitatorCode || 'your code'}</strong>) in their profile settings. You can then approve them and assign them to startups.
+                      </p>
+                    </div>
+
+                    {/* Mentor Sub-tabs */}
+                    <div className="border-b border-slate-200 flex gap-4">
+                      {[
+                        { key: 'pending', label: 'Pending Approvals', count: pendingMentorAssociations.length },
+                        { key: 'approved', label: 'Approved Mentors', count: approvedMentorAssociations.length + facilitatorMentors.length }
+                      ].map(({ key, label, count }) => (
+                        <button
+                          key={key}
+                          onClick={() => setMentorSubTab(key as 'pending' | 'approved')}
+                          className={`${
+                            mentorSubTab === key
+                              ? 'border-b-2 border-brand-primary text-brand-primary'
+                              : 'border-b-2 border-transparent text-slate-500 hover:text-slate-700'
+                          } px-4 py-3 font-medium text-sm transition-colors`}
+                        >
+                          {label} ({count})
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Pending Approvals Tab */}
+                    {mentorSubTab === 'pending' && (
+                      <div className="space-y-3">
+                        {pendingMentorAssociations.length === 0 ? (
+                          <Card className="p-8 text-center">
+                            <CheckCircle className="h-12 w-12 text-green-300 mx-auto mb-3" />
+                            <p className="font-semibold text-slate-700">All caught up!</p>
+                            <p className="text-sm text-slate-500">No pending mentor approvals.</p>
+                          </Card>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {pendingMentorAssociations.map((assoc) => (
+                              <Card key={assoc.id} className="p-4 border-amber-200 bg-amber-50">
+                                <div className="flex items-start justify-between mb-3">
+                                  <div>
+                                    <h4 className="font-semibold text-slate-900">{assoc.mentor_name}</h4>
+                                    {assoc.mentor_type && (
+                                      <p className="text-xs text-slate-600">{assoc.mentor_type}</p>
+                                    )}
+                                  </div>
+                                  <Badge variant="warning">Pending</Badge>
+                                </div>
+                                {assoc.mentor_email && (
+                                  <p className="text-xs text-slate-600 mb-3">{assoc.mentor_email}</p>
+                                )}
+                                <div className="flex gap-2 pt-3 border-t border-amber-200">
+                                  <Button
+                                    size="sm"
+                                    variant="primary"
+                                    onClick={async () => {
+                                      try {
+                                        const { data: { user: authUser } } = await supabase.auth.getUser();
+                                        if (authUser) {
+                                          await facilitatorMentorService.approveMentorAssociation(assoc.id, authUser.id);
+                                          await loadMentorManagementData();
+                                          messageService.success('Mentor Approved', `${assoc.mentor_name} has been approved!`);
+                                        }
+                                      } catch (error) {
+                                        console.error('Error approving mentor:', error);
+                                        messageService.error('Approval Failed', 'Failed to approve mentor');
+                                      }
+                                    }}
+                                    className="flex-1"
+                                  >
+                                    <Check className="h-3 w-3 mr-1" />
+                                    Approve
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      if (confirm('Reject this mentor association?')) {
+                                        try {
+                                          await facilitatorMentorService.rejectMentorAssociation(assoc.id);
+                                          await loadMentorManagementData();
+                                          messageService.success('Mentor Rejected', `${assoc.mentor_name} has been rejected.`);
+                                        } catch (error) {
+                                          console.error('Error rejecting mentor:', error);
+                                        }
+                                      }
+                                    }}
+                                    className="flex-1"
+                                  >
+                                    <X className="h-3 w-3 mr-1" />
+                                    Reject
+                                  </Button>
+                                </div>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Approved Mentors Tab */}
+                    {mentorSubTab === 'approved' && (
+                      <div className="space-y-3">
+                        {approvedMentorAssociations.length === 0 && facilitatorMentors.length === 0 ? (
+                          <Card className="p-8 text-center">
+                            <GraduationCap className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                            <p className="font-semibold text-slate-700 mb-1">No mentors registered yet</p>
+                            <p className="text-sm text-slate-500">Share your center code <strong>{facilitatorCode}</strong> with mentors so they can associate with your center.</p>
+                          </Card>
+                        ) : (
+                          <>
+                            <ApprovedMentorsTable
+                              mentors={[
+                                ...approvedMentorAssociations.map((assoc) => ({
+                                  id: assoc.id,
+                                  mentor_user_id: assoc.mentor_user_id,
+                                  mentor_name: assoc.mentor_name,
+                                  mentor_email: assoc.mentor_email,
+                                  mentor_type: assoc.mentor_type,
+                                  expertise_areas: assoc.expertise_areas,
+                                  is_active: assoc.is_active,
+                                })),
+                                ...facilitatorMentors.map((mentor) => ({
+                                  mentor_user_id: mentor.mentor_user_id,
+                                  mentor_name: mentor.mentor_name,
+                                  mentor_email: mentor.mentor_email,
+                                  mentor_type: mentor.mentor_type,
+                                  expertise_areas: mentor.expertise_areas,
+                                  logo_url: mentor.logo_url,
+                                  is_active: true,
+                                }))
+                              ]}
+                              onViewPortfolio={(mentor) => {
+                                setSelectedMentorForPortfolio(mentor);
+                                setIsPortfolioModalOpen(true);
+                              }}
+                              onAssign={(mentor) => {
+                                setAssignMentorId(mentor.mentor_user_id);
+                                setMentorMgmtSubTab('assignments');
+                                setIsAssignModalOpen(true);
+                              }}
+                            />
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ---- Assignments ---- */}
+                {mentorMgmtSubTab === 'assignments' && (
+                  <div className="space-y-6">
+                    {/* Summary */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {[
+                        { label: 'Total Mentors', value: facilitatorMentors.length, color: 'bg-blue-50 text-blue-700' },
+                        { label: 'Active Assignments', value: activeAssignments.length, color: 'bg-green-50 text-green-700' },
+                        { label: 'Completed', value: completedAssignments.length, color: 'bg-slate-50 text-slate-700' },
+                        { label: 'Meeting Records', value: allMeetingRecords.length, color: 'bg-purple-50 text-purple-700' },
+                      ].map(({ label, value, color }) => (
+                        <Card key={label} className={`p-4 ${color}`}>
+                          <p className="text-2xl font-bold">{value}</p>
+                          <p className="text-sm">{label}</p>
+                        </Card>
+                      ))}
+                    </div>
+
+                    {mentorAssignments.length === 0 ? (
+                      <Card className="p-8 text-center">
+                        <GraduationCap className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                        <p className="font-semibold text-slate-700 mb-1">No assignments yet</p>
+                        <p className="text-sm text-slate-500 mb-4">Assign a mentor from your registered mentors to a startup in your portfolio.</p>
+                        <Button
+                          size="sm"
+                          onClick={() => setIsAssignModalOpen(true)}
+                          disabled={facilitatorMentors.length === 0 || portfolioStartups.length === 0}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Assign Mentor
+                        </Button>
+                      </Card>
+                    ) : (
+                      <div className="space-y-3">
+                        {mentorAssignments.filter(a => a.status !== 'removed').map((assignment) => {
+                          const isExpanded = expandedAssignmentId === assignment.id;
+                          const meetings = assignmentMeetings[assignment.id] || [];
+                          const totalMeetings = allMeetingRecords.filter(m => m.assignment_id === assignment.id).length;
+
+                          return (
+                            <Card key={assignment.id} className="overflow-hidden">
+                              <div className="p-4">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                                    <div className="w-10 h-10 rounded-full bg-brand-primary/10 flex items-center justify-center flex-shrink-0">
+                                      <GraduationCap className="h-5 w-5 text-brand-primary" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-semibold text-slate-900">{assignment.mentor_name}</span>
+                                        {assignment.mentor_type && (
+                                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{assignment.mentor_type}</span>
+                                        )}
+                                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${assignment.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                                          {assignment.status.charAt(0).toUpperCase() + assignment.status.slice(1)}
+                                        </span>
+                                      </div>
+                                      <p className="text-sm text-slate-600 mt-0.5">
+                                        Assigned to: <span className="font-medium">{assignment.startup_name}</span>
+                                        {assignment.startup_sector && <span className="text-slate-400"> · {assignment.startup_sector}</span>}
+                                      </p>
+                                      <p className="text-xs text-slate-400 mt-0.5">
+                                        <Calendar className="h-3 w-3 inline mr-1" />
+                                        {new Date(assignment.assigned_at).toLocaleDateString()}
+                                        {totalMeetings > 0 && (
+                                          <span className="ml-3">
+                                            <BookOpen className="h-3 w-3 inline mr-1" />
+                                            {totalMeetings} meeting{totalMeetings !== 1 ? 's' : ''} recorded
+                                          </span>
+                                        )}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setSelectedAssignmentForMeeting(assignment);
+                                        setIsMeetingModalOpen(true);
+                                      }}
+                                      className="text-xs"
+                                    >
+                                      <Plus className="h-3 w-3 mr-1" />
+                                      Add Meeting
+                                    </Button>
+                                    {assignment.status === 'active' && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={async () => {
+                                          if (window.confirm('Mark this assignment as completed?')) {
+                                            await facilitatorMentorService.updateAssignment(assignment.id, { status: 'completed' });
+                                            await loadMentorManagementData();
+                                          }
+                                        }}
+                                        className="text-xs text-green-700 hover:bg-green-50"
+                                      >
+                                        <CheckCircle className="h-3 w-3 mr-1" />
+                                        Complete
+                                      </Button>
+                                    )}
+                                    <button
+                                      onClick={() => handleToggleAssignmentExpand(assignment.id)}
+                                      className="text-slate-400 hover:text-slate-600 p-1"
+                                    >
+                                      {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                    </button>
+                                  </div>
+                                </div>
+                                {assignment.notes && (
+                                  <p className="mt-2 text-xs text-slate-500 bg-slate-50 rounded px-3 py-2">{assignment.notes}</p>
+                                )}
+                              </div>
+
+                              {/* Expanded meeting records */}
+                              {isExpanded && (
+                                <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+                                  <h5 className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
+                                    <BookOpen className="h-4 w-4" />
+                                    Meeting Records
+                                  </h5>
+                                  {meetings.length === 0 ? (
+                                    <p className="text-sm text-slate-400 italic">No meetings recorded yet. Click "Add Meeting" to log one.</p>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {meetings.map(meeting => (
+                                        <div key={meeting.id} className="bg-white rounded-lg border border-slate-200 p-3">
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="flex-1">
+                                              <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="font-medium text-sm text-slate-900">{meeting.title}</span>
+                                                <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{meeting.meeting_type}</span>
+                                              </div>
+                                              <p className="text-xs text-slate-500 mt-0.5">
+                                                <Calendar className="h-3 w-3 inline mr-1" />
+                                                {new Date(meeting.meeting_date).toLocaleDateString()}
+                                                {meeting.duration_minutes && (
+                                                  <span className="ml-3">
+                                                    <Clock className="h-3 w-3 inline mr-1" />
+                                                    {meeting.duration_minutes} min
+                                                  </span>
+                                                )}
+                                              </p>
+                                              {meeting.notes && <p className="text-xs text-slate-600 mt-1"><strong>Notes:</strong> {meeting.notes}</p>}
+                                              {meeting.outcomes && <p className="text-xs text-slate-600 mt-0.5"><strong>Outcomes:</strong> {meeting.outcomes}</p>}
+                                              {meeting.next_steps && <p className="text-xs text-slate-600 mt-0.5"><strong>Next Steps:</strong> {meeting.next_steps}</p>}
+                                            </div>
+                                            <button
+                                              onClick={async () => {
+                                                if (window.confirm('Delete this meeting record?')) {
+                                                  await facilitatorMentorService.deleteMeetingRecord(meeting.id);
+                                                  const updated = await facilitatorMentorService.getMeetingRecords(assignment.id);
+                                                  setAssignmentMeetings(prev => ({ ...prev, [assignment.id]: updated }));
+                                                  await loadMentorManagementData();
+                                                }
+                                              }}
+                                              className="text-slate-300 hover:text-red-500 transition-colors"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ---- Meeting Records (global view) ---- */}
+                {mentorMgmtSubTab === 'meetings' && (
+                  <div className="space-y-4">
+                    {allMeetingRecords.length === 0 ? (
+                      <Card className="p-8 text-center">
+                        <BookOpen className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                        <p className="font-semibold text-slate-700 mb-1">No meeting records yet</p>
+                        <p className="text-sm text-slate-500">Meeting records will appear here once you log meetings from the Assignments tab.</p>
+                      </Card>
+                    ) : (
+                      <div className="space-y-3">
+                        {/* Filter/summary */}
+                        <div className="flex items-center gap-4 text-sm text-slate-600">
+                          <span>{allMeetingRecords.length} total meetings</span>
+                          <span>·</span>
+                          <span>{new Set(allMeetingRecords.map(m => m.mentor_user_id)).size} mentors</span>
+                          <span>·</span>
+                          <span>{new Set(allMeetingRecords.map(m => m.startup_id)).size} startups</span>
+                        </div>
+
+                        {allMeetingRecords.map(meeting => (
+                          <Card key={meeting.id} className="p-4">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-semibold text-slate-900">{meeting.title}</span>
+                                  <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{meeting.meeting_type}</span>
+                                </div>
+                                <div className="flex items-center gap-4 mt-1 flex-wrap text-xs text-slate-500">
+                                  <span>
+                                    <Users className="h-3 w-3 inline mr-1" />
+                                    {meeting.mentor_name}
+                                  </span>
+                                  <span>→</span>
+                                  <span className="font-medium text-slate-700">{meeting.startup_name}</span>
+                                  <span>
+                                    <Calendar className="h-3 w-3 inline mr-1" />
+                                    {new Date(meeting.meeting_date).toLocaleDateString()}
+                                  </span>
+                                  {meeting.duration_minutes && (
+                                    <span>
+                                      <Clock className="h-3 w-3 inline mr-1" />
+                                      {meeting.duration_minutes} min
+                                    </span>
+                                  )}
+                                </div>
+                                {meeting.notes && <p className="text-xs text-slate-600 mt-2"><strong>Notes:</strong> {meeting.notes}</p>}
+                                {meeting.outcomes && <p className="text-xs text-slate-600 mt-0.5"><strong>Outcomes:</strong> {meeting.outcomes}</p>}
+                                {meeting.next_steps && <p className="text-xs text-green-700 mt-0.5"><strong>Next Steps:</strong> {meeting.next_steps}</p>}
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Assign Mentor Modal */}
+            <Modal
+              isOpen={isAssignModalOpen}
+              onClose={() => { setIsAssignModalOpen(false); setAssignMentorId(''); setAssignStartupId(''); setAssignNotes(''); }}
+              title="Assign Mentor to Startup"
+              size="md"
+            >
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Select Mentor</label>
+                  <select
+                    value={assignMentorId}
+                    onChange={e => setAssignMentorId(e.target.value)}
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
+                  >
+                    <option value="">-- Select a mentor --</option>
+                    {facilitatorMentors.map(m => (
+                      <option key={m.mentor_user_id} value={m.mentor_user_id}>{m.mentor_name}{m.mentor_type ? ` (${m.mentor_type})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Select Startup</label>
+                  <select
+                    value={assignStartupId}
+                    onChange={e => setAssignStartupId(e.target.value)}
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
+                  >
+                    <option value="">-- Select a startup --</option>
+                    {portfolioStartups.map(s => (
+                      <option key={s.id} value={String(s.id)}>{s.name}{s.sector ? ` · ${s.sector}` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Notes (optional)</label>
+                  <textarea
+                    value={assignNotes}
+                    onChange={e => setAssignNotes(e.target.value)}
+                    rows={3}
+                    placeholder="Any notes about this assignment..."
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button variant="outline" onClick={() => setIsAssignModalOpen(false)}>Cancel</Button>
+                  <Button
+                    onClick={handleAssignMentor}
+                    disabled={!assignMentorId || !assignStartupId || isSavingAssignment}
+                  >
+                    {isSavingAssignment ? 'Assigning...' : 'Assign Mentor'}
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+
+            {/* Add Meeting Record Modal */}
+            <Modal
+              isOpen={isMeetingModalOpen}
+              onClose={() => setIsMeetingModalOpen(false)}
+              title="Log Meeting Record"
+              size="lg"
+            >
+              {selectedAssignmentForMeeting && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600">
+                    <strong>Mentor:</strong> {selectedAssignmentForMeeting.mentor_name} &nbsp;→&nbsp; <strong>Startup:</strong> {selectedAssignmentForMeeting.startup_name}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input
+                      label="Meeting Title"
+                      value={meetingForm.title}
+                      onChange={e => setMeetingForm(prev => ({ ...prev, title: e.target.value }))}
+                      placeholder="e.g. Q2 Strategy Review"
+                      required
+                    />
+                    <Input
+                      label="Meeting Date"
+                      type="date"
+                      value={meetingForm.meeting_date}
+                      onChange={e => setMeetingForm(prev => ({ ...prev, meeting_date: e.target.value }))}
+                      required
+                    />
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Meeting Type</label>
+                      <select
+                        value={meetingForm.meeting_type}
+                        onChange={e => setMeetingForm(prev => ({ ...prev, meeting_type: e.target.value }))}
+                        className="block w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
+                      >
+                        {meetingTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <Input
+                      label="Duration (minutes)"
+                      type="number"
+                      value={meetingForm.duration_minutes}
+                      onChange={e => setMeetingForm(prev => ({ ...prev, duration_minutes: e.target.value }))}
+                      placeholder="e.g. 60"
+                      min="1"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Meeting Notes</label>
+                    <textarea
+                      value={meetingForm.notes}
+                      onChange={e => setMeetingForm(prev => ({ ...prev, notes: e.target.value }))}
+                      rows={3}
+                      placeholder="What was discussed..."
+                      className="block w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Outcomes</label>
+                    <textarea
+                      value={meetingForm.outcomes}
+                      onChange={e => setMeetingForm(prev => ({ ...prev, outcomes: e.target.value }))}
+                      rows={2}
+                      placeholder="Key decisions or outcomes..."
+                      className="block w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Next Steps</label>
+                    <textarea
+                      value={meetingForm.next_steps}
+                      onChange={e => setMeetingForm(prev => ({ ...prev, next_steps: e.target.value }))}
+                      rows={2}
+                      placeholder="Action items for next session..."
+                      className="block w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <Button variant="outline" onClick={() => setIsMeetingModalOpen(false)}>Cancel</Button>
+                    <Button
+                      onClick={handleAddMeetingRecord}
+                      disabled={!meetingForm.title || !meetingForm.meeting_date || isSavingMeeting}
+                    >
+                      {isSavingMeeting ? 'Saving...' : 'Save Meeting'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Modal>
+
+            {/* Mentor Portfolio Modal */}
+            {isPortfolioModalOpen && selectedMentorForPortfolio && (
+              <MentorPortfolioModal
+                mentor={selectedMentorForPortfolio}
+                onClose={() => {
+                  setIsPortfolioModalOpen(false);
+                  setSelectedMentorForPortfolio(null);
+                }}
+                onViewHistory={() => {
+                  // TODO: Show detailed history modal
+                  messageService.info('History', 'View detailed history feature coming soon');
+                }}
+                onAssign={() => {
+                  setAssignMentorId(selectedMentorForPortfolio.mentor_user_id);
+                  setMentorMgmtSubTab('assignments');
+                  setIsAssignModalOpen(true);
+                  setIsPortfolioModalOpen(false);
+                }}
+              />
+            )}
+          </div>
+        );
+      }
+
       case 'ourInvestments':
         // Use approved Equity/Hybrid recognitions as "our investments"
         // This ensures startups appear once incubation is accepted, even if equityAllocated is not set yet
-        const investedRecords = recognitionRecords.filter(record => 
+        const investedRecords = recognitionRecords.filter(record =>
           record.status === 'approved' && (record.feeType === 'Equity' || record.feeType === 'Hybrid')
         );
         
@@ -6243,6 +7220,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           </button>
           <button onClick={() => setActiveTab('trackMyStartups')} className={`${activeTab === 'trackMyStartups' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Users className="h-5 w-5" />Track My Startups
+          </button>
+          <button onClick={() => setActiveTab('mentorManagement')} className={`${activeTab === 'mentorManagement' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+            <GraduationCap className="h-5 w-5" />Mentor Management
           </button>
           <button onClick={() => setActiveTab('ourInvestments')} className={`${activeTab === 'ourInvestments' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Gift className="h-5 w-5" />Our Investments

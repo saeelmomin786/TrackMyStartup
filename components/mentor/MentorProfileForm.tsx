@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
+import { facilitatorMentorService } from '../../lib/facilitatorMentorService';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
-import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X, Plus, Edit, Trash2, Briefcase } from 'lucide-react';
+import { Save, Upload, Image as ImageIcon, Video, ChevronDown, X, Plus, Edit, Trash2, Briefcase, Check, AlertCircle } from 'lucide-react';
 import { MentorMetrics } from '../../lib/mentorService';
 import Modal from '../ui/Modal';
 import MentorDataForm from '../MentorDataForm';
@@ -90,6 +91,13 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
   const [isStagesOpen, setIsStagesOpen] = useState(false);
   const [showMentoringFormModal, setShowMentoringFormModal] = useState(false);
   const [showStartupExperienceFormModal, setShowStartupExperienceFormModal] = useState(false);
+
+  // Facilitator codes management
+  const [facilitatorCodes, setFacilitatorCodes] = useState<any[]>([]);
+  const [newFacilitatorCode, setNewFacilitatorCode] = useState('');
+  const [isFacilitatorCodeModalOpen, setIsFacilitatorCodeModalOpen] = useState(false);
+  const [isAddingCode, setIsAddingCode] = useState(false);
+
   const expertiseRef = useRef<HTMLDivElement>(null);
   const sectorsRef = useRef<HTMLDivElement>(null);
   const stagesRef = useRef<HTMLDivElement>(null);
@@ -154,6 +162,17 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Load on initial mount
+
+  // Load facilitator codes
+  useEffect(() => {
+    const loadFacilitatorCodes = async () => {
+      if (authUserId) {
+        const codes = await facilitatorMentorService.getMentorAssociations(authUserId);
+        setFacilitatorCodes(codes);
+      }
+    };
+    loadFacilitatorCodes();
+  }, [authUserId]);
 
   // Reload profile when metrics change
   useEffect(() => {
@@ -869,6 +888,19 @@ const MentorProfileForm: React.FC<MentorProfileFormProps> = ({
               disabled={!isEditing || isViewOnly}
               placeholder="contact@example.com"
             />
+
+            <div className="md:col-span-2">
+              <Input
+                label="Incubation Center Code (Optional)"
+                value={profile.facilitator_code || ''}
+                onChange={(e) => handleChange('facilitator_code', e.target.value.toUpperCase())}
+                disabled={!isEditing || isViewOnly}
+                placeholder="e.g. FAC1A2B3C4D"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Enter the code provided by your incubation center to associate yourself with that center. The center can then assign you to their startups.
+              </p>
+            </div>
           </div>
         </div>
 

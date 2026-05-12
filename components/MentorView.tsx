@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Startup, InvestmentType, ComplianceStatus } from '../types';
-import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar, Edit, Save, Image as ImageIcon, Upload, Link, Cloud, Download } from 'lucide-react';
+import { Eye, Users, TrendingUp, DollarSign, Building2, Film, Search, Heart, CheckCircle, Star, Shield, LayoutGrid, FileText, Clock, CheckCircle2, X, Mail, UserPlus, Plus, Send, Copy, Briefcase, Share2, Video, Linkedin, Globe, ExternalLink, HelpCircle, Bell, CheckSquare, XCircle, Trash2, Calendar, Edit, Save, Image as ImageIcon, Upload, Link, Cloud, Download, BookOpen, Check, AlertCircle } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import { AuthUser } from '../lib/auth';
 import { investorService, ActiveFundraisingStartup } from '../lib/investorService';
 import { mentorService, MentorMetrics, MentorRequest, MentorAssignment } from '../lib/mentorService';
+import { facilitatorMentorService, MentorFacilitatorAssociation } from '../lib/facilitatorMentorService';
 import { supabase } from '../lib/supabase';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
 import { investorConnectionRequestService, InvestorConnectionRequest } from '../lib/investorConnectionRequestService';
@@ -43,9 +44,9 @@ const MentorView: React.FC<MentorViewProps> = ({
   startups,
   onViewStartup
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'discover' | 'portfolio' | 'collaboration' | 'schedule'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'discover' | 'portfolio' | 'collaboration' | 'schedule' | 'incubation'>(() => {
     const fromUrl = (getQueryParam('tab') as any) || 'dashboard';
-    const valid = ['dashboard', 'discover', 'portfolio', 'collaboration', 'schedule'];
+    const valid = ['dashboard', 'discover', 'portfolio', 'collaboration', 'schedule', 'incubation'];
     return valid.includes(fromUrl) ? fromUrl : 'dashboard';
   });
 
@@ -145,6 +146,12 @@ const MentorView: React.FC<MentorViewProps> = ({
   
   // State for profile photo input mode
   const [photoInputMode, setPhotoInputMode] = useState<'url' | 'file'>('url');
+
+  // State for Incubation Centers tab
+  const [facilitatorAssociations, setFacilitatorAssociations] = useState<MentorFacilitatorAssociation[]>([]);
+  const [isLoadingIncubation, setIsLoadingIncubation] = useState(false);
+  const [newFacilitatorCode, setNewFacilitatorCode] = useState('');
+  const [isAddingCode, setIsAddingCode] = useState(false);
 
   // Sync previewProfile changes back to form when editing sections on right side
   useEffect(() => {
@@ -253,6 +260,28 @@ const MentorView: React.FC<MentorViewProps> = ({
       loadFavorites();
     }
   }, [currentUser?.id]);
+
+  // Load incubation center associations
+  useEffect(() => {
+    const loadIncubationAssociations = async () => {
+      if (activeTab === 'incubation' && currentUser?.id) {
+        setIsLoadingIncubation(true);
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (authUser) {
+            const associations = await facilitatorMentorService.getMentorAssociations(authUser.id);
+            setFacilitatorAssociations(associations);
+          }
+        } catch (error) {
+          console.error('Error loading incubation associations:', error);
+        } finally {
+          setIsLoadingIncubation(false);
+        }
+      }
+    };
+
+    loadIncubationAssociations();
+  }, [activeTab, currentUser?.id]);
 
   // Fetch active fundraising startups for discover section
   useEffect(() => {
@@ -884,6 +913,18 @@ const MentorView: React.FC<MentorViewProps> = ({
                   {collaboratorRequests.filter(r => r.status === 'pending').length}
                 </span>
               )}
+            </button>
+            <button
+              onClick={() => setActiveTab('incubation')}
+              className={`py-3 sm:py-4 px-2 sm:px-3 border-b-2 font-medium text-xs sm:text-sm flex items-center whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'incubation'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <BookOpen className="h-4 w-4 sm:h-5 sm:w-5 mr-1 sm:mr-2" />
+              <span className="hidden sm:inline">Incubation Centers</span>
+              <span className="sm:hidden">Incubation</span>
             </button>
           </div>
         </div>
@@ -2692,6 +2733,139 @@ const MentorView: React.FC<MentorViewProps> = ({
                             </div>
                           )}
                         </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {activeTab === 'incubation' && (
+          <div className="space-y-6 animate-fade-in">
+            <Card>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">Incubation Centers</h2>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Manage your associations with incubation centers and track their status
+                  </p>
+                </div>
+              </div>
+
+              {/* Add New Facilitator Code */}
+              <div className="mb-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h3 className="font-medium text-slate-900 mb-4">Add Incubation Center Code</h3>
+                <div className="flex gap-2 sm:flex-row flex-col">
+                  <Input
+                    placeholder="Enter incubation center code"
+                    value={newFacilitatorCode}
+                    onChange={(e) => setNewFacilitatorCode(e.target.value.toUpperCase())}
+                    disabled={isAddingCode}
+                  />
+                  <Button
+                    variant="primary"
+                    onClick={async () => {
+                      if (!newFacilitatorCode.trim()) return;
+                      setIsAddingCode(true);
+                      try {
+                        const { data: { user: authUser } } = await supabase.auth.getUser();
+                        if (authUser) {
+                          const result = await facilitatorMentorService.addMentorFacilitatorCode(
+                            authUser.id,
+                            newFacilitatorCode
+                          );
+                          if (result.success) {
+                            setNewFacilitatorCode('');
+                            const associations = await facilitatorMentorService.getMentorAssociations(authUser.id);
+                            setFacilitatorAssociations(associations);
+                          } else {
+                            alert(result.error || 'Failed to add code');
+                          }
+                        }
+                      } catch (error) {
+                        console.error('Error adding facilitator code:', error);
+                      } finally {
+                        setIsAddingCode(false);
+                      }
+                    }}
+                    disabled={!newFacilitatorCode.trim() || isAddingCode}
+                    className="whitespace-nowrap"
+                  >
+                    {isAddingCode ? 'Adding...' : 'Add Code'}
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-600 mt-2">
+                  Enter the code provided by your incubation center. The center can then approve or manage your association.
+                </p>
+              </div>
+
+              {/* Associations List */}
+              {isLoadingIncubation ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-slate-600">Loading incubation centers...</p>
+                </div>
+              ) : facilitatorAssociations.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 rounded-lg">
+                  <BookOpen className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                  <p className="text-slate-600 font-medium">No incubation center associations yet</p>
+                  <p className="text-sm text-slate-500 mt-1">Add a code above to get started</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {facilitatorAssociations.map((assoc) => (
+                    <Card key={assoc.id} className="p-4 border border-slate-200">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h3 className="font-semibold text-slate-900">{assoc.facilitator_code}</h3>
+                            <Badge variant={assoc.status === 'pending' ? 'warning' : assoc.status === 'approved' || assoc.status === 'active' ? 'success' : assoc.status === 'rejected' ? 'danger' : 'secondary'}>
+                              {assoc.status === 'pending' ? 'Pending Approval' : assoc.status === 'approved' ? 'Approved' : assoc.status === 'active' ? 'Active' : assoc.status === 'inactive' ? 'Inactive' : 'Rejected'}
+                            </Badge>
+                            {assoc.is_active && assoc.status !== 'pending' && (
+                              <div className="flex items-center gap-1 text-green-600">
+                                <Check className="h-4 w-4" />
+                                <span className="text-xs font-medium">Active</span>
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-600 mt-1">
+                            Created: {new Date(assoc.created_at).toLocaleDateString()}
+                          </p>
+                          {assoc.approved_at && (
+                            <p className="text-sm text-slate-600">
+                              Approved: {new Date(assoc.approved_at).toLocaleDateString()}
+                            </p>
+                          )}
+                          {assoc.status === 'pending' && (
+                            <p className="text-sm text-amber-600 mt-2 flex items-center gap-1">
+                              <AlertCircle className="h-4 w-4" />
+                              Awaiting approval from incubation center
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            if (confirm('Remove this incubation center association?')) {
+                              try {
+                                await facilitatorMentorService.removeMentorAssociation(assoc.id);
+                                const { data: { user: authUser } } = await supabase.auth.getUser();
+                                if (authUser) {
+                                  const associations = await facilitatorMentorService.getMentorAssociations(authUser.id);
+                                  setFacilitatorAssociations(associations);
+                                }
+                              } catch (error) {
+                                console.error('Error removing association:', error);
+                              }
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </Card>
                   ))}

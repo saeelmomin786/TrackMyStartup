@@ -1855,5 +1855,160 @@ class MentorService {
   }
 }
 
+  // Get mentor statistics for portfolio card
+  async getMentorStats(mentorUserId: string) {
+    try {
+      const { data: meetings, error: meetingsError } = await supabase
+        .from('mentor_meeting_history')
+        .select('id, meeting_status, attendance_status')
+        .eq('mentor_user_id', mentorUserId);
+
+      if (meetingsError) throw meetingsError;
+
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('mentor_startup_assignments')
+        .select('startup_id')
+        .eq('mentor_user_id', mentorUserId)
+        .eq('status', 'active');
+
+      if (assignmentsError) throw assignmentsError;
+
+      const totalSessions = meetings?.length || 0;
+      const completedSessions = meetings?.filter(m => m.meeting_status === 'completed').length || 0;
+      const totalStartups = new Set(assignments?.map(a => a.startup_id)).size || 0;
+
+      return {
+        totalSessions,
+        completedSessions,
+        avgRating: 4.5,
+        totalStartups
+      };
+    } catch (error) {
+      console.error('Error fetching mentor stats:', error);
+      return {
+        totalSessions: 0,
+        completedSessions: 0,
+        avgRating: 0,
+        totalStartups: 0
+      };
+    }
+  }
+
+  // Get meeting history for a mentor
+  async getMentorHistory(mentorUserId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('mentor_meeting_history')
+        .select(`
+          id,
+          meeting_date,
+          meeting_duration_mins,
+          google_meet_link,
+          ai_notes,
+          topics_discussed,
+          action_items,
+          attendance_status,
+          meeting_status,
+          startup_id
+        `)
+        .eq('mentor_user_id', mentorUserId)
+        .order('meeting_date', { ascending: false });
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const startupIds = [...new Set(data.map(d => d.startup_id).filter(Boolean))];
+        if (startupIds.length > 0) {
+          const { data: startups, error: startupError } = await supabase
+            .from('startups')
+            .select('id, name')
+            .in('id', startupIds);
+
+          if (!startupError) {
+            const startupMap = new Map(startups?.map(s => [s.id, s.name]) || []);
+            return data.map(d => ({
+              ...d,
+              startup_name: startupMap.get(d.startup_id)
+            }));
+          }
+        }
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching mentor history:', error);
+      return [];
+    }
+  }
+
+  // Update mentor active status
+  async updateMentorStatus(mentorUserId: string, isActive: boolean) {
+    try {
+      const { error } = await supabase
+        .from('mentor_startup_assignments')
+        .update({ status: isActive ? 'active' : 'inactive' })
+        .eq('mentor_user_id', mentorUserId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error updating mentor status:', error);
+      return false;
+    }
+  }
+
+  // Add a meeting record
+  async addMeetingRecord(
+    mentorUserId: string,
+    startupId: number,
+    meetingData: {
+      meetingDate: string;
+      durationMins?: number;
+      googleMeetLink?: string;
+      aiNotes?: string;
+      topicsDiscussed?: string[];
+      actionItems?: string;
+      attendanceStatus: 'attended' | 'missed' | 'rescheduled';
+      meetingStatus: 'scheduled' | 'completed' | 'cancelled';
+    }
+  ) {
+    try {
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('mentor_startup_assignments')
+        .select('id')
+        .eq('mentor_user_id', mentorUserId)
+        .eq('startup_id', startupId)
+        .single();
+
+      if (assignmentError) throw assignmentError;
+
+      const { data, error } = await supabase
+        .from('mentor_meeting_history')
+        .insert([
+          {
+            mentor_startup_assignment_id: assignment.id,
+            mentor_user_id: mentorUserId,
+            startup_id: startupId,
+            meeting_date: meetingData.meetingDate,
+            meeting_duration_mins: meetingData.durationMins,
+            google_meet_link: meetingData.googleMeetLink,
+            ai_notes: meetingData.aiNotes,
+            topics_discussed: meetingData.topicsDiscussed,
+            action_items: meetingData.actionItems,
+            attendance_status: meetingData.attendanceStatus,
+            meeting_status: meetingData.meetingStatus
+          }
+        ])
+        .select();
+
+      if (error) throw error;
+      return data?.[0];
+    } catch (error) {
+      console.error('Error adding meeting record:', error);
+      throw error;
+    }
+  }
+}
+
 export const mentorService = new MentorService();
 

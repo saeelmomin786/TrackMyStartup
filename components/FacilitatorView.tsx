@@ -317,6 +317,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [mentorSubTab, setMentorSubTab] = useState<'pending' | 'approved'>('approved');
   const [isPortfolioModalOpen, setIsPortfolioModalOpen] = useState(false);
   const [selectedMentorForPortfolio, setSelectedMentorForPortfolio] = useState<any>(null);
+  const [isAssignmentsModalOpen, setIsAssignmentsModalOpen] = useState(false);
+  const [selectedMentorAssignments, setSelectedMentorAssignments] = useState<any>(null);
 
   const [myPostedOpportunities, setMyPostedOpportunities] = useState<IncubationOpportunity[]>([]);
   const [opportunityApplicationCounts, setOpportunityApplicationCounts] = useState<Map<string, number>>(new Map());
@@ -6119,17 +6121,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           </Card>
                         ) : (
                           <>
-                            <div className="flex justify-end mb-4">
-                              <Button
-                                size="sm"
-                                onClick={() => setIsAssignModalOpen(true)}
-                                disabled={facilitatorMentors.length === 0 || portfolioStartups.length === 0}
-                                className="flex items-center gap-2"
-                              >
-                                <Plus className="h-4 w-4" />
-                                Assign Mentor
-                              </Button>
-                            </div>
                             <ApprovedMentorsTable
                               mentors={[
                                 ...approvedMentorAssociations.map((assoc) => ({
@@ -6171,11 +6162,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 }
                               }}
                               onViewAssignments={(mentor) => {
-                                // Show modal with all startups assigned to this mentor
-                                setSelectedMentorForPortfolio(mentor);
-                                // You can create a separate modal or use existing one
-                                // For now, showing a message
-                                messageService.info('Assignments', `View assignments for ${mentor.mentor_name}`);
+                                const mentorAssigns = mentorAssignments.filter(
+                                  a => a.mentor_user_id === mentor.mentor_user_id && a.status !== 'removed'
+                                );
+                                setSelectedMentorAssignments({
+                                  mentor,
+                                  assignments: mentorAssigns
+                                });
+                                setIsAssignmentsModalOpen(true);
                               }}
                             />
                           </>
@@ -6579,6 +6573,69 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   setIsPortfolioModalOpen(false);
                 }}
               />
+            )}
+
+            {/* Mentor Assignments Modal */}
+            {isAssignmentsModalOpen && selectedMentorAssignments && (
+              <Modal
+                isOpen={isAssignmentsModalOpen}
+                onClose={() => {
+                  setIsAssignmentsModalOpen(false);
+                  setSelectedMentorAssignments(null);
+                }}
+                title={`Assignments - ${selectedMentorAssignments.mentor.mentor_name}`}
+                size="md"
+              >
+                <div className="space-y-4">
+                  {selectedMentorAssignments.assignments.length === 0 ? (
+                    <div className="text-center py-6">
+                      <GraduationCap className="h-12 w-12 text-slate-300 mx-auto mb-2" />
+                      <p className="text-slate-600">No startups assigned yet</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-slate-600 mb-4">
+                        <strong>{selectedMentorAssignments.assignments.length}</strong> startup(s) assigned to this mentor
+                      </p>
+                      {selectedMentorAssignments.assignments.map((assignment: any) => (
+                        <Card key={assignment.id} className="p-4 flex items-center justify-between">
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-slate-900">{assignment.startup_name}</h4>
+                            <p className="text-xs text-slate-500 mt-1">
+                              Status: <Badge variant={assignment.status === 'active' ? 'success' : 'secondary'}>
+                                {assignment.status.charAt(0).toUpperCase() + assignment.status.slice(1)}
+                              </Badge>
+                            </p>
+                            {assignment.notes && (
+                              <p className="text-xs text-slate-600 mt-2 italic">{assignment.notes}</p>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              if (confirm(`Remove assignment for ${assignment.startup_name}?`)) {
+                                try {
+                                  await facilitatorMentorService.removeAssignment(assignment.id);
+                                  await loadMentorManagementData();
+                                  messageService.success('Removed', 'Assignment removed successfully');
+                                  setIsAssignmentsModalOpen(false);
+                                  setSelectedMentorAssignments(null);
+                                } catch (error) {
+                                  console.error('Error removing assignment:', error);
+                                  messageService.error('Error', 'Failed to remove assignment');
+                                }
+                              }
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Modal>
             )}
           </div>
         );

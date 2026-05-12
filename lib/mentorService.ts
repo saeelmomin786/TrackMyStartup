@@ -1853,9 +1853,7 @@ class MentorService {
       return [];
     }
   }
-}
 
-  // Get mentor statistics for portfolio card
   async getMentorStats(mentorUserId: string) {
     try {
       const { data: meetings, error: meetingsError } = await supabase

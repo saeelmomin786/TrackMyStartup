@@ -6119,6 +6119,17 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           </Card>
                         ) : (
                           <>
+                            <div className="flex justify-end mb-4">
+                              <Button
+                                size="sm"
+                                onClick={() => setIsAssignModalOpen(true)}
+                                disabled={facilitatorMentors.length === 0 || portfolioStartups.length === 0}
+                                className="flex items-center gap-2"
+                              >
+                                <Plus className="h-4 w-4" />
+                                Assign Mentor
+                              </Button>
+                            </div>
                             <ApprovedMentorsTable
                               mentors={[
                                 ...approvedMentorAssociations.map((assoc) => ({
@@ -6159,9 +6170,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   messageService.error('Error', 'Failed to update mentor status');
                                 }
                               }}
-                              onViewHistory={(mentor) => {
+                              onViewAssignments={(mentor) => {
+                                // Show modal with all startups assigned to this mentor
                                 setSelectedMentorForPortfolio(mentor);
-                                setIsPortfolioModalOpen(true);
+                                // You can create a separate modal or use existing one
+                                // For now, showing a message
+                                messageService.info('Assignments', `View assignments for ${mentor.mentor_name}`);
                               }}
                             />
                           </>
@@ -6415,19 +6429,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               size="md"
             >
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Select Mentor</label>
-                  <select
-                    value={assignMentorId}
-                    onChange={e => setAssignMentorId(e.target.value)}
-                    className="block w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
-                  >
-                    <option value="">-- Select a mentor --</option>
-                    {facilitatorMentors.map(m => (
-                      <option key={m.mentor_user_id} value={m.mentor_user_id}>{m.mentor_name}{m.mentor_type ? ` (${m.mentor_type})` : ''}</option>
-                    ))}
-                  </select>
-                </div>
+                {assignMentorId && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-sm text-blue-900">
+                      <strong>Mentor:</strong> {facilitatorMentors.find(m => m.mentor_user_id === assignMentorId)?.mentor_name || 'Selected'}
+                    </p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Select Startup</label>
                   <select

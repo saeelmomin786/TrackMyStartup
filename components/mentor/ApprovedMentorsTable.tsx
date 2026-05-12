@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye, Clock, Plus, MoreVertical, ChevronDown } from 'lucide-react';
+import { Eye, Clock, Plus, List } from 'lucide-react';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 
@@ -21,6 +21,7 @@ interface ApprovedMentorsTableProps {
   onAssign: (mentor: ApprovedMentor) => void;
   onToggleStatus?: (mentor: ApprovedMentor) => void;
   onViewHistory?: (mentor: ApprovedMentor) => void;
+  onViewAssignments?: (mentor: ApprovedMentor) => void;
 }
 
 const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
@@ -28,7 +29,8 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
   onViewPortfolio,
   onAssign,
   onToggleStatus,
-  onViewHistory
+  onViewHistory,
+  onViewAssignments
 }) => {
   if (mentors.length === 0) {
     return (
@@ -45,7 +47,7 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
           <tr className="border-b border-slate-200 bg-slate-50">
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Name</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Email</th>
-            <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Expertise</th>
+            <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Expertise & Portfolio</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Status</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">History</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Actions</th>
@@ -77,22 +79,33 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
                 <p className="text-sm text-slate-600">{mentor.mentor_email || '-'}</p>
               </td>
               <td className="px-6 py-4">
-                <div className="flex flex-wrap gap-1">
-                  {mentor.expertise_areas && mentor.expertise_areas.length > 0 ? (
-                    mentor.expertise_areas.slice(0, 2).map((area) => (
-                      <span
-                        key={area}
-                        className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full"
-                      >
-                        {area}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-sm text-slate-400">-</span>
-                  )}
-                  {mentor.expertise_areas && mentor.expertise_areas.length > 2 && (
-                    <span className="text-xs text-slate-500">+{mentor.expertise_areas.length - 2}</span>
-                  )}
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-1">
+                    {mentor.expertise_areas && mentor.expertise_areas.length > 0 ? (
+                      mentor.expertise_areas.slice(0, 2).map((area) => (
+                        <span
+                          key={area}
+                          className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full"
+                        >
+                          {area}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm text-slate-400">-</span>
+                    )}
+                    {mentor.expertise_areas && mentor.expertise_areas.length > 2 && (
+                      <span className="text-xs text-slate-500">+{mentor.expertise_areas.length - 2}</span>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onViewPortfolio(mentor)}
+                    className="w-full"
+                  >
+                    <Eye className="h-3 w-3 mr-1" />
+                    Portfolio
+                  </Button>
                 </div>
               </td>
               <td className="px-6 py-4">
@@ -128,15 +141,17 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
               </td>
               <td className="px-6 py-4">
                 <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onViewPortfolio(mentor)}
-                    title="View mentor portfolio and details"
-                  >
-                    <Eye className="h-4 w-4 mr-1" />
-                    Portfolio
-                  </Button>
+                  {onViewAssignments && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onViewAssignments(mentor)}
+                      title="View assigned startups"
+                    >
+                      <List className="h-4 w-4 mr-1" />
+                      Assignments
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="primary"

@@ -2847,6 +2847,8 @@ const App: React.FC = () => {
       setView('investor');
       setHasInitialDataLoaded(false); // Reset data loading flag on logout
       setIgnoreAuthEvents(false); // Reset ignore flag on logout
+      // Ensure the ref is cleared synchronously so auth listeners won't ignore the SIGNED_OUT event
+      ignoreAuthEventsRef.current = false;
       
       // Clear auth cookies on logout
       deleteCookie('lastAuthUserId');

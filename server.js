@@ -46,6 +46,7 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
 // Helper to resolve frontend URL dynamically (supports main domain + client subdomains)
 function getFrontendUrl(req) {
@@ -247,6 +248,12 @@ const hasKeyId = Boolean(process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPA
 const hasKeySecret = Boolean(process.env.VITE_RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET);
 console.log("[Startup] Loaded env from:", loadedEnvPath);
 console.log("[Startup] Razorpay Key ID present:", hasKeyId, "Key Secret present:", hasKeySecret);
+console.log("[Startup] Supabase anon key present (Bearer /auth/v1/user):", Boolean(supabaseAnonKey));
+if (!supabaseAnonKey) {
+  console.warn(
+    "[Startup] Missing VITE_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY — startup investor-application API may return 401 for valid sessions."
+  );
+}
 
 // Log presence of PayPal keys at startup (without secrets)
 const hasPayPalClientId = Boolean(process.env.VITE_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID);
@@ -391,6 +398,281 @@ app.post("/api/razorpay/create-order", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// --------------------
+// Startup → Investor application fee (Razorpay) — mirrors api/investor-application/[action].ts
+// --------------------
+async function getRequesterIdFromBearer(req) {
+  const raw = req.headers.authorization || req.headers.Authorization;
+  const authHeader = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof authHeader !== "string" || !authHeader.startsWith("Bearer ")) return null;
+  const token = authHeader.slice(7).trim();
+  if (!token) return null;
+
+  // GoTrue GET /auth/v1/user: use anon apikey + user JWT (same as browser). Service-role apikey + user JWT often returns 401.
+  if (supabaseUrl && supabaseAnonKey) {
+    try {
+      const anonAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data: { user }, error } = await anonAuth.auth.getUser(token);
+      if (!error && user?.id) return user.id;
+    } catch {
+      /* fall through */
+    }
+  }
+
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (!error && user?.id) return user.id;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function isMissingRelationError(error) {
+  if (!error || typeof error !== "object") return false;
+  const code = error.code;
+  const msg = (String(error.message || "") + " " + String(error.details || "")).toLowerCase();
+  const status = error.status ?? error.statusCode;
+  if (status === 404) {
+    return (
+      code === "PGRST205" ||
+      msg.includes("schema") ||
+      msg.includes("relation") ||
+      msg.includes("table") ||
+      msg.includes("could not find") ||
+      msg.includes("not found")
+    );
+  }
+  return (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    msg.includes("schema cache") ||
+    msg.includes("could not find the table") ||
+    msg.includes("404") ||
+    (msg.includes("does not exist") && (msg.includes("relation") || msg.includes("table")))
+  );
+}
+
+async function fetchGlobalDefaultApplicationFeeInr() {
+  const { data, error } = await supabase.from("investor_application_fee_settings").select("fee_inr").eq("id", 1).maybeSingle();
+  if (isMissingRelationError(error)) return 0;
+  if (error || !data) return 499;
+  const n = Number(data.fee_inr);
+  return Number.isFinite(n) && n >= 0 ? n : 499;
+}
+
+async function resolveInvestorApplicationFeeInr(investorUserId) {
+  if (investorUserId) {
+    const { data: row, error } = await supabase
+      .from("investor_application_fees")
+      .select("fee_inr")
+      .eq("investor_user_id", investorUserId)
+      .maybeSingle();
+    if (isMissingRelationError(error)) {
+      return fetchGlobalDefaultApplicationFeeInr();
+    }
+    if (!error && row && row.fee_inr != null) {
+      const n = Number(row.fee_inr);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+  }
+  return fetchGlobalDefaultApplicationFeeInr();
+}
+
+app.post("/api/investor-application/create-order", async (req, res) => {
+  try {
+    const requesterId = await getRequesterIdFromBearer(req);
+    if (!requesterId) return res.status(401).json({ error: "Unauthorized" });
+
+    const { investorUserId, startupId, previewOnly } = req.body || {};
+    const isPreview = Boolean(previewOnly);
+    if (!investorUserId || startupId === undefined || startupId === null) {
+      return res.status(400).json({ error: "investorUserId and startupId are required" });
+    }
+    const sid = Number(startupId);
+    if (!Number.isFinite(sid)) return res.status(400).json({ error: "Invalid startupId" });
+
+    const { data: startupRow, error: stErr } = await supabase
+      .from("startups")
+      .select("id, user_id")
+      .eq("id", sid)
+      .maybeSingle();
+    if (stErr || !startupRow || startupRow.user_id !== requesterId) {
+      return res.status(403).json({ error: "Startup not found or access denied" });
+    }
+
+    const feeInr = await resolveInvestorApplicationFeeInr(investorUserId);
+
+    const { data: pendingBlock } = await supabase
+      .from("investor_connection_requests")
+      .select("id, status")
+      .eq("investor_id", investorUserId)
+      .eq("requester_id", requesterId)
+      .eq("startup_id", sid)
+      .in("status", ["pending", "accepted"])
+      .maybeSingle();
+    if (pendingBlock) {
+      return res.status(409).json({ error: "You already have an active application for this investor." });
+    }
+
+    if (isPreview) {
+      const safeFee = Number.isFinite(feeInr) && feeInr >= 0 ? feeInr : 0;
+      return res.json({
+        previewOnly: true,
+        feeInr: safeFee,
+        skipPayment: safeFee <= 0,
+      });
+    }
+
+    const keyId = process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.VITE_RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET;
+
+    if (feeInr <= 0) {
+      return res.json({ skipPayment: true, feeInr: 0, keyId });
+    }
+
+    if (!keyId || !keySecret) return res.status(500).json({ error: "Razorpay keys not configured" });
+
+    const amountInPaise = Math.round(feeInr * 100);
+    if (amountInPaise < 100) return res.status(400).json({ error: "Configured fee must be at least ₹1" });
+
+    const authHeader = "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+    const receiptRaw = `invapp_${sid}_${Date.now()}`;
+    const receipt = receiptRaw.length > 40 ? receiptRaw.slice(0, 40) : receiptRaw;
+
+    const rpResp = await fetch("https://api.razorpay.com/v1/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: authHeader },
+      body: JSON.stringify({
+        amount: amountInPaise,
+        currency: "INR",
+        receipt,
+        payment_capture: 1,
+        notes: {
+          purpose: "startup_investor_application",
+          startup_id: String(sid),
+          investor_id: investorUserId,
+          requester_id: requesterId,
+        },
+      }),
+    });
+    if (!rpResp.ok) {
+      const text = await rpResp.text();
+      return res.status(rpResp.status).json({ error: "Failed to create Razorpay order", details: text });
+    }
+    const order = await rpResp.json();
+    return res.json({ success: true, order, keyId, feeInr, currency: "INR", investorUserId, startupId: sid });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/investor-application/verify-payment", async (req, res) => {
+  try {
+    const requesterId = await getRequesterIdFromBearer(req);
+    if (!requesterId) return res.status(401).json({ error: "Unauthorized" });
+
+    const keyId = process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.VITE_RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET;
+    if (!keySecret) return res.status(500).json({ error: "Missing Razorpay secret key" });
+
+    const {
+      investorUserId,
+      startupId,
+      razorpay_order_id: orderId,
+      razorpay_payment_id: paymentId,
+      razorpay_signature: signature,
+      startup_profile_url: startupProfileUrl,
+    } = req.body || {};
+
+    if (!investorUserId || startupId === undefined || !orderId || !paymentId || !signature || !startupProfileUrl) {
+      return res.status(400).json({
+        error:
+          "investorUserId, startupId, startup_profile_url, razorpay_order_id, razorpay_payment_id, razorpay_signature are required",
+      });
+    }
+    const sid = Number(startupId);
+    if (!Number.isFinite(sid)) return res.status(400).json({ error: "Invalid startupId" });
+
+    const payload = `${orderId}|${paymentId}`;
+    const expectedSignature = crypto.createHmac("sha256", keySecret).update(payload).digest("hex");
+    if (expectedSignature !== signature) return res.status(400).json({ error: "Invalid payment signature" });
+
+    const { data: startupRow, error: stErr } = await supabase
+      .from("startups")
+      .select("id, user_id")
+      .eq("id", sid)
+      .maybeSingle();
+    if (stErr || !startupRow || startupRow.user_id !== requesterId) {
+      return res.status(403).json({ error: "Startup not found or access denied" });
+    }
+
+    const feeInr = await resolveInvestorApplicationFeeInr(investorUserId);
+    const expectedPaise = Math.round(feeInr * 100);
+    const authHeader = "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+
+    const payResp = await fetch(`https://api.razorpay.com/v1/payments/${paymentId}`, {
+      headers: { Authorization: authHeader },
+    });
+    if (!payResp.ok) {
+      const t = await payResp.text();
+      return res.status(400).json({ error: "Could not load payment from Razorpay", details: t });
+    }
+    const payment = await payResp.json();
+    if (payment.order_id !== orderId) return res.status(400).json({ error: "Payment does not match order" });
+    if (payment.currency !== "INR" || Number(payment.amount) !== expectedPaise) {
+      return res.status(400).json({ error: "Payment amount does not match application fee" });
+    }
+    if (payment.status !== "authorized" && payment.status !== "captured") {
+      return res.status(400).json({ error: "Payment is not successful" });
+    }
+
+    const { data: existing } = await supabase
+      .from("investor_connection_requests")
+      .select("id")
+      .eq("investor_id", investorUserId)
+      .eq("requester_id", requesterId)
+      .eq("startup_id", sid)
+      .eq("application_razorpay_payment_id", paymentId)
+      .maybeSingle();
+    if (existing) return res.json({ success: true, duplicate: true, requestId: existing.id });
+
+    const { data: block } = await supabase
+      .from("investor_connection_requests")
+      .select("id, status")
+      .eq("investor_id", investorUserId)
+      .eq("requester_id", requesterId)
+      .eq("startup_id", sid)
+      .in("status", ["pending", "accepted"])
+      .maybeSingle();
+    if (block) {
+      return res.status(409).json({ error: "You already have an active application for this investor." });
+    }
+
+    const insertRow = {
+      investor_id: investorUserId,
+      requester_id: requesterId,
+      requester_type: "Startup",
+      startup_id: sid,
+      startup_profile_url: startupProfileUrl,
+      status: "pending",
+      application_fee_inr: feeInr,
+      application_razorpay_payment_id: paymentId,
+    };
+
+    const { data: inserted, error: insErr } = await supabase.from("investor_connection_requests").insert(insertRow).select("id").single();
+    if (insErr) return res.status(500).json({ error: "Failed to create application", details: insErr.message });
+
+    return res.json({ success: true, requestId: inserted.id });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 

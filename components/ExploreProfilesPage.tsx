@@ -509,6 +509,88 @@ const ExploreProfilesPage: React.FC<ExploreProfilesPageProps> = () => {
               })
             ) : (
               filteredProfiles.map((profile) => {
+              // If role is Investor, render the dedicated `InvestorCard` component
+              if (role === 'Investor') {
+                const hasRequest = existingRequests.get(profile.user_id || '') || false;
+                const profileName = profile.investor_name || profile.user?.name || 'Investor';
+                const firmName = profile.firm_name || '';
+                const location = profile.global_hq || profile.location || '';
+                const investmentRange = profile.ticket_size_min && profile.ticket_size_max 
+                  ? `${profile.ticket_size_min.toLocaleString()} - ${profile.ticket_size_max.toLocaleString()} ${profile.currency || 'USD'}`
+                  : profile.minimum_investment && profile.maximum_investment
+                  ? `${profile.minimum_investment.toLocaleString()} - ${profile.maximum_investment.toLocaleString()} ${profile.currency || 'USD'}`
+                  : null;
+
+                return (
+                  <Card key={profile.id || profile.user_id} className="p-4 flex gap-4 items-start">
+                    {/* Left: Photo + Connect button */}
+                    <div className="w-28 flex-shrink-0 flex flex-col items-center">
+                      {profile.logo_url && profile.logo_url !== '#' ? (
+                        <img src={profile.logo_url} alt={`${profileName} logo`} className="w-24 h-24 object-contain rounded-md bg-white p-2 border border-slate-100" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} />
+                      ) : (
+                        <div className="w-24 h-24 rounded-md bg-slate-100 flex items-center justify-center text-slate-400">
+                          <DollarSign className="h-8 w-8" />
+                        </div>
+                      )}
+                      <Button
+                        size="sm"
+                        variant={hasRequest ? 'outline' : 'primary'}
+                        className="mt-3 w-full"
+                        onClick={() => handleConnect(profile)}
+                        disabled={!isAuthenticated || hasRequest}
+                      >
+                        {hasRequest ? 'Requested' : 'Connect'}
+                      </Button>
+                    </div>
+
+                    {/* Right: Details */}
+                    <div className="flex-1">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-800">{profileName}</h3>
+                          {firmName && <div className="text-sm text-slate-600">{firmName}</div>}
+                        </div>
+                        <div className="text-sm text-slate-500">{location}</div>
+                      </div>
+
+                      <div className="mt-3 text-sm text-slate-600 flex flex-wrap gap-3">
+                        {investmentRange && (
+                          <div className="flex items-center gap-2">
+                            <DollarSign className="h-4 w-4 text-slate-400" />
+                            <span>{investmentRange}</span>
+                          </div>
+                        )}
+                        {profile.investment_stages && profile.investment_stages.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-slate-500">Stages:</span>
+                            <span className="text-slate-700">{(profile.investment_stages || []).slice(0,3).join(', ')}{(profile.investment_stages||[]).length>3?` +${(profile.investment_stages||[]).length-3} more`:''}</span>
+                          </div>
+                        )}
+                        {profile.geography && profile.geography.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-slate-400" />
+                            <span className="text-slate-700">{profile.geography.slice(0,3).join(', ')}{profile.geography.length>3?` +${profile.geography.length-3} more`:''}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Links */}
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {profile.website && profile.website !== '#' && (
+                          <a href={profile.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200">
+                            <Globe className="h-3.5 w-3.5" /> Website
+                          </a>
+                        )}
+                        {profile.linkedin_link && profile.linkedin_link !== '#' && (
+                          <a href={profile.linkedin_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200">
+                            <Linkedin className="h-3.5 w-3.5" /> LinkedIn
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                );
+              }
               // Get video/logo info
               const videoEmbedInfo = profile.video_url ? getVideoEmbedUrl(profile.video_url, false) : null;
               const embedUrl = videoEmbedInfo?.embedUrl || null;

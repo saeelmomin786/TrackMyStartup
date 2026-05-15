@@ -107,12 +107,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [offerFilter, setOfferFilter] = useState<'all' | 'investment' | 'incubation'>('all');
   
   // Form 2 Submission Modal states
-  const [isForm2ModalOpen, setIsForm2ModalOpen] = useState(false);
-  const [selectedForm2Data, setSelectedForm2Data] = useState<{
-    applicationId: string;
-    opportunityId: string;
-    opportunityName: string;
-  } | null>(null);
   
   // Messaging modal states
   const [isMessagingModalOpen, setIsMessagingModalOpen] = useState(false);
@@ -141,18 +135,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
   const [recPostMoney, setRecPostMoney] = useState<string>('');
   const [recAgreementFile, setRecAgreementFile] = useState<File | null>(null);
   const [totalSharesForCalc, setTotalSharesForCalc] = useState<number>(0);
-  
-  // Program Tracking Questions Modal states
-  const [isTrackingQuestionsModalOpen, setIsTrackingQuestionsModalOpen] = useState(false);
-  const [selectedProgramForTracking, setSelectedProgramForTracking] = useState<{
-    facilitatorId: string;
-    programName: string;
-    facilitatorName: string;
-  } | null>(null);
-  const [trackingQuestions, setTrackingQuestions] = useState<OpportunityQuestion[]>([]);
-  const [trackingResponses, setTrackingResponses] = useState<Map<string, string>>(new Map());
-  const [isLoadingTrackingQuestions, setIsLoadingTrackingQuestions] = useState(false);
-  const [isSavingTrackingResponses, setIsSavingTrackingResponses] = useState(false);
   
   // Compliance data state
   const [complianceData, setComplianceData] = useState<{
@@ -1062,9 +1044,77 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       // Store facilitator diligence applications separately (don't include in offers)
       setFacilitatorDiligenceRequests(diligenceApplications);
 
-      // Combine all offers - only include properly resolved offers (EXCLUDE diligenceOffers and incubationOffers)
-      const allOffers = [...investmentOffersFormatted, ...coInvestmentOpportunitiesFormatted, ...coInvestmentOffersFormatted];
-
+      // Store incubation programs separately for dedicated Incubation Programs section
+      // Load Form 2 requests for each incubation application
+      const incubationProgramsWithForm2 = await Promise.all(
+        incubationApplications.map(async (app: any) => {
+          const facilitatorInfo = facilitatorData[app.opportunity_id];
+          const programName = facilitatorInfo?.program_name || 'Incubation Program';
+          
+          // DEBUG: Log facilitator info
+          console.log(`🔍 APP ${app.id}: facilitator_id="${facilitatorInfo?.facilitator_id}" program_name="${programName}"`);
+          
+          // Extract facilitator name with better fallback logic
+          let facilitatorName = 'Unknown Facilitator';
+          
+          // Try multiple sources for facilitator name
+          if (facilitatorInfo?.user?.name) {
+            facilitatorName = facilitatorInfo.user.name;
+          } else if (facilitatorInfo?.facilitator_profile?.center_name) {
+            // Use center_name from facilitator profile
+            facilitatorName = facilitatorInfo.facilitator_profile.center_name;
+          } else if (facilitatorInfo?.facilitator_profile?.firm_name) {
+            // Fallback to firm_name
+            facilitatorName = facilitatorInfo.facilitator_profile.firm_name;
+          } else if (facilitatorInfo?.center_name) {
+            // Direct center_name from opportunity data
+            facilitatorName = facilitatorInfo.center_name;
+          } else if (facilitatorInfo?.facilitator_code) {
+            // If facilitator_code exists, use it
+            facilitatorName = facilitatorInfo.facilitator_code;
+          } else if (facilitatorInfo?.program_name) {
+            // Use program name as last resort - extract organization name from it
+            // e.g., "Investments by Track My Startup, real investor access, zero retainer" → "Track My Startup"
+            const programName = facilitatorInfo.program_name;
+            const matches = programName.match(/(?:by\s+)?([A-Za-z\s&,\.]+?)(?:\s*,|$)/);
+            if (matches && matches[1]) {
+              facilitatorName = matches[1].trim();
+            } else {
+              facilitatorName = programName.split(',')[0].trim();
+            }
+          }
+          
+          // Check if Form 2 has been requested
+          const form2Data = {
+            requested: app.form2_requested || false,
+            status: app.form2_status || 'not_requested',
+            requestedAt: app.form2_requested_at,
+            submittedAt: app.form2_submitted_at
+          };
+          
+          const facilitatorId = facilitatorInfo?.facilitator_id || facilitatorInfo?.user?.id || '';
+          
+          // DEBUG: Log the extracted values
+          console.log(`✅ STARTUP PROGRAM: facilitatorId="${facilitatorId}" programName="${programName}"`);
+          
+          return {
+            id: app.id,
+            applicationId: app.id,
+            programName: programName,
+            facilitatorName: facilitatorName,
+            facilitatorId: facilitatorId,
+            facilitatorCode: facilitatorInfo?.facilitator_profile?.facilitator_code || facilitatorInfo?.facilitator_code || '',
+            status: app.status as 'pending' | 'accepted' | 'rejected',
+            createdAt: app.created_at,
+            agreementUrl: app.agreement_url,
+            contractUrl: app.contract_url,
+            isShortlisted: app.is_shortlisted || false,
+            form2: form2Data,
+            opportunityId: app.opportunity_id
+          };
+        })
+      );
+      
       if (process.env.NODE_ENV === 'development') {
         console.log('📦 Combined offers:', {
           investment: investmentOffersFormatted.length,
@@ -1074,9 +1124,9 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
           totalOffers: allOffers.length
         });
       }
-
+      
       // If no offers found, show a debug message
-      if (allOffers.length === 0 && process.env.NODE_ENV === 'development') {
+      if (allOffers.length === 0 && incubationProgramsWithForm2.length === 0 && process.env.NODE_ENV === 'development') {
         console.log('⚠️ No offers or programs found for startup:', startup.id);
         console.log('⚠️ Investment offers from service:', investmentOffers);
         console.log('⚠️ All applications from database:', allApplications);
@@ -1277,96 +1327,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         'Download Failed',
         'Failed to download agreement. Please try again.'
       );
-    }
-  };
-
-  const handleOpenTrackingQuestions = async (facilitatorId: string, programName: string, facilitatorName: string) => {
-    setIsLoadingTrackingQuestions(true);
-    setSelectedProgramForTracking({ facilitatorId, programName, facilitatorName });
-    setIsTrackingQuestionsModalOpen(true);
-
-    try {
-      // DEBUG: Log the parameters being passed to the service
-      console.log(`🎯 TRACKING QUESTIONS HANDLER - facilitatorId: "${facilitatorId}" | programName: "${programName}" | facilitatorName: "${facilitatorName}"`);
-
-      // Get configured questions for this program
-      const questions = await questionBankService.getProgramTrackingQuestions(facilitatorId, programName);
-      
-      // DEBUG: Log what we got back
-      console.log(`✅ RECEIVED ${questions?.length || 0} QUESTIONS from database for facilitatorId="${facilitatorId}" programName="${programName}"`);
-
-      setTrackingQuestions(questions);
-
-      // Get existing responses
-      const responses = await questionBankService.getProgramTrackingResponses(
-        startup.id,
-        facilitatorId,
-        programName
-      );
-      
-      // DEBUG: Log responses
-      console.log(`✅ RECEIVED ${responses?.length || 0} RESPONSES from database`);
-      
-      const responseMap = new Map<string, string>();
-      responses.forEach(r => {
-        responseMap.set(r.questionId, r.answerText);
-      });
-      setTrackingResponses(responseMap);
-    } catch (error) {
-      console.error('❌ Error loading tracking questions:', error);
-      messageService.error('Error', 'Failed to load tracking questions.');
-      setTrackingQuestions([]);
-      setTrackingResponses(new Map());
-    } finally {
-      setIsLoadingTrackingQuestions(false);
-    }
-  };
-
-  const handleSaveTrackingResponses = async () => {
-    if (!selectedProgramForTracking) return;
-
-    setIsSavingTrackingResponses(true);
-    try {
-      // Validate required questions are answered
-      const unansweredRequired = trackingQuestions.filter(q => 
-        q.isRequired && !trackingResponses.get(q.questionId)?.trim()
-      );
-
-      if (unansweredRequired.length > 0) {
-        messageService.warning(
-          'Required Questions',
-          `Please answer all required questions (${unansweredRequired.length} remaining).`
-        );
-        return;
-      }
-
-      // Save all responses
-      const savePromises = Array.from(trackingResponses.entries()).map(
-        ([questionId, answerText]) => {
-          if (!answerText.trim()) return Promise.resolve();
-          
-          return questionBankService.saveProgramTrackingResponse(
-            startup.id,
-            selectedProgramForTracking.facilitatorId,
-            selectedProgramForTracking.programName,
-            questionId,
-            answerText
-          );
-        }
-      );
-
-      await Promise.all(savePromises);
-
-      messageService.success(
-        'Responses Saved',
-        'Your tracking responses have been saved successfully.'
-      );
-      setIsTrackingQuestionsModalOpen(false);
-    } catch (error) {
-      console.error('Error saving tracking responses:', error);
-      messageService.error('Error', 'Failed to save responses. Please try again.');
-    } finally {
-      setIsSavingTrackingResponses(false);
     }
   };
 
@@ -3019,24 +2979,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
         />
       )}
 
-      {/* Form 2 Submission Modal */}
-      {selectedForm2Data && (
-        <Form2SubmissionModal
-          isOpen={isForm2ModalOpen}
-          onClose={() => {
-            setIsForm2ModalOpen(false);
-            setSelectedForm2Data(null);
-          }}
-          applicationId={selectedForm2Data.applicationId}
-          opportunityId={selectedForm2Data.opportunityId}
-          opportunityName={selectedForm2Data.opportunityName}
-          onSuccess={() => {
-            // Reload incubation programs to refresh Form 2 status
-            loadOffersReceived();
-          }}
-        />
-      )}
-
       {/* Recognition / Incubation Entry Modal */}
       <Modal 
         isOpen={isRecognitionModalOpen}
@@ -3226,201 +3168,6 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
             <p>No details available</p>
           </div>
         )}
-      </Modal>
-
-      {/* Tracking Questions Modal */}
-      <Modal
-        isOpen={isTrackingQuestionsModalOpen}
-        onClose={() => {
-          setIsTrackingQuestionsModalOpen(false);
-          setSelectedProgramForTracking(null);
-          setTrackingQuestions([]);
-          setTrackingResponses(new Map());
-        }}
-        title={`Program Tracking Questions - ${selectedProgramForTracking?.programName || ''}`}
-        size="large"
-      >
-        <div className="space-y-6">
-          {/* Program Info Banner */}
-          <div className="bg-purple-50 border border-purple-200 rounded-md p-4">
-            <p className="text-sm text-purple-800">
-              <strong>{selectedProgramForTracking?.facilitatorName}</strong> has configured tracking questions for this program. 
-              Please provide your responses below. These help the facilitator track your progress and provide better support.
-            </p>
-          </div>
-
-          {isLoadingTrackingQuestions ? (
-            <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-3"></div>
-              <p className="text-slate-500">Loading questions...</p>
-            </div>
-          ) : trackingQuestions.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-slate-500 mb-2">No tracking questions configured yet.</p>
-              <p className="text-xs text-slate-400">
-                The facilitator hasn't set up any tracking questions for this program.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {trackingQuestions.map((q, index) => {
-                const question = q.question;
-                if (!question) return null;
-
-                const currentAnswer = trackingResponses.get(q.questionId) || '';
-
-                return (
-                  <div key={q.questionId} className="border-b pb-6 last:border-b-0">
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      {index + 1}. {question.questionText}
-                      {q.isRequired && <span className="text-red-500 ml-1">*</span>}
-                    </label>
-
-                    {/* Render input based on question type */}
-                    {question.questionType === 'textarea' && (
-                      <textarea
-                        value={currentAnswer}
-                        onChange={(e) => {
-                          const newMap = new Map(trackingResponses);
-                          newMap.set(q.questionId, e.target.value);
-                          setTrackingResponses(newMap);
-                        }}
-                        rows={4}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                        placeholder="Enter your answer..."
-                        required={q.isRequired}
-                      />
-                    )}
-
-                    {question.questionType === 'text' && (
-                      <input
-                        type="text"
-                        value={currentAnswer}
-                        onChange={(e) => {
-                          const newMap = new Map(trackingResponses);
-                          newMap.set(q.questionId, e.target.value);
-                          setTrackingResponses(newMap);
-                        }}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                        placeholder="Enter your answer..."
-                        required={q.isRequired}
-                      />
-                    )}
-
-                    {question.questionType === 'number' && (
-                      <input
-                        type="number"
-                        value={currentAnswer}
-                        onChange={(e) => {
-                          const newMap = new Map(trackingResponses);
-                          newMap.set(q.questionId, e.target.value);
-                          setTrackingResponses(newMap);
-                        }}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                        placeholder="Enter number..."
-                        required={q.isRequired}
-                      />
-                    )}
-
-                    {question.questionType === 'date' && (
-                      <input
-                        type="date"
-                        value={currentAnswer}
-                        onChange={(e) => {
-                          const newMap = new Map(trackingResponses);
-                          newMap.set(q.questionId, e.target.value);
-                          setTrackingResponses(newMap);
-                        }}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                        required={q.isRequired}
-                      />
-                    )}
-
-                    {question.questionType === 'select' && question.options && (
-                      <select
-                        value={currentAnswer}
-                        onChange={(e) => {
-                          const newMap = new Map(trackingResponses);
-                          newMap.set(q.questionId, e.target.value);
-                          setTrackingResponses(newMap);
-                        }}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                        required={q.isRequired}
-                      >
-                        <option value="">Select an option...</option>
-                        {question.options.map((opt, i) => (
-                          <option key={i} value={opt}>{opt}</option>
-                        ))}
-                      </select>
-                    )}
-
-                    {question.questionType === 'multiselect' && question.options && (
-                      <div className="space-y-2 border border-slate-300 rounded-md p-3">
-                        {question.options.map((opt, i) => {
-                          const selectedOptions = currentAnswer ? currentAnswer.split(',') : [];
-                          const isChecked = selectedOptions.includes(opt);
-                          
-                          return (
-                            <label key={i} className="flex items-center gap-2 hover:bg-slate-50 p-1.5 rounded cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={(e) => {
-                                  let newSelected = [...selectedOptions];
-                                  if (e.target.checked) {
-                                    newSelected.push(opt);
-                                  } else {
-                                    newSelected = newSelected.filter(o => o !== opt);
-                                  }
-                                  const newMap = new Map(trackingResponses);
-                                  newMap.set(q.questionId, newSelected.filter(o => o).join(','));
-                                  setTrackingResponses(newMap);
-                                }}
-                                className="rounded border-slate-300"
-                              />
-                              <span className="text-sm text-slate-700">{opt}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {question.category && (
-                      <p className="text-xs text-slate-500 mt-2">
-                        Category: {question.category}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          {trackingQuestions.length > 0 && (
-            <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setIsTrackingQuestionsModalOpen(false);
-                  setSelectedProgramForTracking(null);
-                  setTrackingQuestions([]);
-                  setTrackingResponses(new Map());
-                }}
-                disabled={isSavingTrackingResponses}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSaveTrackingResponses}
-                disabled={isSavingTrackingResponses}
-                className="bg-purple-600 hover:bg-purple-700 text-white"
-              >
-                {isSavingTrackingResponses ? 'Saving...' : 'Save Responses'}
-              </Button>
-            </div>
-          )}
-        </div>
       </Modal>
 
     </div>

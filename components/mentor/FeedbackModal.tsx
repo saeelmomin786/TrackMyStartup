@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import { ScheduledSession } from '../../lib/mentorSchedulingService';
 import { Star, X } from 'lucide-react';
 import { mentorSchedulingService } from '../../lib/mentorSchedulingService';
+import { facilitatorMentorService } from '../../lib/facilitatorMentorService';
 
 interface FeedbackModalProps {
   isOpen: boolean;
@@ -55,7 +56,7 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
     try {
       // Store feedback in format: "rating|feedback_text"
       const feedbackText = `${rating}|${feedback.trim()}`;
-      
+
       if (isStartupGivingFeedback) {
         // For startups, update the session with feedback but don't change status
         // The status should remain 'scheduled' until mentor marks it as completed
@@ -64,6 +65,14 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
           feedback: feedbackText,
           status: 'completed'
         });
+
+        // Auto-record the meeting in the associated incubation center
+        await facilitatorMentorService.autoRecordMeetingForStartupSession(
+          session.mentor_id,
+          session.startup_id,
+          session.session_date,
+          session.session_time
+        );
       } else {
         // For mentors, use completeSession
         await mentorSchedulingService.completeSession(session.id!, feedbackText);

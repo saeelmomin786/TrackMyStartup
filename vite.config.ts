@@ -12,8 +12,12 @@ export default defineConfig(({ mode }) => {
       base: '/', // Change this to '/your-repo-name/' if deploying to GitHub Pages subdirectory
       server: {
         proxy: {
-          '/api': 'http://localhost:3001'
-        }
+          '/api': {
+            target: 'http://localhost:3001',
+            changeOrigin: true,
+            secure: false,
+          },
+        },
       },
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),

@@ -23,6 +23,8 @@ interface StartupMessagingModalProps {
   applicationId: string;
   facilitatorName: string;
   startupName: string;
+  // Optional explicit receiver id (useful to send directly to a mentor instead of facilitator)
+  receiverId?: string;
 }
 
 const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
@@ -30,7 +32,8 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
   onClose,
   applicationId,
   facilitatorName,
-  startupName
+  startupName,
+  receiverId
 }) => {
   const [messages, setMessages] = useState<IncubationMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -152,32 +155,36 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
         }
       }
 
-      // Get the facilitator ID from the application using a join with incubation_opportunities table
-      const { data: applicationData, error: appError } = await supabase
-        .from('opportunity_applications')
-        .select(`
-          opportunity_id,
-          incubation_opportunities!inner(facilitator_id)
-        `)
-        .eq('id', applicationId)
-        .maybeSingle();
-      
-      if (appError || !applicationData) {
-        throw new Error('Unable to get application details. Please refresh and try again.');
+      // Determine receiver: prefer explicit receiverId prop, otherwise use facilitator from application
+      let receiverIdToUse = receiverId;
+      if (!receiverIdToUse) {
+        // Get the facilitator ID from the application using a join with incubation_opportunities table
+        const { data: applicationData, error: appError } = await supabase
+          .from('opportunity_applications')
+          .select(`
+            opportunity_id,
+            incubation_opportunities!inner(facilitator_id)
+          `)
+          .eq('id', applicationId)
+          .maybeSingle();
+        
+        if (appError || !applicationData) {
+          throw new Error('Unable to get application details. Please refresh and try again.');
+        }
+        
+        receiverIdToUse = applicationData.incubation_opportunities?.facilitator_id;
       }
       
-      const facilitatorId = applicationData.incubation_opportunities?.facilitator_id;
-      
-      if (!facilitatorId) {
-        throw new Error('Unable to determine facilitator. Please refresh and try again.');
+      if (!receiverIdToUse) {
+        throw new Error('Unable to determine message receiver. Please refresh and try again.');
       }
 
       // Send message
-      console.log('Startup sending message to facilitator:', { applicationId, facilitatorId, newMessage, messageType: selectedFile ? 'file' : 'text' });
+      console.log('Startup sending message:', { applicationId, receiverIdToUse, newMessage, messageType: selectedFile ? 'file' : 'text' });
       const { error: sendError } = await supabase.from('incubation_messages').insert({
         application_id: applicationId,
         sender_id: currentUserId,
-        receiver_id: facilitatorId,
+        receiver_id: receiverIdToUse,
         message: newMessage,
         message_type: selectedFile ? 'file' : 'text',
         attachment_url: attachmentUrl,
@@ -191,7 +198,7 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
         id: `temp_${Date.now()}`, // Temporary ID
         application_id: applicationId,
         sender_id: currentUserId || '',
-        receiver_id: facilitatorId,
+        receiver_id: receiverIdToUse || '',
         message: newMessage,
         message_type: selectedFile ? 'file' : 'text',
         attachment_url: attachmentUrl,
@@ -247,7 +254,7 @@ const StartupMessagingModal: React.FC<StartupMessagingModalProps> = ({
 
   return (
     <>
-      <style jsx>{`
+      <style>{`
         .messages-container::-webkit-scrollbar {
           width: 8px;
         }

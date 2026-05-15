@@ -47,7 +47,7 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
           <tr className="border-b border-slate-200 bg-slate-50">
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Name</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Email</th>
-            <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Expertise & Portfolio</th>
+            <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Portfolio</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Status</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">History</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Actions</th>
@@ -57,56 +57,26 @@ const ApprovedMentorsTable: React.FC<ApprovedMentorsTableProps> = ({
           {mentors.map((mentor) => (
             <tr key={mentor.mentor_user_id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
               <td className="px-6 py-4">
-                <div className="flex items-center gap-3">
-                  {mentor.logo_url ? (
-                    <img
-                      src={mentor.logo_url}
-                      alt={mentor.mentor_name}
-                      className="w-8 h-8 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-brand-primary/10" />
+                <div>
+                  <p className="font-medium text-slate-900">{mentor.mentor_name}</p>
+                  {mentor.mentor_type && (
+                    <p className="text-xs text-slate-500">{mentor.mentor_type}</p>
                   )}
-                  <div>
-                    <p className="font-medium text-slate-900">{mentor.mentor_name}</p>
-                    {mentor.mentor_type && (
-                      <p className="text-xs text-slate-500">{mentor.mentor_type}</p>
-                    )}
-                  </div>
                 </div>
               </td>
               <td className="px-6 py-4">
                 <p className="text-sm text-slate-600">{mentor.mentor_email || '-'}</p>
               </td>
               <td className="px-6 py-4">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap gap-1">
-                    {mentor.expertise_areas && mentor.expertise_areas.length > 0 ? (
-                      mentor.expertise_areas.slice(0, 2).map((area) => (
-                        <span
-                          key={area}
-                          className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full"
-                        >
-                          {area}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-sm text-slate-400">-</span>
-                    )}
-                    {mentor.expertise_areas && mentor.expertise_areas.length > 2 && (
-                      <span className="text-xs text-slate-500">+{mentor.expertise_areas.length - 2}</span>
-                    )}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onViewPortfolio(mentor)}
-                    className="w-full"
-                  >
-                    <Eye className="h-3 w-3 mr-1" />
-                    Portfolio
-                  </Button>
-                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onViewPortfolio(mentor)}
+                  className="w-full"
+                >
+                  <Eye className="h-3 w-3 mr-1" />
+                  Portfolio
+                </Button>
               </td>
               <td className="px-6 py-4">
                 <div className="flex items-center gap-2">

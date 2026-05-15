@@ -11,7 +11,8 @@
     "server": "node server.js",
     "fix-env": "node fix-env-file.js",
     "restart-app": "node restart-app.js",
-    "diagnose": "npm run dev -- --open /diagnostic"
+    "diagnose": "npm run dev -- --open /diagnostic",
+    "typecheck": "node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.53.0",

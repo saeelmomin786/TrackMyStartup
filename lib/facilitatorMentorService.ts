@@ -94,40 +94,73 @@ class FacilitatorMentorService {
   // Get all mentor-startup assignments for this facilitator
   async getAssignmentsForFacilitator(facilitatorCode: string): Promise<FacilitatorMentorAssignment[]> {
     try {
+      console.log('🔍 [Service] Querying assignments for facilitatorCode:', facilitatorCode);
+      
+      // First, get raw assignments without foreign key join (relationships may not be cached)
       const { data, error } = await supabase
         .from('facilitator_mentor_assignments')
-        .select(`
-          *,
-          startups (id, name, sector)
-        `)
+        .select('*')
         .eq('facilitator_code', facilitatorCode)
         .order('assigned_at', { ascending: false });
 
       if (error) {
-        console.warn('Error fetching assignments:', error);
+        console.error('❌ [Service] Query error:', error);
         return [];
       }
 
       const assignments = data || [];
+      console.log('📋 Raw assignments from DB:', { 
+        facilitatorCode, 
+        count: assignments.length, 
+        data: assignments 
+      });
 
-      // Enrich with mentor names
+      if (assignments.length === 0) {
+        console.warn('⚠️ [Service] No assignments found for facilitatorCode:', facilitatorCode);
+        return [];
+      }
+
+      // Enrich with mentor and startup details
       const enriched = await Promise.all(
         assignments.map(async (a) => {
           let mentorName = 'Unknown Mentor';
           let mentorType = '';
           let mentorEmail = '';
+          let startupName = 'Unknown Startup';
+          let startupSector = '';
+
           try {
-            const { data: mp } = await supabase
+            // Fetch mentor profile
+            const { data: mp, error: mpError } = await supabase
               .from('mentor_profiles')
               .select('mentor_name, mentor_type, email')
               .eq('user_id', a.mentor_user_id)
               .maybeSingle();
-            if (mp) {
+            
+            if (mpError) {
+              console.warn('⚠️ Error fetching mentor profile:', mpError);
+            } else if (mp) {
               mentorName = mp.mentor_name || mentorName;
               mentorType = mp.mentor_type || '';
               mentorEmail = mp.email || '';
             }
-          } catch {}
+
+            // Fetch startup details
+            const { data: startup, error: startupError } = await supabase
+              .from('startups')
+              .select('name, sector')
+              .eq('id', a.startup_id)
+              .maybeSingle();
+            
+            if (startupError) {
+              console.warn('⚠️ Error fetching startup:', startupError);
+            } else if (startup) {
+              startupName = startup.name || startupName;
+              startupSector = startup.sector || '';
+            }
+          } catch (err) {
+            console.warn('Error enriching assignment:', err);
+          }
 
           return {
             id: a.id,
@@ -141,16 +174,70 @@ class FacilitatorMentorService {
             mentor_name: mentorName,
             mentor_type: mentorType,
             mentor_email: mentorEmail,
-            startup_name: a.startups?.name || 'Unknown Startup',
-            startup_sector: a.startups?.sector || '',
+            startup_name: startupName,
+            startup_sector: startupSector,
           } as FacilitatorMentorAssignment;
         })
       );
 
+      console.log('✅ Enriched assignments:', { count: enriched.length, data: enriched });
       return enriched;
     } catch (err) {
-      console.error('Error in getAssignmentsForFacilitator:', err);
+      console.error('❌ Error in getAssignmentsForFacilitator:', err);
       return [];
+    }
+  }
+
+  // Diagnostic method: Check what assignments exist in the database
+  async debugCheckAllAssignments(): Promise<void> {
+    try {
+      console.log('🔍 [Debug] Checking all assignments in database...');
+      const { data, error } = await supabase
+        .from('facilitator_mentor_assignments')
+        .select('*')
+        .limit(50);
+
+      if (error) {
+        console.error('❌ [Debug] Error querying assignments:', error);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('⚠️ [Debug] No assignments found in entire table');
+        return;
+      }
+
+      console.log('📊 [Debug] All assignments in table:', {
+        total: data.length,
+        facilitatorCodes: [...new Set(data.map(a => a.facilitator_code))],
+        startupIds: [...new Set(data.map(a => a.startup_id))],
+        sample: data.slice(0, 3)
+      });
+    } catch (err) {
+      console.error('❌ [Debug] Error in debugCheckAllAssignments:', err);
+    }
+  }
+
+  // Diagnostic method: Check if startup has ANY assignments
+  async debugCheckStartupAssignments(startupId: number): Promise<void> {
+    try {
+      console.log(`🔍 [Debug] Checking all assignments for startup ${startupId}...`);
+      const { data, error } = await supabase
+        .from('facilitator_mentor_assignments')
+        .select('*')
+        .eq('startup_id', startupId);
+
+      if (error) {
+        console.error('❌ [Debug] Error querying:', error);
+        return;
+      }
+
+      console.log(`📊 [Debug] Assignments for startup ${startupId}:`, {
+        count: data?.length || 0,
+        data: data || []
+      });
+    } catch (err) {
+      console.error('❌ [Debug] Error:', err);
     }
   }
 
@@ -162,6 +249,13 @@ class FacilitatorMentorService {
     notes?: string
   ): Promise<{ success: boolean; id?: number; error?: string }> {
     try {
+      console.log('🔵 [Service] Attempting to assign mentor:', {
+        facilitatorCode,
+        mentorUserId,
+        startupId,
+        notes
+      });
+
       const { data, error } = await supabase
         .from('facilitator_mentor_assignments')
         .insert({
@@ -175,15 +269,28 @@ class FacilitatorMentorService {
         .single();
 
       if (error) {
+        console.error('❌ [Service] Assignment error:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        
         if (error.code === '23505') {
           return { success: false, error: 'This mentor is already assigned to this startup.' };
         }
-        console.error('Error assigning mentor:', error);
         return { success: false, error: error.message };
       }
 
+      console.log('✅ [Service] Assignment created successfully:', {
+        id: data.id,
+        facilitatorCode,
+        mentorUserId,
+        startupId
+      });
       return { success: true, id: data.id };
     } catch (err: any) {
+      console.error('❌ [Service] Exception in assignMentorToStartup:', err);
       return { success: false, error: err.message || 'Unknown error' };
     }
   }
@@ -555,6 +662,62 @@ class FacilitatorMentorService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  // Auto-record meeting when startup completes a session with an associated mentor
+  async autoRecordMeetingForStartupSession(
+    mentorUserId: string,
+    startupId: number,
+    sessionDate: string,
+    sessionTime: string
+  ): Promise<void> {
+    try {
+      // Get mentor's associations (incubation centers)
+      const associations = await this.getMentorAssociations(mentorUserId);
+
+      // Filter for approved associations
+      const approvedAssociations = associations.filter(a => a.status === 'approved');
+
+      if (approvedAssociations.length === 0) {
+        return; // No associated incubation centers, nothing to record
+      }
+
+      // Get mentor name
+      const { data: mentorProfile } = await supabase
+        .from('mentor_profiles')
+        .select('mentor_name')
+        .eq('user_id', mentorUserId)
+        .single();
+
+      const mentorName = mentorProfile?.mentor_name || 'Unknown Mentor';
+
+      // Get startup name
+      const { data: startupData } = await supabase
+        .from('startups')
+        .select('name')
+        .eq('id', startupId)
+        .single();
+
+      const startupName = startupData?.name || 'Unknown Startup';
+
+      // Create meeting records for each associated facilitator
+      for (const association of approvedAssociations) {
+        await this.addMeetingRecord({
+          assignment_id: 0, // No assignment, this is from startup's side
+          facilitator_code: association.facilitator_code,
+          mentor_user_id: mentorUserId,
+          startup_id: startupId,
+          title: `Meeting with ${startupName}`,
+          meeting_date: sessionDate,
+          meeting_type: 'Session',
+          duration_minutes: 60, // Default duration
+          notes: `Meeting scheduled by startup: ${startupName} with Mentor: ${mentorName}`
+        });
+      }
+    } catch (error) {
+      console.error('Error auto-recording meeting:', error);
+      // Don't throw - silently fail to not break the session completion flow
     }
   }
 }

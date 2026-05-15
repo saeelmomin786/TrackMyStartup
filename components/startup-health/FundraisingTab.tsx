@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { FundraisingDetails, InvestmentType, Startup, StartupDomain, StartupStage, UserRole } from '../../types';
 import { capTableService } from '../../lib/capTableService';
 import { AuthUser } from '../../lib/auth';
@@ -19,14 +19,22 @@ import { useStartupCurrency } from '../../lib/hooks/useStartupCurrency';
 import { DashboardMetricsService, DashboardMetrics } from '../../lib/dashboardMetricsService';
 import { complianceRulesIntegrationService } from '../../lib/complianceRulesIntegrationService';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus, TrendingDown, Gauge, Clock, XCircle } from 'lucide-react';
+import { TrendingUp, DollarSign, Percent, Building2, Share2, ExternalLink, Video, FileText, Heart, CheckCircle, Linkedin, Globe, Sparkles, Plus, TrendingDown, Gauge, Clock, XCircle, Search, Users, MapPin, IndianRupee } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import FundraisingCRM from './FundraisingCRM';
-import OpportunitiesTab from './OpportunitiesTab';
 import { supabase } from '../../lib/supabase';
 import SubscriptionPlansPage from '../SubscriptionPlansPage';
 import { getQueryParam } from '../../lib/urlState';
+import { investorConnectionRequestService } from '../../lib/investorConnectionRequestService';
+import { featureAccessService } from '../../lib/featureAccessService';
+import { isMissingRelationError } from '../../lib/postgrestErrors';
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+  }
+}
 
 interface FundraisingTabProps {
   startup: Startup;
@@ -37,7 +45,7 @@ interface FundraisingTabProps {
   isDueDiligenceView?: boolean;
 }
 
-type FundraisingSubTab = 'portfolio' | 'programs' | 'investors' | 'crm';
+type FundraisingSubTab = 'portfolio' | 'application' | 'investors' | 'crm';
 
 // Team member interface for one-pager
 interface TeamMember {
@@ -203,24 +211,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
   // Initialize activeSubTab based on URL tab parameter or opportunityId
   const getInitialSubTab = (): FundraisingSubTab => {
-    const tabParam = getQueryParam('tab');
-    const opportunityId = getQueryParam('opportunityId');
-    
-    // If tab=fundraising is explicitly set, check if we need to go to programs
-    if (tabParam === 'fundraising') {
-      // If opportunityId is present, go to programs sub-tab
-      if (opportunityId) {
-        return 'programs';
-      }
-      // Otherwise just stay in portfolio (user clicked fundraising tab manually)
-      return 'portfolio';
-    }
-    
-    // If opportunityId exists, go to programs
-    if (opportunityId) {
-      return 'programs';
-    }
-    
     return 'portfolio';
   };
 
@@ -242,15 +232,6 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     getAuthUserId();
   }, []);
 
-  // Auto-switch to programs tab if there's an opportunityId in the URL
-  useEffect(() => {
-    const opportunityId = getQueryParam('opportunityId');
-    if (opportunityId && activeSubTab !== 'programs') {
-      console.log('🎯 Switching to programs tab due to opportunityId in URL:', opportunityId);
-      setActiveSubTab('programs');
-    }
-  }, []);
-  
   // In due diligence view, only show portfolio sub-tab, hide programs, investors, and crm
   useEffect(() => {
     if (isDueDiligenceView && activeSubTab !== 'portfolio') {
@@ -391,7 +372,31 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   const [filteredInvestors, setFilteredInvestors] = useState<InvestorListItem[]>([]);
   const [isLoadingInvestors, setIsLoadingInvestors] = useState(false);
   const [showAIMatched, setShowAIMatched] = useState(false);
-  
+
+  const [applicationProfiles, setApplicationProfiles] = useState<any[]>([]);
+  const [applicationLoading, setApplicationLoading] = useState(false);
+  const [applicationError, setApplicationError] = useState<string | null>(null);
+  const [applicationSearch, setApplicationSearch] = useState('');
+  const [applicationStatusMap, setApplicationStatusMap] = useState<
+    Map<string, 'pending' | 'accepted' | 'rejected' | 'viewed'>
+  >(new Map());
+  const [applicationPayingUserId, setApplicationPayingUserId] = useState<string | null>(null);
+  const [applyFeeModal, setApplyFeeModal] = useState<{
+    open: boolean;
+    profile: any | null;
+    previewLoading: boolean;
+    previewError: string | null;
+    feeInr: number | null;
+    skipPayment: boolean | null;
+  }>({
+    open: false,
+    profile: null,
+    previewLoading: false,
+    previewError: null,
+    feeInr: null,
+    skipPayment: null,
+  });
+
   // Dashboard metrics state (MRR, Burn Rate, Gross Margin, Compliance)
   const [metrics, setMetrics] = useState<DashboardMetrics>({
     mrr: 0,
@@ -753,6 +758,362 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
     loadInvestors();
   }, [activeSubTab]);
+
+  // Load investor profiles for Application sub-tab (same source as Explore → Investors)
+  useEffect(() => {
+    if (activeSubTab !== 'application') return;
+    let cancelled = false;
+    const loadApplicationInvestors = async () => {
+      setApplicationLoading(true);
+      setApplicationError(null);
+      try {
+        const { data, error: investorError } = await supabase
+          .from('investor_profiles')
+          .select('*')
+          .order('investor_name', { ascending: true });
+
+        if (cancelled) return;
+
+        if (investorError) {
+          if (isMissingRelationError(investorError)) {
+            setApplicationProfiles([]);
+            return;
+          }
+          throw investorError;
+        }
+
+        const userIds = [...new Set((data || []).map(p => p.user_id).filter(Boolean))];
+        let userMap = new Map<string, { id: string; name?: string }>();
+        if (userIds.length > 0) {
+          const { data: profilesData } = await supabase
+            .from('user_profiles')
+            .select('auth_user_id, name')
+            .in('auth_user_id', userIds);
+          if (profilesData) {
+            for (const row of profilesData as { auth_user_id?: string; name?: string }[]) {
+              const aid = row.auth_user_id;
+              if (aid && !userMap.has(aid)) {
+                userMap.set(aid, { id: aid, name: row.name });
+              }
+            }
+          }
+        }
+
+        const profilesWithUsers = (data || []).map(profile => ({
+          ...profile,
+          user: userMap.get(profile.user_id) || { id: profile.user_id, name: '' },
+        }));
+        setApplicationProfiles(profilesWithUsers);
+      } catch (e: any) {
+        if (!cancelled) {
+          console.error('Error loading investor profiles for applications:', e);
+          setApplicationError('Failed to load investors');
+          setApplicationProfiles([]);
+        }
+      } finally {
+        if (!cancelled) setApplicationLoading(false);
+      }
+    };
+    loadApplicationInvestors();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSubTab]);
+
+  // Latest application status per investor (pending / accepted / rejected)
+  useEffect(() => {
+    if (activeSubTab !== 'application' || !authUserId) return;
+    let cancelled = false;
+    const loadStatuses = async () => {
+      try {
+        const map = await investorConnectionRequestService.getLatestApplicationStatuses(authUserId, startup.id);
+        if (!cancelled) setApplicationStatusMap(map);
+      } catch (e) {
+        console.error('Error loading application statuses:', e);
+      }
+    };
+    loadStatuses();
+    const interval = setInterval(loadStatuses, 45000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeSubTab, authUserId, startup.id]);
+
+  const refreshApplicationStatuses = useCallback(async () => {
+    if (!authUserId) return;
+    try {
+      const map = await investorConnectionRequestService.getLatestApplicationStatuses(authUserId, startup.id);
+      setApplicationStatusMap(map);
+    } catch (e) {
+      console.error('Error refreshing application statuses:', e);
+    }
+  }, [authUserId, startup.id]);
+
+  const loadRazorpayScript = useCallback(async (): Promise<boolean> => {
+    if (typeof window !== 'undefined' && window.Razorpay) return true;
+    return new Promise(resolve => {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  }, []);
+
+  const filteredApplicationProfiles = useMemo(() => {
+    const term = applicationSearch.trim().toLowerCase();
+    if (!term) return applicationProfiles;
+    return applicationProfiles.filter(profile => {
+      const name = (
+        profile.investor_name ||
+        profile.user?.name ||
+        ''
+      ).toLowerCase();
+      const firm = (profile.firm_name || '').toLowerCase();
+      return name.includes(term) || firm.includes(term);
+    });
+  }, [applicationProfiles, applicationSearch]);
+
+  const closeApplyFeeModal = useCallback(() => {
+    setApplyFeeModal({
+      open: false,
+      profile: null,
+      previewLoading: false,
+      previewError: null,
+      feeInr: null,
+      skipPayment: null,
+    });
+  }, []);
+
+  const getInvestorApplicationShareUrl = useCallback(() => {
+    const startupUrl = new URL(window.location.origin + window.location.pathname);
+    startupUrl.searchParams.set('view', 'startup');
+    startupUrl.searchParams.set('startupId', String(startup.id));
+    return startupUrl.toString();
+  }, [startup.id]);
+
+  const runFreeInvestorApply = useCallback(
+    async (targetUserId: string) => {
+      if (!authUserId) return;
+      const shareUrl = getInvestorApplicationShareUrl();
+      const existingCheck = await investorConnectionRequestService.checkExistingRequest(targetUserId, authUserId);
+      if (existingCheck.exists) {
+        if (existingCheck.status === 'accepted') {
+          messageService.info('Already connected', 'You are already connected with this investor.', 3000);
+          return;
+        }
+        if (existingCheck.status === 'pending') {
+          messageService.info('Already applied', 'You already have a pending application. Please wait for their response.', 3000);
+          return;
+        }
+      }
+      await investorConnectionRequestService.createRequest({
+        investor_id: targetUserId,
+        requester_id: authUserId,
+        requester_type: 'Startup',
+        startup_id: startup.id,
+        startup_profile_url: shareUrl,
+      });
+      await refreshApplicationStatuses();
+      messageService.success('Application sent', 'Your application was sent successfully.', 3000);
+    },
+    [authUserId, startup.id, refreshApplicationStatuses, getInvestorApplicationShareUrl]
+  );
+
+  const executePaidInvestorApplication = useCallback(
+    async (profile: any, accessToken: string) => {
+      const targetUserId = profile.user_id as string | undefined;
+      if (!targetUserId) return;
+      const shareUrl = getInvestorApplicationShareUrl();
+      try {
+        const orderResp = await fetch('/api/investor-application/create-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ investorUserId: targetUserId, startupId: startup.id }),
+        });
+        const orderJson = await orderResp.json();
+        if (orderResp.status === 409) {
+          messageService.info(
+            'Already applied',
+            orderJson?.error || 'You already have an active application for this investor.',
+            3000
+          );
+          return;
+        }
+        if (!orderResp.ok) {
+          throw new Error(orderJson?.error || orderJson?.details || 'Could not start payment.');
+        }
+
+        if (orderJson.skipPayment) {
+          await runFreeInvestorApply(targetUserId);
+          return;
+        }
+
+        setApplicationPayingUserId(targetUserId);
+
+        const scriptOk = await loadRazorpayScript();
+        if (!scriptOk || !window.Razorpay) {
+          throw new Error('Could not load Razorpay checkout.');
+        }
+
+        const keyId = orderJson.keyId;
+        const order = orderJson.order;
+        if (!keyId || !order?.id) {
+          throw new Error('Invalid payment session.');
+        }
+
+        const options: Record<string, unknown> = {
+          key: keyId,
+          order_id: order.id,
+          name: 'Track My Startup',
+          description: `Investor application fee (${profile.investor_name || 'Investor'})`,
+          amount: order.amount,
+          currency: order.currency || 'INR',
+          handler: async (response: {
+            razorpay_order_id?: string;
+            razorpay_payment_id?: string;
+            razorpay_signature?: string;
+          }) => {
+            try {
+              const verifyResp = await fetch('/api/investor-application/verify-payment', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${accessToken}`,
+                },
+                body: JSON.stringify({
+                  investorUserId: targetUserId,
+                  startupId: startup.id,
+                  startup_profile_url: shareUrl,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                }),
+              });
+              const verifyJson = await verifyResp.json();
+              if (!verifyResp.ok) {
+                throw new Error(verifyJson?.error || verifyJson?.details || 'Payment verification failed');
+              }
+              await refreshApplicationStatuses();
+              messageService.success(
+                'Application submitted',
+                'Payment successful. Your application is now in review with the investor.',
+                4000
+              );
+            } catch (err: any) {
+              console.error(err);
+              messageService.error('Verification failed', err?.message || 'Please contact support.', 4000);
+            } finally {
+              setApplicationPayingUserId(null);
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              setApplicationPayingUserId(null);
+            },
+          },
+          theme: { color: '#2563eb' },
+        };
+
+        const checkout = new window.Razorpay(options);
+        checkout.open();
+      } catch (e: any) {
+        console.error('Error sending investor application:', e);
+        messageService.error('Apply failed', e?.message || 'Could not complete application. Please try again.', 4000);
+        setApplicationPayingUserId(null);
+      }
+    },
+    [startup.id, loadRazorpayScript, refreshApplicationStatuses, getInvestorApplicationShareUrl, runFreeInvestorApply]
+  );
+
+  const openApplicationApplyModal = useCallback(
+    async (profile: any) => {
+      if (!authUserId) {
+        messageService.warning('Sign in required', 'Please sign in to apply to investors.', 3000);
+        return;
+      }
+      const targetUserId = profile.user_id as string | undefined;
+      if (!targetUserId) return;
+
+      const latest = applicationStatusMap.get(targetUserId);
+      if (latest === 'pending' || latest === 'accepted' || latest === 'viewed') {
+        messageService.info('Already submitted', 'You already have an active application for this investor.', 3000);
+        return;
+      }
+
+      setApplyFeeModal({
+        open: true,
+        profile,
+        previewLoading: true,
+        previewError: null,
+        feeInr: null,
+        skipPayment: null,
+      });
+
+      await supabase.auth.getUser();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        setApplyFeeModal(s => ({
+          ...s,
+          previewLoading: false,
+          previewError: 'Your session expired. Please sign in again.',
+        }));
+        return;
+      }
+
+      try {
+        const orderResp = await fetch('/api/investor-application/create-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            investorUserId: targetUserId,
+            startupId: startup.id,
+            previewOnly: true,
+          }),
+        });
+        const orderJson = await orderResp.json();
+        if (orderResp.status === 409) {
+          setApplyFeeModal(s => ({
+            ...s,
+            previewLoading: false,
+            previewError: orderJson?.error || 'You already have an active application for this investor.',
+          }));
+          return;
+        }
+        if (!orderResp.ok) {
+          setApplyFeeModal(s => ({
+            ...s,
+            previewLoading: false,
+            previewError: orderJson?.error || orderJson?.details || 'Could not load application fee.',
+          }));
+          return;
+        }
+        const rawFee = Number(orderJson.feeInr);
+        const fee = Number.isFinite(rawFee) && rawFee >= 0 ? rawFee : 0;
+        setApplyFeeModal(s => ({
+          ...s,
+          previewLoading: false,
+          feeInr: fee,
+          skipPayment: Boolean(orderJson.skipPayment),
+        }));
+      } catch {
+        setApplyFeeModal(s => ({
+          ...s,
+          previewLoading: false,
+          previewError: 'Could not load application fee. Please try again.',
+        }));
+      }
+    },
+    [authUserId, applicationStatusMap, startup.id]
+  );
 
   // Load metrics when portfolio tab is active
   useEffect(() => {
@@ -1856,14 +2217,14 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => setActiveSubTab('programs')}
+                onClick={() => setActiveSubTab('application')}
                 className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeSubTab === 'programs'
+                  activeSubTab === 'application'
                     ? 'border-brand-primary text-brand-primary'
                     : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                 }`}
               >
-                Grant / Incubation Programs
+                Application
               </button>
               <button
                 type="button"
@@ -3883,16 +4244,280 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       </>
       )}
 
-      {/* Grant / Incubation Programs: reuse existing Programs/Opportunities UI */}
-      {/* Note: Free users can view and apply to grants, but drafts and CRM are locked */}
-      {activeSubTab === 'programs' && !isDueDiligenceView && !isLoading && (
+      {/* Application: all investor portfolio cards (Explore-style) with Apply = same connection request flow */}
+      {activeSubTab === 'application' && !isDueDiligenceView && !isLoading && (
         <div className="space-y-4">
-          <OpportunitiesTab 
-            startup={{ id: startup.id, name: startup.name }} 
-            crmRef={crmRef}
-            onProgramAddedToCRM={() => setActiveSubTab('crm')}
-            authUserId={authUserId}
-          />
+          <Card className="p-4 sm:p-6">
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold text-slate-900">Apply to investors</h2>
+            </div>
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search investors by name or firm..."
+                value={applicationSearch}
+                onChange={e => setApplicationSearch(e.target.value)}
+                className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
+            {applicationError && (
+              <div className="mb-3 text-sm text-red-600">{applicationError}</div>
+            )}
+            {applicationLoading ? (
+              <div className="text-center py-8 text-slate-600">Loading investors...</div>
+            ) : filteredApplicationProfiles.length === 0 ? (
+              <div className="text-center py-10">
+                <Users className="h-14 w-14 text-slate-400 mx-auto mb-3" />
+                <p className="text-slate-600 text-sm">
+                  {applicationSearch.trim()
+                    ? 'No investors match your search.'
+                    : 'No investor profiles found.'}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-3 text-sm text-slate-600">
+                  {filteredApplicationProfiles.length}{' '}
+                  {filteredApplicationProfiles.length === 1 ? 'investor' : 'investors'} found
+                </div>
+                <div className="space-y-4">
+                  {filteredApplicationProfiles.map(profile => {
+                    const st = applicationStatusMap.get(profile.user_id || '') || null;
+                    const isPaying = applicationPayingUserId === profile.user_id;
+                    const profileName = profile.investor_name || profile.user?.name || 'Investor';
+                    const firmName = profile.firm_name || '';
+                    const location = profile.global_hq || profile.location || '';
+                    const investmentRange =
+                      profile.ticket_size_min && profile.ticket_size_max
+                        ? `${profile.ticket_size_min.toLocaleString()} - ${profile.ticket_size_max.toLocaleString()} ${profile.currency || 'USD'}`
+                        : profile.minimum_investment && profile.maximum_investment
+                          ? `${profile.minimum_investment.toLocaleString()} - ${profile.maximum_investment.toLocaleString()} ${profile.currency || 'USD'}`
+                          : null;
+
+                    let applyLabel = 'Apply';
+                    if (st === 'accepted') applyLabel = 'Connected';
+                    else if (st === 'pending' || st === 'viewed') applyLabel = 'In review';
+                    else if (st === 'rejected') applyLabel = 'Apply again';
+
+                    const applyDisabled =
+                      !authUserId ||
+                      isPaying ||
+                      st === 'pending' ||
+                      st === 'viewed' ||
+                      st === 'accepted';
+
+                    const statusLine =
+                      st === 'pending' || st === 'viewed'
+                        ? 'Application in review.'
+                        : st === 'accepted'
+                          ? 'Application accepted. The investor will contact you soon.'
+                          : st === 'rejected'
+                            ? 'Application rejected.'
+                            : null;
+
+                    return (
+                      <Card key={profile.id || profile.user_id} className="p-4 flex gap-4 items-start">
+                        <div className="w-28 flex-shrink-0 flex flex-col items-center">
+                          {profile.logo_url && profile.logo_url !== '#' ? (
+                            <img
+                              src={profile.logo_url}
+                              alt={`${profileName} logo`}
+                              className="w-24 h-24 object-contain rounded-md bg-white p-2 border border-slate-100"
+                              onError={e => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="w-24 h-24 rounded-md bg-slate-100 flex items-center justify-center text-slate-400">
+                              <DollarSign className="h-8 w-8" />
+                            </div>
+                          )}
+                          <Button
+                            size="sm"
+                            variant={st === 'pending' || st === 'viewed' || st === 'accepted' ? 'outline' : 'primary'}
+                            className="mt-3 w-full"
+                            onClick={() => openApplicationApplyModal(profile)}
+                            disabled={applyDisabled}
+                          >
+                            {isPaying ? 'Processing…' : applyLabel}
+                          </Button>
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-800">{profileName}</h3>
+                              {firmName && <div className="text-sm text-slate-600">{firmName}</div>}
+                            </div>
+                            <div className="text-sm text-slate-500">{location}</div>
+                          </div>
+                          {statusLine && (
+                            <p
+                              className={`mt-2 text-sm font-medium ${
+                                st === 'accepted'
+                                  ? 'text-emerald-700'
+                                  : st === 'rejected'
+                                    ? 'text-red-700'
+                                    : 'text-amber-800'
+                              }`}
+                            >
+                              {statusLine}
+                            </p>
+                          )}
+                          <div className="mt-3 text-sm text-slate-600 flex flex-wrap gap-3">
+                            {investmentRange && (
+                              <div className="flex items-center gap-2">
+                                <DollarSign className="h-4 w-4 text-slate-400" />
+                                <span>{investmentRange}</span>
+                              </div>
+                            )}
+                            {profile.investment_stages && profile.investment_stages.length > 0 && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-slate-500">Stages:</span>
+                                <span className="text-slate-700">
+                                  {(profile.investment_stages || []).slice(0, 3).join(', ')}
+                                  {(profile.investment_stages || []).length > 3
+                                    ? ` +${(profile.investment_stages || []).length - 3} more`
+                                    : ''}
+                                </span>
+                              </div>
+                            )}
+                            {profile.geography && profile.geography.length > 0 && (
+                              <div className="flex items-center gap-2">
+                                <MapPin className="h-4 w-4 text-slate-400" />
+                                <span className="text-slate-700">
+                                  {profile.geography.slice(0, 3).join(', ')}
+                                  {profile.geography.length > 3 ? ` +${profile.geography.length - 3} more` : ''}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {profile.website && profile.website !== '#' && (
+                              <a
+                                href={profile.website}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                              >
+                                <Globe className="h-3.5 w-3.5" /> Website
+                              </a>
+                            )}
+                            {profile.linkedin_link && profile.linkedin_link !== '#' && (
+                              <a
+                                href={profile.linkedin_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                              >
+                                <Linkedin className="h-3.5 w-3.5" /> LinkedIn
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </Card>
+
+          <Modal
+            isOpen={applyFeeModal.open}
+            onClose={closeApplyFeeModal}
+            title="Apply to investor"
+            position="center"
+            size="small"
+          >
+            <div className="space-y-4">
+              {applyFeeModal.previewLoading && (
+                <p className="text-sm text-slate-600">Checking application fee…</p>
+              )}
+              {applyFeeModal.previewError && (
+                <div className="space-y-3">
+                  <p className="text-sm text-red-700">{applyFeeModal.previewError}</p>
+                  <Button variant="secondary" className="w-full" onClick={closeApplyFeeModal}>
+                    Close
+                  </Button>
+                </div>
+              )}
+              {!applyFeeModal.previewLoading && !applyFeeModal.previewError && applyFeeModal.profile && (
+                <>
+                  <p className="text-sm text-slate-700">
+                    <span className="font-semibold text-slate-900">
+                      {applyFeeModal.profile.investor_name ||
+                        applyFeeModal.profile.user?.name ||
+                        'Investor'}
+                    </span>
+                  </p>
+                  {applyFeeModal.skipPayment ? (
+                    <>
+                      <p className="text-sm text-slate-600">
+                        There is no application fee for this investor. Your startup profile will be sent for review when
+                        you confirm.
+                      </p>
+                      <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-2">
+                        <Button variant="secondary" onClick={closeApplyFeeModal}>
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="primary"
+                          onClick={async () => {
+                            const pid = applyFeeModal.profile?.user_id as string | undefined;
+                            if (!pid) return;
+                            await runFreeInvestorApply(pid);
+                            closeApplyFeeModal();
+                          }}
+                        >
+                          Submit application
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                        <IndianRupee className="h-5 w-5 text-slate-500 shrink-0" />
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Application fee</p>
+                          <p className="text-xl font-semibold text-slate-900">
+                            ₹{(applyFeeModal.feeInr ?? 0).toLocaleString('en-IN')}{' '}
+                            <span className="text-sm font-normal text-slate-500">INR</span>
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-sm text-slate-600">
+                        Your startup profile is only sent to this investor after you complete payment below. You cannot
+                        submit this application without paying this fee.
+                      </p>
+                      <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-2">
+                        <Button variant="secondary" onClick={closeApplyFeeModal}>
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="primary"
+                          onClick={async () => {
+                            const profile = applyFeeModal.profile;
+                            if (!profile?.user_id) return;
+                            const { data: sessionData } = await supabase.auth.getSession();
+                            const accessToken = sessionData?.session?.access_token;
+                            if (!accessToken) {
+                              messageService.error('Session expired', 'Please sign in again to continue.', 3000);
+                              return;
+                            }
+                            closeApplyFeeModal();
+                            await executePaidInvestorApplication(profile, accessToken);
+                          }}
+                        >
+                          Pay ₹{(applyFeeModal.feeInr ?? 0).toLocaleString('en-IN')} and submit
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </Modal>
         </div>
       )}
 

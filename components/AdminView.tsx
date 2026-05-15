@@ -4,7 +4,7 @@ import { ValidationRequest } from '../lib/validationService';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Badge from './ui/Badge';
-import { Users, Building2, HelpCircle, FileCheck2, LayoutGrid, Eye, Check, X, UserCheck, NotebookPen, BookUser, FileStack, Database, Shield, Settings, TrendingUp, AlertTriangle, BarChart3, UserPlus, Building, CreditCard, MessageSquare, Calendar, Globe, Target, Zap, Megaphone, FileText, DollarSign, Coins } from 'lucide-react';
+import { Users, Building2, HelpCircle, FileCheck2, LayoutGrid, Eye, Check, X, UserCheck, NotebookPen, BookUser, FileStack, Database, Shield, Settings, TrendingUp, AlertTriangle, BarChart3, UserPlus, Building, CreditCard, MessageSquare, Calendar, Globe, Target, Zap, Megaphone, FileText, DollarSign, Coins, IndianRupee } from 'lucide-react';
 import AdminProgramsTab from './admin/AdminProgramsTab';
 import AdminBlogsTab from './admin/AdminBlogsTab';
 import InvestorListManager from './admin/InvestorListManager';
@@ -22,6 +22,7 @@ import FinancialTab from './admin/FinancialTab';
 import MentorPaymentsTab from './admin/MentorPaymentsTab';
 import CreditPricingTab from './admin/CreditPricingTab';
 import AdminEventsTab from './admin/AdminEventsTab';
+import InvestorApplicationFeeTab from './admin/InvestorApplicationFeeTab';
 import { supabase } from '../lib/supabase';
 import { investmentService } from '../lib/database';
 import { AuthUser } from '../lib/auth';
@@ -39,7 +40,7 @@ interface AdminViewProps {
   onViewStartup: (id: number) => void;
 }
 
-type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList' | 'questionBank' | 'financial' | 'mentorPayments' | 'creditPricing' | 'events';
+type AdminTab = 'dashboard' | 'userManagement' | 'startupManagement' | 'investmentFlow' | 'compliance' | 'analytics' | 'system' | 'programs' | 'blogs' | 'investorList' | 'questionBank' | 'financial' | 'investorApplicationFee' | 'mentorPayments' | 'creditPricing' | 'events';
 type TimeFilter = '30d' | '90d' | 'all';
 
 const SummaryCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -373,6 +374,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             case 'investorList': return <InvestorListManager />;
             case 'questionBank': return <AdminQuestionBankTab />;
             case 'financial': return <FinancialTab />;
+            case 'investorApplicationFee': return <InvestorApplicationFeeTab />;
             case 'mentorPayments': return <MentorPaymentsTab />;
             case 'creditPricing': return <CreditPricingTab />;
             case 'events': return <AdminEventsTab />;
@@ -415,6 +417,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
                     <TabButton id="compliance" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Shield />}>Compliance</TabButton>
                     <TabButton id="analytics" activeTab={activeTab} setActiveTab={setActiveTab} icon={<BarChart3 />}>Analytics</TabButton>
                     <TabButton id="financial" activeTab={activeTab} setActiveTab={setActiveTab} icon={<DollarSign />}>Financial</TabButton>
+                    <TabButton id="investorApplicationFee" activeTab={activeTab} setActiveTab={setActiveTab} icon={<IndianRupee />}>Investor apply fee</TabButton>
                     <TabButton id="mentorPayments" activeTab={activeTab} setActiveTab={setActiveTab} icon={<CreditCard />}>Mentor Payments</TabButton>
                     <TabButton id="creditPricing" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Coins />}>Credit Pricing</TabButton>
                     <TabButton id="system" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Settings />}>System</TabButton>

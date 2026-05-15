@@ -319,10 +319,7 @@ const IncubationMessagingModal: React.FC<IncubationMessagingModalProps> = ({
               </div>
             ) : (
               <>
-                {/* Debug info */}
-                <div className="bg-yellow-100 p-2 mb-2 text-xs">
-                  Debug: {messages.length} messages loaded. Current user: {currentUserId}
-                </div>
+                {/* Debug info removed */}
                 {messages.map((message) => {
                 const isCurrentUser = message.sender_id === currentUserId;
                 const isFromFacilitator = !isCurrentUser; // Messages from facilitator (not current user)

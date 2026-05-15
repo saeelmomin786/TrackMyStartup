@@ -11,12 +11,12 @@ import StartupDashboardTab from './startup-health/StartupDashboardTab';
 import NotificationBadge from './startup-health/NotificationBadge';
 import NotificationsView from './startup-health/NotificationsView';
 import ProfileTab from './startup-health/ProfileTab';
+import IncubationTab from './startup-health/IncubationTab';
 import ComplianceTab from './startup-health/ComplianceTab';
 import FinancialsTab from './startup-health/FinancialsTab';
 import EmployeesTab from './startup-health/EmployeesTab';
 import CapTableTab from './startup-health/CapTableTab';
 import FundraisingTab from './startup-health/FundraisingTab';
-import IncubationCenterTab from './startup-health/IncubationCenterTab';
 import StartupProfilePage from './StartupProfilePage';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import ConnectMentorRequestModal from './mentor/ConnectMentorRequestModal';
@@ -1083,7 +1083,7 @@ interface StartupHealthViewProps {
   onTrialButtonClick?: () => void; // Add trial button click handler
 }
 
-type TabId = 'dashboard' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable' | 'fundraising' | 'incubation' | 'services';
+type TabId = 'dashboard' | 'incubation' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable' | 'fundraising' | 'services';
 
 const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole, user, onBack, onActivateFundraising, onInvestorAdded, onUpdateFounders, isViewOnly = false, investmentOffers = [], onProcessOffer, onTrialButtonClick }) => {
     // Check if this is a facilitator accessing the startup
@@ -1904,41 +1904,41 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         setIsMobileMenuOpen(false); // Close mobile menu when tab changes
     };
 
-    const tabs = isFacilitatorAccess
+    const tabs = isFacilitatorAccess 
         ? [
             // Facilitator users see limited tabs based on access level
             { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+            { id: 'incubation', name: 'Incubation', icon: <Building2 className="w-4 h-4" /> },
             { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
             { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
             { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
-            { id: 'incubation', name: 'Incubation Center', icon: <Building2 className="w-4 h-4" /> },
             { id: 'services', name: 'Explore', icon: <Wrench className="w-4 h-4" /> },
           ]
         : isDueDiligenceView
         ? [
             // Due diligence view: hide services tab, show other tabs
             { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+            { id: 'incubation', name: 'Incubation', icon: <Building2 className="w-4 h-4" /> },
             { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
             { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
             { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
-            { id: 'incubation', name: 'Incubation Center', icon: <Building2 className="w-4 h-4" /> },
           ]
         : [
-            // Regular startup users see all tabs; programs moved under Incubation Center
+            // Regular startup users see all tabs; programs moved under Fundraising → Grant / Incubation Programs
             { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+            { id: 'incubation', name: 'Incubation', icon: <Building2 className="w-4 h-4" /> },
             { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
             { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
             { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
             { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
             { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
-            { id: 'incubation', name: 'Incubation Center', icon: <Building2 className="w-4 h-4" /> },
             { id: 'services', name: 'Explore', icon: <Wrench className="w-4 h-4" /> },
           ];
 
@@ -1946,6 +1946,20 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         switch (activeTab) {
             case 'dashboard':
                 return <StartupDashboardTab startup={currentStartup} isViewOnly={isViewOnly} offers={offersForStartup} onProcessOffer={onProcessOffer} currentUser={user} onTrialButtonClick={onTrialButtonClick} />;
+            case 'incubation':
+                return (
+                  <IncubationTab
+                    startup={currentStartup}
+                    isViewOnly={isViewOnly}
+                    currentUser={user}
+                    onTrialButtonClick={onTrialButtonClick}
+                    onMentorRequestSent={() => {
+                      setActiveTab('services');
+                      setServicesSubTab('requested');
+                      loadStartupRequests();
+                    }}
+                  />
+                );
             case 'profile':
                 return <ProfileTab startup={currentStartup} userRole={userRole} onProfileUpdate={handleProfileUpdate} isViewOnly={isViewOnly} />;
             case 'compliance':
@@ -1973,8 +1987,17 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                     isViewOnly={isViewOnly}
                   />
                 );
-            case 'incubation':
-                return <IncubationCenterTab startup={currentStartup} isViewOnly={isViewOnly} />;
+            case 'fundraising':
+                return (
+                  <FundraisingTab
+                    startup={currentStartup}
+                    userRole={userRole}
+                    user={user}
+                    isViewOnly={isViewOnly}
+                    onActivateFundraising={onActivateFundraising}
+                    isDueDiligenceView={isDueDiligenceView}
+                  />
+                );
             case 'services':
                 return (
                   <div className="space-y-6 animate-fade-in">

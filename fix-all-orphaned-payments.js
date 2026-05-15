@@ -147,8 +147,8 @@ async function fixAllOrphanedPayments() {
       successCount++;
       console.log(`✅ Successfully fixed payment ${payment.id}`);
       
-    } catch (error: any) {
-      console.error(`❌ Error processing payment ${payment.id}:`, error.message);
+    } catch (error) {
+      console.error(`❌ Error processing payment ${payment.id}:`, error instanceof Error ? error.message : error);
       failCount++;
     }
   }

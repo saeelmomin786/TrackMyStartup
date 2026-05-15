@@ -14,6 +14,8 @@ export interface InvestorConnectionRequest {
   updated_at: string;
   viewed_at?: string;
   responded_at?: string;
+  application_fee_inr?: number;
+  application_razorpay_payment_id?: string;
 }
 
 export interface CreateConnectionRequest {
@@ -24,6 +26,8 @@ export interface CreateConnectionRequest {
   startup_profile_url?: string;
   advisor_profile_url?: string;
   message?: string;
+  application_fee_inr?: number;
+  application_razorpay_payment_id?: string;
 }
 
 export const investorConnectionRequestService = {
@@ -183,6 +187,32 @@ export const investorConnectionRequestService = {
 
     if (error) throw error;
     return count || 0;
-  }
+  },
+
+  /** Latest application status per investor for this startup + requester (by created_at). */
+  async getLatestApplicationStatuses(
+    requesterId: string,
+    startupId: number
+  ): Promise<Map<string, 'pending' | 'accepted' | 'rejected' | 'viewed'>> {
+    const { data, error } = await supabase
+      .from('investor_connection_requests')
+      .select('investor_id, status, created_at')
+      .eq('requester_id', requesterId)
+      .eq('startup_id', startupId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const map = new Map<string, 'pending' | 'accepted' | 'rejected' | 'viewed'>();
+    for (const row of data || []) {
+      const inv = (row as { investor_id?: string }).investor_id;
+      const st = (row as { status?: string }).status;
+      if (!inv || map.has(inv)) continue;
+      if (st === 'pending' || st === 'accepted' || st === 'rejected' || st === 'viewed') {
+        map.set(inv, st as 'pending' | 'accepted' | 'rejected' | 'viewed');
+      }
+    }
+    return map;
+  },
 };
 

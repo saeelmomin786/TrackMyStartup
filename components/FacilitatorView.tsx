@@ -4,7 +4,7 @@ import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, Mail, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download, GraduationCap, Calendar, Clock, Plus, ChevronDown, ChevronUp, BookOpen, AlertCircle } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, Mail, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download, GraduationCap, Calendar, Clock, Plus, ChevronDown, ChevronUp, BookOpen, AlertCircle, MessageCircle, Handshake } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import PortfolioHealthCharts from './charts/PortfolioHealthCharts';
@@ -36,6 +36,7 @@ import { reportsService } from '../lib/reportsService';
 import { facilitatorMentorService, FacilitatorMentor, FacilitatorMentorAssignment, MentorMeetingRecord, MentorFacilitatorAssociation } from '../lib/facilitatorMentorService';
 import ApprovedMentorsTable from './mentor/ApprovedMentorsTable';
 import MentorPortfolioModal from './mentor/MentorPortfolioModal';
+import MentorHistoryModal from './mentor/MentorHistoryModal';
 import { intakeCRMService } from '../lib/intakeCRMService';
 import { form2ResponseService } from '../lib/form2ResponseService';
 import { Form2SubmissionModal } from './Form2SubmissionModal';
@@ -43,6 +44,7 @@ import { IntakeCRMBoard } from './IntakeCRMBoard';
 import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../lib/advisorConnectionRequestService';
 import FacilitatorProfileForm from './facilitator/FacilitatorProfileForm';
 import FacilitatorCard from './facilitator/FacilitatorCard';
+import PartnerNetworkTab from './facilitator/PartnerNetworkTab';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -55,7 +57,7 @@ interface FacilitatorViewProps {
   onLogout?: () => void;
 }
 
-type FacilitatorTab = 'dashboard' | 'discover' | 'intakeManagement' | 'trackMyStartups' | 'mentorManagement' | 'ourInvestments' | 'collaboration' | 'portfolio';
+type FacilitatorTab = 'dashboard' | 'discover' | 'intakeManagement' | 'trackMyStartups' | 'mentorManagement' | 'ourInvestments' | 'collaboration' | 'partner' | 'portfolio';
 
 // Local opportunity type for facilitator postings
 type IncubationOpportunity = {
@@ -231,7 +233,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   };
   const [activeTab, setActiveTab] = useState<FacilitatorTab>((() => {
     const fromUrl = (getQueryParam('tab') as FacilitatorTab) || 'dashboard';
-    const valid: FacilitatorTab[] = ['dashboard','discover','intakeManagement','trackMyStartups','mentorManagement','ourInvestments','collaboration','portfolio'];
+    const valid: FacilitatorTab[] = ['dashboard','discover','intakeManagement','trackMyStartups','mentorManagement','ourInvestments','collaboration','partner','portfolio'];
     return valid.includes(fromUrl) ? fromUrl : 'dashboard';
   })());
   // Keep URL in sync when tab changes
@@ -317,6 +319,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [mentorSubTab, setMentorSubTab] = useState<'pending' | 'approved'>('approved');
   const [isPortfolioModalOpen, setIsPortfolioModalOpen] = useState(false);
   const [selectedMentorForPortfolio, setSelectedMentorForPortfolio] = useState<any>(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [selectedMentorForHistory, setSelectedMentorForHistory] = useState<any>(null);
   const [isAssignmentsModalOpen, setIsAssignmentsModalOpen] = useState(false);
   const [selectedMentorAssignments, setSelectedMentorAssignments] = useState<any>(null);
 
@@ -866,23 +870,31 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
   const handleCreateMandate = async () => {
     if (!facilitatorId) return;
+    if (!reportSource) {
+      messageService.warning('Required', 'Please choose how to handle responses');
+      return;
+    }
 
     try {
       setIsProcessingAction(true);
 
       const mandateId = crypto.randomUUID();
+      const normalizedQuestionIds = reportQuestionIds.map(questionId => String(questionId));
+      const normalizedTargetStartupIds = reportSource === 'startup'
+        ? targetStartupIds.map(startupId => String(startupId))
+        : [];
+
       const { error } = await supabase
         .from('reports_mandate')
         .insert({
           id: mandateId,
           facilitator_id: facilitatorId,
-          title: reportTitle,
+          title: reportTitle.trim(),
           program_name: reportProgram,
-          question_ids: reportQuestionIds,
-          target_startups: reportSource === 'startup' ? targetStartupIds : [],
-          source: reportSource,
-          status: 'draft',
-          created_at: new Date().toISOString()
+          program_list: reportProgram ? [reportProgram] : null,
+          question_ids: normalizedQuestionIds,
+          target_startups: normalizedTargetStartupIds,
+          source: reportSource === 'startup' ? 'startup' : 'existing',
         });
 
       if (error) throw error;
@@ -1174,10 +1186,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               
               allResponses.push(startupResponse);
             } else {
-              // No response yet for this startup
+              // No response yet for this startup - fetch the startup name
+              const { data: startupData } = await supabase
+                .from('startups')
+                .select('name')
+                .eq('id', numStartupId)
+                .single();
+
               allResponses.push({
                 startup_id: numStartupId,
-                startup_name: numStartupId,
+                startup_name: startupData?.name || `Startup ${numStartupId}`,
                 program_name: mandate.program_name,
                 answers: {},
                 submitted_at: null
@@ -1655,6 +1673,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   };
 
   const myPortfolio = useMemo(() => portfolioStartups, [portfolioStartups]);
+  /** Accepted startups for Partner tab — same set as Track My Startups → Portfolio (deduped by startup id). */
+  const partnerTrackMyStartups = useMemo(() => {
+    const seen = new Set<number>();
+    const list: { id: number; name: string }[] = [];
+    for (const app of myReceivedApplications) {
+      if (app.status !== 'accepted' || app.startupId == null) continue;
+      const id = typeof app.startupId === 'number' ? app.startupId : Number(app.startupId);
+      if (Number.isNaN(id) || seen.has(id)) continue;
+      seen.add(id);
+      list.push({ id, name: app.startupName || `Startup #${id}` });
+    }
+    return list;
+  }, [myReceivedApplications]);
   const myApplications = useMemo(() => startupAdditionRequests, [startupAdditionRequests]);
 
   // Load facilitator's portfolio of approved startups
@@ -2787,13 +2818,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     if (!facilitatorCode || !assignMentorId || !assignStartupId) return;
     setIsSavingAssignment(true);
     try {
+      console.log('🟢 [FacilitatorView] Assigning mentor:', {
+        facilitatorCode,
+        mentorId: assignMentorId,
+        startupId: assignStartupId
+      });
+      
       const result = await facilitatorMentorService.assignMentorToStartup(
         facilitatorCode,
         assignMentorId,
         Number(assignStartupId),
         assignNotes || undefined
       );
+      
+      console.log('📊 [FacilitatorView] Assignment result:', result);
+      
       if (result.success) {
+        console.log('✅ [FacilitatorView] Assignment succeeded, reloading data...');
         setIsAssignModalOpen(false);
         setAssignMentorId('');
         setAssignStartupId('');
@@ -2801,6 +2842,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         await loadMentorManagementData();
         messageService.success('Mentor Assigned', 'Mentor has been assigned to the startup successfully.');
       } else {
+        console.error('❌ [FacilitatorView] Assignment failed:', result.error);
         messageService.error('Assignment Failed', result.error || 'Failed to assign mentor.');
       }
     } finally {
@@ -4492,13 +4534,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 {/* View By Pill Filter */}
                 <div className="flex flex-wrap gap-2 mb-5">
                   {([
-                    { value: 'program', label: '📋 By Program' },
-                    { value: 'stage', label: '🎯 By Stage' },
-                    { value: 'funding-stage', label: '💰 By Funding Stage' },
-                    { value: 'timeline', label: '📅 By Timeline' },
-                    { value: 'status', label: '✅ By Status' },
+                    { value: 'program', label: 'By Program' },
+                    { value: 'stage', label: 'By Stage' },
+                    { value: 'funding-stage', label: 'By Funding Stage' },
+                    { value: 'timeline', label: 'By Timeline' },
+                    { value: 'status', label: 'By Status' },
                   ] as const).map(opt => (
-                    <button
+                      <button
                       key={opt.value}
                       onClick={() => setViewByFilter(opt.value)}
                       className={viewByFilter === opt.value
@@ -4516,9 +4558,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Program Tabs">
                       <button
                         onClick={() => setSelectedOpportunityId(null)}
-                        className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                       >
-                        <Users className="h-4 w-4" />
                         All Startups ({acceptedApplications.length})
                       </button>
                       {myPostedOpportunities.map(opportunity => {
@@ -4528,9 +4569,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <button
                             key={opportunity.id}
                             onClick={() => setSelectedOpportunityId(opportunity.id)}
-                            className={`${selectedOpportunityId === opportunity.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                            className={`${selectedOpportunityId === opportunity.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                           >
-                            <Gift className="h-4 w-4" />
                             {opportunity.programName} ({acceptedCount})
                           </button>
                         );
@@ -4709,6 +4749,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   >
                                     <FileQuestion className="h-4 w-4" />
                                     <span>View Responses</span>
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelectedApplicationForMessaging(app);
+                                      setIsMessagingModalOpen(true);
+                                    }}
+                                    className="flex items-center gap-1.5 text-slate-600 border-slate-300 hover:bg-slate-50"
+                                    title={`Send update to ${app.startupName}`}
+                                  >
+                                    <MessageCircle className="h-4 w-4" />
+                                    <span>Send Update</span>
                                   </Button>
                                 </div>
                               </td>
@@ -6171,6 +6224,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 });
                                 setIsAssignmentsModalOpen(true);
                               }}
+                              onViewHistory={(mentor) => {
+                                setSelectedMentorForHistory(mentor);
+                                setIsHistoryModalOpen(true);
+                              }}
                             />
                           </>
                         )}
@@ -6201,15 +6258,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       <Card className="p-8 text-center">
                         <GraduationCap className="h-12 w-12 text-slate-300 mx-auto mb-3" />
                         <p className="font-semibold text-slate-700 mb-1">No assignments yet</p>
-                        <p className="text-sm text-slate-500 mb-4">Assign a mentor from your registered mentors to a startup in your portfolio.</p>
-                        <Button
-                          size="sm"
-                          onClick={() => setIsAssignModalOpen(true)}
-                          disabled={facilitatorMentors.length === 0 || portfolioStartups.length === 0}
-                        >
-                          <Plus className="h-4 w-4 mr-1" />
-                          Assign Mentor
-                        </Button>
+                        <p className="text-sm text-slate-500">Assign a mentor from your registered mentors to a startup in your portfolio.</p>
                       </Card>
                     ) : (
                       <div className="space-y-3">
@@ -6563,14 +6612,25 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   setSelectedMentorForPortfolio(null);
                 }}
                 onViewHistory={() => {
-                  // TODO: Show detailed history modal
-                  messageService.info('History', 'View detailed history feature coming soon');
+                  setSelectedMentorForHistory(selectedMentorForPortfolio);
+                  setIsHistoryModalOpen(true);
                 }}
                 onAssign={() => {
                   setAssignMentorId(selectedMentorForPortfolio.mentor_user_id);
                   setMentorMgmtSubTab('assignments');
                   setIsAssignModalOpen(true);
                   setIsPortfolioModalOpen(false);
+                }}
+              />
+            )}
+
+            {/* Mentor History Modal */}
+            {isHistoryModalOpen && selectedMentorForHistory && (
+              <MentorHistoryModal
+                mentor={selectedMentorForHistory}
+                onClose={() => {
+                  setIsHistoryModalOpen(false);
+                  setSelectedMentorForHistory(null);
                 }}
               />
             )}
@@ -7196,6 +7256,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             </div>
           </div>
         );
+      case 'partner':
+        return (
+          <PartnerNetworkTab facilitatorId={facilitatorId} trackMyStartups={partnerTrackMyStartups} />
+        );
       case 'portfolio':
         return (
           <div className="space-y-6">
@@ -7290,7 +7354,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       </div>
 
       <div className="border-b border-slate-200">
-        <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+        <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
           <button onClick={() => setActiveTab('dashboard')} className={`${activeTab === 'dashboard' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <LayoutGrid className="h-5 w-5" />Dashboard
           </button>
@@ -7311,6 +7375,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           </button>
           <button onClick={() => setActiveTab('collaboration')} className={`${activeTab === 'collaboration' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Users className="h-5 w-5" />Collaboration
+          </button>
+          <button onClick={() => setActiveTab('partner')} className={`${activeTab === 'partner' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+            <Handshake className="h-5 w-5" />Partner
           </button>
           <button onClick={() => setActiveTab('portfolio')} className={`${activeTab === 'portfolio' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <User className="h-5 w-5" />Portfolio

@@ -16,13 +16,39 @@ import investorApplicationActionHandler from './handlers/investorApplicationActi
 import autoRenewAdvisorCreditsHandler from './handlers/autoRenewAdvisorCredits';
 
 function getApiPathSegments(req: VercelRequest): string[] {
-  const raw = req.query['...path'];
-  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
-  if (typeof raw === 'string' && raw.length > 0) return raw.split('/').filter(Boolean);
+  // Vercel: file `api/[...path].ts` exposes segments as `req.query.path` (array or string), not `...path`.
+  const qPath = req.query.path;
+  if (Array.isArray(qPath)) {
+    return qPath.map(String).filter(Boolean);
+  }
+  if (typeof qPath === 'string' && qPath.length > 0) {
+    // Crawler rewrites use `?path=/about` — that is a site pathname, not API segments.
+    if (qPath.startsWith('/') && qPath !== '/') {
+      return [];
+    }
+    if (qPath === '/') {
+      return [];
+    }
+    if (qPath.includes('/')) {
+      return qPath.split('/').filter(Boolean);
+    }
+    return [qPath];
+  }
+
+  const rawLegacy = req.query['...path'];
+  if (Array.isArray(rawLegacy)) return rawLegacy.map(String).filter(Boolean);
+  if (typeof rawLegacy === 'string' && rawLegacy.length > 0) {
+    return rawLegacy.split('/').filter(Boolean);
+  }
 
   const pathOnly = (req.url || '').split('?')[0];
   if (pathOnly.startsWith('/api/')) {
     return pathOnly.slice(5).split('/').filter(Boolean);
+  }
+  // Internal invocations sometimes omit the `/api` prefix
+  const trimmed = pathOnly.replace(/^\//, '');
+  if (trimmed.length > 0 && !trimmed.startsWith('api')) {
+    return trimmed.split('/').filter(Boolean);
   }
   return [];
 }

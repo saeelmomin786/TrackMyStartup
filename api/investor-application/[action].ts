@@ -245,6 +245,7 @@ async function handleVerifyPayment(req: VercelRequest, res: VercelResponse): Pro
     }
 
     const feeInr = await resolveApplicationFeeInr(admin, investorUserId);
+    const expectedPaise = Math.round(feeInr * 100);
 
     const keyId = process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID;
     if (!keyId || !keySecret) {

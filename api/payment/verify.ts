@@ -1,13 +1,16 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+
+/** Service-role client without generated DB types (avoids `never` table/RPC types from `ReturnType<typeof createClient>`). */
+type ServiceSupabase = SupabaseClient<any, 'public', any>;
 
 function json(res: VercelResponse, status: number, data: unknown): void {
   res.status(status).json(data);
 }
 
 async function addAdvisorCredits(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ServiceSupabase,
   advisorUserId: string,
   creditsToAdd: number,
   amountPaid: number,
@@ -75,9 +78,9 @@ async function addAdvisorCredits(
         payment_transaction_id: paymentTransactionId,
         status: 'completed',
         metadata: {
-          credits_available: incrementedCredits?.credits_available,
-          credits_used: incrementedCredits?.credits_used,
-          credits_purchased: incrementedCredits?.credits_purchased
+          credits_available: incrementedCredits != null ? (incrementedCredits as Record<string, unknown>).credits_available : null,
+          credits_used: incrementedCredits != null ? (incrementedCredits as Record<string, unknown>).credits_used : null,
+          credits_purchased: incrementedCredits != null ? (incrementedCredits as Record<string, unknown>).credits_purchased : null
         }
       });
 
@@ -102,7 +105,7 @@ async function addAdvisorCredits(
 }
 
 async function completeMentorPayment(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ServiceSupabase,
   assignmentId: number,
   paymentId: string,
   isRazorpay: boolean
@@ -188,7 +191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
       const supabase = createClient(supabaseUrl, supabaseServiceKey, {
         auth: { autoRefreshToken: false, persistSession: false },
-      });
+      }) as ServiceSupabase;
 
       const result = await addAdvisorCredits(
         supabase,
@@ -245,7 +248,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
       const supabase = createClient(supabaseUrl, supabaseServiceKey, {
         auth: { autoRefreshToken: false, persistSession: false },
-      });
+      }) as ServiceSupabase;
 
       // Fetch premium monthly startup plan
       const { data: premiumPlan, error: planError } = await supabase
@@ -520,7 +523,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
         const supabase = createClient(supabaseUrl, supabaseServiceKey, {
           auth: { autoRefreshToken: false, persistSession: false },
-        });
+        }) as ServiceSupabase;
 
         // Find all expired assignments with auto_renewal_enabled = true
         const { data: expiredAssignments, error: fetchError } = await supabase
@@ -704,7 +707,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
-    });
+    }) as ServiceSupabase;
 
     // RAZORPAY VERIFICATION
     if (detectedProvider === 'razorpay') {

@@ -26,9 +26,10 @@ interface IncubationTabProps {
   currentUser?: any;
   onTrialButtonClick?: () => void;
   onMentorRequestSent?: () => void;
+  onOpenMentorExplore?: (mentor: any) => void;
 }
 
-const IncubationTab: React.FC<IncubationTabProps> = ({ startup, isViewOnly = false, currentUser, onTrialButtonClick, onMentorRequestSent }) => {
+const IncubationTab: React.FC<IncubationTabProps> = ({ startup, isViewOnly = false, currentUser, onTrialButtonClick, onMentorRequestSent, onOpenMentorExplore }) => {
   const [activeSubTab, setActiveSubTab] = useState<'programs' | 'grantPrograms' | 'myCenters'>('programs');
   const [incubationPrograms, setIncubationPrograms] = useState<any[]>([]);
   const [form2Requests, setForm2Requests] = useState<any[]>([]);
@@ -1165,6 +1166,11 @@ const IncubationTab: React.FC<IncubationTabProps> = ({ startup, isViewOnly = fal
                       <Button
                         size="sm"
                         onClick={() => {
+                          if (onOpenMentorExplore) {
+                            onOpenMentorExplore(mentor);
+                            return;
+                          }
+
                           setSelectedMentor(mentor);
                           setConnectModalOpen(true);
                         }}

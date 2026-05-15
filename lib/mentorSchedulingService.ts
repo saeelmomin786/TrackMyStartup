@@ -620,6 +620,16 @@ class MentorSchedulingService {
       }
 
       console.log('✅ Session booked successfully:', data);
+
+      if (data?.id) {
+        try {
+          const { facilitatorMentorService } = await import('./facilitatorMentorService');
+          await facilitatorMentorService.upsertMeetingRecordForSession(data.id, undefined, 'scheduled');
+        } catch (recordError) {
+          console.warn('⚠️ Failed to create meeting record for booked session:', recordError);
+        }
+      }
+
       return data;
     } catch (error) {
       console.error('❌ Error in bookSession:', error);
@@ -795,6 +805,16 @@ class MentorSchedulingService {
         throw error;
       }
 
+      // Keep facilitator meeting records aligned with latest session status/time.
+      if (updates.status) {
+        try {
+          const { facilitatorMentorService } = await import('./facilitatorMentorService');
+          await facilitatorMentorService.upsertMeetingRecordForSession(sessionId, undefined, updates.status);
+        } catch (recordError) {
+          console.warn('⚠️ Failed to sync facilitator meeting record after session update:', recordError);
+        }
+      }
+
       return data;
     } catch (error) {
       console.error('Error in updateSession:', error);
@@ -816,6 +836,13 @@ class MentorSchedulingService {
       if (error) {
         console.error('Error cancelling session:', error);
         return false;
+      }
+
+      try {
+        const { facilitatorMentorService } = await import('./facilitatorMentorService');
+        await facilitatorMentorService.upsertMeetingRecordForSession(sessionId, undefined, 'cancelled');
+      } catch (recordError) {
+        console.warn('⚠️ Failed to sync facilitator meeting record after session cancellation:', recordError);
       }
 
       return true;
@@ -841,6 +868,13 @@ class MentorSchedulingService {
       if (error) {
         console.error('Error completing session:', error);
         return false;
+      }
+
+      try {
+        const { facilitatorMentorService } = await import('./facilitatorMentorService');
+        await facilitatorMentorService.upsertMeetingRecordForSession(sessionId, feedback, 'completed');
+      } catch (recordError) {
+        console.warn('⚠️ Failed to sync facilitator meeting record after session completion:', recordError);
       }
 
       // Auto-delete completed sessions older than 30 days to keep database clean

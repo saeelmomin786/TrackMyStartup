@@ -409,7 +409,7 @@ const AdminView: React.FC<AdminViewProps> = ({ users, startups, verificationRequ
             </div>
 
             <div className="border-b border-slate-200">
-                <nav className="-mb-px flex flex-wrap space-x-6" aria-label="Tabs">
+                <nav className="-mb-px flex flex-wrap gap-2" aria-label="Tabs">
                     <TabButton id="dashboard" activeTab={activeTab} setActiveTab={setActiveTab} icon={<LayoutGrid />}>Dashboard</TabButton>
                     <TabButton id="userManagement" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Users />}>User Management</TabButton>
                     <TabButton id="startupManagement" activeTab={activeTab} setActiveTab={setActiveTab} icon={<Building2 />}>Startup Management</TabButton>
@@ -529,7 +529,7 @@ const TabButton: React.FC<{id: AdminTab, activeTab: AdminTab, setActiveTab: (id:
                 activeTab === id
                 ? 'border-brand-primary text-brand-primary'
                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            } flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+            } flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
         >
             {React.cloneElement(icon, iconProps)}
             {children}
@@ -927,7 +927,7 @@ const StartupManagementTab: React.FC<{
         <div className="space-y-6">
             {/* Sub-tabs */}
             <div className="border-b border-slate-200">
-                <nav className="-mb-px flex space-x-6">
+                <nav className="-mb-px flex flex-wrap gap-2">
                     <button
                         onClick={() => setActiveSubTab('startups')}
                         className={`py-2 px-1 border-b-2 font-medium text-sm ${
@@ -1035,7 +1035,7 @@ const InvestmentFlowTab: React.FC<{
         <div className="space-y-6">
             {/* Tab Navigation */}
             <div className="border-b border-gray-200">
-                <nav className="-mb-px flex space-x-8">
+                <nav className="-mb-px flex flex-wrap gap-2">
                     <button
                         onClick={() => setActiveTab('activeOffers')}
                         className={`py-2 px-1 border-b-2 font-medium text-sm ${
@@ -1381,7 +1381,7 @@ const SystemTab: React.FC = () => {
         <div className="space-y-6">
             {/* Sub-tabs */}
             <div className="border-b border-slate-200">
-                <nav className="-mb-px flex space-x-8">
+                <nav className="-mb-px flex flex-wrap gap-2">
                     <button
                         onClick={() => setActiveSubTab('general')}
                         className={`py-4 px-1 border-b-2 font-medium text-sm ${
@@ -2081,7 +2081,7 @@ const ComplianceRulesManager: React.FC = () => {
 
                 {/* Sub-tabs */}
                 <div className="border-b border-slate-200">
-                    <nav className="-mb-px flex space-x-6">
+                    <nav className="-mb-px flex flex-wrap gap-2">
                         <button
                             onClick={() => setActiveSubTab('countries')}
                             className={`py-2 px-1 border-b-2 font-medium text-sm ${

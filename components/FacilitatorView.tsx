@@ -324,6 +324,28 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isAssignmentsModalOpen, setIsAssignmentsModalOpen] = useState(false);
   const [selectedMentorAssignments, setSelectedMentorAssignments] = useState<any>(null);
 
+  const getMeetingStatusClasses = (status?: string) => {
+    switch ((status || '').toLowerCase()) {
+      case 'scheduled':
+        return 'bg-amber-50 text-amber-700 border border-amber-200';
+      case 'completed':
+        return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+      case 'cancelled':
+        return 'bg-rose-50 text-rose-700 border border-rose-200';
+      case 'rescheduled':
+        return 'bg-sky-50 text-sky-700 border border-sky-200';
+      case 'no_show':
+        return 'bg-slate-100 text-slate-600 border border-slate-200';
+      default:
+        return 'bg-blue-50 text-blue-600 border border-blue-200';
+    }
+  };
+
+  const formatMeetingStatus = (status?: string) => {
+    if (!status) return 'Recorded';
+    return status.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+  };
+
   const [myPostedOpportunities, setMyPostedOpportunities] = useState<IncubationOpportunity[]>([]);
   const [opportunityApplicationCounts, setOpportunityApplicationCounts] = useState<Map<string, number>>(new Map());
   const [myReceivedApplications, setMyReceivedApplications] = useState<ReceivedApplication[]>([]);
@@ -4125,10 +4147,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               
               {/* Opportunity Tabs */}
               <div className="border-b border-slate-200 mb-6">
-                <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Opportunity Tabs">
+                <nav className="-mb-px flex flex-wrap gap-2" aria-label="Opportunity Tabs">
                   <button 
                     onClick={() => setSelectedOpportunityId(null)} 
-                    className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                    className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                   >
                     <FileText className="h-4 w-4" />
                     All Applications ({myReceivedApplications.length})
@@ -4139,7 +4161,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       <button 
                         key={opportunity.id}
                         onClick={() => setSelectedOpportunityId(opportunity.id)} 
-                        className={`${selectedOpportunityId === opportunity.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        className={`${selectedOpportunityId === opportunity.id ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                       >
                         <Gift className="h-4 w-4" />
                         {opportunity.programName} ({appCount})
@@ -4474,14 +4496,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
             {/* Sub-tabs for Portfolio and Reports */}
             <div className="border-b border-slate-200">
-              <nav className="-mb-px flex space-x-8" aria-label="Track My Startups Tabs">
+              <nav className="-mb-px flex flex-wrap gap-2" aria-label="Track My Startups Tabs">
                 <button
                   onClick={() => setTrackMyStartupsSubTab('portfolio')}
                   className={`${
                     trackMyStartupsSubTab === 'portfolio'
                       ? 'border-brand-primary text-brand-primary'
                       : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+                  } py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
                 >
                   Portfolio
                 </button>
@@ -4491,7 +4513,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     trackMyStartupsSubTab === 'reports'
                       ? 'border-brand-primary text-brand-primary'
                       : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+                  } py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
                 >
                   Reports
                 </button>
@@ -4554,11 +4576,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
                 {/* Dynamic Sub-Tabs */}
                 {viewByFilter === 'program' && (
-                  <div className="border-b border-slate-200 mb-6">
-                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Program Tabs">
+                    <div className="border-b border-slate-200 mb-6">
+                    <nav className="-mb-px flex flex-wrap gap-2" aria-label="Program Tabs">
                       <button
                         onClick={() => setSelectedOpportunityId(null)}
-                        className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        className={`${selectedOpportunityId === null ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                       >
                         All Startups ({acceptedApplications.length})
                       </button>
@@ -4580,13 +4602,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 )}
 
                 {viewByFilter === 'stage' && (
-                  <div className="border-b border-slate-200 mb-6">
-                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Stage Tabs">
+                          <div className="border-b border-slate-200 mb-6">
+                    <nav className="-mb-px flex flex-wrap gap-2" aria-label="Stage Tabs">
                       {(['Pre-Incubation', 'Incubation', 'Acceleration'] as const).map(stage => (
                         <button
                           key={stage}
                           onClick={() => setSelectedStageTab(stage)}
-                          className={`${selectedStageTab === stage ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                          className={`${selectedStageTab === stage ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                         >
                           {stage}
                         </button>
@@ -4597,12 +4619,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
                 {viewByFilter === 'funding-stage' && (
                   <div className="border-b border-slate-200 mb-6">
-                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Funding Stage Tabs">
+                    <nav className="-mb-px flex flex-wrap gap-2" aria-label="Funding Stage Tabs">
                       {(['Pre-Seed', 'Seed', 'Series A'] as const).map(fs => (
                         <button
                           key={fs}
                           onClick={() => setSelectedFundingStageTab(fs)}
-                          className={`${selectedFundingStageTab === fs ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                          className={`${selectedFundingStageTab === fs ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                         >
                           {fs}
                         </button>
@@ -4613,12 +4635,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
                 {viewByFilter === 'timeline' && (
                   <div className="border-b border-slate-200 mb-6">
-                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Timeline Tabs">
+                    <nav className="-mb-px flex flex-wrap gap-2" aria-label="Timeline Tabs">
                       {(['2024', '2025', '2026'] as const).map(year => (
                         <button
                           key={year}
                           onClick={() => setSelectedTimelineTab(year)}
-                          className={`${selectedTimelineTab === year ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                          className={`${selectedTimelineTab === year ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                         >
                           {year}
                         </button>
@@ -4629,12 +4651,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
                 {viewByFilter === 'status' && (
                   <div className="border-b border-slate-200 mb-6">
-                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Status Tabs">
+                    <nav className="-mb-px flex flex-wrap gap-2" aria-label="Status Tabs">
                       {(['active', 'graduated'] as const).map(st => (
                         <button
                           key={st}
                           onClick={() => setSelectedStatusTab(st)}
-                          className={`${selectedStatusTab === st ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none capitalize`}
+                          className={`${selectedStatusTab === st ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none capitalize`}
                         >
                           {st}
                         </button>
@@ -6036,7 +6058,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
             {/* Sub-tabs */}
             <div className="border-b border-slate-200">
-              <nav className="-mb-px flex space-x-6" aria-label="Mentor Management Sub-tabs">
+              <nav className="-mb-px flex flex-wrap gap-2" aria-label="Mentor Management Sub-tabs">
                 {[
                   { key: 'mentors', label: 'Registered Mentors', icon: <Users className="h-4 w-4" /> },
                   { key: 'assignments', label: 'Assignments', icon: <GraduationCap className="h-4 w-4" /> },
@@ -6045,7 +6067,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   <button
                     key={key}
                     onClick={() => setMentorMgmtSubTab(key as any)}
-                    className={`${mentorMgmtSubTab === key ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                    className={`${mentorMgmtSubTab === key ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
                   >
                     {icon}{label}
                   </button>
@@ -6196,8 +6218,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 }))
                               ]}
                               onViewPortfolio={(mentor) => {
-                                setSelectedMentorForPortfolio(mentor);
-                                setIsPortfolioModalOpen(true);
+                                if (!mentor?.mentor_user_id) {
+                                  messageService.warning('Mentor Not Available', 'Unable to open mentor profile right now.');
+                                  return;
+                                }
+
+                                const url = new URL(window.location.origin);
+                                url.searchParams.set('view', 'mentor');
+                                url.searchParams.set('userId', mentor.mentor_user_id);
+                                window.location.href = url.toString();
                               }}
                               onAssign={(mentor) => {
                                 setAssignMentorId(mentor.mentor_user_id);
@@ -6361,10 +6390,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                               <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="font-medium text-sm text-slate-900">{meeting.title}</span>
                                                 <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{meeting.meeting_type}</span>
+                                                <span className={`text-xs px-2 py-0.5 rounded-full ${getMeetingStatusClasses(meeting.session_status)}`}>
+                                                  {formatMeetingStatus(meeting.session_status)}
+                                                </span>
                                               </div>
                                               <p className="text-xs text-slate-500 mt-0.5">
                                                 <Calendar className="h-3 w-3 inline mr-1" />
                                                 {new Date(meeting.meeting_date).toLocaleDateString()}
+                                                {meeting.meeting_time && (
+                                                  <span className="ml-3">
+                                                    <Clock className="h-3 w-3 inline mr-1" />
+                                                    {meeting.meeting_time}
+                                                  </span>
+                                                )}
                                                 {meeting.duration_minutes && (
                                                   <span className="ml-3">
                                                     <Clock className="h-3 w-3 inline mr-1" />
@@ -6375,6 +6413,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                               {meeting.notes && <p className="text-xs text-slate-600 mt-1"><strong>Notes:</strong> {meeting.notes}</p>}
                                               {meeting.outcomes && <p className="text-xs text-slate-600 mt-0.5"><strong>Outcomes:</strong> {meeting.outcomes}</p>}
                                               {meeting.next_steps && <p className="text-xs text-slate-600 mt-0.5"><strong>Next Steps:</strong> {meeting.next_steps}</p>}
+                                              {meeting.transcript && (
+                                                <div className="mt-2 p-3 bg-white rounded border border-blue-100">
+                                                  <p className="text-xs font-semibold text-blue-700 mb-1">AI Transcript</p>
+                                                  <p className="text-xs text-slate-700 whitespace-pre-line">{meeting.transcript}</p>
+                                                </div>
+                                              )}
                                             </div>
                                             <button
                                               onClick={async () => {
@@ -6415,6 +6459,105 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       </Card>
                     ) : (
                       <div className="space-y-3">
+                        {(() => {
+                          const sorted = [...allMeetingRecords].sort((a, b) => {
+                            const byDate = (a.meeting_date || '').localeCompare(b.meeting_date || '');
+                            if (byDate !== 0) return byDate;
+                            return (a.meeting_time || '').localeCompare(b.meeting_time || '');
+                          });
+
+                          const scheduledMeetings = sorted.filter(m => (m.session_status || '').toLowerCase() === 'scheduled');
+                          const completedMeetings = sorted.filter(m => (m.session_status || '').toLowerCase() === 'completed');
+                          const otherMeetings = sorted.filter(m => !['scheduled', 'completed'].includes((m.session_status || '').toLowerCase()));
+
+                          const renderMeetingCard = (meeting: any) => (
+                            <Card key={meeting.id} className="p-4">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-semibold text-slate-900">{meeting.title}</span>
+                                    <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{meeting.meeting_type}</span>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${getMeetingStatusClasses(meeting.session_status)}`}>
+                                      {formatMeetingStatus(meeting.session_status)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-4 mt-1 flex-wrap text-xs text-slate-500">
+                                    <span>
+                                      <Users className="h-3 w-3 inline mr-1" />
+                                      {meeting.mentor_name}
+                                    </span>
+                                    <span>→</span>
+                                    <span className="font-medium text-slate-700">{meeting.startup_name}</span>
+                                    <span>
+                                      <Calendar className="h-3 w-3 inline mr-1" />
+                                      {new Date(meeting.meeting_date).toLocaleDateString()}
+                                    </span>
+                                    {meeting.meeting_time && (
+                                      <span>
+                                        <Clock className="h-3 w-3 inline mr-1" />
+                                        {meeting.meeting_time}
+                                      </span>
+                                    )}
+                                    {meeting.duration_minutes && (
+                                      <span>
+                                        <Clock className="h-3 w-3 inline mr-1" />
+                                        {meeting.duration_minutes} min
+                                      </span>
+                                    )}
+                                  </div>
+                                  {meeting.notes && <p className="text-xs text-slate-600 mt-2"><strong>Notes:</strong> {meeting.notes}</p>}
+                                  {meeting.outcomes && <p className="text-xs text-slate-600 mt-0.5"><strong>Outcomes:</strong> {meeting.outcomes}</p>}
+                                  {meeting.next_steps && <p className="text-xs text-green-700 mt-0.5"><strong>Next Steps:</strong> {meeting.next_steps}</p>}
+                                  {meeting.transcript && (
+                                    <div className="mt-3 p-3 bg-white rounded border border-blue-100">
+                                      <p className="text-xs font-semibold text-blue-700 mb-1">AI Transcript</p>
+                                      <p className="text-xs text-slate-700 whitespace-pre-line">{meeting.transcript}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </Card>
+                          );
+
+                          return (
+                            <>
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="text-sm font-semibold text-amber-700">Scheduled Meetings</h4>
+                                  <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">{scheduledMeetings.length}</span>
+                                </div>
+                                {scheduledMeetings.length === 0 ? (
+                                  <Card className="p-3 text-xs text-slate-500">No scheduled meetings yet.</Card>
+                                ) : (
+                                  <div className="space-y-3">{scheduledMeetings.map(renderMeetingCard)}</div>
+                                )}
+                              </div>
+
+                              <div className="space-y-3 pt-2">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="text-sm font-semibold text-emerald-700">Completed Meetings</h4>
+                                  <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">{completedMeetings.length}</span>
+                                </div>
+                                {completedMeetings.length === 0 ? (
+                                  <Card className="p-3 text-xs text-slate-500">No completed meetings yet.</Card>
+                                ) : (
+                                  <div className="space-y-3">{completedMeetings.map(renderMeetingCard)}</div>
+                                )}
+                              </div>
+
+                              {otherMeetings.length > 0 && (
+                                <div className="space-y-3 pt-2">
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="text-sm font-semibold text-slate-700">Other Meeting Statuses</h4>
+                                    <span className="text-xs text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full">{otherMeetings.length}</span>
+                                  </div>
+                                  <div className="space-y-3">{otherMeetings.map(renderMeetingCard)}</div>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+
                         {/* Filter/summary */}
                         <div className="flex items-center gap-4 text-sm text-slate-600">
                           <span>{allMeetingRecords.length} total meetings</span>
@@ -6423,40 +6566,6 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           <span>·</span>
                           <span>{new Set(allMeetingRecords.map(m => m.startup_id)).size} startups</span>
                         </div>
-
-                        {allMeetingRecords.map(meeting => (
-                          <Card key={meeting.id} className="p-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-semibold text-slate-900">{meeting.title}</span>
-                                  <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{meeting.meeting_type}</span>
-                                </div>
-                                <div className="flex items-center gap-4 mt-1 flex-wrap text-xs text-slate-500">
-                                  <span>
-                                    <Users className="h-3 w-3 inline mr-1" />
-                                    {meeting.mentor_name}
-                                  </span>
-                                  <span>→</span>
-                                  <span className="font-medium text-slate-700">{meeting.startup_name}</span>
-                                  <span>
-                                    <Calendar className="h-3 w-3 inline mr-1" />
-                                    {new Date(meeting.meeting_date).toLocaleDateString()}
-                                  </span>
-                                  {meeting.duration_minutes && (
-                                    <span>
-                                      <Clock className="h-3 w-3 inline mr-1" />
-                                      {meeting.duration_minutes} min
-                                    </span>
-                                  )}
-                                </div>
-                                {meeting.notes && <p className="text-xs text-slate-600 mt-2"><strong>Notes:</strong> {meeting.notes}</p>}
-                                {meeting.outcomes && <p className="text-xs text-slate-600 mt-0.5"><strong>Outcomes:</strong> {meeting.outcomes}</p>}
-                                {meeting.next_steps && <p className="text-xs text-green-700 mt-0.5"><strong>Next Steps:</strong> {meeting.next_steps}</p>}
-                              </div>
-                            </div>
-                          </Card>
-                        ))}
                       </div>
                     )}
                   </div>
@@ -7354,32 +7463,32 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       </div>
 
       <div className="border-b border-slate-200">
-        <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
-          <button onClick={() => setActiveTab('dashboard')} className={`${activeTab === 'dashboard' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+        <nav className="-mb-px flex flex-wrap gap-2" aria-label="Tabs">
+          <button onClick={() => setActiveTab('dashboard')} className={`${activeTab === 'dashboard' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <LayoutGrid className="h-5 w-5" />Dashboard
           </button>
-          <button onClick={() => setActiveTab('intakeManagement')} className={`${activeTab === 'intakeManagement' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+          <button onClick={() => setActiveTab('intakeManagement')} className={`${activeTab === 'intakeManagement' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Gift className="h-5 w-5" />Intake Management
           </button>
-          <button onClick={() => setActiveTab('trackMyStartups')} className={`${activeTab === 'trackMyStartups' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+          <button onClick={() => setActiveTab('trackMyStartups')} className={`${activeTab === 'trackMyStartups' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Users className="h-5 w-5" />Track My Startups
           </button>
-          <button onClick={() => setActiveTab('mentorManagement')} className={`${activeTab === 'mentorManagement' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+          <button onClick={() => setActiveTab('mentorManagement')} className={`${activeTab === 'mentorManagement' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <GraduationCap className="h-5 w-5" />Mentor Management
           </button>
-          <button onClick={() => setActiveTab('ourInvestments')} className={`${activeTab === 'ourInvestments' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+          <button onClick={() => setActiveTab('ourInvestments')} className={`${activeTab === 'ourInvestments' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Gift className="h-5 w-5" />Our Investments
           </button>
-          <button onClick={() => setActiveTab('discover')} className={`${activeTab === 'discover' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+          <button onClick={() => setActiveTab('discover')} className={`${activeTab === 'discover' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Film className="h-5 w-5" />Discover Pitches
           </button>
-          <button onClick={() => setActiveTab('collaboration')} className={`${activeTab === 'collaboration' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+          <button onClick={() => setActiveTab('collaboration')} className={`${activeTab === 'collaboration' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Users className="h-5 w-5" />Collaboration
           </button>
-          <button onClick={() => setActiveTab('partner')} className={`${activeTab === 'partner' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+          <button onClick={() => setActiveTab('partner')} className={`${activeTab === 'partner' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <Handshake className="h-5 w-5" />Partner
           </button>
-          <button onClick={() => setActiveTab('portfolio')} className={`${activeTab === 'portfolio' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
+          <button onClick={() => setActiveTab('portfolio')} className={`${activeTab === 'portfolio' ? 'border-brand-primary text-brand-primary' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'} flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}>
             <User className="h-5 w-5" />Portfolio
           </button>
         </nav>

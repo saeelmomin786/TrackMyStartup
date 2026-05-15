@@ -1081,10 +1081,10 @@ const MentorView: React.FC<MentorViewProps> = ({
                       
                       {/* Tabs */}
                       <div className="border-b border-slate-200">
-                        <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto scrollbar-hide" aria-label="Tabs">
+                        <nav className="-mb-px flex flex-wrap gap-2" aria-label="Tabs">
                           <button
                             onClick={() => setMentorStartupsTab('active')}
-                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex-shrink-0 ${
+                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm flex-shrink-0 ${
                               mentorStartupsTab === 'active'
                                 ? 'border-green-500 text-green-600'
                                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
@@ -1099,7 +1099,7 @@ const MentorView: React.FC<MentorViewProps> = ({
                           </button>
                           <button
                             onClick={() => setMentorStartupsTab('completed')}
-                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex-shrink-0 ${
+                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm flex-shrink-0 ${
                               mentorStartupsTab === 'completed'
                                 ? 'border-purple-500 text-purple-600'
                                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
@@ -1114,7 +1114,7 @@ const MentorView: React.FC<MentorViewProps> = ({
                           </button>
                           <button
                             onClick={() => setMentorStartupsTab('founded')}
-                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex-shrink-0 ${
+                            className={`py-2 px-1 sm:px-2 border-b-2 font-medium text-xs sm:text-sm flex-shrink-0 ${
                               mentorStartupsTab === 'founded'
                                 ? 'border-orange-500 text-orange-600'
                                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
@@ -1623,7 +1623,7 @@ const MentorView: React.FC<MentorViewProps> = ({
               
               {/* Discovery Sub-Tabs */}
               <div className="mb-6 border-b border-gray-200">
-                <nav className="-mb-px flex space-x-2 sm:space-x-4 md:space-x-8 overflow-x-auto pb-2" aria-label="Discovery Tabs">
+                <nav className="-mb-px flex flex-wrap gap-2 pb-2" aria-label="Discovery Tabs">
                   <button
                     onClick={() => {
                       setDiscoverySubTab('all');
@@ -1631,7 +1631,7 @@ const MentorView: React.FC<MentorViewProps> = ({
                       setShowOnlyFavorites(false);
                       setShowOnlyDueDiligence(false);
                     }}
-                    className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
+                    className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm flex items-center gap-1 sm:gap-2 ${
                       discoverySubTab === 'all'
                         ? 'border-blue-500 text-blue-600'
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -1648,7 +1648,7 @@ const MentorView: React.FC<MentorViewProps> = ({
                       setShowOnlyFavorites(false);
                       setShowOnlyDueDiligence(false);
                     }}
-                    className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
+                    className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm flex items-center gap-1 sm:gap-2 ${
                       discoverySubTab === 'verified'
                         ? 'border-green-500 text-green-600'
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'

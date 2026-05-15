@@ -56,6 +56,12 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
     try {
       // Store feedback in format: "rating|feedback_text"
       const feedbackText = `${rating}|${feedback.trim()}`;
+      const transcriptText = [
+        `AI Transcript for ${session.session_date} ${session.session_time}`,
+        `Session with ${startupName}`,
+        `Rating: ${rating}/5`,
+        `Summary: ${feedback.trim()}`,
+      ].join('\n');
 
       if (isStartupGivingFeedback) {
         // For startups, update the session with feedback but don't change status
@@ -71,7 +77,16 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
           session.mentor_id,
           session.startup_id,
           session.session_date,
-          session.session_time
+          session.session_time,
+          session.id,
+          'completed',
+          transcriptText
+        );
+
+        await facilitatorMentorService.upsertMeetingRecordForSession(
+          session.id!,
+          transcriptText,
+          'completed'
         );
       } else {
         // For mentors, use completeSession

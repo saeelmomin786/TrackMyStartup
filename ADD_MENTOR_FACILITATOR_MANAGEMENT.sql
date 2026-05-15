@@ -36,11 +36,13 @@ CREATE INDEX IF NOT EXISTS idx_fma_startup_id       ON facilitator_mentor_assign
 CREATE TABLE IF NOT EXISTS mentor_meeting_records (
   id              BIGSERIAL PRIMARY KEY,
   assignment_id   BIGINT NOT NULL REFERENCES facilitator_mentor_assignments(id) ON DELETE CASCADE,
+  session_id      BIGINT,
   facilitator_code TEXT NOT NULL,
   mentor_user_id  UUID NOT NULL,
   startup_id      INTEGER NOT NULL,
   title           TEXT NOT NULL,
   meeting_date    DATE NOT NULL,
+  meeting_time    TIME,
   meeting_type    TEXT NOT NULL DEFAULT 'General' CHECK (
     meeting_type IN ('General', 'Strategy', 'Technical', 'Financial', 'Marketing', 'HR', 'Investor Prep', 'Review', 'Other')
   ),
@@ -48,14 +50,25 @@ CREATE TABLE IF NOT EXISTS mentor_meeting_records (
   notes           TEXT,
   outcomes        TEXT,
   next_steps      TEXT,
+  transcript      TEXT,
+  session_status  TEXT NOT NULL DEFAULT 'scheduled' CHECK (
+    session_status IN ('scheduled', 'completed', 'cancelled', 'rescheduled', 'no_show')
+  ),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_mmr_assignment_id    ON mentor_meeting_records (assignment_id);
+CREATE INDEX IF NOT EXISTS idx_mmr_session_id        ON mentor_meeting_records (session_id);
 CREATE INDEX IF NOT EXISTS idx_mmr_facilitator_code ON mentor_meeting_records (facilitator_code);
 CREATE INDEX IF NOT EXISTS idx_mmr_mentor_user_id   ON mentor_meeting_records (mentor_user_id);
 CREATE INDEX IF NOT EXISTS idx_mmr_startup_id       ON mentor_meeting_records (startup_id);
+
+ALTER TABLE mentor_meeting_records
+  ADD COLUMN IF NOT EXISTS session_id BIGINT,
+  ADD COLUMN IF NOT EXISTS meeting_time TIME,
+  ADD COLUMN IF NOT EXISTS transcript TEXT,
+  ADD COLUMN IF NOT EXISTS session_status TEXT DEFAULT 'scheduled';
 
 -- 4. RLS Policies
 

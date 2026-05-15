@@ -902,8 +902,7 @@ const MentorCardWithDetails: React.FC<{
                 size="sm"
                 variant={requestStatus ? 'outline' : 'primary'}
                 onClick={onConnect}
-                disabled={!!requestStatus}
-                className={requestStatus ? 'cursor-not-allowed opacity-60' : ''}
+                className={requestStatus ? 'cursor-pointer' : ''}
                 title={requestStatus ? 
                   (requestStatus.status === 'accepted' ? 'You already have an accepted request with this mentor. Please check your dashboard.' :
                    requestStatus.status === 'pending' ? 'You already have a pending request with this mentor.' :
@@ -1130,11 +1129,18 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
     const [showNotifications, setShowNotifications] = useState(false);
     const [profileUpdateTrigger, setProfileUpdateTrigger] = useState(0);
     const [hasAdvisorPaidSubscription, setHasAdvisorPaidSubscription] = useState(false);
-    const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>('explore');
+    const [servicesSubTab, setServicesSubTab] = useState<'explore' | 'requested' | 'my-services'>(() => {
+      const fromUrl = getQueryParam('servicesSubTab');
+      if (fromUrl === 'requested' || fromUrl === 'my-services' || fromUrl === 'explore') {
+        return fromUrl;
+      }
+      return 'explore';
+    });
     const [userInvestmentAdvisorCode, setUserInvestmentAdvisorCode] = useState<string | null | undefined>((user as any)?.investment_advisor_code_entered);
     
     // State for service exploration
-    const [selectedServiceType, setSelectedServiceType] = useState<string | null>(null);
+    const [selectedServiceType, setSelectedServiceType] = useState<string | null>(() => getQueryParam('serviceType'));
+    const [focusedMentorId, setFocusedMentorId] = useState<string | null>(() => getQueryParam('mentorId'));
     const [mentors, setMentors] = useState<any[]>([]);
     const [loadingMentors, setLoadingMentors] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -1512,6 +1518,21 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             loadMentors();
         }
     }, [selectedServiceType, activeTab, servicesSubTab]);
+
+    useEffect(() => {
+      if (activeTab !== 'services' || servicesSubTab !== 'explore' || selectedServiceType !== 'Mentor' || !focusedMentorId) {
+        return;
+      }
+
+      const timer = window.setTimeout(() => {
+        const target = document.getElementById(`mentor-card-${focusedMentorId}`);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 150);
+
+      return () => window.clearTimeout(timer);
+    }, [activeTab, servicesSubTab, selectedServiceType, focusedMentorId, mentors.length, loadingMentors]);
 
 
     const loadMentors = async () => {
@@ -1904,6 +1925,20 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
         setIsMobileMenuOpen(false); // Close mobile menu when tab changes
     };
 
+    const navigateToMentorServices = (mentorId: string, targetSubTab: 'explore' | 'requested' | 'my-services') => {
+      handleTabChange('services');
+      setServicesSubTab(targetSubTab);
+      setSelectedServiceType('Mentor');
+      setFocusedMentorId(mentorId);
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'services');
+      url.searchParams.set('servicesSubTab', targetSubTab);
+      url.searchParams.set('serviceType', 'Mentor');
+      url.searchParams.set('mentorId', mentorId);
+      window.history.pushState({}, '', url.toString());
+    };
+
     const tabs = isFacilitatorAccess 
         ? [
             // Facilitator users see limited tabs based on access level
@@ -1953,6 +1988,25 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                     isViewOnly={isViewOnly}
                     currentUser={user}
                     onTrialButtonClick={onTrialButtonClick}
+                    onOpenMentorExplore={(mentor) => {
+                      const mentorId = String(mentor?.mentor_user_id || mentor?.user_id || mentor?.id || '');
+                      if (!mentorId) {
+                        return;
+                      }
+
+                      const status = mentorRequestStatus.get(mentorId)?.status;
+                      if (status === 'accepted') {
+                        navigateToMentorServices(mentorId, 'my-services');
+                        return;
+                      }
+
+                      if (status === 'pending' || status === 'negotiating') {
+                        navigateToMentorServices(mentorId, 'requested');
+                        return;
+                      }
+
+                      navigateToMentorServices(mentorId, 'explore');
+                    }}
                     onMentorRequestSent={() => {
                       setActiveTab('services');
                       setServicesSubTab('requested');
@@ -2254,15 +2308,31 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                                                   )}
                                                 </div>
                                               )}
-                                              <MentorCardWithDetails 
-                                                mentor={mentor} 
-                                                videoEmbedUrl={videoEmbedUrl}
-                                                requestStatus={mentorRequestStatus.get(mentor.user_id || mentor.id)}
-                                                onConnect={() => {
-                                                  setSelectedMentor(mentor);
-                                                  setConnectModalOpen(true);
-                                                }}
-                                              />
+                                              <div id={`mentor-card-${mentor.user_id || mentor.id}`}>
+                                                <MentorCardWithDetails 
+                                                  mentor={mentor} 
+                                                  videoEmbedUrl={videoEmbedUrl}
+                                                  requestStatus={mentorRequestStatus.get(mentor.user_id || mentor.id)}
+                                                  onConnect={() => {
+                                                    const mentorId = String(mentor.user_id || mentor.id || '');
+                                                    const status = mentorRequestStatus.get(mentorId)?.status;
+
+                                                    if (status === 'accepted') {
+                                                      navigateToMentorServices(mentorId, 'my-services');
+                                                      return;
+                                                    }
+
+                                                    if (status === 'pending' || status === 'negotiating') {
+                                                      navigateToMentorServices(mentorId, 'requested');
+                                                      return;
+                                                    }
+
+                                                    setSelectedMentor(mentor);
+                                                    setConnectModalOpen(true);
+                                                    navigateToMentorServices(mentorId, 'explore');
+                                                  }}
+                                                />
+                                              </div>
                                             </div>
                                           );
                                         })}

@@ -1,7 +1,58 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
-import { routeApiRequest } from '../lib/vercel-api/routeApiRequest';
+// NOTE: Inlined `routeApiRequest` to avoid missing-module errors in some deployment
+// environments where `lib/vercel-api/routeApiRequest` is not bundled/copied.
+import inviteHandler from '../lib/vercel-api/handlers/invite';
+import otpHandler from '../lib/vercel-api/handlers/otp';
+import configHandler from '../lib/vercel-api/handlers/config';
+import googleCalendarHandler from '../lib/vercel-api/handlers/google-calendar';
+import mentorStatsHandler from '../lib/vercel-api/handlers/mentor-stats';
+import mentorHistoryHandler from '../lib/vercel-api/handlers/mentor-history';
+import mentorStatusHandler from '../lib/vercel-api/handlers/mentor-status';
+import prerenderHandler from '../lib/vercel-api/handlers/prerender';
+import sitemapXmlHandler from '../lib/vercel-api/handlers/sitemapXml';
+
+function getApiPathSegments(req: VercelRequest): string[] {
+  const qPath = req.query.path;
+  if (Array.isArray(qPath)) {
+    return qPath.map(String).filter(Boolean);
+  }
+  if (typeof qPath === 'string' && qPath.length > 0) {
+    if (qPath.startsWith('/') && qPath !== '/') return [];
+    if (qPath === '/') return [];
+    if (qPath.includes('/')) return qPath.split('/').filter(Boolean);
+    return [qPath];
+  }
+
+  const rawLegacy = req.query['...path'];
+  if (Array.isArray(rawLegacy)) return rawLegacy.map(String).filter(Boolean);
+  if (typeof rawLegacy === 'string' && rawLegacy.length > 0) return rawLegacy.split('/').filter(Boolean);
+
+  const pathOnly = (req.url || '').split('?')[0];
+  if (pathOnly.startsWith('/api/')) return pathOnly.slice(5).split('/').filter(Boolean);
+  const trimmed = pathOnly.replace(/^\//, '');
+  if (trimmed.length > 0 && !trimmed.startsWith('api')) return trimmed.split('/').filter(Boolean);
+  return [];
+}
+
+async function routeApiRequest(req: VercelRequest, res: VercelResponse): Promise<boolean> {
+  const segments = getApiPathSegments(req);
+  if (segments.length === 0) return false;
+  const key = segments.join('/');
+
+  if (key === 'invite') { await inviteHandler(req, res); return true; }
+  if (key === 'otp') { await otpHandler(req, res); return true; }
+  if (key === 'config') { await configHandler(req, res); return true; }
+  if (key === 'google-calendar') { await googleCalendarHandler(req, res); return true; }
+  if (key === 'mentor-stats') { await mentorStatsHandler(req, res); return true; }
+  if (key === 'mentor-history') { await mentorHistoryHandler(req, res); return true; }
+  if (key === 'mentor-status') { await mentorStatusHandler(req, res); return true; }
+  if (key === 'prerender') { await prerenderHandler(req, res); return true; }
+  if (key === 'sitemap.xml') { await sitemapXmlHandler(req, res); return true; }
+
+  return false;
+}
 
 /**
  * Catch-all API route for crawler detection and pre-rendering

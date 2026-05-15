@@ -2671,10 +2671,10 @@ const InvestorView: React.FC<InvestorViewProps> = ({
       {/* Navigation Tabs */}
       <div className="bg-white rounded-lg shadow mb-6">
         <div className="border-b border-gray-200">
-          <nav className="-mb-px flex flex-wrap space-x-2 sm:space-x-8 px-4 sm:px-6 overflow-x-auto" aria-label="Tabs">
+          <nav className="-mb-px flex flex-wrap gap-2 px-4 sm:px-6" aria-label="Tabs">
                  <button
                     onClick={() => setActiveTab('dashboard')}
-              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
                         activeTab === 'dashboard'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -3020,7 +3020,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
             
             {/* Discovery Sub-Tabs */}
             <div className="mb-6 border-b border-gray-200">
-              <nav className="-mb-px flex space-x-2 sm:space-x-4 md:space-x-8 overflow-x-auto pb-2" aria-label="Discovery Tabs">
+              <nav className="-mb-px flex flex-wrap gap-2 pb-2" aria-label="Discovery Tabs">
                   <button
                     onClick={() => {
                     setDiscoverySubTab('all');
@@ -3028,7 +3028,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                       setShowOnlyFavorites(false);
                       setShowOnlyDueDiligence(false);
                     }}
-                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm flex items-center gap-1 sm:gap-2 ${
                     discoverySubTab === 'all'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -4138,11 +4138,11 @@ const InvestorView: React.FC<InvestorViewProps> = ({
               </Card>
             ) : (
               <div className="border-b border-slate-200 mb-6">
-                <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto pb-2" aria-label="Mandate Tabs">
+                <nav className="-mb-px flex flex-wrap gap-2 pb-2" aria-label="Mandate Tabs">
                   {mandates.map((mandate) => (
                     <div
                       key={mandate.id}
-                      className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-2 transition-colors cursor-pointer ${
+                      className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm flex items-center gap-2 transition-colors cursor-pointer ${
                         selectedMandateId === mandate.id
                           ? 'border-blue-500 text-blue-600'
                           : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'

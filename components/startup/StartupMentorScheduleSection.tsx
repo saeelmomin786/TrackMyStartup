@@ -6,6 +6,7 @@ import { Calendar, Clock, CheckCircle, Star, Eye } from 'lucide-react';
 import { formatDateDDMMYYYYWithDay, formatTimeAMPM } from '../../lib/dateTimeUtils';
 import SchedulingModal from '../mentor/SchedulingModal';
 import FeedbackModal from '../mentor/FeedbackModal';
+import { facilitatorMentorService, type MentorMeetingRecord } from '../../lib/facilitatorMentorService';
 
 interface StartupMentorScheduleSectionProps {
   startupId: number;
@@ -25,10 +26,11 @@ const StartupMentorScheduleSection: React.FC<StartupMentorScheduleSectionProps> 
   const [schedulingModalOpen, setSchedulingModalOpen] = useState(false);
   const [scheduledSessions, setScheduledSessions] = useState<ScheduledSession[]>([]);
   const [completedSessions, setCompletedSessions] = useState<ScheduledSession[]>([]);
+  const [meetingRecords, setMeetingRecords] = useState<MentorMeetingRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedSessionForFeedback, setSelectedSessionForFeedback] = useState<ScheduledSession | null>(null);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<'book' | 'booked' | 'completed'>('book');
+  const [activeSection, setActiveSection] = useState<'book' | 'booked' | 'completed' | 'records'>('book');
 
   useEffect(() => {
     loadSessions();
@@ -46,6 +48,9 @@ const StartupMentorScheduleSection: React.FC<StartupMentorScheduleSectionProps> 
       const completed = await mentorSchedulingService.getStartupSessions(startupId, 'completed');
       const filteredCompleted = completed.filter(s => s.mentor_id === mentorId);
       setCompletedSessions(filteredCompleted);
+
+      const records = await facilitatorMentorService.getMeetingRecords(assignmentId);
+      setMeetingRecords(records);
     } catch (error) {
       console.error('Error loading sessions:', error);
     } finally {
@@ -107,6 +112,17 @@ const StartupMentorScheduleSection: React.FC<StartupMentorScheduleSectionProps> 
               >
                 <CheckCircle className="h-4 w-4 inline mr-1" />
                 Completed ({completedSessions.length})
+              </button>
+              <button
+                onClick={() => setActiveSection('records')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeSection === 'records'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                <Eye className="h-4 w-4 inline mr-1" />
+                Meeting Records ({meetingRecords.length})
               </button>
             </nav>
           </div>
@@ -248,6 +264,60 @@ const StartupMentorScheduleSection: React.FC<StartupMentorScheduleSectionProps> 
                               <p className="text-xs text-slate-700 mt-1">
                                 {session.feedback.split('|')[1] || session.feedback}
                               </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeSection === 'records' && (
+          <div className="space-y-4">
+            {isLoading ? (
+              <div className="text-center py-8 text-slate-500">
+                <Eye className="h-6 w-6 mx-auto mb-2 animate-spin" />
+                <p className="text-sm">Loading meeting records...</p>
+              </div>
+            ) : meetingRecords.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">
+                <Eye className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                <p className="text-sm">No meeting records yet.</p>
+                <p className="text-xs text-slate-400 mt-1">Booked sessions and completed sessions will appear here automatically.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {meetingRecords.map(record => (
+                  <div key={record.id} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                          <span className="font-medium text-slate-900">{record.title}</span>
+                          <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs rounded-full capitalize">
+                            {record.session_status || 'scheduled'}
+                          </span>
+                        </div>
+                        <div className="text-sm text-slate-600 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4" />
+                            <span>{formatDateDDMMYYYYWithDay(record.meeting_date)}</span>
+                            {record.meeting_time && <span>• {formatTimeAMPM(record.meeting_time)}</span>}
+                          </div>
+                          {record.duration_minutes ? (
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4" />
+                              <span>{record.duration_minutes} minutes</span>
+                            </div>
+                          ) : null}
+                          {record.notes && <p className="text-xs text-slate-600 mt-1"><strong>Notes:</strong> {record.notes}</p>}
+                          {record.transcript && (
+                            <div className="mt-2 p-3 bg-white rounded border border-orange-200">
+                              <p className="text-xs font-semibold text-orange-700 mb-1">AI Transcript</p>
+                              <p className="text-xs text-slate-700 whitespace-pre-line">{record.transcript}</p>
                             </div>
                           )}
                         </div>

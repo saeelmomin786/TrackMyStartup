@@ -6913,10 +6913,10 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
       {/* Navigation Tabs */}
       <div className="bg-white rounded-lg shadow mb-6">
         <div className="border-b border-gray-200">
-          <nav className="-mb-px flex flex-wrap space-x-2 sm:space-x-8 px-4 sm:px-6 overflow-x-auto">
+          <nav className="-mb-px flex flex-wrap gap-2 px-4 sm:px-6">
             <button
               onClick={() => setActiveTab('dashboard')}
-              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+              className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
                 activeTab === 'dashboard'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -12067,14 +12067,14 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
 
             {/* Sub-tabs: My Mandates / Investor Mandates */}
             <div className="border-b border-slate-200 mb-6">
-              <nav className="-mb-px flex space-x-4 sm:space-x-8" aria-label="Mandate Sub-tabs">
+              <nav className="-mb-px flex flex-wrap gap-2" aria-label="Mandate Sub-tabs">
                 <button
                   onClick={() => {
                     setMandateSubTab('myMandates');
                     setSelectedInvestorForMandates(null);
                     setSelectedInvestorMandateId(null);
                   }}
-                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap ${
+                  className={`py-2 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
                     mandateSubTab === 'myMandates'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -12115,7 +12115,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
                   </Card>
                 ) : (
                   <div className="border-b border-slate-200 mb-6">
-                    <nav className="-mb-px flex space-x-2 sm:space-x-4 overflow-x-auto pb-2" aria-label="Mandate Tabs">
+                    <nav className="-mb-px flex flex-wrap gap-2 pb-2" aria-label="Mandate Tabs">
                       {mandates.map((mandate) => (
                         <div
                           key={mandate.id}

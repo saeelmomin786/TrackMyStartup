@@ -541,7 +541,7 @@ const AdminQuestionBankTab: React.FC = () => {
 
       {/* Sub-tabs */}
       <div className="border-b border-slate-200">
-        <nav className="-mb-px flex space-x-6">
+        <nav className="-mb-px flex flex-wrap gap-2">
           <button
             onClick={() => setActiveSubTab('pending')}
             className={`py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${

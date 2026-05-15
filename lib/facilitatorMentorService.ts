@@ -31,16 +31,20 @@ export interface FacilitatorMentorAssignment {
 export interface MentorMeetingRecord {
   id: number;
   assignment_id: number;
+  session_id?: number | null;
   facilitator_code: string;
   mentor_user_id: string;
   startup_id: number;
   title: string;
   meeting_date: string;
+  meeting_time?: string | null;
   meeting_type: string;
   duration_minutes?: number;
   notes?: string;
   outcomes?: string;
   next_steps?: string;
+  transcript?: string;
+  session_status?: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled' | 'no_show';
   created_at: string;
   mentor_name?: string;
   startup_name?: string;
@@ -333,7 +337,8 @@ class FacilitatorMentorService {
         .from('mentor_meeting_records')
         .select('*')
         .eq('assignment_id', assignmentId)
-        .order('meeting_date', { ascending: false });
+        .order('meeting_date', { ascending: false })
+        .order('meeting_time', { ascending: false, nullsLast: true });
 
       if (error) {
         console.warn('Error fetching meeting records:', error);
@@ -394,16 +399,20 @@ class FacilitatorMentorService {
   // Add a meeting record
   async addMeetingRecord(record: {
     assignment_id: number;
+    session_id?: number;
     facilitator_code: string;
     mentor_user_id: string;
     startup_id: number;
     title: string;
     meeting_date: string;
+    meeting_time?: string;
     meeting_type: string;
     duration_minutes?: number;
     notes?: string;
     outcomes?: string;
     next_steps?: string;
+    transcript?: string;
+    session_status?: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled' | 'no_show';
   }): Promise<{ success: boolean; id?: number; error?: string }> {
     try {
       const { data, error } = await supabase
@@ -429,11 +438,14 @@ class FacilitatorMentorService {
     updates: Partial<{
       title: string;
       meeting_date: string;
+      meeting_time: string;
       meeting_type: string;
       duration_minutes: number;
       notes: string;
       outcomes: string;
       next_steps: string;
+      transcript: string;
+      session_status: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled' | 'no_show';
     }>
   ): Promise<boolean> {
     try {
@@ -670,7 +682,10 @@ class FacilitatorMentorService {
     mentorUserId: string,
     startupId: number,
     sessionDate: string,
-    sessionTime: string
+    sessionTime: string,
+    sessionId?: number,
+    status: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled' | 'no_show' = 'scheduled',
+    transcript?: string
   ): Promise<void> {
     try {
       // Get mentor's associations (incubation centers)
@@ -701,23 +716,186 @@ class FacilitatorMentorService {
 
       const startupName = startupData?.name || 'Unknown Startup';
 
-      // Create meeting records for each associated facilitator
+      const meetingTime = sessionTime?.slice(0, 5) || null;
+
+      // Create or update meeting records for each associated facilitator
       for (const association of approvedAssociations) {
-        await this.addMeetingRecord({
-          assignment_id: 0, // No assignment, this is from startup's side
+        const payload = {
+          assignment_id: 0,
+          session_id: sessionId || undefined,
           facilitator_code: association.facilitator_code,
           mentor_user_id: mentorUserId,
           startup_id: startupId,
           title: `Meeting with ${startupName}`,
           meeting_date: sessionDate,
+          meeting_time: meetingTime || undefined,
           meeting_type: 'Session',
-          duration_minutes: 60, // Default duration
-          notes: `Meeting scheduled by startup: ${startupName} with Mentor: ${mentorName}`
-        });
+          duration_minutes: 60,
+          notes: `Meeting scheduled by startup: ${startupName} with Mentor: ${mentorName}`,
+          session_status: status,
+          transcript: transcript,
+        };
+
+        const { data: existingRecord } = await supabase
+          .from('mentor_meeting_records')
+          .select('id')
+          .eq('facilitator_code', association.facilitator_code)
+          .eq('mentor_user_id', mentorUserId)
+          .eq('startup_id', startupId)
+          .eq('meeting_date', sessionDate)
+          .maybeSingle();
+
+        if (existingRecord?.id) {
+          await this.updateMeetingRecord(existingRecord.id, {
+            meeting_time: meetingTime || undefined,
+            notes: payload.notes,
+            transcript: transcript || undefined,
+            session_status: status,
+          } as any);
+        } else {
+          await this.addMeetingRecord(payload as any);
+        }
       }
     } catch (error) {
       console.error('Error auto-recording meeting:', error);
       // Don't throw - silently fail to not break the session completion flow
+    }
+  }
+
+  async updateMeetingTranscriptForSession(
+    sessionId: number,
+    transcript: string,
+    status: 'completed' | 'scheduled' | 'cancelled' | 'rescheduled' | 'no_show' = 'completed'
+  ): Promise<void> {
+    try {
+      const { data: session } = await supabase
+        .from('mentor_startup_sessions')
+        .select('id, mentor_id, startup_id, assignment_id, session_date, session_time, status')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+      if (!session) return;
+
+      const updatePayload = {
+        transcript,
+        session_status: status,
+        meeting_time: session.session_time?.slice(0, 5),
+      } as any;
+
+      const { data: existingRecord } = await supabase
+        .from('mentor_meeting_records')
+        .select('id')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+
+      if (existingRecord?.id) {
+        await this.updateMeetingRecord(existingRecord.id, updatePayload);
+        return;
+      }
+
+      if (!session.assignment_id) return;
+
+      const { data: assignment } = await supabase
+        .from('facilitator_mentor_assignments')
+        .select('facilitator_code')
+        .eq('id', session.assignment_id)
+        .maybeSingle();
+
+      if (!assignment?.facilitator_code) return;
+
+      await this.addMeetingRecord({
+        assignment_id: session.assignment_id,
+        session_id: sessionId,
+        facilitator_code: assignment.facilitator_code,
+        mentor_user_id: session.mentor_id,
+        startup_id: session.startup_id,
+        title: 'Completed mentoring session',
+        meeting_date: session.session_date,
+        meeting_time: session.session_time?.slice(0, 5),
+        meeting_type: 'Review',
+        duration_minutes: 60,
+        notes: 'Auto-recorded from startup session completion.',
+        transcript,
+        session_status: status,
+      });
+    } catch (error) {
+      console.error('Error updating meeting transcript for session:', error);
+    }
+  }
+
+  async upsertMeetingRecordForSession(
+    sessionId: number,
+    transcript?: string,
+    status: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled' | 'no_show' = 'scheduled'
+  ): Promise<void> {
+    try {
+      const { data: session } = await supabase
+        .from('mentor_startup_sessions')
+        .select('id, mentor_id, startup_id, assignment_id, session_date, session_time, status, duration_minutes, google_meet_link')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+      if (!session || !session.assignment_id) {
+        return;
+      }
+
+      const { data: assignment } = await supabase
+        .from('facilitator_mentor_assignments')
+        .select('facilitator_code')
+        .eq('id', session.assignment_id)
+        .maybeSingle();
+
+      if (!assignment?.facilitator_code) {
+        return;
+      }
+
+      let startupName = `startup ${session.startup_id}`;
+      try {
+        const { data: startup } = await supabase
+          .from('startups')
+          .select('name')
+          .eq('id', session.startup_id)
+          .maybeSingle();
+        if (startup?.name) startupName = startup.name;
+      } catch {}
+
+      const meetingTime = session.session_time?.slice(0, 5) || null;
+      const baseRecord = {
+        assignment_id: session.assignment_id,
+        session_id: session.id,
+        facilitator_code: assignment.facilitator_code,
+        mentor_user_id: session.mentor_id,
+        startup_id: session.startup_id,
+        title: `Mentor Session - ${startupName}`,
+        meeting_date: session.session_date,
+        meeting_time: meetingTime || undefined,
+        meeting_type: 'Session',
+        duration_minutes: session.duration_minutes || 60,
+        notes: session.google_meet_link ? `Google Meet: ${session.google_meet_link}` : undefined,
+        transcript,
+        session_status: status,
+      } as any;
+
+      const { data: existingRecord } = await supabase
+        .from('mentor_meeting_records')
+        .select('id')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+
+      if (existingRecord?.id) {
+        await this.updateMeetingRecord(existingRecord.id, {
+          meeting_time: meetingTime || undefined,
+          notes: baseRecord.notes,
+          transcript: transcript || undefined,
+          session_status: status,
+          duration_minutes: baseRecord.duration_minutes,
+        } as any);
+        return;
+      }
+
+      await this.addMeetingRecord(baseRecord);
+    } catch (error) {
+      console.error('Error upserting meeting record for session:', error);
     }
   }
 }

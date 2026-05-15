@@ -1,7 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { isMissingRelationError } from '../../lib/postgrestErrors';
+import { isMissingRelationError } from '../../postgrestErrors';
 
 function json(res: VercelResponse, status: number, data: unknown): void {
   res.status(status).json(data);

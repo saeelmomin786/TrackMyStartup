@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
+import { routeApiRequest } from '../lib/vercel-api/routeApiRequest';
+
 /**
  * Catch-all API route for crawler detection and pre-rendering
  * 
@@ -348,6 +350,11 @@ async function generatePageHTML(pathname: string): Promise<string> {
  * Main handler
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const routed = await routeApiRequest(req, res);
+  if (routed) {
+    return;
+  }
+
   try {
     // Get path from query params (catch-all route)
     // When rewrite routes /about to /api/about, Vercel passes it as query param '...path': 'about'

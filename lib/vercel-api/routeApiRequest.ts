@@ -8,15 +8,14 @@ import mentorHistoryHandler from './handlers/mentor-history';
 import mentorStatusHandler from './handlers/mentor-status';
 import prerenderHandler from './handlers/prerender';
 import sitemapXmlHandler from './handlers/sitemapXml';
-import paymentVerifyHandler from './handlers/paymentVerify';
-import billingSubscriptionStatusHandler from './handlers/billingSubscriptionStatus';
-import razorpayActionHandler from './handlers/razorpayAction';
-import eventsActionHandler from './handlers/eventsAction';
-import investorApplicationActionHandler from './handlers/investorApplicationAction';
-import autoRenewAdvisorCreditsHandler from './handlers/autoRenewAdvisorCredits';
 
+/**
+ * Only **single-segment** `/api/<name>` routes are dispatched here.
+ * Multi-segment routes (`/api/investor-application/create-order`, `/api/payment/verify`, …)
+ * use dedicated files under `api/` — Vercel non-Next catch-alls do not match multiple segments
+ * (see https://github.com/vercel/community/discussions/947).
+ */
 function getApiPathSegments(req: VercelRequest): string[] {
-  // Vercel: file `api/[...path].ts` exposes segments as `req.query.path` (array or string), not `...path`.
   const qPath = req.query.path;
   if (Array.isArray(qPath)) {
     return qPath.map(String).filter(Boolean);
@@ -64,40 +63,6 @@ export async function routeApiRequest(req: VercelRequest, res: VercelResponse): 
   }
 
   const key = segments.join('/');
-  const q = req.query as Record<string, string | string[] | undefined>;
-
-  if (key === 'cron/auto-renew-advisor-credits') {
-    await autoRenewAdvisorCreditsHandler(req, res);
-    return true;
-  }
-
-  if (segments[0] === 'razorpay' && segments[1]) {
-    q.action = segments[1];
-    await razorpayActionHandler(req, res);
-    return true;
-  }
-
-  if (segments[0] === 'events' && segments[1]) {
-    q.action = segments[1];
-    await eventsActionHandler(req, res);
-    return true;
-  }
-
-  if (segments[0] === 'investor-application' && segments[1]) {
-    q.action = segments[1];
-    await investorApplicationActionHandler(req, res);
-    return true;
-  }
-
-  if (key === 'payment/verify') {
-    await paymentVerifyHandler(req, res);
-    return true;
-  }
-
-  if (key === 'billing/subscription-status') {
-    await billingSubscriptionStatusHandler(req, res);
-    return true;
-  }
 
   if (key === 'invite') {
     await inviteHandler(req, res);

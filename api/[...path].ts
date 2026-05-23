@@ -3,15 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 
 // NOTE: Inlined `routeApiRequest` to avoid missing-module errors in some deployment
 // environments where `lib/vercel-api/routeApiRequest` is not bundled/copied.
-import inviteHandler from '../lib/vercel-api/handlers/invite';
-import otpHandler from '../lib/vercel-api/handlers/otp';
-import configHandler from '../lib/vercel-api/handlers/config';
-import googleCalendarHandler from '../lib/vercel-api/handlers/google-calendar';
-import mentorStatsHandler from '../lib/vercel-api/handlers/mentor-stats';
-import mentorHistoryHandler from '../lib/vercel-api/handlers/mentor-history';
-import mentorStatusHandler from '../lib/vercel-api/handlers/mentor-status';
-import prerenderHandler from '../lib/vercel-api/handlers/prerender';
-import sitemapXmlHandler from '../lib/vercel-api/handlers/sitemapXml';
+import inviteHandler from '../lib/vercel-api/handlers/invite.js';
+import otpHandler from '../lib/vercel-api/handlers/otp.js';
+import configHandler from '../lib/vercel-api/handlers/config.js';
+import googleCalendarHandler from '../lib/vercel-api/handlers/google-calendar.js';
+import mentorStatsHandler from '../lib/vercel-api/handlers/mentor-stats.js';
+import mentorHistoryHandler from '../lib/vercel-api/handlers/mentor-history.js';
+import mentorStatusHandler from '../lib/vercel-api/handlers/mentor-status.js';
+import prerenderHandler from '../lib/vercel-api/handlers/prerender.js';
+import sitemapXmlHandler from '../lib/vercel-api/handlers/sitemapXml.js';
 
 function getApiPathSegments(req: VercelRequest): string[] {
   const qPath = req.query.path;

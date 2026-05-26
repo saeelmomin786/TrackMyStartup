@@ -1046,6 +1046,30 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     openApplicationApplyModal(profile);
   }
 
+  const runFreeInvestorApply = async (targetUserId: string): Promise<void> => {
+    const profile = applyFeeModal.profile || applicationProfiles.find(item => item.user_id === targetUserId);
+    if (!profile) {
+      throw new Error('Investor profile not found.');
+    }
+
+    const shareUrl = getInvestorApplicationShareUrl();
+    await investorConnectionRequestService.createRequest({
+      investor_id: targetUserId,
+      requester_id: authUserId,
+      requester_type: 'Startup',
+      startup_id: startup.id,
+      startup_profile_url: shareUrl,
+      application_fee_inr: 0,
+    });
+
+    await refreshApplicationStatuses();
+    messageService.success(
+      'Application submitted',
+      'Your startup profile has been sent to the investor for review.',
+      4000
+    );
+  };
+
   const getInvestorApplicationShareUrl = (): string => {
     if (typeof window === 'undefined') return '';
     const url = new URL(window.location.origin + window.location.pathname);

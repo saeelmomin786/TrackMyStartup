@@ -1046,6 +1046,28 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     openApplicationApplyModal(profile);
   }
 
+  const loadRazorpayScript = (): Promise<boolean> => {
+    if (typeof window !== 'undefined' && window.Razorpay) {
+      return Promise.resolve(true);
+    }
+
+    return new Promise(resolve => {
+      const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (existingScript) {
+        existingScript.addEventListener('load', () => resolve(true), { once: true });
+        existingScript.addEventListener('error', () => resolve(false), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   // Load metrics when portfolio tab is active
   useEffect(() => {
     const loadMetrics = async () => {

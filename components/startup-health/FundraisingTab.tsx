@@ -387,6 +387,13 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     Map<string, 'pending' | 'accepted' | 'rejected' | 'viewed'>
   >(new Map());
   const [applicationPayingUserId, setApplicationPayingUserId] = useState<string | null>(null);
+  const [applicationPreviewModal, setApplicationPreviewModal] = useState<{
+    open: boolean;
+    profile: any | null;
+  }>({
+    open: false,
+    profile: null,
+  });
   const [applyFeeModal, setApplyFeeModal] = useState<{
     open: boolean;
     profile: any | null;
@@ -411,6 +418,20 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       previewError: null,
       feeInr: null,
       skipPayment: null,
+    });
+  }, []);
+
+  const closeApplicationPreviewModal = useCallback(() => {
+    setApplicationPreviewModal({
+      open: false,
+      profile: null,
+    });
+  }, []);
+
+  const openApplicationPreviewModal = useCallback((profile: any) => {
+    setApplicationPreviewModal({
+      open: true,
+      profile,
     });
   }, []);
 
@@ -853,7 +874,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     if (!match) return;
 
     hasAutoOpenedApplicationModalRef.current = true;
-    openApplicationApplyModal(match);
+    openApplicationPreviewModal(match);
   }, [activeSubTab, applyInvestorUserId, applicationLoading, applicationProfiles, openApplicationApplyModal]);
 
   // Latest application status per investor (pending / accepted / rejected)
@@ -949,7 +970,8 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         }
 
         if (!orderResp.ok) {
-          throw new Error(orderJson?.error || orderJson?.details || 'Could not start payment.');
+          const backendMessage = orderJson?.details || orderJson?.error || 'Could not start payment.';
+          throw new Error(backendMessage);
         }
 
         if (orderJson.skipPayment) {
@@ -1019,7 +1041,8 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
               );
             } catch (err: any) {
               console.error(err);
-              messageService.error('Verification failed', err?.message || 'Please contact support.', 4000);
+              const message = e?.message || 'Could not complete application. Please try again.';
+              messageService.error('Apply failed', message, 4000);
             } finally {
               setApplicationPayingUserId(null);
             }
@@ -1040,6 +1063,14 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         setApplicationPayingUserId(null);
       }
     })();
+  }
+
+  function continueApplicationFromPreview() {
+    const profile = applicationPreviewModal.profile;
+    if (!profile) return;
+
+    closeApplicationPreviewModal();
+    openApplicationApplyModal(profile);
   }
 
   function executePaidInvestorApplication(profile: any, _accessToken?: string) {
@@ -4322,7 +4353,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                             size="sm"
                             variant={st === 'pending' || st === 'viewed' || st === 'accepted' ? 'outline' : 'primary'}
                             className="mt-3 w-full"
-                            onClick={() => openApplicationApplyModal(profile)}
+                            onClick={() => openApplicationPreviewModal(profile)}
                             disabled={applyDisabled}
                           >
                             {isPaying ? 'Processing…' : applyLabel}
@@ -4407,6 +4438,79 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
               </>
             )}
           </Card>
+
+          <Modal
+            isOpen={applicationPreviewModal.open}
+            onClose={closeApplicationPreviewModal}
+            title="Review your portfolio first"
+            position="center"
+            size="medium"
+          >
+            {applicationPreviewModal.profile && (
+              <div className="space-y-5">
+                <Card className="p-5 border border-slate-200 bg-slate-50">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Portfolio preview</p>
+                      <h3 className="mt-1 text-2xl font-bold text-slate-900">{startup?.name}</h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Review your startup details before paying for this application.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+                      {startup?.sector && (
+                        <span className="rounded-full bg-white px-3 py-1 border border-slate-200">{startup.sector}</span>
+                      )}
+                      {startup?.stage && (
+                        <span className="rounded-full bg-white px-3 py-1 border border-slate-200">{startup.stage}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg bg-white border border-slate-200 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fundraising status</p>
+                      <p className="mt-1 text-sm font-medium text-slate-900">
+                        {fundraising?.active ? 'Active' : 'Not active'}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {fundraising?.type || 'No fundraising type set'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-white border border-slate-200 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Application snapshot</p>
+                      <p className="mt-1 text-sm font-medium text-slate-900">
+                        {fundraising?.value
+                          ? `${formatCurrency(fundraising.value)} target`
+                          : 'No target amount set'}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {fundraising?.equity ? `${fundraising.equity}% equity offered` : 'No equity percentage set'}
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button variant="secondary" onClick={closeApplicationPreviewModal}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      closeApplicationPreviewModal();
+                      setActiveSubTab('portfolio');
+                    }}
+                  >
+                    Edit portfolio
+                  </Button>
+                  <Button variant="primary" onClick={continueApplicationFromPreview}>
+                    Continue to apply
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Modal>
 
           <Modal
             isOpen={applyFeeModal.open}

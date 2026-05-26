@@ -366,7 +366,7 @@ app.post("/api/razorpay/create-order", async (req, res) => {
 
     const keyId = process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.VITE_RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET;
-    if (!keyId || !keySecret) return res.status(500).json({ error: "Razorpay keys not configured" });
+    if (!keyId || !keySecret) return res.status(503).json({ error: "Razorpay keys not configured" });
 
     const authHeader = "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64");
 

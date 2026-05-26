@@ -15,6 +15,7 @@ import CAServicePage from './pages/CAServicePage';
 import CSServicePage from './pages/CSServicePage';
 import MentorsServicePage from './pages/MentorsServicePage';
 import UnifiedMentorNetworkPage from './pages/UnifiedMentorNetworkPage';
+import PublicInvestorPortfolioPage from './PublicInvestorPortfolioPage';
 import TMSVirtualConferencePage from './pages/TMSVirtualConferencePage';
 import GrantOpportunitiesPage from './pages/GrantOpportunitiesPage';
 import BlogsPage from './pages/BlogsPage';
@@ -154,6 +155,8 @@ const PageRouter: React.FC = () => {
       return <DiagnosticPage />;
     case '/unified-mentor-network':
       return <UnifiedMentorNetworkPage />;
+    case '/investor-portfolio':
+      return <PublicInvestorPortfolioPage />;
     case '/tms-virtual-conference':
       return <TMSVirtualConferencePage />;
     case '/grant-opportunities':

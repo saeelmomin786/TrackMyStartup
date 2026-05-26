@@ -114,7 +114,7 @@ const App: React.FC = () => {
   }, []); // Run once on mount
 
   // Check if we're on a standalone page (footer links and service pages)
-  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products', '/diagnostic', '/unified-mentor-network', '/tms-virtual-conference', '/grant-opportunities', '/blogs', '/events'];
+  const standalonePages = ['/privacy-policy', '/cancellation-refunds', '/shipping', '/terms-conditions', '/about', '/contact', '/products', '/diagnostic', '/unified-mentor-network', '/investor-portfolio', '/tms-virtual-conference', '/grant-opportunities', '/blogs', '/events'];
   const currentPath = window.location.pathname;
   const isServicePage = currentPath.startsWith('/services/');
   const isBlogDetailPage = currentPath.startsWith('/blogs/') && currentPath !== '/blogs';

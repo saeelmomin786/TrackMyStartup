@@ -273,6 +273,16 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                   Grant Opportunities
                 </a>
                 <a 
+                  href="/investor-portfolio" 
+                  className={`font-medium text-sm transition-colors duration-200 ${
+                    currentPath === '/investor-portfolio' 
+                      ? 'text-brand-primary font-semibold' 
+                      : 'text-slate-700 hover:text-blue-400'
+                  }`}
+                >
+                  Investor Portfolio
+                </a>
+                <a 
                   href="/events" 
                   className={`font-medium text-sm transition-colors duration-200 ${
                     currentPath === '/events' 
@@ -439,6 +449,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
 
                   <a href="/unified-mentor-network" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Unified Mentor Network</a>
                   <a href="/grant-opportunities" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Grant Opportunities</a>
+                  <a href="/investor-portfolio" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Investor Portfolio</a>
                   <a href="/events" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Events</a>
 
                   {/* Explore Mobile */}

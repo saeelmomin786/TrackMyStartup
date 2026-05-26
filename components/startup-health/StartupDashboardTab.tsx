@@ -1040,6 +1040,14 @@ const StartupDashboardTab: React.FC<StartupDashboardTabProps> = ({ startup, isVi
       } catch (err) {
         console.error('❌ Error loading co-investment offers:', err);
       }
+
+      const allOffers = [
+        ...investmentOffersFormatted,
+        ...coInvestmentOpportunitiesFormatted,
+        ...coInvestmentOffersFormatted,
+        ...incubationOffers,
+        ...diligenceOffers,
+      ];
       
       // Store facilitator diligence applications separately (don't include in offers)
       setFacilitatorDiligenceRequests(diligenceApplications);

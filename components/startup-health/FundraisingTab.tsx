@@ -403,6 +403,25 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     skipPayment: null,
   });
 
+  const closeApplyFeeModal = useCallback(() => {
+    setApplyFeeModal({
+      open: false,
+      profile: null,
+      previewLoading: false,
+      previewError: null,
+      feeInr: null,
+      skipPayment: null,
+    });
+  }, []);
+
+  const filteredApplicationProfiles = applicationProfiles.filter(profile => {
+    const term = applicationSearch.trim().toLowerCase();
+    if (!term) return true;
+    const name = (profile.investor_name || profile.user?.name || '').toLowerCase();
+    const firm = (profile.firm_name || '').toLowerCase();
+    return name.includes(term) || firm.includes(term);
+  });
+
   // Dashboard metrics state (MRR, Burn Rate, Gross Margin, Compliance)
   const [metrics, setMetrics] = useState<DashboardMetrics>({
     mrr: 0,
@@ -857,92 +876,42 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     };
   }, [activeSubTab, authUserId, startup.id]);
 
-  const refreshApplicationStatuses = useCallback(async () => {
-    if (!authUserId) return;
-    try {
-      const map = await investorConnectionRequestService.getLatestApplicationStatuses(authUserId, startup.id);
-      setApplicationStatusMap(map);
-    } catch (e) {
-      console.error('Error refreshing application statuses:', e);
-    }
-  }, [authUserId, startup.id]);
-
-  const loadRazorpayScript = useCallback(async (): Promise<boolean> => {
-    if (typeof window !== 'undefined' && window.Razorpay) return true;
-    return new Promise(resolve => {
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  }, []);
-
-  const filteredApplicationProfiles = useMemo(() => {
-    const term = applicationSearch.trim().toLowerCase();
-    if (!term) return applicationProfiles;
-    return applicationProfiles.filter(profile => {
-      const name = (
-        profile.investor_name ||
-        profile.user?.name ||
-        ''
-      ).toLowerCase();
-      const firm = (profile.firm_name || '').toLowerCase();
-      return name.includes(term) || firm.includes(term);
-    });
-  }, [applicationProfiles, applicationSearch]);
-
-  const closeApplyFeeModal = useCallback(() => {
-    setApplyFeeModal({
-      open: false,
-      profile: null,
-      previewLoading: false,
-      previewError: null,
-      feeInr: null,
-      skipPayment: null,
-    });
-  }, []);
-
-  const getInvestorApplicationShareUrl = useCallback(() => {
-    const startupUrl = new URL(window.location.origin + window.location.pathname);
-    startupUrl.searchParams.set('view', 'startup');
-    startupUrl.searchParams.set('startupId', String(startup.id));
-    return startupUrl.toString();
-  }, [startup.id]);
-
-  const runFreeInvestorApply = useCallback(
-    async (targetUserId: string) => {
-      if (!authUserId) return;
-      const shareUrl = getInvestorApplicationShareUrl();
-      const existingCheck = await investorConnectionRequestService.checkExistingRequest(targetUserId, authUserId);
-      if (existingCheck.exists) {
-        if (existingCheck.status === 'accepted') {
-          messageService.info('Already connected', 'You are already connected with this investor.', 3000);
-          return;
-        }
-        if (existingCheck.status === 'pending') {
-          messageService.info('Already applied', 'You already have a pending application. Please wait for their response.', 3000);
-          return;
-        }
+  function openApplicationApplyModal(profile: any) {
+    void (async () => {
+      if (!authUserId) {
+        messageService.warning('Sign in required', 'Please sign in to apply to investors.', 3000);
+        return;
       }
-      await investorConnectionRequestService.createRequest({
-        investor_id: targetUserId,
-        requester_id: authUserId,
-        requester_type: 'Startup',
-        startup_id: startup.id,
-        startup_profile_url: shareUrl,
-      });
-      await refreshApplicationStatuses();
-      messageService.success('Application sent', 'Your application was sent successfully.', 3000);
-    },
-    [authUserId, startup.id, refreshApplicationStatuses, getInvestorApplicationShareUrl]
-  );
-
-  const executePaidInvestorApplication = useCallback(
-    async (profile: any, accessToken: string) => {
       const targetUserId = profile.user_id as string | undefined;
       if (!targetUserId) return;
-      const shareUrl = getInvestorApplicationShareUrl();
+
+      const latest = applicationStatusMap.get(targetUserId);
+      if (latest === 'pending' || latest === 'accepted' || latest === 'viewed') {
+        messageService.info('Already submitted', 'You already have an active application for this investor.', 3000);
+        return;
+      }
+
+      setApplyFeeModal({
+        open: true,
+        profile,
+        previewLoading: true,
+        previewError: null,
+        feeInr: null,
+        skipPayment: null,
+      });
+
+      await supabase.auth.getUser();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        setApplyFeeModal(s => ({
+          ...s,
+          previewLoading: false,
+          previewError: 'Your session expired. Please sign in again.',
+        }));
+        return;
+      }
+
       try {
         const orderResp = await fetch('/api/investor-application/create-order', {
           method: 'POST',
@@ -950,7 +919,10 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             'Content-Type': 'application/json',
             Authorization: `Bearer ${accessToken}`,
           },
-          body: JSON.stringify({ investorUserId: targetUserId, startupId: startup.id }),
+          body: JSON.stringify({
+            investorUserId: targetUserId,
+            startupId: startup.id,
+          }),
         });
         const orderJson = await orderResp.json();
         if (orderResp.status === 409) {
@@ -959,19 +931,33 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             orderJson?.error || 'You already have an active application for this investor.',
             3000
           );
+          setApplyFeeModal(s => ({
+            ...s,
+            previewLoading: false,
+            previewError: orderJson?.error || 'You already have an active application for this investor.',
+          }));
           return;
         }
+
         if (!orderResp.ok) {
           throw new Error(orderJson?.error || orderJson?.details || 'Could not start payment.');
         }
 
         if (orderJson.skipPayment) {
           await runFreeInvestorApply(targetUserId);
+          closeApplyFeeModal();
           return;
         }
 
-        setApplicationPayingUserId(targetUserId);
+        setApplyFeeModal(s => ({
+          ...s,
+          previewLoading: false,
+          previewError: null,
+          feeInr: orderJson.feeInr ?? null,
+          skipPayment: false,
+        }));
 
+        setApplicationPayingUserId(targetUserId);
         const scriptOk = await loadRazorpayScript();
         if (!scriptOk || !window.Razorpay) {
           throw new Error('Could not load Razorpay checkout.');
@@ -983,6 +969,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
           throw new Error('Invalid payment session.');
         }
 
+        const shareUrl = getInvestorApplicationShareUrl();
         const options: Record<string, unknown> = {
           key: keyId,
           order_id: order.id,
@@ -1043,94 +1030,12 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
         messageService.error('Apply failed', e?.message || 'Could not complete application. Please try again.', 4000);
         setApplicationPayingUserId(null);
       }
-    },
-    [startup.id, loadRazorpayScript, refreshApplicationStatuses, getInvestorApplicationShareUrl, runFreeInvestorApply]
-  );
+    })();
+  }
 
-  const openApplicationApplyModal = useCallback(
-    async (profile: any) => {
-      if (!authUserId) {
-        messageService.warning('Sign in required', 'Please sign in to apply to investors.', 3000);
-        return;
-      }
-      const targetUserId = profile.user_id as string | undefined;
-      if (!targetUserId) return;
-
-      const latest = applicationStatusMap.get(targetUserId);
-      if (latest === 'pending' || latest === 'accepted' || latest === 'viewed') {
-        messageService.info('Already submitted', 'You already have an active application for this investor.', 3000);
-        return;
-      }
-
-      setApplyFeeModal({
-        open: true,
-        profile,
-        previewLoading: true,
-        previewError: null,
-        feeInr: null,
-        skipPayment: null,
-      });
-
-      await supabase.auth.getUser();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-      if (!accessToken) {
-        setApplyFeeModal(s => ({
-          ...s,
-          previewLoading: false,
-          previewError: 'Your session expired. Please sign in again.',
-        }));
-        return;
-      }
-
-      try {
-        const orderResp = await fetch('/api/investor-application/create-order', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({
-            investorUserId: targetUserId,
-            startupId: startup.id,
-            previewOnly: true,
-          }),
-        });
-        const orderJson = await orderResp.json();
-        if (orderResp.status === 409) {
-          setApplyFeeModal(s => ({
-            ...s,
-            previewLoading: false,
-            previewError: orderJson?.error || 'You already have an active application for this investor.',
-          }));
-          return;
-        }
-        if (!orderResp.ok) {
-          setApplyFeeModal(s => ({
-            ...s,
-            previewLoading: false,
-            previewError: orderJson?.error || orderJson?.details || 'Could not load application fee.',
-          }));
-          return;
-        }
-        const rawFee = Number(orderJson.feeInr);
-        const fee = Number.isFinite(rawFee) && rawFee >= 0 ? rawFee : 0;
-        setApplyFeeModal(s => ({
-          ...s,
-          previewLoading: false,
-          feeInr: fee,
-          skipPayment: Boolean(orderJson.skipPayment),
-        }));
-      } catch {
-        setApplyFeeModal(s => ({
-          ...s,
-          previewLoading: false,
-          previewError: 'Could not load application fee. Please try again.',
-        }));
-      }
-    },
-    [authUserId, applicationStatusMap, startup.id]
-  );
+  function executePaidInvestorApplication(profile: any, _accessToken?: string) {
+    openApplicationApplyModal(profile);
+  }
 
   // Load metrics when portfolio tab is active
   useEffect(() => {

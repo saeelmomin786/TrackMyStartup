@@ -5387,7 +5387,7 @@ const InvestorView: React.FC<InvestorViewProps> = ({
                     }
                   }}
                   onView={undefined}
-                  totalStartupsInvested={startups.length + investorAddedStartups.length}
+                  totalStartupsInvested={previewProfile?.number_of_startups_invested ?? (startups.length + investorAddedStartups.length)}
                 />
               ) : (
                 <Card className="flex-1 !p-0 overflow-hidden shadow-lg border-0 bg-white">

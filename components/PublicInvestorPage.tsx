@@ -32,6 +32,7 @@ interface InvestorProfile {
   logo_url?: string;
   video_url?: string;
   media_type?: 'logo' | 'video';
+  number_of_startups_invested?: number | null;
   user?: {
     name?: string;
     email?: string;
@@ -211,11 +212,11 @@ const PublicInvestorPage: React.FC = () => {
               }
             }
 
-            const total = (addedCount || 0) + investmentCount;
+            const total = investorData.number_of_startups_invested ?? ((addedCount || 0) + investmentCount);
             setTotalStartupsInvested(total);
           } catch (err) {
             console.error('Error loading startups count:', err);
-            setTotalStartupsInvested(0);
+            setTotalStartupsInvested(investorData.number_of_startups_invested ?? 0);
           }
         }
       } catch (err: any) {
@@ -318,92 +319,28 @@ const PublicInvestorPage: React.FC = () => {
   };
 
   const handleApproach = async () => {
+    const targetUrl = new URL(window.location.origin);
+    targetUrl.searchParams.set('page', 'startup-health');
+    targetUrl.searchParams.set('tab', 'fundraising');
+    targetUrl.searchParams.set('subTab', 'application');
+    targetUrl.searchParams.set('applyInvestorUserId', investor.user_id);
+
     if (!isAuthenticated) {
-      // Save current URL to redirect back after login
-      const currentUrl = window.location.href;
-      sessionStorage.setItem('redirectAfterLogin', currentUrl);
+      sessionStorage.setItem('redirectAfterLogin', targetUrl.toString());
       
-      // Redirect to clean login page
       const url = new URL(window.location.origin);
       url.searchParams.set('page', 'login');
       window.location.href = url.toString();
       return;
     }
 
-    // Check if user is a startup
     if (currentUser?.role !== 'Startup') {
-      messageService.error('Access Restricted', 'Only startups can approach investors. Please log in with a Startup account.', 3000);
+      messageService.error('Access Restricted', 'Only startups can apply to investors. Please log in with a Startup account.', 3000);
       return;
     }
 
-    // Get user's startup
-    // CRITICAL FIX: Use auth.uid() instead of currentUser.id (profile ID)
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    const authUserId = authUser?.id || currentUser.id;
-    
-    const { data: userStartups } = await supabase
-      .from('startups')
-      .select('id, name')
-      .eq('user_id', authUserId) // Use auth.uid() instead of profile ID
-      .limit(1);
-
-    if (!userStartups || userStartups.length === 0) {
-      messageService.error('No Startup Found', 'Please create a startup profile first.', 3000);
-      return;
-    }
-
-    const startup = userStartups[0];
-    
-    // Create shareable startup link
-    const startupUrl = new URL(window.location.origin + window.location.pathname);
-    startupUrl.searchParams.set('view', 'startup');
-    startupUrl.searchParams.set('startupId', String(startup.id));
-    const shareUrl = startupUrl.toString();
-
-    // Create connection request in database
-    try {
-      // CRITICAL FIX: requester_id in investor_connection_requests references auth.users(id), not profile_id
-      const requesterAuthUserId = authUserId;  // Already got from above
-      await investorConnectionRequestService.createRequest({
-        investor_id: investor.user_id,
-        requester_id: requesterAuthUserId,  // Use auth_user_id, not profile_id
-        requester_type: 'Startup',
-        startup_id: startup.id,
-        startup_profile_url: shareUrl
-        // No message field - will be undefined/null, so no default message is sent
-      });
-    } catch (err) {
-      console.error('Error creating connection request:', err);
-    }
-
-    // Share startup profile with investor
-    const shareText = `View my startup profile: ${shareUrl}`;
-
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: `${startup.name} - Investment Opportunity`,
-          text: shareText,
-          url: shareUrl,
-        });
-        messageService.success('Shared', 'Startup profile shared successfully! Pitch request sent.', 2000);
-      } else if (investor.email) {
-        // Fallback: open email client
-        const subject = encodeURIComponent(`Investment Opportunity - ${startup.name}`);
-        const body = encodeURIComponent(shareText);
-        window.location.href = `mailto:${investor.email}?subject=${subject}&body=${body}`;
-        messageService.success('Shared', 'Pitch request sent!', 2000);
-      } else {
-        // Copy to clipboard
-        await navigator.clipboard.writeText(shareText);
-        messageService.success('Copied', 'Startup profile link copied to clipboard! Pitch request sent.', 2000);
-      }
-    } catch (err) {
-      console.error('Error sharing startup:', err);
-      if (err instanceof Error && err.name !== 'AbortError') {
-        messageService.error('Error', 'Failed to share startup profile. Please try again.', 3000);
-      }
-    }
+    sessionStorage.setItem('redirectAfterLogin', targetUrl.toString());
+    window.location.href = targetUrl.toString();
   };
 
   if (loading) {
@@ -516,7 +453,6 @@ const PublicInvestorPage: React.FC = () => {
               isPublicPage={true}
               isAuthenticated={isAuthenticated}
               currentUser={currentUser}
-              onConnect={handleConnect}
               onApproach={handleApproach}
             />
           </div>

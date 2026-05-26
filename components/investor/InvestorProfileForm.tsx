@@ -30,6 +30,7 @@ interface InvestorProfile {
   logo_url?: string;
   video_url?: string;
   media_type?: 'logo' | 'video';
+  number_of_startups_invested?: number | null;
 }
 
 interface InvestorProfileFormProps {
@@ -258,7 +259,8 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
           user_id: userId, // Use auth_user_id, not profile ID
           geography: profileData.geography || [],
           investment_stages: profileData.investment_stages || [],
-          domain: profileData.domain || []
+          domain: profileData.domain || [],
+          number_of_startups_invested: profileData.number_of_startups_invested ?? totalStartupsInvested
         };
         setProfile(loadedProfile);
         if (onProfileChange) {
@@ -268,7 +270,8 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
         // Initialize with auth_user_id
         const initialProfile: InvestorProfile = {
           ...profile,
-          user_id: userId // Use auth_user_id, not profile ID
+          user_id: userId, // Use auth_user_id, not profile ID
+          number_of_startups_invested: totalStartupsInvested
         };
         setProfile(initialProfile);
         // Set initial preview with default values
@@ -461,28 +464,35 @@ const InvestorProfileForm: React.FC<InvestorProfileFormProps> = ({
             />
             
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Number of Startups Invested
-              </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-sm text-slate-700">
-                  {totalStartupsInvested}
-                </div>
+              <div className="flex items-start gap-2">
+                <Input
+                  containerClassName="flex-1"
+                  label="Number of Startups Invested"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={profile.number_of_startups_invested ?? totalStartupsInvested}
+                  onChange={(e) => {
+                    const nextValue = e.target.value === '' ? null : Number.parseInt(e.target.value, 10);
+                    handleChange('number_of_startups_invested', Number.isNaN(nextValue as number) ? null : nextValue);
+                  }}
+                  disabled={!isEditing || isViewOnly}
+                  helpText="Enter the total number you want to display on your investor profile."
+                />
                 {!isViewOnly && onAddStartup && (
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    onClick={onAddStartup}
-                    className="whitespace-nowrap"
-                  >
-                    <PlusCircle className="h-4 w-4 mr-1" />
-                    Add
-                  </Button>
+                  <div className="pt-6">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={onAddStartup}
+                      className="whitespace-nowrap"
+                    >
+                      <PlusCircle className="h-4 w-4 mr-1" />
+                      Add
+                    </Button>
+                  </div>
                 )}
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Calculated from your portfolio
-              </p>
             </div>
 
             <div>

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS public.investor_profiles (
     funding_stages TEXT[], -- Array of funding stages
     target_countries TEXT[], -- Array of target countries
     company_size TEXT, -- Company size preference (e.g., "1-10", "11-50", etc.)
+    number_of_startups_invested INTEGER, -- Manual count displayed on the investor profile
     
     -- Media
     logo_url TEXT,
@@ -122,5 +123,6 @@ COMMENT ON COLUMN public.investor_profiles.geography IS 'Array of countries/regi
 COMMENT ON COLUMN public.investor_profiles.currency IS 'Currency code for ticket sizes (USD, EUR, INR, etc.)';
 COMMENT ON COLUMN public.investor_profiles.investment_stages IS 'Array of investment stages the investor focuses on';
 COMMENT ON COLUMN public.investor_profiles.domain IS 'Array of investment domains/sectors the investor focuses on (e.g., Agriculture, AI, Climate, E-commerce, etc.)';
+COMMENT ON COLUMN public.investor_profiles.number_of_startups_invested IS 'Manual count of startups invested, shown on the investor profile';
 COMMENT ON COLUMN public.investor_profiles.media_type IS 'Type of media to display: logo or video';
 

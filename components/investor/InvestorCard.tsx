@@ -26,6 +26,7 @@ interface InvestorProfile {
   logo_url?: string;
   video_url?: string;
   media_type?: 'logo' | 'video';
+  number_of_startups_invested?: number | null;
   user?: {
     name?: string;
     email?: string;
@@ -65,6 +66,7 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
   
   const videoEmbedUrl = videoEmbedInfo?.embedUrl || null;
   const videoSource = videoEmbedInfo?.source || null;
+  const displayedStartupsInvested = totalStartupsInvested ?? investor.number_of_startups_invested;
 
   const handleShare = async () => {
     // Create SEO-friendly public shareable link
@@ -229,12 +231,12 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
               </span>
             </>
           )}
-          {totalStartupsInvested !== undefined && (
+          {displayedStartupsInvested !== undefined && displayedStartupsInvested !== null && (
             <>
               {(investor.firm_type || investor.global_hq || (investor.ticket_size_min && investor.ticket_size_max)) && <span className="text-slate-300">•</span>}
               <span className="text-slate-600 flex items-center gap-1.5">
                 <Building2 className="h-4 w-4 text-slate-500" />
-                <span>Startups Invested: <span className="font-semibold text-slate-900">{totalStartupsInvested}</span></span>
+                <span>Startups Invested: <span className="font-semibold text-slate-900">{displayedStartupsInvested}</span></span>
               </span>
             </>
           )}
@@ -342,20 +344,12 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
         {isPublicPage && (
           <div className="flex flex-col sm:flex-row gap-3 mt-4 pt-4 border-t border-slate-200">
             <Button
-              variant="outline"
-              className="flex-1"
-              onClick={onConnect}
-            >
-              <Mail className="h-4 w-4 mr-2" />
-              Connect
-            </Button>
-            <Button
               variant="primary"
               className="flex-1"
-              onClick={onApproach}
+              onClick={onApproach || onConnect}
             >
               <Send className="h-4 w-4 mr-2" />
-              Pitch
+              Apply
             </Button>
           </div>
         )}

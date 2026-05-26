@@ -208,14 +208,20 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
   isDueDiligenceView = false,
 }) => {
   const canEdit = (userRole === 'Startup' || userRole === 'Admin') && !isViewOnly;
+  const applyInvestorUserId = getQueryParam('applyInvestorUserId');
 
   // Initialize activeSubTab based on URL tab parameter or opportunityId
   const getInitialSubTab = (): FundraisingSubTab => {
+    const requestedSubTab = getQueryParam('subTab');
+    if (requestedSubTab === 'application' || requestedSubTab === 'investors' || requestedSubTab === 'crm' || requestedSubTab === 'portfolio') {
+      return requestedSubTab;
+    }
     return 'portfolio';
   };
 
   const [activeSubTab, setActiveSubTab] = useState<FundraisingSubTab>(getInitialSubTab());
   const [authUserId, setAuthUserId] = useState<string>('');
+  const hasAutoOpenedApplicationModalRef = useRef(false);
 
   // Get auth_user_id (UUID from auth.users) for feature access checks
   useEffect(() => {
@@ -819,6 +825,17 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       cancelled = true;
     };
   }, [activeSubTab]);
+
+  useEffect(() => {
+    if (activeSubTab !== 'application' || !applyInvestorUserId || applicationLoading || applicationProfiles.length === 0) return;
+    if (hasAutoOpenedApplicationModalRef.current) return;
+
+    const match = applicationProfiles.find(profile => profile.user_id === applyInvestorUserId);
+    if (!match) return;
+
+    hasAutoOpenedApplicationModalRef.current = true;
+    openApplicationApplyModal(match);
+  }, [activeSubTab, applyInvestorUserId, applicationLoading, applicationProfiles, openApplicationApplyModal]);
 
   // Latest application status per investor (pending / accepted / rejected)
   useEffect(() => {

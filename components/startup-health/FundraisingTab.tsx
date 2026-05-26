@@ -1046,6 +1046,14 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     openApplicationApplyModal(profile);
   }
 
+  const getInvestorApplicationShareUrl = (): string => {
+    if (typeof window === 'undefined') return '';
+    const url = new URL(window.location.origin + window.location.pathname);
+    url.searchParams.set('view', 'startup');
+    url.searchParams.set('startupId', String(startup.id));
+    return url.toString();
+  };
+
   const loadRazorpayScript = (): Promise<boolean> => {
     if (typeof window !== 'undefined' && window.Razorpay) {
       return Promise.resolve(true);

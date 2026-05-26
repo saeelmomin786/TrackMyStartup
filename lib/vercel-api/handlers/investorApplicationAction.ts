@@ -23,25 +23,30 @@ function getSupabaseAdmin(): SupabaseClient | null {
 
 /** GoTrue /user expects anon apikey + user access JWT; service-only client often returns 401 for the same JWT. */
 async function getRequesterIdFromBearer(admin: SupabaseClient, authHeader: string | string[] | undefined): Promise<string | null> {
-  const raw = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-  const h = typeof raw === 'string' ? raw.trim() : '';
-  if (!h.startsWith('Bearer ')) return null;
-  const jwt = h.slice(7).trim();
-  if (!jwt) return null;
+  try {
+    const raw = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    const h = typeof raw === 'string' ? raw.trim() : '';
+    if (!h.startsWith('Bearer ')) return null;
+    const jwt = h.slice(7).trim();
+    if (!jwt) return null;
 
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const anon = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-  if (supabaseUrl && anon) {
-    const anonAuth = createClient(supabaseUrl, anon, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const { data: a, error: e1 } = await anonAuth.auth.getUser(jwt);
-    if (!e1 && a?.user?.id) return a.user.id;
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const anon = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    if (supabaseUrl && anon) {
+      const anonAuth = createClient(supabaseUrl, anon, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const { data: a, error: e1 } = await anonAuth.auth.getUser(jwt);
+      if (!e1 && a?.user?.id) return a.user.id;
+    }
+
+    const { data, error } = await admin.auth.getUser(jwt);
+    if (!error && data?.user?.id) return data.user.id;
+    return null;
+  } catch (error) {
+    console.error('Error resolving requester from bearer token:', error);
+    return null;
   }
-
-  const { data, error } = await admin.auth.getUser(jwt);
-  if (!error && data?.user?.id) return data.user.id;
-  return null;
 }
 
 async function fetchGlobalDefaultFeeInr(admin: SupabaseClient): Promise<number> {

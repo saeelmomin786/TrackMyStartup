@@ -28,6 +28,7 @@ interface InvestorProfile {
   ticket_size_max?: number;
   currency?: string;
   investment_stages?: string[];
+  domain?: string[];
   investment_thesis?: string;
   logo_url?: string;
   video_url?: string;

@@ -18,6 +18,7 @@ interface InvestorProfile {
   ticket_size_min?: number;
   ticket_size_max?: number;
   investment_stages?: string[];
+  domain?: string[];
   investment_thesis?: string;
   funding_requirements?: string;
   funding_stages?: string[];
@@ -237,6 +238,15 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
               <span className="text-slate-600 flex items-center gap-1.5">
                 <Building2 className="h-4 w-4 text-slate-500" />
                 <span>Startups Invested: <span className="font-semibold text-slate-900">{displayedStartupsInvested}</span></span>
+              </span>
+            </>
+          )}
+          {investor.domain && investor.domain.length > 0 && (
+            <>
+              {(investor.firm_type || investor.global_hq || (investor.ticket_size_min && investor.ticket_size_max) || displayedStartupsInvested !== undefined) && <span className="text-slate-300">•</span>}
+              <span className="text-slate-600 flex items-center gap-1.5">
+                <Briefcase className="h-4 w-4 text-slate-500" />
+                <span>Domain: <span className="font-semibold text-slate-900">{investor.domain.join(', ')}</span></span>
               </span>
             </>
           )}

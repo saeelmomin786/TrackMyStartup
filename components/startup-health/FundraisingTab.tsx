@@ -913,6 +913,15 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       }
 
       try {
+        const readResponseBody = async (response: Response) => {
+          const text = await response.text();
+          try {
+            return text ? JSON.parse(text) : {};
+          } catch {
+            return { error: text };
+          }
+        };
+
         const orderResp = await fetch('/api/investor-application/create-order', {
           method: 'POST',
           headers: {
@@ -924,7 +933,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             startupId: startup.id,
           }),
         });
-        const orderJson = await orderResp.json();
+        const orderJson = await readResponseBody(orderResp);
         if (orderResp.status === 409) {
           messageService.info(
             'Already applied',
@@ -998,7 +1007,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   razorpay_signature: response.razorpay_signature,
                 }),
               });
-              const verifyJson = await verifyResp.json();
+              const verifyJson = await readResponseBody(verifyResp);
               if (!verifyResp.ok) {
                 throw new Error(verifyJson?.error || verifyJson?.details || 'Payment verification failed');
               }

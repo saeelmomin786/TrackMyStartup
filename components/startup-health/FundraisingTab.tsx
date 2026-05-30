@@ -92,6 +92,59 @@ const InvestorImage: React.FC<{ imageUrl?: string; name: string }> = ({ imageUrl
   );
 };
 
+type PortfolioPreviewItem = {
+  label: string;
+  value: React.ReactNode;
+  span?: 1 | 2;
+};
+
+function PortfolioPreviewCard({
+  title,
+  description,
+  items,
+}: {
+  title: string;
+  description?: string;
+  items: PortfolioPreviewItem[];
+}) {
+  return (
+    <Card className="p-5 border border-slate-200 bg-slate-50/80">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+        {description && <p className="text-sm text-slate-500">{description}</p>}
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {items.map(item => (
+          <div key={item.label} className={item.span === 2 ? 'sm:col-span-2' : ''}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
+            <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap break-words">{item.value}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+const renderOptionalText = (value?: string | number | null) => {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return <span className="text-slate-400">Not set</span>;
+  }
+  return <span className="text-slate-900">{value}</span>;
+};
+
+const renderOptionalUrl = (url?: string | null, label = 'Open') => {
+  if (!url || url === '#') {
+    return <span className="text-slate-400">Not set</span>;
+  }
+
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700">
+      <span>{label}</span>
+      <ExternalLink className="h-3 w-3" />
+    </a>
+  );
+};
+
 // Active Fundraising Toggle Button - single button for activate/deactivate
 function ActiveFundraisingToggle({ 
   userId, 
@@ -260,6 +313,10 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     websiteUrl: '',
     linkedInUrl: '',
   });
+  const [applicationPreviewDraft, setApplicationPreviewDraft] = useState<{
+    fundraising: FundraisingDetails;
+    onePager: typeof onePager;
+  } | null>(null);
   const [pitchDeckFile, setPitchDeckFile] = useState<File | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [businessPlanFile, setBusinessPlanFile] = useState<File | null>(null);
@@ -394,6 +451,11 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     open: false,
     profile: null,
   });
+  const [isApplicationPreviewEditing, setIsApplicationPreviewEditing] = useState(false);
+  const [isApplicationPreviewAutoSaving, setIsApplicationPreviewAutoSaving] = useState(false);
+  const [applicationPreviewAutoSaveError, setApplicationPreviewAutoSaveError] = useState<string | null>(null);
+  const [applicationPreviewLastSavedHash, setApplicationPreviewLastSavedHash] = useState('');
+  const applicationPreviewAutoSaveTimeoutRef = useRef<number | null>(null);
   const [applyFeeModal, setApplyFeeModal] = useState<{
     open: boolean;
     profile: any | null;
@@ -421,19 +483,289 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
     });
   }, []);
 
+  const buildApplicationPreviewSavePayload = useCallback((draft: {
+    fundraising: FundraisingDetails;
+    onePager: typeof onePager;
+  }): FundraisingDetails => {
+    return {
+      id: draft.fundraising.id,
+      active: Boolean(draft.fundraising.active),
+      type: draft.fundraising.type || InvestmentType.Seed,
+      value: Number(draft.fundraising.value || 0),
+      equity: Number(draft.fundraising.equity || 0),
+      domain: draft.fundraising.domain,
+      stage: draft.fundraising.stage,
+      country: draft.fundraising.country,
+      validationRequested: Boolean(draft.fundraising.validationRequested),
+      pitchDeckUrl: draft.fundraising.pitchDeckUrl || '',
+      pitchVideoUrl: draft.fundraising.pitchVideoUrl || '',
+      logoUrl: draft.fundraising.logoUrl || '',
+      businessPlanUrl: draft.fundraising.businessPlanUrl || '',
+      websiteUrl: draft.fundraising.websiteUrl || '',
+      linkedInUrl: draft.fundraising.linkedInUrl || '',
+      onePagerUrl: draft.fundraising.onePagerUrl || '',
+      onePagerDate: draft.onePager.date,
+      onePagerOneLiner: draft.onePager.oneLiner,
+      problemStatement: draft.onePager.problemStatement,
+      solutionText: draft.onePager.solution,
+      growthChallenge: draft.onePager.growthChallenge,
+      uspText: draft.onePager.usp,
+      competitionText: draft.onePager.competition,
+      teamText: JSON.stringify(draft.onePager.teamMembers),
+      tamText: draft.onePager.tam,
+      samText: draft.onePager.sam,
+      somText: draft.onePager.som,
+      tractionText: draft.onePager.traction,
+      askUtilizationText: draft.onePager.askUtilization,
+      revenueThisYear: draft.onePager.revenueThisYear,
+      revenueLastYear: draft.onePager.revenueLastYear,
+      revenueNextMonth: draft.onePager.revenueNextMonth,
+      grossProfitMargin: draft.onePager.grossProfitMargin,
+      netProfitMargin: draft.onePager.netProfitMargin,
+      fixedCostLast3Months: draft.onePager.fixedCostLast3Months,
+    };
+  }, []);
+
+  const getApplicationPreviewDraftHash = useCallback((draft: {
+    fundraising: FundraisingDetails;
+    onePager: typeof onePager;
+  }): string => {
+    return JSON.stringify(buildApplicationPreviewSavePayload(draft));
+  }, [buildApplicationPreviewSavePayload]);
+
+  const persistApplicationPreviewDraft = useCallback(async (
+    draft: {
+      fundraising: FundraisingDetails;
+      onePager: typeof onePager;
+    },
+    options?: { silent?: boolean; exitEditMode?: boolean }
+  ): Promise<boolean> => {
+    if (!startup?.id) return false;
+
+    const silent = Boolean(options?.silent);
+
+    if (silent) {
+      setIsApplicationPreviewAutoSaving(true);
+      setApplicationPreviewAutoSaveError(null);
+    } else {
+      setIsSaving(true);
+      setError(null);
+    }
+
+    try {
+      const payload = buildApplicationPreviewSavePayload(draft);
+      const saved = await capTableService.updateFundraisingDetails(startup.id, payload);
+
+      setFundraising(saved);
+      setOnePager({
+        ...draft.onePager,
+        teamMembers: draft.onePager.teamMembers.map(member => ({ ...member })),
+      });
+
+      const nextDraft = {
+        fundraising: {
+          ...draft.fundraising,
+          ...payload,
+          id: saved.id || payload.id,
+        },
+        onePager: {
+          ...draft.onePager,
+          teamMembers: draft.onePager.teamMembers.map(member => ({ ...member })),
+        },
+      };
+
+      setApplicationPreviewDraft(nextDraft);
+      setApplicationPreviewLastSavedHash(getApplicationPreviewDraftHash(nextDraft));
+
+      setExistingRounds(prev => {
+        if (!saved.id) return prev;
+        const index = prev.findIndex(round => round.id === saved.id);
+        if (index === -1) return [saved, ...prev];
+        const clone = [...prev];
+        clone[index] = { ...clone[index], ...saved };
+        return clone;
+      });
+
+      if (!silent) {
+        if (options?.exitEditMode) {
+          setIsApplicationPreviewEditing(false);
+        }
+        messageService.success('Portfolio saved', 'Your live application preview has been updated.', 2500);
+      }
+
+      return true;
+    } catch (e: any) {
+      console.error('Error saving application preview edits:', e);
+      const message = e?.message || 'Failed to save portfolio changes';
+
+      if (silent) {
+        setApplicationPreviewAutoSaveError(message);
+      } else {
+        setError(message);
+        messageService.error('Save Failed', 'Could not save the portfolio changes. Please try again.', 3000);
+      }
+
+      return false;
+    } finally {
+      if (silent) {
+        setIsApplicationPreviewAutoSaving(false);
+      } else {
+        setIsSaving(false);
+      }
+    }
+  }, [startup?.id, buildApplicationPreviewSavePayload, getApplicationPreviewDraftHash]);
+
   const closeApplicationPreviewModal = useCallback(() => {
+    if (applicationPreviewAutoSaveTimeoutRef.current !== null) {
+      window.clearTimeout(applicationPreviewAutoSaveTimeoutRef.current);
+      applicationPreviewAutoSaveTimeoutRef.current = null;
+    }
     setApplicationPreviewModal({
       open: false,
       profile: null,
     });
+    setApplicationPreviewDraft(null);
+    setIsApplicationPreviewEditing(false);
+    setApplicationPreviewAutoSaveError(null);
+    setApplicationPreviewLastSavedHash('');
   }, []);
 
   const openApplicationPreviewModal = useCallback((profile: any) => {
+    const nextDraft = {
+      fundraising: { ...fundraising },
+      onePager: {
+        ...onePager,
+        teamMembers: onePager.teamMembers.map(member => ({ ...member })),
+      },
+    };
+
+    setApplicationPreviewDraft(nextDraft);
+    setApplicationPreviewLastSavedHash(getApplicationPreviewDraftHash(nextDraft));
+    setApplicationPreviewAutoSaveError(null);
+    setIsApplicationPreviewEditing(false);
     setApplicationPreviewModal({
       open: true,
       profile,
     });
-  }, []);
+  }, [fundraising, onePager, getApplicationPreviewDraftHash]);
+
+  const previewFundraising = applicationPreviewDraft?.fundraising || fundraising;
+  const previewOnePager = applicationPreviewDraft?.onePager || onePager;
+
+  const updateApplicationPreviewFundraising = (field: keyof FundraisingDetails, value: any) => {
+    setApplicationPreviewDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        fundraising: {
+          ...prev.fundraising,
+          [field]: value,
+        },
+      };
+    });
+  };
+
+  const updateApplicationPreviewOnePager = (field: keyof typeof onePager, value: string) => {
+    setApplicationPreviewDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        onePager: {
+          ...prev.onePager,
+          [field]: value,
+        },
+      };
+    });
+  };
+
+  const updateApplicationPreviewTeamMember = (memberId: string, field: keyof TeamMember, value: string) => {
+    setApplicationPreviewDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        onePager: {
+          ...prev.onePager,
+          teamMembers: prev.onePager.teamMembers.map(member => (
+            member.id === memberId ? { ...member, [field]: value } : member
+          )),
+        },
+      };
+    });
+  };
+
+  const addApplicationPreviewTeamMember = () => {
+    setApplicationPreviewDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        onePager: {
+          ...prev.onePager,
+          teamMembers: [
+            ...prev.onePager.teamMembers,
+            {
+              id: `${Date.now()}`,
+              name: '',
+              education: '',
+              experience: '',
+              description: '',
+            },
+          ],
+        },
+      };
+    });
+  };
+
+  const removeApplicationPreviewTeamMember = (memberId: string) => {
+    setApplicationPreviewDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        onePager: {
+          ...prev.onePager,
+          teamMembers: prev.onePager.teamMembers.filter(member => member.id !== memberId),
+        },
+      };
+    });
+  };
+
+  const saveApplicationPreviewEdits = async () => {
+    if (!applicationPreviewDraft) return;
+    await persistApplicationPreviewDraft(applicationPreviewDraft, { silent: false, exitEditMode: false });
+  };
+
+  useEffect(() => {
+    if (!applicationPreviewModal.open || !isApplicationPreviewEditing || !canEdit || !applicationPreviewDraft) {
+      return;
+    }
+
+    const currentHash = getApplicationPreviewDraftHash(applicationPreviewDraft);
+    if (currentHash === applicationPreviewLastSavedHash) {
+      return;
+    }
+
+    if (applicationPreviewAutoSaveTimeoutRef.current !== null) {
+      window.clearTimeout(applicationPreviewAutoSaveTimeoutRef.current);
+    }
+
+    applicationPreviewAutoSaveTimeoutRef.current = window.setTimeout(() => {
+      void persistApplicationPreviewDraft(applicationPreviewDraft, { silent: true, exitEditMode: false });
+    }, 1200);
+
+    return () => {
+      if (applicationPreviewAutoSaveTimeoutRef.current !== null) {
+        window.clearTimeout(applicationPreviewAutoSaveTimeoutRef.current);
+        applicationPreviewAutoSaveTimeoutRef.current = null;
+      }
+    };
+  }, [
+    applicationPreviewModal.open,
+    isApplicationPreviewEditing,
+    canEdit,
+    applicationPreviewDraft,
+    applicationPreviewLastSavedHash,
+    getApplicationPreviewDraftHash,
+    persistApplicationPreviewDraft,
+  ]);
 
   const filteredApplicationProfiles = applicationProfiles.filter(profile => {
     const term = applicationSearch.trim().toLowerCase();
@@ -4444,69 +4776,285 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
             onClose={closeApplicationPreviewModal}
             title="Review your portfolio first"
             position="center"
-            size="medium"
+            size="large"
           >
             {applicationPreviewModal.profile && (
               <div className="space-y-5">
-                <Card className="p-5 border border-slate-200 bg-slate-50">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="rounded-lg border border-blue-100 bg-blue-50/80 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Portfolio preview</p>
-                      <h3 className="mt-1 text-2xl font-bold text-slate-900">{startup?.name}</h3>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Submitting to</p>
+                      <p className="mt-1 text-base font-semibold text-slate-900">
+                        {applicationPreviewModal.profile.investor_name || applicationPreviewModal.profile.user?.name || 'Investor'}
+                      </p>
                       <p className="mt-1 text-sm text-slate-600">
-                        Review your startup details before paying for this application.
+                        The application uses the live portfolio data below. Edit mode now autosaves while you type.
                       </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-600">
-                      {startup?.sector && (
-                        <span className="rounded-full bg-white px-3 py-1 border border-slate-200">{startup.sector}</span>
+                      {isApplicationPreviewEditing && (
+                        <p className={`mt-2 text-xs font-medium ${applicationPreviewAutoSaveError ? 'text-red-600' : 'text-blue-700'}`}>
+                          {applicationPreviewAutoSaveError
+                            ? `Autosave failed: ${applicationPreviewAutoSaveError}`
+                            : isApplicationPreviewAutoSaving
+                              ? 'Autosaving...'
+                              : 'All changes saved'}
+                        </p>
                       )}
-                      {startup?.stage && (
-                        <span className="rounded-full bg-white px-3 py-1 border border-slate-200">{startup.stage}</span>
-                      )}
                     </div>
+                    {canEdit && !isApplicationPreviewEditing && (
+                      <Button
+                        variant="primary"
+                        onClick={() => {
+                          setApplicationPreviewAutoSaveError(null);
+                          setIsApplicationPreviewEditing(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                    )}
                   </div>
+                </div>
 
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-lg bg-white border border-slate-200 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fundraising status</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {fundraising?.active ? 'Active' : 'Not active'}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-600">
-                        {fundraising?.type || 'No fundraising type set'}
-                      </p>
-                    </div>
-                    <div className="rounded-lg bg-white border border-slate-200 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Application snapshot</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {fundraising?.value
-                          ? `${formatCurrency(fundraising.value)} target`
-                          : 'No target amount set'}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-600">
-                        {fundraising?.equity ? `${fundraising.equity}% equity offered` : 'No equity percentage set'}
-                      </p>
-                    </div>
+                {!isApplicationPreviewEditing ? (
+                  <>
+                    <PortfolioPreviewCard
+                      title="Startup and fundraising snapshot"
+                      description="This reflects the current portfolio record that will be shared with investors."
+                      items={[
+                        { label: 'Startup', value: renderOptionalText(startup?.name) },
+                        { label: 'Sector', value: renderOptionalText(startup?.sector) },
+                        { label: 'Stage', value: renderOptionalText((startup as any)?.stage) },
+                        { label: 'Country', value: renderOptionalText(previewFundraising.country || startup?.country_of_registration || startup?.country) },
+                        { label: 'Fundraising status', value: renderOptionalText(previewFundraising.active ? 'Active' : 'Not active') },
+                        { label: 'Round type', value: renderOptionalText(previewFundraising.type) },
+                        { label: 'Target ask', value: renderOptionalText(previewFundraising.value ? formatCurrency(previewFundraising.value, startup.currency || 'INR') : '') },
+                        { label: 'Equity offered', value: renderOptionalText(previewFundraising.equity ? `${previewFundraising.equity}%` : '') },
+                        { label: 'Domain', value: renderOptionalText(previewFundraising.domain) },
+                        { label: 'Validation requested', value: renderOptionalText(previewFundraising.validationRequested ? 'Yes' : 'No') },
+                      ]}
+                    />
+
+                    <PortfolioPreviewCard
+                      title="Pitch materials and public links"
+                      description="These are the live assets saved in the fundraising form."
+                      items={[
+                        { label: 'Pitch deck', value: renderOptionalUrl(previewFundraising.pitchDeckUrl, 'Open deck') },
+                        { label: 'Pitch video', value: renderOptionalUrl(previewFundraising.pitchVideoUrl, 'Open video') },
+                        { label: 'Logo', value: renderOptionalUrl(previewFundraising.logoUrl, 'Open logo') },
+                        { label: 'Business plan', value: renderOptionalUrl(previewFundraising.businessPlanUrl, 'Open plan') },
+                        { label: 'Website', value: renderOptionalUrl(previewFundraising.websiteUrl, 'Open website') },
+                        { label: 'LinkedIn', value: renderOptionalUrl(previewFundraising.linkedInUrl, 'Open LinkedIn') },
+                        { label: 'One-pager PDF', value: renderOptionalUrl(previewFundraising.onePagerUrl, 'Open one-pager') },
+                      ]}
+                    />
+
+                    <PortfolioPreviewCard
+                      title="One-pager content"
+                      description="Every saved answer from the one-pager editor appears here."
+                      items={[
+                        { label: 'Date', value: renderOptionalText(previewOnePager.date) },
+                        { label: 'One-liner', value: renderOptionalText(previewOnePager.oneLiner), span: 2 },
+                        { label: 'Problem statement', value: renderOptionalText(previewOnePager.problemStatement), span: 2 },
+                        { label: 'Solution', value: renderOptionalText(previewOnePager.solution), span: 2 },
+                        { label: 'Growth challenge', value: renderOptionalText(previewOnePager.growthChallenge), span: 2 },
+                        { label: 'Unique selling proposition', value: renderOptionalText(previewOnePager.usp), span: 2 },
+                        { label: 'Competition', value: renderOptionalText(previewOnePager.competition), span: 2 },
+                        { label: 'TAM', value: renderOptionalText(previewOnePager.tam) },
+                        { label: 'SAM', value: renderOptionalText(previewOnePager.sam) },
+                        { label: 'SOM', value: renderOptionalText(previewOnePager.som) },
+                        { label: 'Traction', value: renderOptionalText(previewOnePager.traction), span: 2 },
+                        { label: 'Ask utilisation', value: renderOptionalText(previewOnePager.askUtilization), span: 2 },
+                        { label: 'Revenue this year', value: renderOptionalText(previewOnePager.revenueThisYear) },
+                        { label: 'Revenue last year', value: renderOptionalText(previewOnePager.revenueLastYear) },
+                        { label: 'Revenue next month', value: renderOptionalText(previewOnePager.revenueNextMonth) },
+                        { label: 'Gross profit margin', value: renderOptionalText(previewOnePager.grossProfitMargin) },
+                        { label: 'Net profit margin', value: renderOptionalText(previewOnePager.netProfitMargin) },
+                        { label: 'Fixed cost last 3 months', value: renderOptionalText(previewOnePager.fixedCostLast3Months), span: 2 },
+                        {
+                          label: 'Team members',
+                          value: previewOnePager.teamMembers.length > 0 ? (
+                            <div className="space-y-3">
+                              {previewOnePager.teamMembers.map(member => (
+                                <div key={member.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                                  <div className="font-medium text-slate-900">{member.name}</div>
+                                  <div className="text-xs text-slate-500 mt-1">{member.education || 'Education not set'}</div>
+                                  <div className="text-sm text-slate-600 mt-2 whitespace-pre-wrap">{member.experience || 'Experience not set'}</div>
+                                  <div className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{member.description || 'Description not set'}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">Not set</span>
+                          ),
+                          span: 2,
+                        },
+                      ]}
+                    />
+                  </>
+                ) : (
+                  <div className="space-y-5">
+                    <Card className="p-5 border border-slate-200 bg-white">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-600">Round type</label>
+                          <select
+                            value={previewFundraising.type}
+                            onChange={e => updateApplicationPreviewFundraising('type', e.target.value as InvestmentType)}
+                            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            {Object.values(InvestmentType).map(option => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <Input
+                          label="Country"
+                          value={previewFundraising.country || ''}
+                          onChange={e => updateApplicationPreviewFundraising('country', e.target.value)}
+                          placeholder="Country"
+                        />
+                        <Input
+                          label="Target ask"
+                          type="number"
+                          value={previewFundraising.value || 0}
+                          onChange={e => updateApplicationPreviewFundraising('value', Number(e.target.value))}
+                          placeholder="Amount"
+                        />
+                        <Input
+                          label="Equity offered"
+                          type="number"
+                          value={previewFundraising.equity || 0}
+                          onChange={e => updateApplicationPreviewFundraising('equity', Number(e.target.value))}
+                          placeholder="Equity"
+                        />
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-600">Stage</label>
+                          <select
+                            value={(previewFundraising.stage as string) || ''}
+                            onChange={e => updateApplicationPreviewFundraising('stage', e.target.value as StartupStage)}
+                            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="">Select stage</option>
+                            {Object.values(StartupStage).map(option => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-600">Domain</label>
+                          <select
+                            value={(previewFundraising.domain as string) || ''}
+                            onChange={e => updateApplicationPreviewFundraising('domain', e.target.value as StartupDomain)}
+                            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="">Select domain</option>
+                            {Object.values(StartupDomain).map(option => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <Input label="Pitch deck URL" value={previewFundraising.pitchDeckUrl || ''} onChange={e => updateApplicationPreviewFundraising('pitchDeckUrl', e.target.value)} />
+                        <Input label="Pitch video URL" value={previewFundraising.pitchVideoUrl || ''} onChange={e => updateApplicationPreviewFundraising('pitchVideoUrl', e.target.value)} />
+                        <Input label="Logo URL" value={previewFundraising.logoUrl || ''} onChange={e => updateApplicationPreviewFundraising('logoUrl', e.target.value)} />
+                        <Input label="Business plan URL" value={previewFundraising.businessPlanUrl || ''} onChange={e => updateApplicationPreviewFundraising('businessPlanUrl', e.target.value)} />
+                        <Input label="Website URL" value={previewFundraising.websiteUrl || ''} onChange={e => updateApplicationPreviewFundraising('websiteUrl', e.target.value)} />
+                        <Input label="LinkedIn URL" value={previewFundraising.linkedInUrl || ''} onChange={e => updateApplicationPreviewFundraising('linkedInUrl', e.target.value)} />
+                        <Input label="One-pager URL" value={previewFundraising.onePagerUrl || ''} onChange={e => updateApplicationPreviewFundraising('onePagerUrl', e.target.value)} />
+                      </div>
+                    </Card>
+
+                    <Card className="p-5 border border-slate-200 bg-white space-y-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Input label="Date" type="date" value={previewOnePager.date} onChange={e => updateApplicationPreviewOnePager('date', e.target.value)} />
+                        <Input label="One-liner" value={previewOnePager.oneLiner} onChange={e => updateApplicationPreviewOnePager('oneLiner', e.target.value)} />
+                        <textarea className="sm:col-span-2 min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Problem statement" value={previewOnePager.problemStatement} onChange={e => updateApplicationPreviewOnePager('problemStatement', e.target.value)} />
+                        <textarea className="sm:col-span-2 min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Solution" value={previewOnePager.solution} onChange={e => updateApplicationPreviewOnePager('solution', e.target.value)} />
+                        <textarea className="sm:col-span-2 min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Growth challenge" value={previewOnePager.growthChallenge} onChange={e => updateApplicationPreviewOnePager('growthChallenge', e.target.value)} />
+                        <textarea className="sm:col-span-2 min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="USP" value={previewOnePager.usp} onChange={e => updateApplicationPreviewOnePager('usp', e.target.value)} />
+                        <textarea className="sm:col-span-2 min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Competition" value={previewOnePager.competition} onChange={e => updateApplicationPreviewOnePager('competition', e.target.value)} />
+                        <Input label="TAM" value={previewOnePager.tam} onChange={e => updateApplicationPreviewOnePager('tam', e.target.value)} />
+                        <Input label="SAM" value={previewOnePager.sam} onChange={e => updateApplicationPreviewOnePager('sam', e.target.value)} />
+                        <Input label="SOM" value={previewOnePager.som} onChange={e => updateApplicationPreviewOnePager('som', e.target.value)} />
+                        <textarea className="sm:col-span-2 min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Traction" value={previewOnePager.traction} onChange={e => updateApplicationPreviewOnePager('traction', e.target.value)} />
+                        <textarea className="sm:col-span-2 min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Ask utilisation" value={previewOnePager.askUtilization} onChange={e => updateApplicationPreviewOnePager('askUtilization', e.target.value)} />
+                        <Input label="Revenue this year" value={previewOnePager.revenueThisYear} onChange={e => updateApplicationPreviewOnePager('revenueThisYear', e.target.value)} />
+                        <Input label="Revenue last year" value={previewOnePager.revenueLastYear} onChange={e => updateApplicationPreviewOnePager('revenueLastYear', e.target.value)} />
+                        <Input label="Revenue next month" value={previewOnePager.revenueNextMonth} onChange={e => updateApplicationPreviewOnePager('revenueNextMonth', e.target.value)} />
+                        <Input label="Gross profit margin" value={previewOnePager.grossProfitMargin} onChange={e => updateApplicationPreviewOnePager('grossProfitMargin', e.target.value)} />
+                        <Input label="Net profit margin" value={previewOnePager.netProfitMargin} onChange={e => updateApplicationPreviewOnePager('netProfitMargin', e.target.value)} />
+                        <Input label="Fixed cost last 3 months" value={previewOnePager.fixedCostLast3Months} onChange={e => updateApplicationPreviewOnePager('fixedCostLast3Months', e.target.value)} />
+                      </div>
+
+                      <div className="border-t border-slate-200 pt-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <h4 className="text-sm font-semibold text-slate-900">Team members</h4>
+                          <Button variant="secondary" size="sm" onClick={addApplicationPreviewTeamMember}>Add member</Button>
+                        </div>
+                        {previewOnePager.teamMembers.length === 0 ? (
+                          <p className="text-sm text-slate-500">No team members added yet.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {previewOnePager.teamMembers.map(member => (
+                              <div key={member.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="text-sm font-medium text-slate-900">Team member</p>
+                                  <Button variant="secondary" size="sm" onClick={() => removeApplicationPreviewTeamMember(member.id)}>Remove</Button>
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  <Input label="Name" value={member.name} onChange={e => updateApplicationPreviewTeamMember(member.id, 'name', e.target.value)} />
+                                  <Input label="Education" value={member.education} onChange={e => updateApplicationPreviewTeamMember(member.id, 'education', e.target.value)} />
+                                  <textarea className="sm:col-span-2 min-h-[80px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Experience" value={member.experience} onChange={e => updateApplicationPreviewTeamMember(member.id, 'experience', e.target.value)} />
+                                  <textarea className="sm:col-span-2 min-h-[80px] rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Description" value={member.description} onChange={e => updateApplicationPreviewTeamMember(member.id, 'description', e.target.value)} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </Card>
                   </div>
-                </Card>
+                )}
 
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <Button variant="secondary" onClick={closeApplicationPreviewModal}>
                     Cancel
                   </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      closeApplicationPreviewModal();
-                      setActiveSubTab('portfolio');
-                    }}
-                  >
-                    Edit portfolio
-                  </Button>
-                  <Button variant="primary" onClick={continueApplicationFromPreview}>
-                    Continue to apply
-                  </Button>
+                  {isApplicationPreviewEditing ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          if (applicationPreviewAutoSaveTimeoutRef.current !== null) {
+                            window.clearTimeout(applicationPreviewAutoSaveTimeoutRef.current);
+                            applicationPreviewAutoSaveTimeoutRef.current = null;
+                          }
+                          if (applicationPreviewDraft) {
+                            const resetDraft = {
+                              fundraising: { ...fundraising },
+                              onePager: {
+                                ...onePager,
+                                teamMembers: onePager.teamMembers.map(member => ({ ...member })),
+                              },
+                            };
+                            setApplicationPreviewDraft(resetDraft);
+                            setApplicationPreviewLastSavedHash(getApplicationPreviewDraftHash(resetDraft));
+                          }
+                          setApplicationPreviewAutoSaveError(null);
+                          setIsApplicationPreviewEditing(false);
+                        }}
+                      >
+                        Discard changes
+                      </Button>
+                      <Button variant="primary" onClick={saveApplicationPreviewEdits} disabled={isSaving || isApplicationPreviewAutoSaving}>
+                        {isSaving ? 'Saving...' : 'Save'}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button variant="primary" onClick={continueApplicationFromPreview}>
+                        Continue to apply
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             )}

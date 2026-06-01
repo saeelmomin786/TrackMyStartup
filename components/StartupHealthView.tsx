@@ -1082,7 +1082,7 @@ interface StartupHealthViewProps {
   onTrialButtonClick?: () => void; // Add trial button click handler
 }
 
-type TabId = 'dashboard' | 'incubation' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable' | 'fundraising' | 'services';
+type TabId = 'dashboard' | 'incubation' | 'track' | 'profile' | 'compliance' | 'financials' | 'employees' | 'capTable' | 'fundraising' | 'services';
 
 const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole, user, onBack, onActivateFundraising, onInvestorAdded, onUpdateFounders, isViewOnly = false, investmentOffers = [], onProcessOffer, onTrialButtonClick }) => {
     // Check if this is a facilitator accessing the startup
@@ -1120,8 +1120,19 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             return 'dashboard';
         }
         
+        // If URL targets one of the detailed startup sub-tabs, surface the new
+        // top-level "track" tab and keep the original target as the active sub-tab.
+        if (fromUrl === 'profile' || fromUrl === 'compliance' || fromUrl === 'financials' || fromUrl === 'employees') {
+          return 'track';
+        }
         return fromUrl;
     });
+      // Sub-tab state for the new Track my startup tab
+      const [trackSubTab, setTrackSubTab] = useState<'profile' | 'compliance' | 'financials' | 'employees' | 'capTable'>(() => {
+        const t = getQueryParam('tab');
+        if (t === 'profile' || t === 'compliance' || t === 'financials' || t === 'employees' || t === 'capTable') return t as any;
+        return 'profile';
+      });
     const [currentStartup, setCurrentStartup] = useState<Startup>(startup);
     const [localOffers, setLocalOffers] = useState<InvestmentOffer[]>(investmentOffers || []);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -1921,7 +1932,12 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             return;
         }
         setActiveTab(tabId);
+      // If switching to the grouped Track tab, persist the current sub-tab in URL
+      if (tabId === 'track') {
+        setQueryParam('tab', trackSubTab, true);
+      } else {
         setQueryParam('tab', tabId, true);
+      }
         setIsMobileMenuOpen(false); // Close mobile menu when tab changes
     };
 
@@ -1944,11 +1960,7 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             // Facilitator users see limited tabs based on access level
             { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
             { id: 'incubation', name: 'Incubation', icon: <Building2 className="w-4 h-4" /> },
-            { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
-            { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
-            { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
-            { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
-            { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'track', name: 'Track my startup', icon: <Building2 className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
             { id: 'services', name: 'Explore', icon: <Wrench className="w-4 h-4" /> },
           ]
@@ -1957,22 +1969,14 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
             // Due diligence view: hide services tab, show other tabs
             { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
             { id: 'incubation', name: 'Incubation', icon: <Building2 className="w-4 h-4" /> },
-            { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
-            { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
-            { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
-            { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
-            { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'track', name: 'Track my startup', icon: <Building2 className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
           ]
         : [
             // Regular startup users see all tabs; programs moved under Fundraising → Grant / Incubation Programs
             { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
             { id: 'incubation', name: 'Incubation', icon: <Building2 className="w-4 h-4" /> },
-            { id: 'profile', name: 'Profile', icon: <Building2 className="w-4 h-4" /> },
-            { id: 'compliance', name: 'Compliance', icon: <ShieldCheck className="w-4 h-4" /> },
-            { id: 'financials', name: 'Financials', icon: <Banknote className="w-4 h-4" /> },
-            { id: 'employees', name: 'Employees', icon: <Users className="w-4 h-4" /> },
-            { id: 'capTable', name: 'Equity Allocation', icon: <TableProperties className="w-4 h-4" /> },
+            { id: 'track', name: 'Track my startup', icon: <Building2 className="w-4 h-4" /> },
             { id: 'fundraising', name: 'Fundraising', icon: <Banknote className="w-4 h-4" /> },
             { id: 'services', name: 'Explore', icon: <Wrench className="w-4 h-4" /> },
           ];
@@ -2014,6 +2018,99 @@ const StartupHealthView: React.FC<StartupHealthViewProps> = ({ startup, userRole
                     }}
                   />
                 );
+            case 'track':
+                return (
+                  <div className="space-y-6">
+                    <div className="border-b border-slate-200">
+                      <nav className="-mb-px flex justify-center flex-wrap gap-4" aria-label="Track Tabs">
+                        <button
+                          onClick={() => { setTrackSubTab('profile'); setQueryParam('tab', 'profile'); }}
+                          className={`${
+                            trackSubTab === 'profile'
+                              ? 'border-brand-primary text-brand-primary'
+                              : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                          } flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          Profile
+                        </button>
+                        <button
+                          onClick={() => { setTrackSubTab('compliance'); setQueryParam('tab', 'compliance'); }}
+                          className={`${
+                            trackSubTab === 'compliance'
+                              ? 'border-brand-primary text-brand-primary'
+                              : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                          } flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          Compliance
+                        </button>
+                        <button
+                          onClick={() => { setTrackSubTab('financials'); setQueryParam('tab', 'financials'); }}
+                          className={`${
+                            trackSubTab === 'financials'
+                              ? 'border-brand-primary text-brand-primary'
+                              : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                          } flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          Financials
+                        </button>
+                        <button
+                          onClick={() => { setTrackSubTab('employees'); setQueryParam('tab', 'employees'); }}
+                          className={`${
+                            trackSubTab === 'employees'
+                              ? 'border-brand-primary text-brand-primary'
+                              : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                          } flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          Employees
+                        </button>
+                        <button
+                          onClick={() => { setTrackSubTab('capTable'); setQueryParam('tab', 'capTable'); }}
+                          className={`${
+                            trackSubTab === 'capTable'
+                              ? 'border-brand-primary text-brand-primary'
+                              : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                          } flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`}
+                        >
+                          Equity Allocation
+                        </button>
+                      </nav>
+                    </div>
+
+                    <div className="animate-fade-in">
+                      {trackSubTab === 'profile' && (
+                        <ProfileTab startup={currentStartup} userRole={userRole} onProfileUpdate={handleProfileUpdate} isViewOnly={isViewOnly} />
+                      )}
+                      {trackSubTab === 'compliance' && (
+                        <ComplianceTab 
+                          startup={currentStartup} 
+                          currentUser={user} 
+                          onUpdateCompliance={handleUpdateCompliance}
+                          isViewOnly={isViewOnly}
+                          allowCAEdit={!isDueDiligenceView && (userRole === 'CA' || userRole === 'CS')}
+                          onProfileUpdated={profileUpdateTrigger}
+                        />
+                      )}
+                      {trackSubTab === 'financials' && (
+                        <FinancialsTab startup={currentStartup} userRole={userRole} isViewOnly={isViewOnly} />
+                      )}
+                      {trackSubTab === 'employees' && (
+                        <EmployeesTab startup={currentStartup} userRole={userRole} isViewOnly={isViewOnly} onEsopUpdated={handleEsopUpdate} />
+                      )}
+                      {trackSubTab === 'capTable' && (
+                        <CapTableTab 
+                          startup={currentStartup}
+                          userRole={userRole}
+                          user={user}
+                          onActivateFundraising={onActivateFundraising}
+                          onInvestorAdded={onInvestorAdded}
+                          onUpdateFounders={onUpdateFounders}
+                          isViewOnly={isViewOnly}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+
             case 'profile':
                 return <ProfileTab startup={currentStartup} userRole={userRole} onProfileUpdate={handleProfileUpdate} isViewOnly={isViewOnly} />;
             case 'compliance':

@@ -207,13 +207,13 @@ const PublicInvestorPortfolioPage: React.FC = () => {
   const siteUrl = 'https://trackmystartup.com';
   const canonicalUrl = `${siteUrl}${window.location.pathname}`;
 
-  const roleTitle = 'Public Investor Portfolio';
+  const roleTitle = 'Active Investors';
 
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50">
         <SEOHead
-          title="Public Investor Portfolio - TrackMyStartup"
+          title="Active Investors - TrackMyStartup"
           description="Browse public investor cards on TrackMyStartup."
           canonicalUrl={canonicalUrl}
           ogType="website"
@@ -234,7 +234,7 @@ const PublicInvestorPortfolioPage: React.FC = () => {
     return (
       <div className="min-h-screen bg-slate-50">
         <SEOHead
-          title="Public Investor Portfolio - TrackMyStartup"
+          title="Active Investors - TrackMyStartup"
           description="Browse public investor cards on TrackMyStartup."
           canonicalUrl={canonicalUrl}
           ogType="website"
@@ -255,7 +255,7 @@ const PublicInvestorPortfolioPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50">
       <SEOHead
-        title="Public Investor Portfolio - TrackMyStartup"
+        title="Active Investors - TrackMyStartup"
         description="Browse public investor cards on TrackMyStartup."
         canonicalUrl={canonicalUrl}
         ogType="website"
@@ -309,7 +309,7 @@ const PublicInvestorPortfolioPage: React.FC = () => {
                   Grant Opportunities
                 </a>
                 <a href="/investor-portfolio" className={`font-medium text-sm transition-colors duration-200 ${currentPath === '/investor-portfolio' ? 'text-brand-primary font-semibold' : 'text-slate-700 hover:text-blue-400'}`}>
-                  Investor Portfolio
+                  Active Investors
                 </a>
                 <a href="/events" className={`font-medium text-sm transition-colors duration-200 ${currentPath === '/events' ? 'text-brand-primary font-semibold' : 'text-slate-700 hover:text-blue-400'}`}>
                   Events
@@ -349,7 +349,7 @@ const PublicInvestorPortfolioPage: React.FC = () => {
                 <nav className="space-y-4">
                   <a href="/unified-mentor-network" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Unified Mentor Network</a>
                   <a href="/grant-opportunities" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Grant Opportunities</a>
-                  <a href="/investor-portfolio" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Investor Portfolio</a>
+                  <a href="/investor-portfolio" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Active Investors</a>
                   <a href="/events" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Events</a>
                   <a href="/about" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>About Us</a>
                   <a href="/contact" className="block text-slate-700 hover:text-brand-primary transition-colors font-medium py-2" onClick={() => setMobileMenuOpen(false)}>Contact Us</a>

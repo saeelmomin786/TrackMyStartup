@@ -214,7 +214,7 @@ async function generatePageHTML(pathname: string): Promise<string> {
   } else if (pathname.startsWith('/mentor/')) {
     // Dynamic mentor profile
     } else if (pathname === '/investor-portfolio') {
-      title = 'Investor Portfolio - TrackMyStartup | Public Investor Cards';
+      title = 'Active Investors - TrackMyStartup | Public Investor Cards';
       description = 'Browse public investor cards and discover investors on TrackMyStartup.';
     const slug = pathname.replace('/mentor/', '');
     if (supabaseUrl && supabaseAnonKey) {

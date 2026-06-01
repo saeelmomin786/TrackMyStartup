@@ -25,10 +25,11 @@ import html2canvas from 'html2canvas';
 import FundraisingCRM from './FundraisingCRM';
 import { supabase } from '../../lib/supabase';
 import SubscriptionPlansPage from '../SubscriptionPlansPage';
-import { getQueryParam } from '../../lib/urlState';
+import { getQueryParam, setQueryParam } from '../../lib/urlState';
 import { investorConnectionRequestService } from '../../lib/investorConnectionRequestService';
 import { featureAccessService } from '../../lib/featureAccessService';
 import { isMissingRelationError } from '../../lib/postgrestErrors';
+import InvestorCard from '../investor/InvestorCard';
 
 declare global {
   interface Window {
@@ -1207,6 +1208,15 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
 
     hasAutoOpenedApplicationModalRef.current = true;
     openApplicationPreviewModal(match);
+    // Clear the URL params so the auto-open only happens once and
+    // returning to this tab later won't re-trigger the modal.
+    try {
+      setQueryParam('applyInvestorUserId', null, true);
+      setQueryParam('subTab', null, true);
+    } catch (e) {
+      // Non-fatal: if URL manipulation fails, just log and continue
+      console.warn('Failed to clear auto-open URL params', e);
+    }
   }, [activeSubTab, applyInvestorUserId, applicationLoading, applicationProfiles, openApplicationApplyModal]);
 
   // Latest application status per investor (pending / accepted / rejected)
@@ -2572,7 +2582,7 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                     : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                 }`}
               >
-                Application
+                Active Investors
               </button>
               <button
                 type="button"
@@ -4592,12 +4602,12 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
       </>
       )}
 
-      {/* Application: all investor portfolio cards (Explore-style) with Apply = same connection request flow */}
+      {/* Active Investors: all investor portfolio cards (Explore-style) with Apply = same connection request flow */}
       {activeSubTab === 'application' && !isDueDiligenceView && !isLoading && (
         <div className="space-y-4">
           <Card className="p-4 sm:p-6">
             <div className="mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">Apply to investors</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Active Investors</h2>
             </div>
             <div className="relative mb-4">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -4629,19 +4639,10 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                   {filteredApplicationProfiles.length}{' '}
                   {filteredApplicationProfiles.length === 1 ? 'investor' : 'investors'} found
                 </div>
-                <div className="space-y-4">
+                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
                   {filteredApplicationProfiles.map(profile => {
                     const st = applicationStatusMap.get(profile.user_id || '') || null;
                     const isPaying = applicationPayingUserId === profile.user_id;
-                    const profileName = profile.investor_name || profile.user?.name || 'Investor';
-                    const firmName = profile.firm_name || '';
-                    const location = profile.global_hq || profile.location || '';
-                    const investmentRange =
-                      profile.ticket_size_min && profile.ticket_size_max
-                        ? `${profile.ticket_size_min.toLocaleString()} - ${profile.ticket_size_max.toLocaleString()} ${profile.currency || 'USD'}`
-                        : profile.minimum_investment && profile.maximum_investment
-                          ? `${profile.minimum_investment.toLocaleString()} - ${profile.maximum_investment.toLocaleString()} ${profile.currency || 'USD'}`
-                          : null;
 
                     let applyLabel = 'Apply';
                     if (st === 'accepted') applyLabel = 'Connected';
@@ -4655,115 +4656,19 @@ const FundraisingTab: React.FC<FundraisingTabProps> = ({
                       st === 'viewed' ||
                       st === 'accepted';
 
-                    const statusLine =
-                      st === 'pending' || st === 'viewed'
-                        ? 'Application in review.'
-                        : st === 'accepted'
-                          ? 'Application accepted. The investor will contact you soon.'
-                          : st === 'rejected'
-                            ? 'Application rejected.'
-                            : null;
-
                     return (
-                      <Card key={profile.id || profile.user_id} className="p-4 flex gap-4 items-start">
-                        <div className="w-28 flex-shrink-0 flex flex-col items-center">
-                          {profile.logo_url && profile.logo_url !== '#' ? (
-                            <img
-                              src={profile.logo_url}
-                              alt={`${profileName} logo`}
-                              className="w-24 h-24 object-contain rounded-md bg-white p-2 border border-slate-100"
-                              onError={e => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
-                          ) : (
-                            <div className="w-24 h-24 rounded-md bg-slate-100 flex items-center justify-center text-slate-400">
-                              <DollarSign className="h-8 w-8" />
-                            </div>
-                          )}
-                          <Button
-                            size="sm"
-                            variant={st === 'pending' || st === 'viewed' || st === 'accepted' ? 'outline' : 'primary'}
-                            className="mt-3 w-full"
-                            onClick={() => openApplicationPreviewModal(profile)}
-                            disabled={applyDisabled}
-                          >
-                            {isPaying ? 'Processing…' : applyLabel}
-                          </Button>
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <h3 className="text-lg font-bold text-slate-800">{profileName}</h3>
-                              {firmName && <div className="text-sm text-slate-600">{firmName}</div>}
-                            </div>
-                            <div className="text-sm text-slate-500">{location}</div>
-                          </div>
-                          {statusLine && (
-                            <p
-                              className={`mt-2 text-sm font-medium ${
-                                st === 'accepted'
-                                  ? 'text-emerald-700'
-                                  : st === 'rejected'
-                                    ? 'text-red-700'
-                                    : 'text-amber-800'
-                              }`}
-                            >
-                              {statusLine}
-                            </p>
-                          )}
-                          <div className="mt-3 text-sm text-slate-600 flex flex-wrap gap-3">
-                            {investmentRange && (
-                              <div className="flex items-center gap-2">
-                                <DollarSign className="h-4 w-4 text-slate-400" />
-                                <span>{investmentRange}</span>
-                              </div>
-                            )}
-                            {profile.investment_stages && profile.investment_stages.length > 0 && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-medium text-slate-500">Stages:</span>
-                                <span className="text-slate-700">
-                                  {(profile.investment_stages || []).slice(0, 3).join(', ')}
-                                  {(profile.investment_stages || []).length > 3
-                                    ? ` +${(profile.investment_stages || []).length - 3} more`
-                                    : ''}
-                                </span>
-                              </div>
-                            )}
-                            {profile.geography && profile.geography.length > 0 && (
-                              <div className="flex items-center gap-2">
-                                <MapPin className="h-4 w-4 text-slate-400" />
-                                <span className="text-slate-700">
-                                  {profile.geography.slice(0, 3).join(', ')}
-                                  {profile.geography.length > 3 ? ` +${profile.geography.length - 3} more` : ''}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {profile.website && profile.website !== '#' && (
-                              <a
-                                href={profile.website}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
-                              >
-                                <Globe className="h-3.5 w-3.5" /> Website
-                              </a>
-                            )}
-                            {profile.linkedin_link && profile.linkedin_link !== '#' && (
-                              <a
-                                href={profile.linkedin_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md text-xs font-medium transition-colors border border-slate-200"
-                              >
-                                <Linkedin className="h-3.5 w-3.5" /> LinkedIn
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </Card>
+                      <InvestorCard
+                        key={profile.id || profile.user_id}
+                        investor={profile}
+                        isPublicPage={true}
+                        isAuthenticated={!!authUserId}
+                        currentUser={user ? { id: String(user.id), role: userRole, email: user.email } : null}
+                        totalStartupsInvested={profile.number_of_startups_invested || 0}
+                        onApproach={() => openApplicationPreviewModal(profile)}
+                        actionLabel={isPaying ? 'Processing…' : applyLabel}
+                        actionDisabled={applyDisabled}
+                        actionVariant={st === 'pending' || st === 'viewed' || st === 'accepted' ? 'outline' : 'primary'}
+                      />
                     );
                   })}
                 </div>

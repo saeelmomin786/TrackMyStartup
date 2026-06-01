@@ -1,7 +1,7 @@
 import React from 'react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { Briefcase, MapPin, DollarSign, TrendingUp, Eye, Image as ImageIcon, Video, Globe, Linkedin, Mail, Building2, Share2, Send, UserPlus } from 'lucide-react';
+import { Briefcase, MapPin, TrendingUp, Eye, Image as ImageIcon, Video, Globe, Linkedin, Mail, Building2, Share2, Send, UserPlus } from 'lucide-react';
 import { createSlug, createProfileUrl } from '../../lib/slugUtils';
 import { getVideoEmbedUrl } from '../../lib/videoUtils';
 
@@ -47,9 +47,12 @@ interface InvestorCardProps {
   } | null;
   onConnect?: () => void;
   onApproach?: () => void;
+  actionLabel?: string;
+  actionDisabled?: boolean;
+  actionVariant?: 'primary' | 'outline';
 }
 
-const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStartupsInvested, isPublicPage = false, isAuthenticated = false, currentUser = null, onConnect, onApproach }) => {
+const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStartupsInvested, isPublicPage = false, isAuthenticated = false, currentUser = null, onConnect, onApproach, actionLabel = 'Apply', actionDisabled = false, actionVariant = 'primary' }) => {
   const formatCurrency = (value?: number, currency: string = 'USD') => {
     if (!value) return 'N/A';
     return new Intl.NumberFormat('en-US', {
@@ -226,9 +229,8 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
           {investor.ticket_size_min && investor.ticket_size_max && (
             <>
               {(investor.firm_type || investor.global_hq) && <span className="text-slate-300">•</span>}
-              <span className="text-slate-600 flex items-center gap-1.5">
-                <DollarSign className="h-4 w-4 text-slate-500" />
-                <span>{formatCurrency(investor.ticket_size_min, (investor as any).currency || 'USD')} - {formatCurrency(investor.ticket_size_max, (investor as any).currency || 'USD')}</span>
+              <span className="text-slate-600">
+                {formatCurrency(investor.ticket_size_min, (investor as any).currency || 'USD')} - {formatCurrency(investor.ticket_size_max, (investor as any).currency || 'USD')}
               </span>
             </>
           )}
@@ -354,12 +356,13 @@ const InvestorCard: React.FC<InvestorCardProps> = ({ investor, onView, totalStar
         {isPublicPage && (
           <div className="flex flex-col sm:flex-row gap-3 mt-4 pt-4 border-t border-slate-200">
             <Button
-              variant="primary"
+              variant={actionVariant}
               className="flex-1"
+              disabled={actionDisabled}
               onClick={onApproach || onConnect}
             >
               <Send className="h-4 w-4 mr-2" />
-              Apply
+              {actionLabel}
             </Button>
           </div>
         )}

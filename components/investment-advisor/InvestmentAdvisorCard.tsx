@@ -1,7 +1,7 @@
 import React from 'react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { Briefcase, MapPin, DollarSign, Image as ImageIcon, Video, Globe, Linkedin, Share2, Eye } from 'lucide-react';
+import { Briefcase, MapPin, Image as ImageIcon, Video, Globe, Linkedin, Share2, Eye } from 'lucide-react';
 import { createSlug, createProfileUrl } from '../../lib/slugUtils';
 
 interface InvestmentAdvisorProfile {
@@ -231,9 +231,8 @@ const InvestmentAdvisorCard: React.FC<InvestmentAdvisorCardProps> = ({
           {advisor.minimum_investment && advisor.maximum_investment && (
             <>
               {(advisor.firm_name || advisor.global_hq) && <span className="text-slate-300">•</span>}
-              <span className="text-slate-600 flex items-center gap-1.5">
-                <DollarSign className="h-4 w-4 text-slate-500" />
-                <span>{formatCurrency(advisor.minimum_investment, advisor.currency)} - {formatCurrency(advisor.maximum_investment, advisor.currency)}</span>
+              <span className="text-slate-600">
+                {formatCurrency(advisor.minimum_investment, advisor.currency)} - {formatCurrency(advisor.maximum_investment, advisor.currency)}
               </span>
             </>
           )}

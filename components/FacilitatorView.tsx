@@ -9377,7 +9377,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   
                   // Add data rows
                   mandateData.target_startups?.forEach(startupId => {
-                    const response = responsesForMandate.find(r => r.startup_id === parseInt(startupId));
+                    const parsedId = parseInt(startupId);
+                    const response = responsesForMandate.find(r =>
+                      isNaN(parsedId) ? r.startup_id === startupId : r.startup_id === parsedId
+                    );
                     // Only add row if we have a startup name (skip if only ID)
                     if (response?.startup_name) {
                       csvContent += `"${mandateData.program_name}","${response.startup_name}",`;

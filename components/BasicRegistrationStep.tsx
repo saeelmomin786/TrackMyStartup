@@ -39,7 +39,8 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
     startupName: '',
     centerName: '',
     firmName: '',
-    investmentAdvisorCode: ''
+    investmentAdvisorCode: '',
+    facilitatorCode: ''
   });
   const [isAdvisorCodeAutoFilled, setIsAdvisorCodeAutoFilled] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -250,7 +251,8 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
           startupName: formData.startupName,
           centerName: formData.centerName,
           firmName: formData.firmName,
-          investmentAdvisorCode: formData.investmentAdvisorCode
+          investmentAdvisorCode: formData.investmentAdvisorCode,
+          facilitatorCode: formData.facilitatorCode || undefined
         }, { skipSwitch: true }); // Don't switch profile until Form 2 is complete
 
         console.log('Profile creation result:', result);
@@ -424,7 +426,8 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
                     startupName: formData.role === 'Startup' ? formData.startupName : undefined,
                     centerName: formData.role === 'Startup Facilitation Center' ? formData.centerName : undefined,
                     firmName: formData.role === 'Investment Advisor' ? formData.firmName : undefined,
-                    investmentAdvisorCode: formData.investmentAdvisorCode || undefined
+                    investmentAdvisorCode: formData.investmentAdvisorCode || undefined,
+                    facilitatorCode: formData.role === 'Startup' ? (formData.facilitatorCode || undefined) : undefined
                   })
                 });
                 const data = await response.json();
@@ -694,6 +697,22 @@ export const BasicRegistrationStep: React.FC<BasicRegistrationStepProps> = ({
                 ✓ Code automatically set from domain
               </p>
             )}
+          </div>
+        )}
+
+        {/* Incubation Center Code - Only show for Startup role */}
+        {formData.role === 'Startup' && (
+          <div>
+            <Input
+              label="Incubation Center Code (optional)"
+              id="facilitatorCode"
+              name="facilitatorCode"
+              type="text"
+              placeholder="FAC-XXXXXX"
+              value={formData.facilitatorCode}
+              onChange={(e) => handleInputChange('facilitatorCode', e.target.value.toUpperCase())}
+              helpText="If you were invited by an incubation center, enter their code here"
+            />
           </div>
         )}
 

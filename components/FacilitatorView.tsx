@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Startup, NewInvestment, StartupAdditionRequest, ComplianceStatus } from '../types';
 import Card from './ui/Card';
 import Button from './ui/Button';
@@ -45,6 +45,7 @@ import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../li
 import FacilitatorProfileForm from './facilitator/FacilitatorProfileForm';
 import FacilitatorCard from './facilitator/FacilitatorCard';
 import PartnerNetworkTab from './facilitator/PartnerNetworkTab';
+import { existingDataService, ExistingStartup, EXISTING_DATA_PROGRAM } from '../lib/existingDataService';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -422,7 +423,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isLoadingProgramQuestionsConfig, setIsLoadingProgramQuestionsConfig] = useState(false);
   
   // ============ FEATURE 4: REPORTS MANDATE WIZARD ============
-  const [trackMyStartupsSubTab, setTrackMyStartupsSubTab] = useState<'portfolio' | 'reports'>('portfolio');
+  const [trackMyStartupsSubTab, setTrackMyStartupsSubTab] = useState<'portfolio' | 'reports' | 'existingData'>('portfolio');
 
   // ============ VIEW BY FILTER (Track My Startups Portfolio) ============
   const [viewByFilter, setViewByFilter] = useState<'program' | 'stage' | 'funding-stage' | 'timeline' | 'status'>('program');
@@ -453,6 +454,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isGenerateReportModalOpen, setIsGenerateReportModalOpen] = useState(false);
   const [selectedMandateForReport, setSelectedMandateForReport] = useState<ReportMandate | null>(null);
   const [reportFormatChoices, setReportFormatChoices] = useState<'csv' | 'pdf' | null>(null);
+
+  // ============ EXISTING DATA TAB ============
+  const [existingStartups, setExistingStartups] = useState<ExistingStartup[]>([]);
+  const [isLoadingExistingData, setIsLoadingExistingData] = useState(false);
+  const [isUploadingCSV, setIsUploadingCSV] = useState(false);
+  const [existingDataUploadResult, setExistingDataUploadResult] = useState<{ uploaded: number; skipped: number; errors: string[] } | null>(null);
+  const existingDataFileInputRef = useRef<HTMLInputElement>(null);
+  const [invitedEmails, setInvitedEmails] = useState<Set<string>>(new Set());
+  const [sendingInviteFor, setSendingInviteFor] = useState<string | null>(null); // email being processed
+  const [showAddExistingModal, setShowAddExistingModal] = useState(false);
+  const [addExistingForm, setAddExistingForm] = useState({ startupName: '', email: '', contactName: '', phone: '' });
+  const [isSavingManualStartup, setIsSavingManualStartup] = useState(false);
+  const [viewingExistingStartup, setViewingExistingStartup] = useState<ExistingStartup | null>(null);
   
   // ============ FEATURE 5: FORM 2 RESPONSE MODAL ============
   const [isForm2ModalOpen, setIsForm2ModalOpen] = useState(false);
@@ -976,8 +990,52 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       console.log('Program:', reportProgram);
       console.log('Questions:', reportQuestionIds);
 
+      // Handle the special "Existing Uploaded Data" program
+      if (reportProgram === EXISTING_DATA_PROGRAM) {
+        const existingData = await existingDataService.getExistingStartups(facilitatorId);
+        if (existingData.length === 0) {
+          messageService.warning('No Data', 'No existing startup data uploaded yet. Go to the "Existing Data" tab to upload.');
+          return;
+        }
+
+        // Collect ALL unique question keys across every startup's uploaded data
+        const allDataKeySet = new Set<string>();
+        existingData.forEach(s => Object.keys(s.data).forEach(k => allDataKeySet.add(k)));
+        const allDataKeys = Array.from(allDataKeySet);
+
+        if (allDataKeys.length === 0) {
+          messageService.warning('No Question Data', 'The uploaded CSV only contained Startup Name and Email. Download the template to include question columns.');
+          return;
+        }
+
+        // Build responses using ALL actual uploaded data (not filtered by reportQuestionIds)
+        const allResponses = existingData.map(s => ({
+          startup_id: s.email,
+          startup_name: s.startupName,
+          answers: allDataKeys.reduce((acc: Record<string, string>, qId: string) => {
+            acc[qId] = s.data[qId] || '';
+            return acc;
+          }, {})
+        }));
+        setSelectedMandateForReport({
+          id: 'temp-existing',
+          title: reportTitle,
+          program_name: 'Existing Data',
+          question_ids: allDataKeys,
+          target_startups: existingData.map(s => s.email),
+          source: 'existing',
+          status: 'generated',
+          created_at: new Date().toISOString()
+        } as any);
+        setMandateResponses({ 'temp-existing': allResponses });
+        setIsCreateReportModalOpen(false);
+        resetCreateReportModal();
+        setIsGenerateReportModalOpen(true);
+        return;
+      }
+
       // Get all startups in this program
-      const programStartups = portfolioStartups.filter(s => 
+      const programStartups = portfolioStartups.filter(s =>
         reportProgram === 'All Programs' || s.programName === reportProgram
       );
 
@@ -2806,6 +2864,133 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   }, [activeTab, trackMyStartupsSubTab, facilitatorId]);
 
+  // Load existing data when Existing Data tab is active
+  useEffect(() => {
+    if (activeTab === 'trackMyStartups' && trackMyStartupsSubTab === 'existingData' && facilitatorId) {
+      loadExistingStartups();
+    }
+  }, [activeTab, trackMyStartupsSubTab, facilitatorId]);
+
+  const loadExistingStartups = async () => {
+    if (!facilitatorId) return;
+    setIsLoadingExistingData(true);
+    try {
+      const [data, invited] = await Promise.all([
+        existingDataService.getExistingStartups(facilitatorId),
+        existingDataService.getInvitedEmails(facilitatorId),
+      ]);
+      setExistingStartups(data);
+      setInvitedEmails(invited);
+    } catch (err) {
+      console.error('Error loading existing startups:', err);
+    } finally {
+      setIsLoadingExistingData(false);
+    }
+  };
+
+  const handleInviteExistingStartup = async (startup: ExistingStartup) => {
+    if (!facilitatorId || !facilitatorCode) {
+      messageService.error('Missing Info', 'Facilitator code not available. Please try again.');
+      return;
+    }
+    setSendingInviteFor(startup.email);
+    try {
+      // Get facilitator display name for the email
+      const centerName = currentUser?.name || currentUser?.email || 'Your Incubation Center';
+      const result = await existingDataService.sendInvitation({
+        facilitatorId,
+        facilitatorCode,
+        centerName,
+        startupName: startup.startupName,
+        email: startup.email,
+      });
+      if (result.success) {
+        setInvitedEmails(prev => new Set([...prev, startup.email.toLowerCase()]));
+        messageService.success('Invite Sent', `Invitation emailed to ${startup.email}`, 3000);
+      } else {
+        messageService.error('Failed', result.error || 'Could not send invitation.');
+      }
+    } catch (err) {
+      messageService.error('Error', 'An unexpected error occurred.');
+    } finally {
+      setSendingInviteFor(null);
+    }
+  };
+
+  const handleExistingDataCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !facilitatorId) return;
+    setIsUploadingCSV(true);
+    setExistingDataUploadResult(null);
+    try {
+      const text = await file.text();
+      const rows = existingDataService.parseCSV(text);
+      if (rows.length === 0) {
+        messageService.warning('Empty File', 'No data rows found in the CSV. Make sure the file has headers and at least one data row.');
+        return;
+      }
+      const result = await existingDataService.uploadCSVData(facilitatorId, rows);
+      setExistingDataUploadResult(result);
+      if (result.uploaded > 0) {
+        messageService.success('Upload Complete', `${result.uploaded} startup(s) saved successfully.${result.skipped > 0 ? ` ${result.skipped} row(s) skipped.` : ''}`, 3000);
+        await loadExistingStartups();
+      } else {
+        messageService.warning('Upload Issue', `0 startups saved. ${result.skipped} row(s) skipped — check that Startup Name and Email columns are filled.`);
+      }
+    } catch (err) {
+      console.error('CSV upload error:', err);
+      messageService.error('Upload Failed', 'Could not process the CSV file.');
+    } finally {
+      setIsUploadingCSV(false);
+      if (existingDataFileInputRef.current) existingDataFileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteExistingStartup = async (responseId: string, startupName: string) => {
+    if (!window.confirm(`Remove "${startupName}" from existing data?`)) return;
+    const ok = await existingDataService.deleteExistingStartup(responseId);
+    if (ok) {
+      setExistingStartups(prev => prev.filter(s => s.responseId !== responseId));
+      messageService.success('Removed', `"${startupName}" deleted.`, 2000);
+    } else {
+      messageService.error('Error', 'Could not delete this entry.');
+    }
+  };
+
+  const handleSaveManualExistingStartup = async () => {
+    if (!facilitatorId) return;
+    const name = addExistingForm.startupName.trim();
+    const email = addExistingForm.email.trim();
+    if (!name || !email) {
+      messageService.error('Required', 'Startup Name and Email are required.');
+      return;
+    }
+    if (!email.includes('@')) {
+      messageService.error('Invalid Email', 'Please enter a valid email address.');
+      return;
+    }
+    setIsSavingManualStartup(true);
+    try {
+      const result = await existingDataService.uploadCSVData(facilitatorId, [{
+        'Startup Name': name,
+        'Email': email,
+      }]);
+      if (result.uploaded > 0) {
+        setShowAddExistingModal(false);
+        setAddExistingForm({ startupName: '', email: '', contactName: '', phone: '' });
+        await loadExistingStartups();
+        messageService.success('Startup Added', `"${name}" has been added. You can now send them an invite.`, 3000);
+      } else {
+        const errMsg = result.errors[0] || 'Could not save startup. The email may already exist.';
+        messageService.error('Failed', errMsg);
+      }
+    } catch (err) {
+      messageService.error('Error', 'An unexpected error occurred.');
+    } finally {
+      setIsSavingManualStartup(false);
+    }
+  };
+
   // Load mentor management data when tab is active
   useEffect(() => {
     if (activeTab === 'mentorManagement' && facilitatorCode) {
@@ -4517,6 +4702,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 >
                   Reports
                 </button>
+                <button
+                  onClick={() => setTrackMyStartupsSubTab('existingData')}
+                  className={`${
+                    trackMyStartupsSubTab === 'existingData'
+                      ? 'border-brand-primary text-brand-primary'
+                      : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                  } py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+                >
+                  Existing Data
+                </button>
               </nav>
             </div>
 
@@ -5103,6 +5298,313 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </Card>
                 )}
               </div>
+            )}
+
+            {/* Existing Data Sub-Tab Content */}
+            {trackMyStartupsSubTab === 'existingData' && (
+              <div className="space-y-6">
+                <Card>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-700">Existing Startup Data</h3>
+                      <p className="text-sm text-slate-500 mt-1">
+                        Add your past startups one by one or upload in bulk via CSV. Send them an invite to join TMS.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setAddExistingForm({ startupName: '', email: '', contactName: '', phone: '' });
+                          setShowAddExistingModal(true);
+                        }}
+                        className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        <PlusCircle className="h-4 w-4" />
+                        Add Startup
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => { await existingDataService.downloadTemplate(); }}
+                        className="flex items-center gap-1"
+                      >
+                        <Download className="h-4 w-4" />
+                        Template
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => existingDataFileInputRef.current?.click()}
+                        disabled={isUploadingCSV}
+                        className="flex items-center gap-1"
+                      >
+                        {isUploadingCSV ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-500" />
+                            Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <PlusCircle className="h-4 w-4" />
+                            Bulk CSV
+                          </>
+                        )}
+                      </Button>
+                      <input
+                        ref={existingDataFileInputRef}
+                        type="file"
+                        accept=".csv"
+                        className="hidden"
+                        onChange={handleExistingDataCSVUpload}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Upload result banner */}
+                  {existingDataUploadResult && (
+                    <div className={`mb-4 p-3 rounded-lg text-sm flex items-start gap-2 ${
+                      existingDataUploadResult.uploaded > 0
+                        ? 'bg-green-50 border border-green-200 text-green-800'
+                        : 'bg-amber-50 border border-amber-200 text-amber-800'
+                    }`}>
+                      <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <span className="font-medium">Upload complete:</span>
+                        {' '}{existingDataUploadResult.uploaded} saved
+                        {existingDataUploadResult.skipped > 0 && `, ${existingDataUploadResult.skipped} skipped (missing Name/Email)`}
+                        {existingDataUploadResult.errors.length > 0 && (
+                          <ul className="mt-1 list-disc list-inside text-xs opacity-80">
+                            {existingDataUploadResult.errors.slice(0, 3).map((e, i) => <li key={i}>{e}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Instructions */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                    <p className="text-sm text-blue-800 font-medium mb-1">How to use:</p>
+                    <ol className="text-sm text-blue-700 list-decimal list-inside space-y-1">
+                      <li>Click <span className="font-semibold">Add Startup</span> to manually add a startup (name + email required).</li>
+                      <li>Or use <span className="font-semibold">Bulk CSV</span> — download the template, fill it in, and upload.</li>
+                      <li>Once added, click <span className="font-semibold">Invite to TMS</span> — the startup receives an email with your facilitator code to register.</li>
+                      <li>Select <span className="font-semibold">"Existing (Uploaded Data)"</span> in Generate Report to include this data in reports.</li>
+                    </ol>
+                  </div>
+
+                  {/* Startups list */}
+                  {isLoadingExistingData ? (
+                    <div className="text-center py-12">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3" />
+                      <p className="text-slate-500">Loading existing data...</p>
+                    </div>
+                  ) : existingStartups.length === 0 ? (
+                    <div className="text-center py-12">
+                      <FileText className="h-16 w-16 text-slate-300 mx-auto mb-4" />
+                      <p className="text-slate-500 text-lg font-medium mb-1">No startups yet</p>
+                      <p className="text-slate-400 text-sm">Click <span className="font-semibold">Add Startup</span> to add one manually, or use <span className="font-semibold">Bulk CSV</span> to import many at once.</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm text-slate-600 font-medium mb-3">
+                        {existingStartups.length} startup{existingStartups.length !== 1 ? 's' : ''}
+                      </p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm divide-y divide-slate-200">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Startup Name</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Email</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Uploaded</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Invite to TMS</th>
+                              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Remove</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-slate-200">
+                            {existingStartups.map((startup) => {
+                              const alreadyInvited = invitedEmails.has(startup.email.toLowerCase());
+                              const isSending = sendingInviteFor === startup.email;
+                              return (
+                                <tr key={startup.responseId} className="hover:bg-slate-50">
+                                  <td className="px-4 py-3 font-medium text-slate-900">{startup.startupName}</td>
+                                  <td className="px-4 py-3 text-slate-600">{startup.email}</td>
+                                  <td className="px-4 py-3 text-slate-500 text-xs">
+                                    {startup.uploadedAt ? new Date(startup.uploadedAt).toLocaleDateString() : '—'}
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    {alreadyInvited ? (
+                                      <span className="inline-flex items-center gap-1 text-green-600 text-xs font-medium">
+                                        <CheckCircle className="h-3.5 w-3.5" />
+                                        Invited
+                                        <button
+                                          onClick={() => handleInviteExistingStartup(startup)}
+                                          disabled={isSending}
+                                          className="ml-1 text-slate-400 hover:text-blue-600 text-xs underline"
+                                          title="Resend invite"
+                                        >
+                                          Resend
+                                        </button>
+                                      </span>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleInviteExistingStartup(startup)}
+                                        disabled={isSending}
+                                        className="inline-flex items-center gap-1 px-3 py-1 rounded-md bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+                                      >
+                                        {isSending ? (
+                                          <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Sending...</>
+                                        ) : (
+                                          <><Send className="h-3 w-3" />Invite</>
+                                        )}
+                                      </button>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-right flex items-center justify-end gap-3">
+                                    <button
+                                      onClick={() => setViewingExistingStartup(startup)}
+                                      className="text-blue-600 hover:text-blue-800 text-xs font-medium"
+                                    >
+                                      View Data
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteExistingStartup(startup.responseId, startup.startupName)}
+                                      className="text-red-500 hover:text-red-700 text-xs font-medium"
+                                    >
+                                      Remove
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              </div>
+            )}
+
+            {/* View Uploaded Data Modal */}
+            {viewingExistingStartup && (
+              <Modal
+                isOpen={!!viewingExistingStartup}
+                onClose={() => setViewingExistingStartup(null)}
+                title={`Uploaded Data — ${viewingExistingStartup.startupName}`}
+              >
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Startup Name</p>
+                      <p className="font-medium text-slate-900">{viewingExistingStartup.startupName}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Email</p>
+                      <p className="font-medium text-slate-900">{viewingExistingStartup.email}</p>
+                    </div>
+                  </div>
+
+                  {Object.keys(viewingExistingStartup.data).length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Question Responses</p>
+                      {Object.entries(viewingExistingStartup.data).map(([qId, value]) => {
+                        const qInfo = questionBank.get(qId);
+                        const label = qInfo?.question_text || qId;
+                        return (
+                          <div key={qId} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                            <p className="text-xs text-slate-500 mb-1">{label}</p>
+                            <p className="text-sm text-slate-900">{value || <span className="italic text-slate-400">No answer</span>}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 bg-slate-50 rounded-lg">
+                      <p className="text-sm text-slate-500">No additional data uploaded for this startup.</p>
+                      <p className="text-xs text-slate-400 mt-1">Only Startup Name and Email were in the CSV. Download the template to include question columns.</p>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => setViewingExistingStartup(null)}
+                      className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </Modal>
+            )}
+
+            {/* Add Startup Modal */}
+            {showAddExistingModal && (
+              <Modal
+                isOpen={showAddExistingModal}
+                onClose={() => {
+                  setShowAddExistingModal(false);
+                  setAddExistingForm({ startupName: '', email: '', contactName: '', phone: '' });
+                }}
+                title="Add Startup"
+              >
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input
+                      label="Startup Name *"
+                      value={addExistingForm.startupName}
+                      onChange={(e) => setAddExistingForm(prev => ({ ...prev, startupName: e.target.value }))}
+                      placeholder="e.g. My Startup Inc."
+                    />
+                    <Input
+                      label="Email *"
+                      type="email"
+                      value={addExistingForm.email}
+                      onChange={(e) => setAddExistingForm(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="founder@startup.com"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input
+                      label="Contact Person"
+                      value={addExistingForm.contactName}
+                      onChange={(e) => setAddExistingForm(prev => ({ ...prev, contactName: e.target.value }))}
+                      placeholder="Founder / Contact name"
+                    />
+                    <Input
+                      label="Phone"
+                      value={addExistingForm.phone}
+                      onChange={(e) => setAddExistingForm(prev => ({ ...prev, phone: e.target.value }))}
+                      placeholder="+91 9876543210"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    After adding, use the <span className="font-semibold">Invite to TMS</span> button to send this startup an email with your facilitator code so they can register.
+                  </p>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      onClick={() => {
+                        setShowAddExistingModal(false);
+                        setAddExistingForm({ startupName: '', email: '', contactName: '', phone: '' });
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSaveManualExistingStartup}
+                      disabled={isSavingManualStartup}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    >
+                      {isSavingManualStartup ? (
+                        <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />Saving...</>
+                      ) : (
+                        'Add Startup'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </Modal>
             )}
           </div>
         );
@@ -8397,6 +8899,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   >
                     <option value="">Select a program...</option>
                     <option value="All Programs">All Programs</option>
+                    <option value={EXISTING_DATA_PROGRAM}>Existing (Uploaded Data)</option>
                     {Array.from(new Set(portfolioStartups.map(s => s.programName)))
                       .sort()
                       .map((programName) => (

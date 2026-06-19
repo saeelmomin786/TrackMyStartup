@@ -4,7 +4,7 @@
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
-type InviteKind = 'center' | 'investor';
+type InviteKind = 'center' | 'investor' | 'startup';
 
 interface InvitePayload {
   kind: InviteKind;
@@ -13,6 +13,9 @@ interface InvitePayload {
   phone?: string;
   startupName?: string;
   appUrl?: string;
+  // used when kind === 'startup'
+  centerName?: string;
+  facilitatorCode?: string;
 }
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
@@ -31,13 +34,37 @@ function jsonResponse(body: any, status = 200) {
 }
 
 function buildEmailContent(payload: InvitePayload) {
-  const { kind, name, email, phone, startupName, appUrl } = payload;
+  const { kind, name, email, phone, startupName, appUrl, centerName, facilitatorCode } = payload;
+  const registerUrl = appUrl ? `${appUrl}?page=register` : '';
+
+  // Invitation from incubation center to a startup
+  if (kind === 'startup') {
+    const subject = `You've been invited to join TrackMyStartup by ${centerName || 'an Incubation Center'}`;
+    const lines: string[] = [];
+    lines.push(`Hello ${name || startupName || 'Founder'},`);
+    lines.push('');
+    lines.push(`${centerName || 'An incubation center'} has added ${startupName || 'your startup'} to their portfolio on TrackMyStartup and would like you to create your account.`);
+    lines.push('');
+    lines.push('TrackMyStartup helps you track your startup\'s progress, connect with mentors, and manage investor relationships — all in one place.');
+    lines.push('');
+    if (facilitatorCode) {
+      lines.push(`Your facilitator code: ${facilitatorCode}`);
+      lines.push('Use this code when registering to automatically link your account to your incubation center.');
+      lines.push('');
+    }
+    if (registerUrl) {
+      lines.push(`Create your account here: ${registerUrl}`);
+      lines.push('');
+    }
+    lines.push('Best regards,');
+    lines.push('TrackMyStartup Support');
+    return { subject, text: lines.join('\n') };
+  }
+
   const roleLine = kind === 'center' ? 'Incubation Center / Accelerator' : 'Investor';
   const subject = kind === 'center'
     ? `Association details requested for ${startupName || 'a startup'}`
     : `Investment association details requested for ${startupName || 'a startup'}`;
-
-  const registerUrl = appUrl ? `${appUrl}?page=register` : '';
 
   const lines: string[] = [];
   lines.push(`Hello ${name},`);
@@ -97,7 +124,7 @@ serve(async (req) => {
     if (!payload || !payload.kind || !payload.name || !payload.email) {
       return jsonResponse({ error: 'Invalid payload' }, 400);
     }
-    if (!['center', 'investor'].includes(payload.kind)) {
+    if (!['center', 'investor', 'startup'].includes(payload.kind)) {
       return jsonResponse({ error: 'Invalid kind' }, 400);
     }
 

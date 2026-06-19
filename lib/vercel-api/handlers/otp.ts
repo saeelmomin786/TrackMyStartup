@@ -49,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { action, email, code, newPassword, purpose, advisorCode, name, role, startupName, centerName, firmName, investmentAdvisorCode } = req.body as {
+    const { action, email, code, newPassword, purpose, advisorCode, name, role, startupName, centerName, firmName, investmentAdvisorCode, facilitatorCode } = req.body as {
       action: 'request' | 'verify';
       email?: string;
       code?: string;
@@ -62,6 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       centerName?: string;
       firmName?: string;
       investmentAdvisorCode?: string;
+      facilitatorCode?: string;
     };
 
     const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -305,6 +306,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             mentor_code: mentorCode,
             facilitator_code: facilitatorCode,
             investment_advisor_code_entered: investmentAdvisorCode || advisorCode || null,
+            facilitator_code_entered: role === 'Startup' ? (facilitatorCode || null) : null,
             registration_date: new Date().toISOString().split('T')[0],
             is_profile_complete: false
           })

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Users, ArrowLeft, Building2, Menu, X, ChevronDown } from 'lucide-react';
+import { Search, Users, ArrowLeft, Building2, Menu, X, ChevronDown, Filter, SlidersHorizontal } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { authService } from '../lib/auth';
 import Card from './ui/Card';
@@ -25,6 +25,11 @@ const PublicInvestorPortfolioPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filterDomain, setFilterDomain] = useState<string[]>([]);
+  const [filterStage, setFilterStage] = useState<string[]>([]);
+  const [filterFirmType, setFilterFirmType] = useState('');
+  const [filterLocation, setFilterLocation] = useState('');
 
   useEffect(() => {
     setCurrentPath(window.location.pathname);
@@ -159,17 +164,75 @@ const PublicInvestorPortfolioPage: React.FC = () => {
     loadInvestors();
   }, []);
 
-  const filteredInvestors = useMemo(() => {
-    if (!searchTerm.trim()) return investors;
-    const search = searchTerm.toLowerCase();
-    return investors.filter((investor) => {
-      const name = (investor.investor_name || investor.user?.name || '').toLowerCase();
-      const firm = (investor.firm_name || investor.firm_type || '').toLowerCase();
-      const location = (investor.global_hq || investor.location || '').toLowerCase();
-      const domain = Array.isArray(investor.domain) ? investor.domain.join(', ').toLowerCase() : '';
-      return name.includes(search) || firm.includes(search) || location.includes(search) || domain.includes(search);
+  const allDomains = useMemo(() => {
+    const set = new Set<string>();
+    investors.forEach((inv) => {
+      if (Array.isArray(inv.domain)) inv.domain.forEach((d: string) => d && set.add(d));
     });
-  }, [investors, searchTerm]);
+    return Array.from(set).sort();
+  }, [investors]);
+
+  const allStages = useMemo(() => {
+    const set = new Set<string>();
+    investors.forEach((inv) => {
+      if (Array.isArray(inv.investment_stages)) inv.investment_stages.forEach((s: string) => s && set.add(s));
+      if (Array.isArray(inv.funding_stages)) inv.funding_stages.forEach((s: string) => s && set.add(s));
+    });
+    return Array.from(set).sort();
+  }, [investors]);
+
+  const allFirmTypes = useMemo(() => {
+    const set = new Set<string>();
+    investors.forEach((inv) => { if (inv.firm_type) set.add(inv.firm_type); });
+    return Array.from(set).sort();
+  }, [investors]);
+
+  const activeFilterCount = filterDomain.length + filterStage.length + (filterFirmType ? 1 : 0) + (filterLocation.trim() ? 1 : 0);
+
+  const filteredInvestors = useMemo(() => {
+    return investors.filter((investor) => {
+      if (searchTerm.trim()) {
+        const search = searchTerm.toLowerCase();
+        const name = (investor.investor_name || investor.user?.name || '').toLowerCase();
+        const firm = (investor.firm_name || investor.firm_type || '').toLowerCase();
+        const location = (investor.global_hq || investor.location || '').toLowerCase();
+        const domain = Array.isArray(investor.domain) ? investor.domain.join(', ').toLowerCase() : '';
+        if (!name.includes(search) && !firm.includes(search) && !location.includes(search) && !domain.includes(search)) return false;
+      }
+      if (filterDomain.length > 0) {
+        const invDomains: string[] = Array.isArray(investor.domain) ? investor.domain : [];
+        if (!filterDomain.some((d) => invDomains.includes(d))) return false;
+      }
+      if (filterStage.length > 0) {
+        const invStages: string[] = [
+          ...(Array.isArray(investor.investment_stages) ? investor.investment_stages : []),
+          ...(Array.isArray(investor.funding_stages) ? investor.funding_stages : []),
+        ];
+        if (!filterStage.some((s) => invStages.includes(s))) return false;
+      }
+      if (filterFirmType) {
+        if ((investor.firm_type || '') !== filterFirmType) return false;
+      }
+      if (filterLocation.trim()) {
+        const loc = filterLocation.toLowerCase();
+        const invLoc = (investor.global_hq || investor.location || '').toLowerCase();
+        if (!invLoc.includes(loc)) return false;
+      }
+      return true;
+    });
+  }, [investors, searchTerm, filterDomain, filterStage, filterFirmType, filterLocation]);
+
+  const clearFilters = () => {
+    setFilterDomain([]);
+    setFilterStage([]);
+    setFilterFirmType('');
+    setFilterLocation('');
+    setSearchTerm('');
+  };
+
+  const toggleArrayFilter = (arr: string[], setArr: (v: string[]) => void, value: string) => {
+    setArr(arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value]);
+  };
 
   const handleBack = () => {
     window.location.href = '/';
@@ -370,21 +433,113 @@ const PublicInvestorPortfolioPage: React.FC = () => {
           <p className="text-slate-600">Browse public investor cards and connect with the right backers.</p>
         </div>
 
-        <div className="mb-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search investors by name, firm, location, or domain..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
+        <div className="mb-6 space-y-3">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search investors by name, firm, location, or domain..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
+            <button
+              onClick={() => setFiltersOpen(!filtersOpen)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md border text-sm font-medium transition-colors ${filtersOpen || activeFilterCount > 0 ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-300 hover:border-blue-400'}`}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="bg-white text-blue-600 text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
           </div>
+
+          {filtersOpen && (
+            <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {allDomains.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Domain / Sector</p>
+                    <div className="flex flex-wrap gap-2">
+                      {allDomains.map((d) => (
+                        <button
+                          key={d}
+                          onClick={() => toggleArrayFilter(filterDomain, setFilterDomain, d)}
+                          className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterDomain.includes(d) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-700 border-slate-300 hover:border-blue-400'}`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {allStages.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Investment Stage</p>
+                    <div className="flex flex-wrap gap-2">
+                      {allStages.map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => toggleArrayFilter(filterStage, setFilterStage, s)}
+                          className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filterStage.includes(s) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-700 border-slate-300 hover:border-blue-400'}`}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {allFirmTypes.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Firm Type</p>
+                    <select
+                      value={filterFirmType}
+                      onChange={(e) => setFilterFirmType(e.target.value)}
+                      className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">All firm types</option>
+                      {allFirmTypes.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Location / HQ</p>
+                  <input
+                    type="text"
+                    placeholder="e.g. Mumbai, USA, Singapore..."
+                    value={filterLocation}
+                    onChange={(e) => setFilterLocation(e.target.value)}
+                    className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {activeFilterCount > 0 && (
+                <div className="flex justify-end pt-1 border-t border-slate-100">
+                  <button onClick={clearFilters} className="text-sm text-red-500 hover:text-red-700 font-medium transition-colors">
+                    Clear all filters
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="mb-4 text-sm text-slate-600">
           {filteredInvestors.length} {filteredInvestors.length === 1 ? 'investor' : 'investors'} found
+          {activeFilterCount > 0 && (
+            <button onClick={clearFilters} className="ml-3 text-blue-600 hover:underline text-xs">Clear filters</button>
+          )}
         </div>
 
         {filteredInvestors.length === 0 ? (
@@ -392,8 +547,11 @@ const PublicInvestorPortfolioPage: React.FC = () => {
             <Users className="h-16 w-16 text-slate-400 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-slate-800 mb-2">No Investors Found</h3>
             <p className="text-slate-500">
-              {searchTerm ? 'No investors match your search criteria.' : 'No public investors found.'}
+              {searchTerm || activeFilterCount > 0 ? 'No investors match your search or filter criteria.' : 'No public investors found.'}
             </p>
+            {(searchTerm || activeFilterCount > 0) && (
+              <button onClick={clearFilters} className="mt-4 text-sm text-blue-600 hover:underline font-medium">Clear all filters</button>
+            )}
           </Card>
         ) : (
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">

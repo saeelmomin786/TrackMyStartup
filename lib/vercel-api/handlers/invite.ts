@@ -28,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { type } = req.body as { type: 'startup-advisor' | 'investor-advisor' | 'startup-mentor' | 'center' | 'investor' };
+    const { type } = req.body as { type: 'startup-advisor' | 'investor-advisor' | 'startup-mentor' | 'facilitator-startup' | 'center' | 'investor' };
 
     // Handle startup-mentor (simple email-only flow)
     if (type === 'startup-mentor') {
@@ -131,6 +131,98 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         success: true,
         message: 'Invitation email sent successfully'
       });
+    }
+
+    // Handle facilitator-startup invite (incubation center → startup)
+    if (type === 'facilitator-startup') {
+      const {
+        centerName,
+        startupName,
+        contactEmail,
+        facilitatorCode,
+        redirectUrl
+      } = req.body as {
+        centerName: string;
+        startupName: string;
+        contactEmail: string;
+        facilitatorCode: string;
+        redirectUrl?: string;
+      };
+
+      if (!centerName || !startupName || !contactEmail || !facilitatorCode) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: Number(process.env.SMTP_PORT || 587) === 465,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+
+      const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
+      const fromName = process.env.SMTP_FROM_NAME || 'TrackMyStartup';
+
+      let siteUrl = redirectUrl;
+      if (!siteUrl) {
+        const isDevelopment = process.env.NODE_ENV === 'development' ||
+          !process.env.VERCEL_ENV ||
+          process.env.VITE_SITE_URL?.includes('localhost');
+        siteUrl = isDevelopment
+          ? 'http://localhost:5173'
+          : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://trackmystartup.com');
+      }
+
+      const registerUrl = `${siteUrl}/?page=register`;
+      const emailSubject = `You've been invited to join TrackMyStartup by ${centerName}`;
+      const emailText = [
+        `Hello ${startupName},`,
+        ``,
+        `${centerName} has added your startup to their portfolio on TrackMyStartup and would like you to create your account.`,
+        ``,
+        `TrackMyStartup helps you track your startup's progress, connect with mentors, and manage investor relationships — all in one place.`,
+        ``,
+        `Your facilitator code: ${facilitatorCode}`,
+        `Use this code when registering to automatically link your account to your incubation center.`,
+        ``,
+        `Create your account here: ${registerUrl}`,
+        ``,
+        `Best regards,`,
+        `TrackMyStartup Support`
+      ].join('\n');
+
+      const emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <p>Hello <strong>${startupName}</strong>,</p>
+          <p><strong>${centerName}</strong> has added your startup to their portfolio on TrackMyStartup and would like you to create your account.</p>
+          <p>TrackMyStartup helps you track your startup's progress, connect with mentors, and manage investor relationships — all in one place.</p>
+          <p style="background:#f0f4ff;padding:12px 16px;border-radius:8px;font-size:1.1em;">
+            <strong>Your facilitator code: ${facilitatorCode}</strong>
+          </p>
+          <p>Use this code when registering to automatically link your account to your incubation center.</p>
+          <p><a href="${registerUrl}" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Create Your Account</a></p>
+          <p style="color:#6b7280;font-size:0.875em;">Or copy this link: ${registerUrl}</p>
+          <p>Best regards,<br><strong>TrackMyStartup Support</strong></p>
+        </div>
+      `;
+
+      try {
+        await transporter.sendMail({
+          from: `${fromName} <${fromAddress}>`,
+          to: contactEmail,
+          subject: emailSubject,
+          text: emailText,
+          html: emailHtml
+        });
+      } catch (sendErr: any) {
+        console.error('Facilitator-startup invite email failed:', sendErr?.message || sendErr);
+        return res.status(500).json({ success: false, error: sendErr?.message || 'Email send failed' });
+      }
+
+      return res.status(200).json({ success: true, message: 'Invitation email sent successfully' });
     }
 
     // Handle startup-advisor and investor-advisor (complex flows with user creation)

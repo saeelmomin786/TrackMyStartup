@@ -1068,6 +1068,7 @@ export const authService = {
     centerName?: string;
     firmName?: string;
     investmentAdvisorCode?: string;
+    facilitatorCode?: string;
   }, options?: { skipSwitch?: boolean }): Promise<{ profile: any | null; error: string | null }> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -1112,6 +1113,7 @@ export const authService = {
           mentor_code: mentorCode,
           facilitator_code: facilitatorCode,
           investment_advisor_code_entered: profileData.investmentAdvisorCode || null,
+          facilitator_code_entered: profileData.role === 'Startup' ? (profileData.facilitatorCode || null) : null,
           registration_date: new Date().toISOString().split('T')[0]
         })
         .select()

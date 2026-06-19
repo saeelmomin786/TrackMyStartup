@@ -1,0 +1,485 @@
+import { supabase } from './supabase';
+
+export const EXISTING_DATA_PROGRAM = '__existing_data__';
+
+export interface ExistingStartup {
+  responseId: string;
+  startupName: string;
+  email: string;
+  data: Record<string, string>; // question_bank_id → answer value
+  uploadedAt: string;
+}
+
+export interface UploadResult {
+  uploaded: number;
+  skipped: number;
+  errors: string[];
+}
+
+interface QuestionBankRow {
+  id: string;
+  question_text: string;
+  category: string | null;
+  question_type: string;
+  options?: string[] | null;
+}
+
+class ExistingDataService {
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  // The reports table RLS requires user_profiles.id as facilitator_id (not auth.uid()).
+  // FacilitatorView passes the auth user ID, so we resolve it once here.
+  private async resolveProfileId(authUserId: string): Promise<string | null> {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('id')
+      .eq('auth_user_id', authUserId)
+      .single();
+    return data?.id ?? null;
+  }
+
+  private async fetchApprovedQuestions(): Promise<QuestionBankRow[]> {
+    const { data, error } = await supabase
+      .from('application_question_bank')
+      .select('id, question_text, category, question_type, options')
+      .eq('status', 'approved')
+      .order('category', { ascending: true })
+      .order('usage_count', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching question bank:', error);
+      return [];
+    }
+    return data || [];
+  }
+
+  // Get or create the special "Existing Data" report for a facilitator.
+  // Each call also syncs report_questions against the current question bank
+  // so new questions are always included.
+  async getOrCreateExistingDataReport(authUserId: string): Promise<string | null> {
+    // Resolve auth user ID → user_profiles.id (required by reports RLS)
+    const facilitatorId = await this.resolveProfileId(authUserId);
+    if (!facilitatorId) {
+      console.error('Could not resolve profile ID for auth user:', authUserId);
+      return null;
+    }
+
+    // Find or create the parent report record
+    let reportId: string;
+
+    const { data: existing } = await supabase
+      .from('reports')
+      .select('id')
+      .eq('facilitator_id', facilitatorId)
+      .eq('program_name', EXISTING_DATA_PROGRAM)
+      .maybeSingle();
+
+    if (existing?.id) {
+      reportId = existing.id;
+    } else {
+      const year = new Date().getFullYear().toString();
+      const { data: created, error } = await supabase
+        .from('reports')
+        .insert({
+          facilitator_id: facilitatorId,
+          title: 'Existing Startup Data',
+          program_name: EXISTING_DATA_PROGRAM,
+          report_year: year,
+        })
+        .select('id')
+        .single();
+
+      if (error || !created) {
+        console.error('Error creating existing data report:', error);
+        return null;
+      }
+      reportId = created.id;
+    }
+
+    // Sync report_questions with question bank
+    // pool_question_id stores the application_question_bank.id
+    const [bankQuestions, { data: existingQuestions }] = await Promise.all([
+      this.fetchApprovedQuestions(),
+      supabase
+        .from('report_questions')
+        .select('pool_question_id')
+        .eq('report_id', reportId),
+    ]);
+
+    const alreadySynced = new Set(
+      (existingQuestions || []).map((q: any) => q.pool_question_id)
+    );
+
+    const toInsert = bankQuestions
+      .filter(q => !alreadySynced.has(q.id))
+      .map((q, idx) => ({
+        report_id: reportId,
+        question_text: q.question_text,
+        question_type: q.question_type || 'text',
+        options: q.options ? JSON.stringify(q.options) : null,
+        is_from_pool: true,
+        pool_question_id: q.id, // ← links back to application_question_bank.id
+        position: (existingQuestions?.length || 0) + idx,
+      }));
+
+    if (toInsert.length > 0) {
+      await supabase.from('report_questions').insert(toInsert);
+    }
+
+    return reportId;
+  }
+
+  // Map question_text (CSV header) → report_question.id
+  // Also includes the reverse: pool_question_id → report_question.id
+  private async buildHeaderToQuestionIdMap(
+    reportId: string,
+    bankQuestions: QuestionBankRow[]
+  ): Promise<{ byText: Map<string, string>; byBankId: Map<string, string> }> {
+    const { data: rqs } = await supabase
+      .from('report_questions')
+      .select('id, question_text, pool_question_id')
+      .eq('report_id', reportId);
+
+    const byText = new Map<string, string>();   // question_text → report_question.id
+    const byBankId = new Map<string, string>(); // pool_question_id → report_question.id
+
+    (rqs || []).forEach((rq: any) => {
+      byText.set(rq.question_text.trim().toLowerCase(), rq.id);
+      if (rq.pool_question_id) byBankId.set(rq.pool_question_id, rq.id);
+    });
+
+    return { byText, byBankId };
+  }
+
+  // ── CSV parsing ────────────────────────────────────────────────────────────
+
+  parseCSV(csvText: string): Array<Record<string, string>> {
+    const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    if (lines.length < 2) return [];
+
+    // Strip BOM
+    const rawHeader = lines[0].startsWith('﻿') ? lines[0].slice(1) : lines[0];
+
+    // Parse headers (strip asterisks and trim)
+    const headers = this.splitCSVLine(rawHeader).map(h =>
+      h.replace(/^\*|\*$/g, '').trim()
+    );
+
+    const rows: Array<Record<string, string>> = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const values = this.splitCSVLine(line);
+      const row: Record<string, string> = {};
+      headers.forEach((header, idx) => {
+        row[header] = values[idx] || '';
+      });
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  private splitCSVLine(line: string): string[] {
+    const values: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === ',' && !inQuotes) {
+        values.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    values.push(current.trim());
+    return values;
+  }
+
+  private escapeCSV(val: string): string {
+    if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+      return `"${val.replace(/"/g, '""')}"`;
+    }
+    return val;
+  }
+
+  // ── Template download ──────────────────────────────────────────────────────
+
+  async downloadTemplate(): Promise<void> {
+    const questions = await this.fetchApprovedQuestions();
+
+    const headers = [
+      'Startup Name*',
+      'Email*',
+      ...questions.map(q => this.escapeCSV(q.question_text)),
+    ];
+
+    // One illustrative sample row; leave question answers blank so the template is clean
+    const sampleRow = [
+      'My Startup Inc.',
+      'founder@mystartup.com',
+      ...questions.map(() => ''),
+    ];
+
+    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'existing_startup_template.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Upload CSV rows ────────────────────────────────────────────────────────
+
+  async uploadCSVData(
+    facilitatorId: string,
+    rows: Array<Record<string, string>>
+  ): Promise<UploadResult> {
+    const reportId = await this.getOrCreateExistingDataReport(facilitatorId);
+    if (!reportId) return { uploaded: 0, skipped: 0, errors: ['Failed to initialise storage'] };
+
+    const bankQuestions = await this.fetchApprovedQuestions();
+    const { byText } = await this.buildHeaderToQuestionIdMap(reportId, bankQuestions);
+
+    let uploaded = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const row of rows) {
+      const name = (row['Startup Name'] || row['startup_name'] || row['startup name'] || '').trim();
+      const email = (row['Email'] || row['email'] || '').trim();
+
+      if (!name || !email) {
+        skipped++;
+        if (errors.length < 5) errors.push(`Row skipped — missing Startup Name or Email`);
+        continue;
+      }
+
+      // Upsert response — email is used as startup_id for future account linking
+      const { data: response, error: resErr } = await supabase
+        .from('report_responses')
+        .upsert(
+          {
+            report_id: reportId,
+            startup_id: email,
+            startup_name: name,
+            status: 'submitted',
+            submitted_at: new Date().toISOString(),
+          },
+          { onConflict: 'report_id,startup_id' }
+        )
+        .select('id')
+        .single();
+
+      if (resErr || !response) {
+        errors.push(`Failed to save "${name}": ${resErr?.message}`);
+        continue;
+      }
+
+      // Build answers for every CSV column that maps to a known question
+      const answersToUpsert: Array<{
+        response_id: string;
+        question_id: string;
+        answer: string;
+      }> = [];
+
+      for (const [header, value] of Object.entries(row)) {
+        // Skip the mandatory identity columns
+        const headerLower = header.toLowerCase().trim();
+        if (headerLower === 'startup name' || headerLower === 'email') continue;
+
+        const questionId = byText.get(headerLower);
+        if (!questionId) continue; // column not in question bank — ignore
+
+        answersToUpsert.push({
+          response_id: response.id,
+          question_id: questionId,
+          answer: JSON.stringify(value),
+        });
+      }
+
+      if (answersToUpsert.length > 0) {
+        await supabase
+          .from('report_answers')
+          .upsert(answersToUpsert, { onConflict: 'response_id,question_id' });
+      }
+
+      uploaded++;
+    }
+
+    return { uploaded, skipped, errors };
+  }
+
+  // ── Fetch uploaded startups ────────────────────────────────────────────────
+
+  async getExistingStartups(authUserId: string): Promise<ExistingStartup[]> {
+    // Resolve auth user ID → user_profiles.id (required by reports RLS)
+    const facilitatorId = await this.resolveProfileId(authUserId);
+    if (!facilitatorId) return [];
+
+    const { data: report } = await supabase
+      .from('reports')
+      .select('id')
+      .eq('facilitator_id', facilitatorId)
+      .eq('program_name', EXISTING_DATA_PROGRAM)
+      .maybeSingle();
+
+    if (!report?.id) return [];
+
+    // Build question_id → pool_question_id (bank ID) map for decoding answers
+    const { data: rqs } = await supabase
+      .from('report_questions')
+      .select('id, pool_question_id, question_text')
+      .eq('report_id', report.id);
+
+    const qKeyMap = new Map<string, string>(); // report_question.id → pool_question_id
+    (rqs || []).forEach((q: any) => {
+      qKeyMap.set(q.id, q.pool_question_id || q.question_text);
+    });
+
+    const { data: responses } = await supabase
+      .from('report_responses')
+      .select(`id, startup_id, startup_name, submitted_at, report_answers(question_id, answer)`)
+      .eq('report_id', report.id)
+      .order('created_at', { ascending: false });
+
+    return (responses || []).map((r: any) => {
+      const data: Record<string, string> = {};
+      (r.report_answers || []).forEach((a: any) => {
+        const key = qKeyMap.get(a.question_id) || a.question_id;
+        try {
+          data[key] = typeof a.answer === 'string' ? JSON.parse(a.answer) : String(a.answer ?? '');
+        } catch {
+          data[key] = String(a.answer ?? '');
+        }
+      });
+      return {
+        responseId: r.id,
+        startupName: r.startup_name,
+        email: r.startup_id,
+        data,
+        uploadedAt: r.submitted_at || '',
+      };
+    });
+  }
+
+  // ── Delete a single entry ──────────────────────────────────────────────────
+
+  async deleteExistingStartup(responseId: string): Promise<boolean> {
+    const { error } = await supabase
+      .from('report_responses')
+      .delete()
+      .eq('id', responseId);
+    return !error;
+  }
+
+  // ── Send invitation to a startup ───────────────────────────────────────────
+  // Creates a startup_invitations record (same table used by portfolio invites)
+  // and fires an email via the send-invite edge function.
+  async sendInvitation(params: {
+    facilitatorId: string;
+    facilitatorCode: string;
+    centerName: string;
+    startupName: string;
+    email: string;
+  }): Promise<{ success: boolean; invitationId?: string; error?: string }> {
+    try {
+      // 1. Upsert startup_invitations record — reuse the same table as portfolio invites
+      //    Check if a record already exists first
+      const { data: existing } = await supabase
+        .from('startup_invitations')
+        .select('id, status')
+        .eq('facilitator_id', params.facilitatorId)
+        .eq('email', params.email)
+        .maybeSingle();
+
+      let invitationId: string;
+
+      if (existing?.id) {
+        // Already invited — refresh the timestamp
+        await supabase
+          .from('startup_invitations')
+          .update({ status: 'sent', invitation_sent_at: new Date().toISOString() })
+          .eq('id', existing.id);
+        invitationId = existing.id;
+      } else {
+        const { data: created, error: insertErr } = await supabase
+          .from('startup_invitations')
+          .insert({
+            facilitator_id: params.facilitatorId,
+            startup_name: params.startupName,
+            contact_person: params.startupName,
+            email: params.email,
+            phone: '',
+            facilitator_code: params.facilitatorCode,
+            status: 'sent',
+            invitation_sent_at: new Date().toISOString(),
+          })
+          .select('id')
+          .single();
+
+        if (insertErr || !created) {
+          return { success: false, error: insertErr?.message || 'Failed to create invitation record' };
+        }
+        invitationId = created.id;
+      }
+
+      // 2. Fire email via Vercel serverless function (best-effort — don't fail if email fails)
+      try {
+        const redirectUrl = window.location.origin;
+        const response = await fetch('/api/invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'facilitator-startup',
+            centerName: params.centerName,
+            startupName: params.startupName,
+            contactEmail: params.email,
+            facilitatorCode: params.facilitatorCode,
+            redirectUrl,
+          }),
+        });
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          console.warn('Invite email failed (non-fatal):', errData);
+        }
+      } catch (emailErr) {
+        console.warn('Email send failed (non-fatal):', emailErr);
+      }
+
+      return { success: true, invitationId };
+    } catch (err: any) {
+      console.error('sendInvitation error:', err);
+      return { success: false, error: err?.message || 'Unknown error' };
+    }
+  }
+
+  // ── Fetch sent invitation emails for this facilitator ─────────────────────
+  // Returns a Set of emails that have already been invited
+  async getInvitedEmails(facilitatorId: string): Promise<Set<string>> {
+    const { data } = await supabase
+      .from('startup_invitations')
+      .select('email')
+      .eq('facilitator_id', facilitatorId)
+      .in('status', ['sent', 'accepted']);
+
+    const set = new Set<string>();
+    (data || []).forEach((row: any) => {
+      if (row.email) set.add(row.email.toLowerCase());
+    });
+    return set;
+  }
+}
+
+export const existingDataService = new ExistingDataService();

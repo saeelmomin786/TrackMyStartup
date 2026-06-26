@@ -42,6 +42,16 @@ export interface ReportAnswer {
   updated_at: string;
 }
 
+export interface ReportAnswerHistory {
+  id: string;
+  response_id: string;
+  question_id: string;
+  answer: string | string[]; // JSON parsed
+  submitted_at: string;
+  created_at: string;
+  startup_name?: string; // populated when fetched with join
+}
+
 class ReportsService {
   // ============ REPORTS ============
   async getReports(facilitatorId: string): Promise<Report[]> {
@@ -211,14 +221,14 @@ class ReportsService {
     questionId: string,
     answer: string | string[]
   ): Promise<boolean> {
+    const serialized = JSON.stringify(answer);
+    const now = new Date().toISOString();
+
+    // Update the latest answer
     const { error } = await supabase
       .from('report_answers')
       .upsert(
-        {
-          response_id: responseId,
-          question_id: questionId,
-          answer: JSON.stringify(answer)
-        },
+        { response_id: responseId, question_id: questionId, answer: serialized },
         { onConflict: 'response_id,question_id' }
       );
 
@@ -226,7 +236,72 @@ class ReportsService {
       console.error('Error upserting answer:', error);
       return false;
     }
+
+    // Record in history so all submissions are preserved
+    await supabase.from('report_answer_history').insert({
+      response_id: responseId,
+      question_id: questionId,
+      answer: serialized,
+      submitted_at: now,
+    });
+
     return true;
+  }
+
+  // ============ ANSWER HISTORY ============
+  async getAnswerHistory(responseId: string): Promise<ReportAnswerHistory[]> {
+    const { data, error } = await supabase
+      .from('report_answer_history')
+      .select('*')
+      .eq('response_id', responseId)
+      .order('submitted_at', { ascending: false });
+
+    if (error) {
+      console.error('Error loading answer history:', error);
+      return [];
+    }
+
+    return (data || []).map(row => ({
+      ...row,
+      answer: (() => {
+        try { return typeof row.answer === 'string' ? JSON.parse(row.answer) : row.answer; }
+        catch { return row.answer; }
+      })(),
+    }));
+  }
+
+  async getAllAnswerHistoryForReport(reportId: string): Promise<ReportAnswerHistory[]> {
+    // First get all response IDs for this report along with startup names
+    const { data: responses, error: respErr } = await supabase
+      .from('report_responses')
+      .select('id, startup_name')
+      .eq('report_id', reportId);
+
+    if (respErr || !responses || responses.length === 0) return [];
+
+    const responseIds = responses.map(r => r.id);
+    const nameMap: Record<string, string> = {};
+    responses.forEach(r => { nameMap[r.id] = r.startup_name; });
+
+    const { data, error } = await supabase
+      .from('report_answer_history')
+      .select('*')
+      .in('response_id', responseIds)
+      .order('submitted_at', { ascending: false });
+
+    if (error) {
+      console.error('Error loading all answer history for report:', error);
+      return [];
+    }
+
+    return (data || []).map(row => ({
+      ...row,
+      startup_name: nameMap[row.response_id] || undefined,
+      answer: (() => {
+        try { return typeof row.answer === 'string' ? JSON.parse(row.answer) : row.answer; }
+        catch { return row.answer; }
+      })(),
+    }));
   }
 }
 

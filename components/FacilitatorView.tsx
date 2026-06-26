@@ -32,7 +32,6 @@ import MessageContainer from './MessageContainer';
 import QuestionSelector from './QuestionSelector';
 import { questionBankService, ApplicationQuestion } from '../lib/questionBankService';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
-import { reportsService } from '../lib/reportsService';
 import { facilitatorMentorService, FacilitatorMentor, FacilitatorMentorAssignment, MentorMeetingRecord, MentorFacilitatorAssociation } from '../lib/facilitatorMentorService';
 import ApprovedMentorsTable from './mentor/ApprovedMentorsTable';
 import MentorPortfolioModal from './mentor/MentorPortfolioModal';
@@ -45,7 +44,8 @@ import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../li
 import FacilitatorProfileForm from './facilitator/FacilitatorProfileForm';
 import FacilitatorCard from './facilitator/FacilitatorCard';
 import PartnerNetworkTab from './facilitator/PartnerNetworkTab';
-import { existingDataService, ExistingStartup, EXISTING_DATA_PROGRAM } from '../lib/existingDataService';
+import { existingDataService, ExistingStartup, EXISTING_DATA_PROGRAM, TemplateConfig, TemplateQuestion } from '../lib/existingDataService';
+import { reportsService, ReportAnswerHistory } from '../lib/reportsService';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -423,7 +423,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isLoadingProgramQuestionsConfig, setIsLoadingProgramQuestionsConfig] = useState(false);
   
   // ============ FEATURE 4: REPORTS MANDATE WIZARD ============
-  const [trackMyStartupsSubTab, setTrackMyStartupsSubTab] = useState<'portfolio' | 'reports' | 'existingData'>('portfolio');
+  const [trackMyStartupsSubTab, setTrackMyStartupsSubTab] = useState<'portfolio' | 'reports'>('portfolio');
 
   // ============ VIEW BY FILTER (Track My Startups Portfolio) ============
   const [viewByFilter, setViewByFilter] = useState<'program' | 'stage' | 'funding-stage' | 'timeline' | 'status'>('program');
@@ -455,7 +455,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [selectedMandateForReport, setSelectedMandateForReport] = useState<ReportMandate | null>(null);
   const [reportFormatChoices, setReportFormatChoices] = useState<'csv' | 'pdf' | null>(null);
 
-  // ============ EXISTING DATA TAB ============
+  // ============ EXISTING DATA / PORTFOLIO ADD ============
   const [existingStartups, setExistingStartups] = useState<ExistingStartup[]>([]);
   const [isLoadingExistingData, setIsLoadingExistingData] = useState(false);
   const [isUploadingCSV, setIsUploadingCSV] = useState(false);
@@ -467,6 +467,22 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [addExistingForm, setAddExistingForm] = useState({ startupName: '', email: '', contactName: '', phone: '' });
   const [isSavingManualStartup, setIsSavingManualStartup] = useState(false);
   const [viewingExistingStartup, setViewingExistingStartup] = useState<ExistingStartup | null>(null);
+
+  // ============ TEMPLATE MODAL ============
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [templateStep, setTemplateStep] = useState<1 | 2>(1);
+  const [templateFromYear, setTemplateFromYear] = useState(new Date().getFullYear() - 2);
+  const [templateToYear, setTemplateToYear] = useState(new Date().getFullYear());
+  const [templateAllQuestions, setTemplateAllQuestions] = useState<TemplateQuestion[]>([]);
+  const [templateSelectedIds, setTemplateSelectedIds] = useState<string[]>([]);
+  const [templateMultipleMap, setTemplateMultipleMap] = useState<Record<string, boolean>>({});
+  const [isLoadingTemplateQuestions, setIsLoadingTemplateQuestions] = useState(false);
+  const [isAddingTemplateQuestion, setIsAddingTemplateQuestion] = useState(false);
+  const [newTemplateQuestionText, setNewTemplateQuestionText] = useState('');
+
+  // ============ REPORT VIEW MODE ============
+  const [reportViewMode, setReportViewMode] = useState<'recent' | 'all' | 'graph'>('recent');
+  const [reportAnswerHistory, setReportAnswerHistory] = useState<ReportAnswerHistory[]>([]);
   
   // ============ FEATURE 5: FORM 2 RESPONSE MODAL ============
   const [isForm2ModalOpen, setIsForm2ModalOpen] = useState(false);
@@ -2864,9 +2880,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   }, [activeTab, trackMyStartupsSubTab, facilitatorId]);
 
-  // Load existing data when Existing Data tab is active
+  // Load existing/manually-added startups when portfolio sub-tab is active
   useEffect(() => {
-    if (activeTab === 'trackMyStartups' && trackMyStartupsSubTab === 'existingData' && facilitatorId) {
+    if (activeTab === 'trackMyStartups' && trackMyStartupsSubTab === 'portfolio' && facilitatorId) {
       loadExistingStartups();
     }
   }, [activeTab, trackMyStartupsSubTab, facilitatorId]);
@@ -2989,6 +3005,60 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     } finally {
       setIsSavingManualStartup(false);
     }
+  };
+
+  // ── Template modal handlers ──────────────────────────────────────────────
+
+  const openTemplateModal = async () => {
+    setTemplateStep(1);
+    setTemplateFromYear(new Date().getFullYear() - 2);
+    setTemplateToYear(new Date().getFullYear());
+    setTemplateSelectedIds([]);
+    setTemplateMultipleMap({});
+    setNewTemplateQuestionText('');
+    setIsAddingTemplateQuestion(false);
+    setIsTemplateModalOpen(true);
+    // Pre-load questions
+    setIsLoadingTemplateQuestions(true);
+    try {
+      const { data } = await supabase
+        .from('application_question_bank')
+        .select('id, question_text, category, question_type')
+        .eq('status', 'approved')
+        .order('category', { ascending: true });
+      setTemplateAllQuestions(
+        (data || []).map((q: any) => ({ id: q.id, question_text: q.question_text, multipleResponses: false }))
+      );
+    } catch {
+      setTemplateAllQuestions([]);
+    } finally {
+      setIsLoadingTemplateQuestions(false);
+    }
+  };
+
+  const handleAddCustomTemplateQuestion = () => {
+    const text = newTemplateQuestionText.trim();
+    if (!text) return;
+    const customId = `custom-${Date.now()}`;
+    setTemplateAllQuestions(prev => [...prev, { id: customId, question_text: text, multipleResponses: false }]);
+    setTemplateSelectedIds(prev => [...prev, customId]);
+    setNewTemplateQuestionText('');
+    setIsAddingTemplateQuestion(false);
+  };
+
+  const handleGenerateTemplate = () => {
+    if (templateSelectedIds.length === 0) {
+      messageService.warning('No Questions', 'Please select at least one question.');
+      return;
+    }
+    const selectedQs = templateAllQuestions.filter(q => templateSelectedIds.includes(q.id));
+    const config: TemplateConfig = {
+      fromYear: templateFromYear,
+      toYear: templateToYear,
+      questions: selectedQs.map(q => ({ ...q, multipleResponses: !!templateMultipleMap[q.id] })),
+    };
+    existingDataService.generateAndDownloadTemplate(config);
+    setIsTemplateModalOpen(false);
   };
 
   // Load mentor management data when tab is active
@@ -4702,51 +4772,105 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 >
                   Reports
                 </button>
-                <button
-                  onClick={() => setTrackMyStartupsSubTab('existingData')}
-                  className={`${
-                    trackMyStartupsSubTab === 'existingData'
-                      ? 'border-brand-primary text-brand-primary'
-                      : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                  } py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
-                >
-                  Existing Data
-                </button>
               </nav>
             </div>
 
             {/* Portfolio Sub-Tab Content */}
             {trackMyStartupsSubTab === 'portfolio' && (
               <Card>
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                   <h3 className="text-lg font-semibold text-slate-700">Accepted Startups</h3>
-                  {viewByFilter === 'program' && selectedOpportunityId && (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={openEmailDraftsModal}
-                        className="flex items-center gap-1"
-                      >
-                        <Mail className="h-4 w-4" />
-                        Email Drafts
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          const selectedOpportunity = myPostedOpportunities.find(opp => opp.id === selectedOpportunityId);
-                          if (selectedOpportunity) {
-                            openProgramQuestionsConfig(selectedOpportunity.programName);
-                          }
-                        }}
-                        className="flex items-center gap-1"
-                      >
-                        <Settings className="h-4 w-4" />
-                        Configure Questions
-                      </Button>
-                    </div>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Add Startup / Template / Bulk CSV */}
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setAddExistingForm({ startupName: '', email: '', contactName: '', phone: '' });
+                        setShowAddExistingModal(true);
+                      }}
+                      className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      <PlusCircle className="h-4 w-4" />
+                      Add Startup
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={openTemplateModal}
+                      className="flex items-center gap-1"
+                    >
+                      <Download className="h-4 w-4" />
+                      Template
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => existingDataFileInputRef.current?.click()}
+                      disabled={isUploadingCSV}
+                      className="flex items-center gap-1"
+                    >
+                      {isUploadingCSV ? (
+                        <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-500" />Uploading...</>
+                      ) : (
+                        <><PlusCircle className="h-4 w-4" />Bulk CSV</>
+                      )}
+                    </Button>
+                    <input
+                      ref={existingDataFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      className="hidden"
+                      onChange={handleExistingDataCSVUpload}
+                    />
+                    {viewByFilter === 'program' && selectedOpportunityId && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={openEmailDraftsModal}
+                          className="flex items-center gap-1"
+                        >
+                          <Mail className="h-4 w-4" />
+                          Email Drafts
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            const selectedOpportunity = myPostedOpportunities.find(opp => opp.id === selectedOpportunityId);
+                            if (selectedOpportunity) {
+                              openProgramQuestionsConfig(selectedOpportunity.programName);
+                            }
+                          }}
+                          className="flex items-center gap-1"
+                        >
+                          <Settings className="h-4 w-4" />
+                          Configure Questions
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
+
+                {/* Upload result banner */}
+                {existingDataUploadResult && (
+                  <div className={`mb-4 p-3 rounded-lg text-sm flex items-start gap-2 ${
+                    existingDataUploadResult.uploaded > 0
+                      ? 'bg-green-50 border border-green-200 text-green-800'
+                      : 'bg-amber-50 border border-amber-200 text-amber-800'
+                  }`}>
+                    <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="font-medium">Upload complete:</span>
+                      {' '}{existingDataUploadResult.uploaded} saved
+                      {existingDataUploadResult.skipped > 0 && `, ${existingDataUploadResult.skipped} skipped (missing Name/Email)`}
+                      {existingDataUploadResult.errors.length > 0 && (
+                        <ul className="mt-1 list-disc list-inside text-xs opacity-80">
+                          {existingDataUploadResult.errors.slice(0, 3).map((e, i) => <li key={i}>{e}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* View By Pill Filter */}
                 <div className="flex flex-wrap gap-2 mb-5">
@@ -5064,6 +5188,93 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     </table>
                   )}
                 </div>
+
+                {/* Manually Added Startups */}
+                {(isLoadingExistingData || existingStartups.length > 0) && (
+                  <div className="mt-8">
+                    <h4 className="text-base font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                      <UserPlus className="h-4 w-4 text-blue-600" />
+                      Manually Added Startups
+                    </h4>
+                    {isLoadingExistingData ? (
+                      <div className="text-center py-6">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2" />
+                        <p className="text-slate-500 text-sm">Loading...</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm divide-y divide-slate-200">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Startup Name</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Email</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Added On</th>
+                              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Invite to TMS</th>
+                              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-slate-200">
+                            {existingStartups.map((startup) => {
+                              const alreadyInvited = invitedEmails.has(startup.email.toLowerCase());
+                              const isSending = sendingInviteFor === startup.email;
+                              return (
+                                <tr key={startup.responseId} className="hover:bg-slate-50">
+                                  <td className="px-4 py-3 font-medium text-slate-900">{startup.startupName}</td>
+                                  <td className="px-4 py-3 text-slate-600">{startup.email}</td>
+                                  <td className="px-4 py-3 text-slate-500 text-xs">
+                                    {startup.uploadedAt ? new Date(startup.uploadedAt).toLocaleDateString() : '—'}
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    {alreadyInvited ? (
+                                      <span className="inline-flex items-center gap-1 text-green-600 text-xs font-medium">
+                                        <CheckCircle className="h-3.5 w-3.5" />
+                                        Invited
+                                        <button
+                                          onClick={() => handleInviteExistingStartup(startup)}
+                                          disabled={isSending}
+                                          className="ml-1 text-slate-400 hover:text-blue-600 text-xs underline"
+                                          title="Resend invite"
+                                        >
+                                          Resend
+                                        </button>
+                                      </span>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleInviteExistingStartup(startup)}
+                                        disabled={isSending}
+                                        className="inline-flex items-center gap-1 px-3 py-1 rounded-md bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+                                      >
+                                        {isSending ? (
+                                          <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Sending...</>
+                                        ) : (
+                                          <><Send className="h-3 w-3" />Invite</>
+                                        )}
+                                      </button>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-right flex items-center justify-end gap-3">
+                                    <button
+                                      onClick={() => setViewingExistingStartup(startup)}
+                                      className="text-blue-600 hover:text-blue-800 text-xs font-medium"
+                                    >
+                                      View Data
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteExistingStartup(startup.responseId, startup.startupName)}
+                                      className="text-red-500 hover:text-red-700 text-xs font-medium"
+                                    >
+                                      Remove
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </Card>
             )}
 
@@ -5114,7 +5325,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             }`}
                           >
                             <div className="flex justify-between items-start mb-3">
-                              <div className="flex-1 cursor-pointer" onClick={() => setSelectedReportIdForTracking(mandate.id)}>
+                              <div className="flex-1 cursor-pointer" onClick={() => { setSelectedReportIdForTracking(mandate.id); setReportViewMode('recent'); setReportAnswerHistory([]); }}>
                                 <h4 className="font-semibold text-slate-900 text-sm">{mandate.title}</h4>
                               </div>
                               <div className="flex items-center gap-2">
@@ -5133,12 +5344,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                 </button>
                               </div>
                             </div>
-                            <p className="text-xs text-slate-600 mb-3 cursor-pointer hover:text-slate-800" onClick={() => setSelectedReportIdForTracking(mandate.id)}>
+                            <p className="text-xs text-slate-600 mb-3 cursor-pointer hover:text-slate-800" onClick={() => { setSelectedReportIdForTracking(mandate.id); setReportViewMode('recent'); setReportAnswerHistory([]); }}>
                               {mandate.program_name}
                             </p>
                             <div 
                               className="flex items-center justify-between text-xs text-slate-500 cursor-pointer mb-3"
-                              onClick={() => setSelectedReportIdForTracking(mandate.id)}
+                              onClick={() => { setSelectedReportIdForTracking(mandate.id); setReportViewMode('recent'); setReportAnswerHistory([]); }}
                             >
                               <span>{mandate.question_ids?.length || 0} questions</span>
                               <span className="flex items-center gap-1">
@@ -5164,18 +5375,47 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   )}
                 </Card>
 
-                {/* Response Tracking Table */}
+                {/* Response Tracking */}
                 {selectedReportIdForTracking && (
                   <Card>
-                    <h3 className="text-lg font-semibold text-slate-700 mb-4">Response Tracking</h3>
                     {(() => {
                       const selectedMandate = reportMandates.find(m => m.id === selectedReportIdForTracking);
                       if (!selectedMandate) return null;
-                      
                       const mandateResponseData = mandateResponses[selectedMandate.id] || [];
-                      
+
                       return (
                         <div className="space-y-4">
+                          {/* Header + summary */}
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <h3 className="text-lg font-semibold text-slate-700">Response Tracking</h3>
+                            {/* View mode toggle */}
+                            <div className="flex gap-1 p-1 bg-slate-100 rounded-lg">
+                              {([
+                                { key: 'recent', label: 'Most Recent' },
+                                { key: 'all', label: 'All Responses' },
+                                { key: 'graph', label: 'Graph' },
+                              ] as const).map(opt => (
+                                <button
+                                  key={opt.key}
+                                  onClick={async () => {
+                                    setReportViewMode(opt.key);
+                                    if (opt.key !== 'recent') {
+                                      const history = await reportsService.getAllAnswerHistoryForReport(selectedReportIdForTracking);
+                                      setReportAnswerHistory(history);
+                                    }
+                                  }}
+                                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                    reportViewMode === opt.key
+                                      ? 'bg-white text-blue-600 shadow-sm'
+                                      : 'text-slate-500 hover:text-slate-700'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
                           <div className="bg-slate-50 p-4 rounded-lg">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                               <div>
@@ -5198,100 +5438,149 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               </div>
                             </div>
                           </div>
-                          
-                          <div className="overflow-x-auto">
-                            <table className="w-full divide-y divide-slate-200">
-                              <thead className="bg-gradient-to-r from-slate-50 to-slate-100">
-                                <tr>
-                                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Startup Name</th>
-                                  <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Status</th>
-                                  <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Responses</th>
-                                  <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Action</th>
-                                </tr>
-                              </thead>
-                              <tbody className="bg-white divide-y divide-slate-200">
-                                {selectedMandate.target_startups?.map((startupId: string) => {
-                                  const response = mandateResponseData.find(r => r.startup_id === parseInt(startupId));
-                                  
-                                  // Get only answers for the configured questions in this mandate
-                                  const mandateAnswers = selectedMandate.question_ids?.reduce((acc: Record<string, string>, qId: string) => {
-                                    if (response?.answers && response.answers[qId]) {
-                                      acc[qId] = response.answers[qId];
-                                    }
-                                    return acc;
-                                  }, {}) || {};
-                                  
-                                  const answeredCount = Object.keys(mandateAnswers).length;
-                                  const totalQuestions = selectedMandate.question_ids?.length || 0;
-                                  
-                                  const handleDownloadResponses = () => {
-                                    // Create CSV content
-                                    let csvContent = "Question,Answer\n";
-                                    selectedMandate.question_ids?.forEach((qId: string) => {
-                                      const answer = mandateAnswers[qId] || "";
-                                      const questionData = questionBank.get(qId);
-                                      const questionText = questionData?.question_text || qId;
-                                      // Escape quotes in CSV
-                                      const escapedQuestion = `"${questionText.replace(/"/g, '""')}"`;
-                                      const escapedAnswer = `"${String(answer).replace(/"/g, '""')}"`;
-                                      csvContent += `${escapedQuestion},${escapedAnswer}\n`;
-                                    });
-                                    
-                                    // Create blob and download
-                                    const blob = new Blob([csvContent], { type: 'text/csv' });
-                                    const url = window.URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = `${response?.startup_name || startupId}_responses.csv`;
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    window.URL.revokeObjectURL(url);
-                                    document.body.removeChild(a);
-                                  };
-                                  
-                                  return (
-                                    <tr key={startupId} className="hover:bg-slate-50">
-                                      <td className="px-4 py-3 text-sm text-slate-900 font-medium">
-                                        {response?.startup_name || startupId}
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold text-white ${answeredCount === totalQuestions && totalQuestions > 0 ? 'bg-green-600' : 'bg-orange-500'}`}>
-                                          {answeredCount}/{totalQuestions}
-                                        </span>
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        {response && Object.keys(mandateAnswers).length > 0 ? (
-                                          <button
-                                            onClick={() => {
-                                              setSelectedStartupResponse(response);
-                                              setIsViewMandateResponsesModalOpen(true);
-                                            }}
-                                            className="inline-block px-3 py-2 bg-blue-600 text-white text-xs font-semibold rounded-md hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md"
-                                          >
-                                            View
-                                          </button>
-                                        ) : (
-                                          <span className="text-slate-400 italic">—</span>
-                                        )}
-                                      </td>
-                                      <td className="px-4 py-3 text-center">
-                                        {response && Object.keys(mandateAnswers).length > 0 ? (
-                                          <button
-                                            onClick={handleDownloadResponses}
-                                            className="inline-block px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-md hover:bg-green-700 transition-all duration-200 shadow-sm hover:shadow-md"
-                                          >
-                                            Download
-                                          </button>
-                                        ) : (
-                                          <span className="text-slate-400 italic">—</span>
-                                        )}
-                                      </td>
+
+                          {/* ── MOST RECENT VIEW ── */}
+                          {reportViewMode === 'recent' && (
+                            <div className="overflow-x-auto">
+                              <table className="w-full divide-y divide-slate-200">
+                                <thead className="bg-gradient-to-r from-slate-50 to-slate-100">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Startup Name</th>
+                                    <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Status</th>
+                                    <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Responses</th>
+                                    <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-slate-200">
+                                  {selectedMandate.target_startups?.map((startupId: string) => {
+                                    const response = mandateResponseData.find(r => r.startup_id === parseInt(startupId));
+                                    const mandateAnswers = selectedMandate.question_ids?.reduce((acc: Record<string, string>, qId: string) => {
+                                      if (response?.answers && response.answers[qId]) acc[qId] = response.answers[qId];
+                                      return acc;
+                                    }, {}) || {};
+                                    const answeredCount = Object.keys(mandateAnswers).length;
+                                    const totalQuestions = selectedMandate.question_ids?.length || 0;
+                                    const handleDownload = () => {
+                                      let csv = "Question,Answer\n";
+                                      selectedMandate.question_ids?.forEach((qId: string) => {
+                                        const q = questionBank.get(qId);
+                                        csv += `"${(q?.question_text || qId).replace(/"/g,'""')}","${String(mandateAnswers[qId] || '').replace(/"/g,'""')}"\n`;
+                                      });
+                                      const blob = new Blob([csv], { type: 'text/csv' });
+                                      const url = window.URL.createObjectURL(blob);
+                                      const a = document.createElement('a'); a.href = url;
+                                      a.download = `${response?.startup_name || startupId}_responses.csv`;
+                                      document.body.appendChild(a); a.click();
+                                      window.URL.revokeObjectURL(url); document.body.removeChild(a);
+                                    };
+                                    return (
+                                      <tr key={startupId} className="hover:bg-slate-50">
+                                        <td className="px-4 py-3 text-sm text-slate-900 font-medium">{response?.startup_name || startupId}</td>
+                                        <td className="px-4 py-3 text-center">
+                                          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold text-white ${answeredCount === totalQuestions && totalQuestions > 0 ? 'bg-green-600' : 'bg-orange-500'}`}>
+                                            {answeredCount}/{totalQuestions}
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                          {response && answeredCount > 0 ? (
+                                            <button onClick={() => { setSelectedStartupResponse(response); setIsViewMandateResponsesModalOpen(true); }}
+                                              className="px-3 py-2 bg-blue-600 text-white text-xs font-semibold rounded-md hover:bg-blue-700">View</button>
+                                          ) : <span className="text-slate-400 italic">—</span>}
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                          {response && answeredCount > 0 ? (
+                                            <button onClick={handleDownload}
+                                              className="px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-md hover:bg-green-700">Download</button>
+                                          ) : <span className="text-slate-400 italic">—</span>}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {/* ── ALL RESPONSES VIEW ── */}
+                          {reportViewMode === 'all' && (
+                            <div className="overflow-x-auto">
+                              {reportAnswerHistory.length === 0 ? (
+                                <p className="text-center text-slate-400 py-8 text-sm">No response history recorded yet.</p>
+                              ) : (
+                                <table className="w-full divide-y divide-slate-200 text-sm">
+                                  <thead className="bg-gradient-to-r from-slate-50 to-slate-100">
+                                    <tr>
+                                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Startup</th>
+                                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Question</th>
+                                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Answer</th>
+                                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Submitted</th>
                                     </tr>
+                                  </thead>
+                                  <tbody className="bg-white divide-y divide-slate-200">
+                                    {reportAnswerHistory.map((h) => {
+                                      const q = questionBank.get(h.question_id);
+                                      const answerDisplay = Array.isArray(h.answer)
+                                        ? h.answer.join(', ')
+                                        : typeof h.answer === 'object' && h.answer !== null
+                                        ? Object.entries(h.answer as Record<string,string>).map(([yr, v]) => `${yr}: ${v}`).join(' | ')
+                                        : String(h.answer ?? '');
+                                      return (
+                                        <tr key={h.id} className="hover:bg-slate-50">
+                                          <td className="px-4 py-3 font-medium text-slate-900">{h.startup_name || h.response_id.slice(0,8)}</td>
+                                          <td className="px-4 py-3 text-slate-700">{q?.question_text || h.question_id.slice(0,8)}</td>
+                                          <td className="px-4 py-3 text-slate-600 max-w-xs truncate">{answerDisplay || <span className="italic text-slate-400">—</span>}</td>
+                                          <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
+                                            {new Date(h.submitted_at).toLocaleString()}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          )}
+
+                          {/* ── GRAPH VIEW ── */}
+                          {reportViewMode === 'graph' && (() => {
+                            // Count responses per question (for multi-response questions)
+                            const qCounts: Record<string, number> = {};
+                            reportAnswerHistory.forEach(h => {
+                              const qId = h.question_id;
+                              qCounts[qId] = (qCounts[qId] || 0) + 1;
+                            });
+                            const bars = Object.entries(qCounts).filter(([, count]) => count > 1);
+                            if (bars.length === 0) {
+                              return (
+                                <p className="text-center text-slate-400 py-8 text-sm">No questions with multiple responses yet. Responses will appear here once submitted more than once.</p>
+                              );
+                            }
+                            const maxCount = Math.max(...bars.map(([, c]) => c));
+                            return (
+                              <div className="space-y-3">
+                                <p className="text-xs text-slate-500">Number of response submissions per question (questions with more than one submission shown)</p>
+                                {bars.map(([qId, count]) => {
+                                  const q = questionBank.get(qId);
+                                  const label = q?.question_text || qId.slice(0, 20);
+                                  const pct = Math.round((count / maxCount) * 100);
+                                  return (
+                                    <div key={qId} className="space-y-1">
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-xs text-slate-700 truncate max-w-xs" title={label}>{label}</span>
+                                        <span className="text-xs font-semibold text-blue-600 ml-2">{count}</span>
+                                      </div>
+                                      <div className="w-full bg-slate-100 rounded-full h-4">
+                                        <div
+                                          className="bg-blue-500 h-4 rounded-full transition-all duration-500"
+                                          style={{ width: `${pct}%` }}
+                                        />
+                                      </div>
+                                    </div>
                                   );
                                 })}
-                              </tbody>
-                            </table>
-                          </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })()}
@@ -5300,8 +5589,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               </div>
             )}
 
-            {/* Existing Data Sub-Tab Content */}
-            {trackMyStartupsSubTab === 'existingData' && (
+            {/* (Existing Data sub-tab removed — Add Startup / Template / CSV moved to Portfolio) */}
+            {false && (
               <div className="space-y-6">
                 <Card>
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -5533,6 +5822,203 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     >
                       Close
                     </button>
+                  </div>
+                </div>
+              </Modal>
+            )}
+
+            {/* Template Modal */}
+            {isTemplateModalOpen && (
+              <Modal
+                isOpen={isTemplateModalOpen}
+                onClose={() => setIsTemplateModalOpen(false)}
+                title="Download Data Template"
+              >
+                <div className="space-y-5">
+                  {/* Step indicator */}
+                  <div className="flex items-center gap-3">
+                    {[1, 2].map(step => (
+                      <div key={step} className="flex items-center">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${
+                          templateStep >= step ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                        }`}>{step}</div>
+                        {step < 2 && <div className={`w-10 h-1 mx-2 ${templateStep > 1 ? 'bg-blue-600' : 'bg-slate-200'}`} />}
+                      </div>
+                    ))}
+                    <span className="text-xs text-slate-500 ml-2">
+                      {templateStep === 1 ? 'Year Range' : 'Select Questions'}
+                    </span>
+                  </div>
+
+                  {/* Step 1: Year Range */}
+                  {templateStep === 1 && (
+                    <div className="space-y-4">
+                      <p className="text-sm text-slate-600">Choose the range of years you would like to upload data for. Questions marked as "multiple responses" will get one column per year.</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">From Year</label>
+                          <input
+                            type="number"
+                            min="2000"
+                            max={templateToYear}
+                            value={templateFromYear}
+                            onChange={e => setTemplateFromYear(Number(e.target.value))}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">To Year</label>
+                          <input
+                            type="number"
+                            min={templateFromYear}
+                            max={new Date().getFullYear() + 5}
+                            value={templateToYear}
+                            onChange={e => setTemplateToYear(Number(e.target.value))}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                      {templateFromYear > templateToYear && (
+                        <p className="text-xs text-red-500">From year must be ≤ To year.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Step 2: Question Selection */}
+                  {templateStep === 2 && (
+                    <div className="space-y-3">
+                      <p className="text-sm text-slate-600">
+                        Select the questions to include. Check <span className="font-semibold">Multiple Responses</span> to generate one column per year ({templateFromYear}–{templateToYear}).
+                      </p>
+
+                      {isLoadingTemplateQuestions ? (
+                        <div className="text-center py-6">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2" />
+                          <p className="text-slate-500 text-sm">Loading questions...</p>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Select All */}
+                          <div className="flex items-center justify-between mb-1">
+                            <button
+                              onClick={() => setTemplateSelectedIds(templateAllQuestions.map(q => q.id))}
+                              className="text-xs text-blue-600 hover:underline"
+                            >
+                              Select All
+                            </button>
+                            <button
+                              onClick={() => setTemplateSelectedIds([])}
+                              className="text-xs text-slate-500 hover:underline"
+                            >
+                              Clear
+                            </button>
+                          </div>
+
+                          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                            {templateAllQuestions.map(q => {
+                              const isSelected = templateSelectedIds.includes(q.id);
+                              const isMulti = !!templateMultipleMap[q.id];
+                              return (
+                                <div key={q.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={e => {
+                                      setTemplateSelectedIds(prev =>
+                                        e.target.checked ? [...prev, q.id] : prev.filter(id => id !== q.id)
+                                      );
+                                    }}
+                                    className="h-4 w-4 text-blue-600 rounded flex-shrink-0"
+                                  />
+                                  <span className="text-sm text-slate-800 flex-1 min-w-0">{q.question_text}</span>
+                                  {isSelected && (
+                                    <label className="flex items-center gap-1.5 text-xs text-slate-600 whitespace-nowrap cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={isMulti}
+                                        onChange={e => setTemplateMultipleMap(prev => ({ ...prev, [q.id]: e.target.checked }))}
+                                        className="h-3.5 w-3.5 text-blue-600 rounded"
+                                      />
+                                      Multiple Responses
+                                    </label>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Add Custom Question */}
+                          {isAddingTemplateQuestion ? (
+                            <div className="flex gap-2 mt-2">
+                              <input
+                                type="text"
+                                value={newTemplateQuestionText}
+                                onChange={e => setNewTemplateQuestionText(e.target.value)}
+                                placeholder="Enter question text…"
+                                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                onKeyDown={e => { if (e.key === 'Enter') handleAddCustomTemplateQuestion(); }}
+                                autoFocus
+                              />
+                              <button
+                                onClick={handleAddCustomTemplateQuestion}
+                                className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+                              >
+                                Add
+                              </button>
+                              <button
+                                onClick={() => { setIsAddingTemplateQuestion(false); setNewTemplateQuestionText(''); }}
+                                className="px-3 py-2 bg-slate-100 text-slate-600 text-sm rounded-lg hover:bg-slate-200"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setIsAddingTemplateQuestion(true)}
+                              className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 mt-1"
+                            >
+                              <Plus className="h-4 w-4" />
+                              Add Custom Question
+                            </button>
+                          )}
+
+                          <p className="text-xs text-slate-400 mt-1">
+                            {templateSelectedIds.length} question{templateSelectedIds.length !== 1 ? 's' : ''} selected
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Navigation */}
+                  <div className="flex justify-between pt-3 border-t">
+                    <button
+                      onClick={() => {
+                        if (templateStep === 1) setIsTemplateModalOpen(false);
+                        else setTemplateStep(1);
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
+                    >
+                      {templateStep === 1 ? 'Cancel' : 'Back'}
+                    </button>
+                    {templateStep === 1 ? (
+                      <button
+                        onClick={() => { if (templateFromYear <= templateToYear) setTemplateStep(2); }}
+                        disabled={templateFromYear > templateToYear}
+                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleGenerateTemplate}
+                        disabled={templateSelectedIds.length === 0}
+                        className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        Generate Template
+                      </button>
+                    )}
                   </div>
                 </div>
               </Modal>

@@ -6,8 +6,20 @@ export interface ExistingStartup {
   responseId: string;
   startupName: string;
   email: string;
-  data: Record<string, string>; // question_bank_id → answer value
+  data: Record<string, string | Record<string, string>>; // question_bank_id → answer or {year → answer}
   uploadedAt: string;
+}
+
+export interface TemplateQuestion {
+  id: string;
+  question_text: string;
+  multipleResponses: boolean; // true = one column per year
+}
+
+export interface TemplateConfig {
+  fromYear: number;
+  toYear: number;
+  questions: TemplateQuestion[];
 }
 
 export interface UploadResult {
@@ -212,28 +224,41 @@ class ExistingDataService {
 
   // ── Template download ──────────────────────────────────────────────────────
 
+  // Legacy: download all questions with no year columns
   async downloadTemplate(): Promise<void> {
     const questions = await this.fetchApprovedQuestions();
+    const config: TemplateConfig = {
+      fromYear: new Date().getFullYear(),
+      toYear: new Date().getFullYear(),
+      questions: questions.map(q => ({ id: q.id, question_text: q.question_text, multipleResponses: false })),
+    };
+    this.generateAndDownloadTemplate(config);
+  }
 
-    const headers = [
-      'Startup Name*',
-      'Email*',
-      ...questions.map(q => this.escapeCSV(q.question_text)),
-    ];
+  // Generate template CSV based on user-provided config
+  generateAndDownloadTemplate(config: TemplateConfig): void {
+    const years: number[] = [];
+    for (let y = config.fromYear; y <= config.toYear; y++) years.push(y);
 
-    // One illustrative sample row; leave question answers blank so the template is clean
-    const sampleRow = [
-      'My Startup Inc.',
-      'founder@mystartup.com',
-      ...questions.map(() => ''),
-    ];
+    const headers: string[] = ['Startup Name*', 'Email*'];
+    for (const q of config.questions) {
+      if (q.multipleResponses && years.length > 0) {
+        for (const yr of years) {
+          headers.push(this.escapeCSV(`${q.question_text} (${yr})`));
+        }
+      } else {
+        headers.push(this.escapeCSV(q.question_text));
+      }
+    }
+
+    const sampleRow = ['My Startup Inc.', 'founder@mystartup.com', ...headers.slice(2).map(() => '')];
 
     const csv = [headers.join(','), sampleRow.join(',')].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'existing_startup_template.csv';
+    link.download = 'startup_data_template.csv';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -241,6 +266,13 @@ class ExistingDataService {
   }
 
   // ── Upload CSV rows ────────────────────────────────────────────────────────
+
+  // Detect "Question Text (YYYY)" pattern → returns { baseText, year } or null
+  private parseYearHeader(header: string): { baseText: string; year: string } | null {
+    const m = header.match(/^(.+?)\s*\((\d{4})\)\s*$/);
+    if (!m) return null;
+    return { baseText: m[1].trim(), year: m[2] };
+  }
 
   async uploadCSVData(
     facilitatorId: string,
@@ -255,6 +287,7 @@ class ExistingDataService {
     let uploaded = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const now = new Date().toISOString();
 
     for (const row of rows) {
       const name = (row['Startup Name'] || row['startup_name'] || row['startup name'] || '').trim();
@@ -275,7 +308,7 @@ class ExistingDataService {
             startup_id: email,
             startup_name: name,
             status: 'submitted',
-            submitted_at: new Date().toISOString(),
+            submitted_at: now,
           },
           { onConflict: 'report_id,startup_id' }
         )
@@ -287,32 +320,51 @@ class ExistingDataService {
         continue;
       }
 
-      // Build answers for every CSV column that maps to a known question
-      const answersToUpsert: Array<{
-        response_id: string;
-        question_id: string;
-        answer: string;
-      }> = [];
+      // Collect answers — group year-suffixed columns into JSON objects per question
+      const yearGrouped: Map<string, Record<string, string>> = new Map(); // questionId → {year → value}
+      const singleAnswers: Map<string, string> = new Map(); // questionId → value
 
       for (const [header, value] of Object.entries(row)) {
-        // Skip the mandatory identity columns
         const headerLower = header.toLowerCase().trim();
         if (headerLower === 'startup name' || headerLower === 'email') continue;
 
-        const questionId = byText.get(headerLower);
-        if (!questionId) continue; // column not in question bank — ignore
-
-        answersToUpsert.push({
-          response_id: response.id,
-          question_id: questionId,
-          answer: JSON.stringify(value),
-        });
+        const yearParsed = this.parseYearHeader(header);
+        if (yearParsed) {
+          const qId = byText.get(yearParsed.baseText.toLowerCase());
+          if (!qId) continue;
+          if (!yearGrouped.has(qId)) yearGrouped.set(qId, {});
+          yearGrouped.get(qId)![yearParsed.year] = value;
+        } else {
+          const qId = byText.get(headerLower);
+          if (!qId) continue;
+          singleAnswers.set(qId, value);
+        }
       }
+
+      // Merge into upsert list
+      const answersToUpsert: Array<{ response_id: string; question_id: string; answer: string }> = [];
+      const historyToInsert: Array<{ response_id: string; question_id: string; answer: string; submitted_at: string }> = [];
+
+      singleAnswers.forEach((value, qId) => {
+        const serialized = JSON.stringify(value);
+        answersToUpsert.push({ response_id: response.id, question_id: qId, answer: serialized });
+        historyToInsert.push({ response_id: response.id, question_id: qId, answer: serialized, submitted_at: now });
+      });
+
+      yearGrouped.forEach((yearMap, qId) => {
+        const serialized = JSON.stringify(yearMap);
+        answersToUpsert.push({ response_id: response.id, question_id: qId, answer: serialized });
+        historyToInsert.push({ response_id: response.id, question_id: qId, answer: serialized, submitted_at: now });
+      });
 
       if (answersToUpsert.length > 0) {
         await supabase
           .from('report_answers')
           .upsert(answersToUpsert, { onConflict: 'response_id,question_id' });
+      }
+
+      if (historyToInsert.length > 0) {
+        await supabase.from('report_answer_history').insert(historyToInsert);
       }
 
       uploaded++;

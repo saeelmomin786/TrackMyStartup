@@ -8,6 +8,7 @@ export interface ExistingStartup {
   email: string;
   data: Record<string, string | Record<string, string>>; // question_bank_id → answer or {year → answer}
   uploadedAt: string;
+  assignedProgram: string | null;
 }
 
 export interface TemplateQuestion {
@@ -402,7 +403,7 @@ class ExistingDataService {
 
     const { data: responses } = await supabase
       .from('report_responses')
-      .select(`id, startup_id, startup_name, submitted_at, report_answers(question_id, answer)`)
+      .select(`id, startup_id, startup_name, submitted_at, assigned_program, report_answers(question_id, answer)`)
       .eq('report_id', report.id)
       .order('created_at', { ascending: false });
 
@@ -422,8 +423,20 @@ class ExistingDataService {
         email: r.startup_id,
         data,
         uploadedAt: r.submitted_at || '',
+        assignedProgram: r.assigned_program ?? null,
       };
     });
+  }
+
+  // ── Assign a manually-added startup to a real program ─────────────────────
+  // Lets an existing-data entry be pulled into that program's "Create Report"
+  // flow alongside live-tracked portfolio startups.
+  async assignProgram(responseId: string, programName: string | null): Promise<boolean> {
+    const { error } = await supabase
+      .from('report_responses')
+      .update({ assigned_program: programName })
+      .eq('id', responseId);
+    return !error;
   }
 
   // ── Delete a single entry ──────────────────────────────────────────────────

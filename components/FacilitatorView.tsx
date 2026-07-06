@@ -1055,12 +1055,19 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         reportProgram === 'All Programs' || s.programName === reportProgram
       );
 
-      if (programStartups.length === 0) {
+      // Also pull in manually-added/uploaded startups assigned to this program,
+      // so their data is included alongside live-tracked portfolio startups.
+      const allExistingData = await existingDataService.getExistingStartups(facilitatorId);
+      const assignedExistingData = allExistingData.filter(s =>
+        s.assignedProgram && (reportProgram === 'All Programs' || s.assignedProgram === reportProgram)
+      );
+
+      if (programStartups.length === 0 && assignedExistingData.length === 0) {
         messageService.warning('No Data', 'No startups found in this program');
         return;
       }
 
-      console.log(`📊 Found ${programStartups.length} startups in program`);
+      console.log(`📊 Found ${programStartups.length} startups in program, ${assignedExistingData.length} assigned existing-data startups`);
 
       // For each startup, fetch answers using cascading logic
       const allResponses: any[] = [];
@@ -1141,6 +1148,22 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         });
       }
 
+      // Merge in manually-added/uploaded startups assigned to this program.
+      // Their answers are keyed by application_question_bank.id, the same
+      // key space as reportQuestionIds, so they can be looked up directly.
+      for (const existing of assignedExistingData) {
+        const startupAnswers: Record<string, string> = {};
+        for (const questionId of reportQuestionIds) {
+          const value = existing.data[questionId];
+          startupAnswers[questionId] = typeof value === 'string' ? value : '';
+        }
+        allResponses.push({
+          startup_id: existing.email,
+          startup_name: existing.startupName,
+          answers: startupAnswers
+        });
+      }
+
       console.log('✅ Collected all responses:', allResponses);
 
       // Show format selection modal
@@ -1149,7 +1172,10 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         title: reportTitle,
         program_name: reportProgram,
         question_ids: reportQuestionIds,
-        target_startups: programStartups.map(s => String(s.id)),
+        target_startups: [
+          ...programStartups.map(s => String(s.id)),
+          ...assignedExistingData.map(s => s.email)
+        ],
         source: 'existing',
         status: 'generated',
         created_at: new Date().toISOString()
@@ -2970,6 +2996,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       messageService.success('Removed', `"${startupName}" deleted.`, 2000);
     } else {
       messageService.error('Error', 'Could not delete this entry.');
+    }
+  };
+
+  const handleAssignExistingStartupProgram = async (responseId: string, programName: string) => {
+    const normalized = programName || null;
+    const ok = await existingDataService.assignProgram(responseId, normalized);
+    if (ok) {
+      setExistingStartups(prev => prev.map(s =>
+        s.responseId === responseId ? { ...s, assignedProgram: normalized } : s
+      ));
+      messageService.success(
+        'Program Updated',
+        normalized ? `Assigned to "${normalized}". Its data will now be included when you generate a report for that program.` : 'Removed program assignment.',
+        2500
+      );
+    } else {
+      messageService.error('Error', 'Could not update the program assignment.');
     }
   };
 
@@ -5209,6 +5252,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Startup Name</th>
                               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Email</th>
                               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Added On</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Program</th>
                               <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Invite to TMS</th>
                               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Actions</th>
                             </tr>
@@ -5223,6 +5267,22 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   <td className="px-4 py-3 text-slate-600">{startup.email}</td>
                                   <td className="px-4 py-3 text-slate-500 text-xs">
                                     {startup.uploadedAt ? new Date(startup.uploadedAt).toLocaleDateString() : '—'}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <select
+                                      value={startup.assignedProgram || ''}
+                                      onChange={e => handleAssignExistingStartupProgram(startup.responseId, e.target.value)}
+                                      className="text-xs border border-slate-300 rounded-md px-2 py-1.5 text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
+                                      title="Assign this startup to a program so its data is included when you generate a report for that program"
+                                    >
+                                      <option value="">— Not Assigned —</option>
+                                      {Array.from(new Set(portfolioStartups.map(s => s.programName).filter(Boolean)))
+                                        .sort()
+                                        .map(programName => (
+                                          <option key={programName} value={programName}>{programName}</option>
+                                        ))
+                                      }
+                                    </select>
                                   </td>
                                   <td className="px-4 py-3 text-center">
                                     {alreadyInvited ? (

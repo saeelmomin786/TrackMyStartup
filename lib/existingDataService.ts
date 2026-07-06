@@ -439,6 +439,88 @@ class ExistingDataService {
     return !error;
   }
 
+  // ── Report generation: year-aware answer expansion ─────────────────────────
+  // A question tracked across multiple periods (e.g. "Turnover Generated") is
+  // stored as a JSON object { year → value } in ExistingStartup.data (see
+  // uploadCSVData's yearGrouped map). A plain single-value answer is a string.
+  // Reports need one column per selected year for the former, one column for
+  // the latter — this mirrors the exact structure used when the data was
+  // uploaded via the year-range Template.
+
+  // Scan every startup's data and collect every year key that appears anywhere.
+  collectAvailableYears(startups: ExistingStartup[]): string[] {
+    const years = new Set<string>();
+    startups.forEach(s => {
+      Object.values(s.data).forEach(v => {
+        if (v && typeof v === 'object') {
+          Object.keys(v).forEach(y => years.add(y));
+        }
+      });
+    });
+    return Array.from(years).sort();
+  }
+
+  // Expand base question ids into "questionId::year" keys for multi-year
+  // questions (filtered to selectedYears), leaving single-value questions as
+  // plain question ids. Returns the expanded id list (in report column order),
+  // which of the base ids were multi-year, and each startup's answer map keyed
+  // by the expanded ids.
+  buildYearAwareResponses(
+    startups: ExistingStartup[],
+    baseQuestionIds: string[],
+    selectedYears: string[]
+  ): {
+    expandedQuestionIds: string[];
+    multiYearQuestionIds: string[];
+    responses: Array<{ startup_id: string; startup_name: string; answers: Record<string, string> }>;
+  } {
+    const selectedYearSet = new Set(selectedYears);
+    const yearsByQuestion = new Map<string, Set<string>>();
+
+    baseQuestionIds.forEach(qId => {
+      const years = new Set<string>();
+      startups.forEach(s => {
+        const v = s.data[qId];
+        if (v && typeof v === 'object') Object.keys(v).forEach(y => years.add(y));
+      });
+      if (years.size > 0) yearsByQuestion.set(qId, years);
+    });
+
+    const expandedQuestionIds: string[] = [];
+    baseQuestionIds.forEach(qId => {
+      const years = yearsByQuestion.get(qId);
+      if (years) {
+        Array.from(years)
+          .filter(y => selectedYearSet.has(y))
+          .sort()
+          .forEach(y => expandedQuestionIds.push(`${qId}::${y}`));
+      } else {
+        expandedQuestionIds.push(qId);
+      }
+    });
+
+    const responses = startups.map(s => {
+      const answers: Record<string, string> = {};
+      expandedQuestionIds.forEach(key => {
+        if (key.includes('::')) {
+          const [qId, year] = key.split('::');
+          const v = s.data[qId];
+          answers[key] = (v && typeof v === 'object') ? (v[year] || '') : '';
+        } else {
+          const v = s.data[key];
+          answers[key] = typeof v === 'string' ? v : '';
+        }
+      });
+      return { startup_id: s.email, startup_name: s.startupName, answers };
+    });
+
+    return {
+      expandedQuestionIds,
+      multiYearQuestionIds: Array.from(yearsByQuestion.keys()),
+      responses,
+    };
+  }
+
   // ── Delete a single entry ──────────────────────────────────────────────────
 
   async deleteExistingStartup(responseId: string): Promise<boolean> {

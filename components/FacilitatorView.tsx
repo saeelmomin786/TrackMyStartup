@@ -443,6 +443,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isLoadingReportQuestions, setIsLoadingReportQuestions] = useState(false);
   const [reportSource, setReportSource] = useState<'existing' | 'startup' | ''>('');
   const [targetStartupIds, setTargetStartupIds] = useState<string[]>([]);
+  const [reportAvailableYears, setReportAvailableYears] = useState<string[]>([]);
+  const [reportSelectedYears, setReportSelectedYears] = useState<string[]>([]);
+  const [isLoadingReportYears, setIsLoadingReportYears] = useState(false);
   const [reportMandates, setReportMandates] = useState<ReportMandate[]>([]);
   const [mandateStats, setMandateStats] = useState<Record<string, { submitted: number; total: number }>>({});
   const [mandateResponses, setMandateResponses] = useState<Record<string, any[]>>({}); // Store responses per mandate
@@ -890,7 +893,33 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     setReportQuestionIds([]);
     setReportSource('');
     setTargetStartupIds([]);
+    setReportAvailableYears([]);
+    setReportSelectedYears([]);
   };
+
+  const loadReportAvailableYears = async () => {
+    if (!facilitatorId) return;
+    setIsLoadingReportYears(true);
+    try {
+      const allExisting = await existingDataService.getExistingStartups(facilitatorId);
+      const relevant = reportProgram === EXISTING_DATA_PROGRAM
+        ? allExisting
+        : allExisting.filter(s => s.assignedProgram && (reportProgram === 'All Programs' || s.assignedProgram === reportProgram));
+      const years = existingDataService.collectAvailableYears(relevant);
+      setReportAvailableYears(years);
+      setReportSelectedYears(years);
+    } catch (err) {
+      console.error('Error loading available report years:', err);
+    } finally {
+      setIsLoadingReportYears(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isCreateReportModalOpen && reportStep === 3 && reportSource === 'existing' && facilitatorId) {
+      loadReportAvailableYears();
+    }
+  }, [isCreateReportModalOpen, reportStep, reportSource, facilitatorId, reportProgram]);
 
   const handleNextStep = () => {
     if (reportStep === 1) {
@@ -1024,20 +1053,23 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           return;
         }
 
-        // Build responses using ALL actual uploaded data (not filtered by reportQuestionIds)
-        const allResponses = existingData.map(s => ({
-          startup_id: s.email,
-          startup_name: s.startupName,
-          answers: allDataKeys.reduce((acc: Record<string, string>, qId: string) => {
-            acc[qId] = s.data[qId] || '';
-            return acc;
-          }, {})
-        }));
+        // Expand multi-year questions (e.g. Turnover, Valuation) into one column
+        // per year the facilitator picked, matching the upload Template's layout.
+        // Single-value questions pass through unchanged.
+        const { expandedQuestionIds, responses: allResponses } = existingDataService.buildYearAwareResponses(
+          existingData, allDataKeys, reportSelectedYears
+        );
+
+        if (expandedQuestionIds.length === 0) {
+          messageService.warning('No Years Selected', 'Select at least one year to include in the report.');
+          return;
+        }
+
         setSelectedMandateForReport({
           id: 'temp-existing',
           title: reportTitle,
           program_name: 'Existing Data',
-          question_ids: allDataKeys,
+          question_ids: expandedQuestionIds,
           target_startups: existingData.map(s => s.email),
           source: 'existing',
           status: 'generated',
@@ -1149,20 +1181,36 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       }
 
       // Merge in manually-added/uploaded startups assigned to this program.
-      // Their answers are keyed by application_question_bank.id, the same
-      // key space as reportQuestionIds, so they can be looked up directly.
-      for (const existing of assignedExistingData) {
-        const startupAnswers: Record<string, string> = {};
-        for (const questionId of reportQuestionIds) {
-          const value = existing.data[questionId];
-          startupAnswers[questionId] = typeof value === 'string' ? value : '';
-        }
-        allResponses.push({
-          startup_id: existing.email,
-          startup_name: existing.startupName,
-          answers: startupAnswers
+      // Their answers are keyed by application_question_bank.id, the same key
+      // space as reportQuestionIds. Questions tracked across multiple years
+      // (e.g. Turnover, Valuation) get expanded into one column per year the
+      // facilitator picked; single-value questions pass through unchanged.
+      const {
+        expandedQuestionIds,
+        multiYearQuestionIds,
+        responses: existingResponses
+      } = existingDataService.buildYearAwareResponses(assignedExistingData, reportQuestionIds, reportSelectedYears);
+
+      // Live-tracked portfolio startups only ever have one (current) value per
+      // question — no per-year history — so re-key their flat answers onto the
+      // same expanded columns, repeating the current value into every year
+      // column for questions that turned out to be multi-year for the
+      // uploaded data.
+      const multiYearSet = new Set(multiYearQuestionIds);
+      allResponses.forEach(r => {
+        const rekeyed: Record<string, string> = {};
+        expandedQuestionIds.forEach(key => {
+          if (key.includes('::')) {
+            const [qId] = key.split('::');
+            rekeyed[key] = multiYearSet.has(qId) ? (r.answers[qId] || '') : '';
+          } else {
+            rekeyed[key] = r.answers[key] || '';
+          }
         });
-      }
+        r.answers = rekeyed;
+      });
+
+      allResponses.push(...existingResponses);
 
       console.log('✅ Collected all responses:', allResponses);
 
@@ -1171,7 +1219,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         id: 'temp-existing',
         title: reportTitle,
         program_name: reportProgram,
-        question_ids: reportQuestionIds,
+        question_ids: expandedQuestionIds,
         target_startups: [
           ...programStartups.map(s => String(s.id)),
           ...assignedExistingData.map(s => s.email)
@@ -9523,6 +9571,42 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   </label>
                 </div>
 
+                {reportSource === 'existing' && (
+                  isLoadingReportYears ? (
+                    <p className="text-xs text-slate-500">Checking for multi-year data...</p>
+                  ) : reportAvailableYears.length > 0 ? (
+                    <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm font-medium text-slate-700">Which year(s) do you want in this report?</p>
+                        <div className="flex gap-3 text-xs">
+                          <button type="button" onClick={() => setReportSelectedYears(reportAvailableYears)} className="text-blue-600 hover:underline">Select All</button>
+                          <button type="button" onClick={() => setReportSelectedYears([])} className="text-slate-500 hover:underline">Clear</button>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {reportAvailableYears.map(year => (
+                          <label key={year} className="flex items-center gap-1.5 text-xs bg-white border border-slate-300 rounded-md px-2 py-1 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={reportSelectedYears.includes(year)}
+                              onChange={(e) => {
+                                setReportSelectedYears(prev =>
+                                  e.target.checked ? [...prev, year] : prev.filter(y => y !== year)
+                                );
+                              }}
+                              className="h-3.5 w-3.5 text-blue-600 rounded"
+                            />
+                            {year}
+                          </label>
+                        ))}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2">
+                        Applies to questions tracked across multiple years (e.g. Turnover, Valuation). Single-value questions are unaffected.
+                      </p>
+                    </div>
+                  ) : null
+                )}
+
                 {reportSource === 'startup' && (
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Select Target Startups</label>
@@ -9915,9 +9999,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   // Create CSV header
                   let csvContent = "Program Name,Startup Name,";
                   mandateData.question_ids?.forEach(qId => {
-                    const q = questionBank.get(qId);
-                    const qText = q?.question_text || qId;
-                    csvContent += `"${qText.replace(/"/g, '""')}",`;
+                    // Multi-year questions are keyed "baseQuestionId::year" (see
+                    // existingDataService.buildYearAwareResponses) — split that
+                    // out into a "Question (Year)" column header.
+                    const [baseId, year] = qId.includes('::') ? qId.split('::') : [qId, null];
+                    const q = questionBank.get(baseId);
+                    const qText = q?.question_text || baseId;
+                    const label = year ? `${qText} (${year})` : qText;
+                    csvContent += `"${label.replace(/"/g, '""')}",`;
                   });
                   csvContent = csvContent.slice(0, -1) + "\n";
                   

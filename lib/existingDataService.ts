@@ -167,53 +167,86 @@ class ExistingDataService {
   // ── CSV parsing ────────────────────────────────────────────────────────────
 
   parseCSV(csvText: string): Array<Record<string, string>> {
-    const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-    if (lines.length < 2) return [];
+    const text = csvText.charCodeAt(0) === 0xFEFF ? csvText.slice(1) : csvText;
+    const rows = this.parseCSVRows(text);
+    if (rows.length < 2) return [];
 
-    // Strip BOM
-    const rawHeader = lines[0].startsWith('﻿') ? lines[0].slice(1) : lines[0];
+    const headers = rows[0].map(h => h.replace(/^\*|\*$/g, '').trim());
 
-    // Parse headers (strip asterisks and trim)
-    const headers = this.splitCSVLine(rawHeader).map(h =>
-      h.replace(/^\*|\*$/g, '').trim()
-    );
-
-    const rows: Array<Record<string, string>> = [];
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      const values = this.splitCSVLine(line);
+    const dataRows: Array<Record<string, string>> = [];
+    for (let i = 1; i < rows.length; i++) {
+      const values = rows[i];
+      if (values.every(v => v.trim() === '')) continue; // skip fully blank rows
       const row: Record<string, string> = {};
       headers.forEach((header, idx) => {
-        row[header] = values[idx] || '';
+        row[header] = (values[idx] || '').trim();
       });
-      rows.push(row);
+      dataRows.push(row);
     }
-    return rows;
+    return dataRows;
   }
 
-  private splitCSVLine(line: string): string[] {
-    const values: string[] = [];
-    let current = '';
+  // RFC 4180-aware CSV tokenizer. Operates over the *entire* file rather than
+  // splitting by "\n" first — quoted fields routinely contain embedded
+  // newlines (multi-line addresses, multi-founder names, achievement lists),
+  // and splitting by line before honoring quotes shreds those rows into
+  // corrupted fragments. This scans character-by-character and only treats
+  // an unquoted comma/newline as a field/row boundary.
+  private parseCSVRows(text: string): string[][] {
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let field = '';
     let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          current += '"';
-          i++;
+    let i = 0;
+    const len = text.length;
+
+    while (i < len) {
+      const ch = text[i];
+
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') {
+            field += '"';
+            i += 2;
+          } else {
+            inQuotes = false;
+            i++;
+          }
         } else {
-          inQuotes = !inQuotes;
+          field += ch;
+          i++;
         }
-      } else if (ch === ',' && !inQuotes) {
-        values.push(current.trim());
-        current = '';
+        continue;
+      }
+
+      if (ch === '"') {
+        inQuotes = true;
+        i++;
+      } else if (ch === ',') {
+        row.push(field);
+        field = '';
+        i++;
+      } else if (ch === '\r') {
+        i++; // ignore; \n (bare or following \r) ends the row below
+      } else if (ch === '\n') {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = '';
+        i++;
       } else {
-        current += ch;
+        field += ch;
+        i++;
       }
     }
-    values.push(current.trim());
-    return values;
+
+    // Flush the final field/row if the file doesn't end with a newline
+    if (field.length > 0 || row.length > 0) {
+      row.push(field);
+      rows.push(row);
+    }
+
+    return rows;
   }
 
   private escapeCSV(val: string): string {

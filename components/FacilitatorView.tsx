@@ -5297,6 +5297,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                         <table className="w-full text-sm divide-y divide-slate-200">
                           <thead className="bg-slate-50">
                             <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Sr No.</th>
                               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Startup Name</th>
                               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Email</th>
                               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Added On</th>
@@ -5306,11 +5307,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                             </tr>
                           </thead>
                           <tbody className="bg-white divide-y divide-slate-200">
-                            {existingStartups.map((startup) => {
+                            {existingStartups.map((startup, srIndex) => {
                               const alreadyInvited = invitedEmails.has(startup.email.toLowerCase());
                               const isSending = sendingInviteFor === startup.email;
                               return (
                                 <tr key={startup.responseId} className="hover:bg-slate-50">
+                                  <td className="px-4 py-3 text-slate-500 text-xs">{srIndex + 1}</td>
                                   <td className="px-4 py-3 font-medium text-slate-900">{startup.startupName}</td>
                                   <td className="px-4 py-3 text-slate-600">{startup.email}</td>
                                   <td className="px-4 py-3 text-slate-500 text-xs">
@@ -5908,10 +5910,32 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       {Object.entries(viewingExistingStartup.data).map(([qId, value]) => {
                         const qInfo = questionBank.get(qId);
                         const label = qInfo?.question_text || qId;
+                        // Multi-year answers (e.g. Turnover, Valuation) are stored as
+                        // { year → value } objects rather than a plain string.
+                        const isMultiYear = value !== null && typeof value === 'object';
+                        const yearEntries = isMultiYear
+                          ? Object.entries(value as Record<string, string>)
+                              .filter(([, v]) => v)
+                              .sort(([a], [b]) => a.localeCompare(b))
+                          : [];
+                        const hasAnswer = isMultiYear ? yearEntries.length > 0 : !!value;
                         return (
                           <div key={qId} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                             <p className="text-xs text-slate-500 mb-1">{label}</p>
-                            <p className="text-sm text-slate-900">{value || <span className="italic text-slate-400">No answer</span>}</p>
+                            {!hasAnswer ? (
+                              <p className="text-sm"><span className="italic text-slate-400">No answer</span></p>
+                            ) : isMultiYear ? (
+                              <div className="flex flex-wrap gap-2">
+                                {yearEntries.map(([year, v]) => (
+                                  <span key={year} className="inline-flex items-center gap-1 text-xs bg-white border border-slate-300 rounded-md px-2 py-1">
+                                    <span className="text-slate-500">{year}:</span>
+                                    <span className="font-medium text-slate-900">{v}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-slate-900">{value as string}</p>
+                            )}
                           </div>
                         );
                       })}

@@ -434,11 +434,13 @@ class ExistingDataService {
       qKeyMap.set(q.id, q.pool_question_id || q.question_text);
     });
 
+    // Ascending so the list mirrors upload order (row 1 of the CSV first) —
+    // lets facilitators match a row here back to a row in their spreadsheet.
     const { data: responses } = await supabase
       .from('report_responses')
       .select(`id, startup_id, startup_name, submitted_at, assigned_program, report_answers(question_id, answer)`)
       .eq('report_id', report.id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: true });
 
     return (responses || []).map((r: any) => {
       const data: Record<string, string> = {};

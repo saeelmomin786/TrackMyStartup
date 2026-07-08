@@ -2958,6 +2958,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   useEffect(() => {
     if (activeTab === 'trackMyStartups' && trackMyStartupsSubTab === 'portfolio' && facilitatorId) {
       loadExistingStartups();
+      // Needed so "View Data" can resolve question IDs to their text —
+      // loadQuestionBank() was previously only triggered by the Reports tab.
+      loadQuestionBank();
     }
   }, [activeTab, trackMyStartupsSubTab, facilitatorId]);
 

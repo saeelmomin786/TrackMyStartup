@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -29,15 +30,22 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
     top: 'items-start justify-center pt-20'
   };
 
+  // Rendered via a portal straight to <body> — mounting in place, deep inside
+  // the page's normal DOM tree, means any ancestor with a CSS transform (a
+  // common pattern for animated wrappers) redefines the containing block for
+  // `position: fixed`, so the modal ends up positioned relative to that
+  // ancestor's scroll offset instead of the real viewport. A portal sidesteps
+  // that entirely.
+
   if (fullScreen) {
-    return (
-      <div 
+    return createPortal(
+      <div
         className={`${variant} inset-0 bg-white flex flex-col`}
         style={{ zIndex, position: variant, top: 0, left: 0, right: 0, bottom: 0 }}
       >
         <div className="flex justify-between items-center p-6 border-b border-slate-200 bg-white sticky top-0 z-10">
           <h3 className="text-2xl font-semibold text-slate-900">{title}</h3>
-          <button 
+          <button
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 transition-colors p-2 rounded hover:bg-slate-100"
             aria-label="Close"
@@ -57,24 +65,25 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
             animation: fade-in 0.2s ease-out forwards;
           }
         `}</style>
-      </div>
+      </div>,
+      document.body
     );
   }
 
-  return (
-    <div 
+  return createPortal(
+    <div
       className={`${variant} inset-0 ${showBackdrop ? 'bg-slate-900 bg-opacity-50 backdrop-blur-sm' : ''} flex ${positionClasses[position]} p-4`}
       onClick={onClose}
       style={{ zIndex, position: variant, top: 0, left: 0, right: 0, bottom: 0 }}
     >
-      <div 
+      <div
         className={`bg-white rounded-xl shadow-2xl p-4 sm:p-6 w-full ${sizeClasses[size]} max-h-[80vh] relative animate-fade-in-up border border-slate-200 flex flex-col`}
         onClick={e => e.stopPropagation()} // Prevent closing when clicking inside modal
         style={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
       >
         <div className="flex justify-between items-center mb-4 border-b border-slate-200 pb-3 flex-shrink-0">
           <h3 className="text-lg sm:text-xl font-semibold text-slate-900">{title}</h3>
-          <button 
+          <button
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded hover:bg-slate-100 flex-shrink-0"
             aria-label="Close modal"
@@ -95,7 +104,8 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
           animation: fade-in-up 0.3s ease-out forwards;
         }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 };
 

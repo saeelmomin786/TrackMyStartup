@@ -474,6 +474,78 @@ class ExistingDataService {
     return !error;
   }
 
+  // ── Edit an uploaded startup's data from the "View Data" modal ────────────
+  // `answers` is keyed the same way as ExistingStartup.data (pool_question_id,
+  // value = plain string or { year → value } for multi-year questions).
+  async updateStartupData(
+    authUserId: string,
+    responseId: string,
+    updates: {
+      startupName?: string;
+      email?: string;
+      answers: Record<string, string | Record<string, string>>;
+    }
+  ): Promise<boolean> {
+    const facilitatorId = await this.resolveProfileId(authUserId);
+    if (!facilitatorId) return false;
+
+    const { data: report } = await supabase
+      .from('reports')
+      .select('id')
+      .eq('facilitator_id', facilitatorId)
+      .eq('program_name', EXISTING_DATA_PROGRAM)
+      .maybeSingle();
+    if (!report?.id) return false;
+
+    if (updates.startupName !== undefined || updates.email !== undefined) {
+      const responseUpdate: Record<string, string> = {};
+      if (updates.startupName !== undefined) responseUpdate.startup_name = updates.startupName;
+      if (updates.email !== undefined) responseUpdate.startup_id = updates.email;
+      const { error: infoErr } = await supabase
+        .from('report_responses')
+        .update(responseUpdate)
+        .eq('id', responseId);
+      if (infoErr) return false;
+    }
+
+    // Map pool_question_id (the key space used in ExistingStartup.data) back
+    // to this report's report_question.id, which report_answers references.
+    const { data: rqs } = await supabase
+      .from('report_questions')
+      .select('id, pool_question_id, question_text')
+      .eq('report_id', report.id);
+
+    const qIdMap = new Map<string, string>();
+    (rqs || []).forEach((q: any) => {
+      qIdMap.set(q.pool_question_id || q.question_text, q.id);
+    });
+
+    const now = new Date().toISOString();
+    const answersToUpsert: Array<{ response_id: string; question_id: string; answer: string }> = [];
+    const historyToInsert: Array<{ response_id: string; question_id: string; answer: string; submitted_at: string }> = [];
+
+    Object.entries(updates.answers).forEach(([key, value]) => {
+      const reportQuestionId = qIdMap.get(key);
+      if (!reportQuestionId) return;
+      const serialized = JSON.stringify(value);
+      answersToUpsert.push({ response_id: responseId, question_id: reportQuestionId, answer: serialized });
+      historyToInsert.push({ response_id: responseId, question_id: reportQuestionId, answer: serialized, submitted_at: now });
+    });
+
+    if (answersToUpsert.length > 0) {
+      const { error: ansErr } = await supabase
+        .from('report_answers')
+        .upsert(answersToUpsert, { onConflict: 'response_id,question_id' });
+      if (ansErr) return false;
+
+      await supabase.from('report_answer_history').insert(historyToInsert);
+    }
+
+    await supabase.from('report_responses').update({ submitted_at: now }).eq('id', responseId);
+
+    return true;
+  }
+
   // ── Report generation: year-aware answer expansion ─────────────────────────
   // A question tracked across multiple periods (e.g. "Turnover Generated") is
   // stored as a JSON object { year → value } in ExistingStartup.data (see

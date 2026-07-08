@@ -470,6 +470,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [addExistingForm, setAddExistingForm] = useState({ startupName: '', email: '', contactName: '', phone: '' });
   const [isSavingManualStartup, setIsSavingManualStartup] = useState(false);
   const [viewingExistingStartup, setViewingExistingStartup] = useState<ExistingStartup | null>(null);
+  const [isEditingExistingStartup, setIsEditingExistingStartup] = useState(false);
+  const [editingExistingStartupName, setEditingExistingStartupName] = useState('');
+  const [editingExistingStartupEmail, setEditingExistingStartupEmail] = useState('');
+  const [editingExistingStartupData, setEditingExistingStartupData] = useState<Record<string, string | Record<string, string>>>({});
+  const [isSavingExistingStartupEdit, setIsSavingExistingStartupEdit] = useState(false);
 
   // ============ TEMPLATE MODAL ============
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
@@ -3064,6 +3069,49 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       );
     } else {
       messageService.error('Error', 'Could not update the program assignment.');
+    }
+  };
+
+  const handleStartEditExistingStartup = (startup: ExistingStartup) => {
+    setEditingExistingStartupName(startup.startupName);
+    setEditingExistingStartupEmail(startup.email);
+    setEditingExistingStartupData({ ...startup.data });
+    setIsEditingExistingStartup(true);
+  };
+
+  const handleCancelEditExistingStartup = () => {
+    setIsEditingExistingStartup(false);
+    setEditingExistingStartupData({});
+  };
+
+  const handleSaveExistingStartupEdit = async () => {
+    if (!viewingExistingStartup || !facilitatorId) return;
+    setIsSavingExistingStartupEdit(true);
+    try {
+      const ok = await existingDataService.updateStartupData(facilitatorId, viewingExistingStartup.responseId, {
+        startupName: editingExistingStartupName.trim(),
+        email: editingExistingStartupEmail.trim(),
+        answers: editingExistingStartupData,
+      });
+      if (ok) {
+        const updated: ExistingStartup = {
+          ...viewingExistingStartup,
+          startupName: editingExistingStartupName.trim(),
+          email: editingExistingStartupEmail.trim(),
+          data: editingExistingStartupData,
+        };
+        setExistingStartups(prev => prev.map(s => s.responseId === updated.responseId ? updated : s));
+        setViewingExistingStartup(updated);
+        setIsEditingExistingStartup(false);
+        messageService.success('Saved', 'Startup data updated successfully.', 2000);
+      } else {
+        messageService.error('Error', 'Could not save changes.');
+      }
+    } catch (err) {
+      console.error('Error saving existing startup edit:', err);
+      messageService.error('Error', 'An unexpected error occurred while saving.');
+    } finally {
+      setIsSavingExistingStartupEdit(false);
     }
   };
 
@@ -5892,18 +5940,39 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             {viewingExistingStartup && (
               <Modal
                 isOpen={!!viewingExistingStartup}
-                onClose={() => setViewingExistingStartup(null)}
+                onClose={() => {
+                  setViewingExistingStartup(null);
+                  setIsEditingExistingStartup(false);
+                }}
                 title={`Uploaded Data — ${viewingExistingStartup.startupName}`}
               >
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div className="bg-slate-50 rounded-lg p-3">
                       <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Startup Name</p>
-                      <p className="font-medium text-slate-900">{viewingExistingStartup.startupName}</p>
+                      {isEditingExistingStartup ? (
+                        <input
+                          type="text"
+                          value={editingExistingStartupName}
+                          onChange={e => setEditingExistingStartupName(e.target.value)}
+                          className="w-full px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      ) : (
+                        <p className="font-medium text-slate-900">{viewingExistingStartup.startupName}</p>
+                      )}
                     </div>
                     <div className="bg-slate-50 rounded-lg p-3">
                       <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Email</p>
-                      <p className="font-medium text-slate-900">{viewingExistingStartup.email}</p>
+                      {isEditingExistingStartup ? (
+                        <input
+                          type="email"
+                          value={editingExistingStartupEmail}
+                          onChange={e => setEditingExistingStartupEmail(e.target.value)}
+                          className="w-full px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      ) : (
+                        <p className="font-medium text-slate-900">{viewingExistingStartup.email}</p>
+                      )}
                     </div>
                   </div>
 
@@ -5922,6 +5991,46 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                               .sort(([a], [b]) => a.localeCompare(b))
                           : [];
                         const hasAnswer = isMultiYear ? yearEntries.length > 0 : !!value;
+
+                        if (isEditingExistingStartup) {
+                          const editingValue = editingExistingStartupData[qId];
+                          if (isMultiYear) {
+                            const allYears = Object.keys(editingValue && typeof editingValue === 'object' ? editingValue : (value as Record<string, string>)).sort();
+                            return (
+                              <div key={qId} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                                <p className="text-xs text-slate-500 mb-2">{label}</p>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                  {allYears.map(year => (
+                                    <label key={year} className="flex items-center gap-1.5 text-xs">
+                                      <span className="text-slate-500 w-10 flex-shrink-0">{year}</span>
+                                      <input
+                                        type="text"
+                                        value={(editingValue as Record<string, string>)?.[year] ?? ''}
+                                        onChange={e => {
+                                          const newYearMap = { ...(editingExistingStartupData[qId] as Record<string, string> || {}), [year]: e.target.value };
+                                          setEditingExistingStartupData(prev => ({ ...prev, [qId]: newYearMap }));
+                                        }}
+                                        className="w-full px-2 py-1 border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                      />
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div key={qId} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                              <p className="text-xs text-slate-500 mb-1">{label}</p>
+                              <input
+                                type="text"
+                                value={(editingExistingStartupData[qId] as string) ?? ''}
+                                onChange={e => setEditingExistingStartupData(prev => ({ ...prev, [qId]: e.target.value }))}
+                                className="w-full px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                            </div>
+                          );
+                        }
+
                         return (
                           <div key={qId} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                             <p className="text-xs text-slate-500 mb-1">{label}</p>
@@ -5950,13 +6059,40 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     </div>
                   )}
 
-                  <div className="flex justify-end pt-2">
-                    <button
-                      onClick={() => setViewingExistingStartup(null)}
-                      className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
-                    >
-                      Close
-                    </button>
+                  <div className="flex justify-end gap-2 pt-2">
+                    {isEditingExistingStartup ? (
+                      <>
+                        <button
+                          onClick={handleCancelEditExistingStartup}
+                          disabled={isSavingExistingStartupEdit}
+                          className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleSaveExistingStartupEdit}
+                          disabled={isSavingExistingStartupEdit}
+                          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+                        >
+                          {isSavingExistingStartupEdit ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setViewingExistingStartup(null)}
+                          className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                        >
+                          Close
+                        </button>
+                        <button
+                          onClick={() => handleStartEditExistingStartup(viewingExistingStartup)}
+                          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
+                        >
+                          Edit
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </Modal>

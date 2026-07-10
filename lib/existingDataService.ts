@@ -29,6 +29,30 @@ export interface UploadResult {
   errors: string[];
 }
 
+export interface ExistingStartupAgreement {
+  incubationType: string | null;
+  feeType: 'Free' | 'Fees' | 'Equity' | 'Hybrid' | null;
+  feeAmount: number | null;
+  shares: number | null;
+  pricePerShare: number | null;
+  equityAllocated: number | null;
+  investmentAmount: number | null;
+  postMoneyValuation: number | null;
+  signedAgreementUrl: string | null;
+}
+
+const EMPTY_AGREEMENT: ExistingStartupAgreement = {
+  incubationType: null,
+  feeType: null,
+  feeAmount: null,
+  shares: null,
+  pricePerShare: null,
+  equityAllocated: null,
+  investmentAmount: null,
+  postMoneyValuation: null,
+  signedAgreementUrl: null,
+};
+
 interface QuestionBankRow {
   id: string;
   question_text: string;
@@ -544,6 +568,53 @@ class ExistingDataService {
     await supabase.from('report_responses').update({ submitted_at: now }).eq('id', responseId);
 
     return true;
+  }
+
+  // ── Agreement & fee terms for a manually-added (unregistered) startup ─────
+  // Mirrors the Recognition/Incubation entry type in CapTableTab.tsx, but for
+  // startups with no real startups.id — see existing_startup_agreements.
+
+  async getAgreement(responseId: string): Promise<ExistingStartupAgreement> {
+    const { data, error } = await supabase
+      .from('existing_startup_agreements')
+      .select('*')
+      .eq('response_id', responseId)
+      .maybeSingle();
+
+    if (error || !data) return { ...EMPTY_AGREEMENT };
+
+    return {
+      incubationType: data.incubation_type,
+      feeType: data.fee_type,
+      feeAmount: data.fee_amount,
+      shares: data.shares,
+      pricePerShare: data.price_per_share,
+      equityAllocated: data.equity_allocated,
+      investmentAmount: data.investment_amount,
+      postMoneyValuation: data.post_money_valuation,
+      signedAgreementUrl: data.signed_agreement_url,
+    };
+  }
+
+  async upsertAgreement(responseId: string, agreement: ExistingStartupAgreement): Promise<boolean> {
+    const { error } = await supabase
+      .from('existing_startup_agreements')
+      .upsert(
+        {
+          response_id: responseId,
+          incubation_type: agreement.incubationType,
+          fee_type: agreement.feeType,
+          fee_amount: agreement.feeAmount,
+          shares: agreement.shares,
+          price_per_share: agreement.pricePerShare,
+          equity_allocated: agreement.equityAllocated,
+          investment_amount: agreement.investmentAmount,
+          post_money_valuation: agreement.postMoneyValuation,
+          signed_agreement_url: agreement.signedAgreementUrl,
+        },
+        { onConflict: 'response_id' }
+      );
+    return !error;
   }
 
   // ── Report generation: year-aware answer expansion ─────────────────────────

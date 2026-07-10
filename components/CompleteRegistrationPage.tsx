@@ -15,6 +15,7 @@ import { userComplianceService, CountryComplianceInfo } from '../lib/userComplia
 import { getCurrencyForCountry, getCountryProfessionalTitles } from '../lib/utils';
 import { getQueryParam } from '../lib/urlState';
 import { supabase } from '../lib/supabase';
+import { questionBankService } from '../lib/questionBankService';
 import { generalDataService } from '../lib/generalDataService';
 
 interface Founder {
@@ -1939,6 +1940,71 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                 }
               } catch (error) {
                 console.error('❌ Exception while creating opportunity_applications record:', error);
+                // Don't throw - registration is already complete
+              }
+            }
+
+            // Claim any guest (no-login) applications submitted with this email —
+            // seed reusable draft answers for every match, and for the one
+            // matching the opportunity they registered through, copy answers/
+            // pitch materials 1:1 onto the real application created above.
+            if (startup?.id && userData.email) {
+              try {
+                const { data: guestApps } = await authService.supabase
+                  .from('guest_opportunity_applications')
+                  .select('id, opportunity_id, answers, pitch_deck_url, pitch_video_url')
+                  .eq('email', userData.email.toLowerCase())
+                  .is('claimed_at', null);
+
+                if (guestApps && guestApps.length > 0) {
+                  for (const guestApp of guestApps as any[]) {
+                    const answerEntries = Object.entries(guestApp.answers || {}) as [string, string][];
+
+                    // Seed reusable draft answers regardless of which opportunity this was for.
+                    await Promise.allSettled(
+                      answerEntries.map(([questionId, answerText]) =>
+                        questionBankService.saveStartupAnswer(startup.id, questionId, answerText)
+                      )
+                    );
+
+                    // If this guest row is for the specific opportunity they just
+                    // registered through, copy it 1:1 onto the real application record.
+                    if (guestApp.opportunity_id === opportunityIdFromSession) {
+                      const { data: realApp } = await authService.supabase
+                        .from('opportunity_applications')
+                        .select('id')
+                        .eq('startup_id', startup.id)
+                        .eq('opportunity_id', opportunityIdFromSession)
+                        .maybeSingle();
+
+                      if (realApp) {
+                        if (answerEntries.length > 0) {
+                          await questionBankService.saveApplicationResponses(
+                            (realApp as any).id,
+                            answerEntries.map(([questionId, answerText]) => ({ questionId, answerText }))
+                          );
+                        }
+                        await authService.supabase
+                          .from('opportunity_applications')
+                          // @ts-expect-error - Type inference issue
+                          .update({
+                            pitch_deck_url: guestApp.pitch_deck_url || null,
+                            pitch_video_url: guestApp.pitch_video_url || null,
+                          })
+                          .eq('id', (realApp as any).id);
+                      }
+                    }
+
+                    await authService.supabase
+                      .from('guest_opportunity_applications')
+                      // @ts-expect-error - Type inference issue
+                      .update({ claimed_at: new Date().toISOString(), claimed_startup_id: startup.id })
+                      .eq('id', guestApp.id);
+                  }
+                  console.log(`✅ Claimed ${guestApps.length} guest application(s) for ${userData.email}`);
+                }
+              } catch (error) {
+                console.error('❌ Exception while claiming guest applications:', error);
                 // Don't throw - registration is already complete
               }
             }

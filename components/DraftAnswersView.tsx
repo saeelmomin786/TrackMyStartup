@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
 import Input from './ui/Input';
-import { questionBankService, StartupAnswer } from '../lib/questionBankService';
+import { questionBankService, StartupAnswer, isOtherValue, encodeOtherAnswer, parseOtherText, OTHER_OPTION } from '../lib/questionBankService';
 import { messageService } from '../lib/messageService';
 import { Check, Search, FileText, Edit2, Trash2, Save } from 'lucide-react';
 
@@ -229,42 +229,98 @@ const DraftAnswersView: React.FC<DraftAnswersViewProps> = ({
                                 placeholder="Enter your answer here..."
                               />
                             ) : question.questionType === 'select' ? (
-                              <select
-                                value={currentAnswer}
-                                onChange={(e) => handleAnswerChange(answer.questionId, e.target.value)}
-                                className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
-                              >
-                                <option value="">Select an option</option>
-                                {question.options?.map((option, idx) => (
-                                  <option key={idx} value={option}>{option}</option>
-                                ))}
-                              </select>
-                            ) : question.questionType === 'multiselect' ? (
-                              <div className="space-y-2">
-                                {question.options?.map((option, idx) => {
-                                  const selectedValues = currentAnswer.split(',').map(v => v.trim()).filter(v => v.length > 0);
-                                  const isChecked = selectedValues.includes(option);
-                                  return (
-                                    <label key={idx} className="flex items-center gap-2 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={(e) => {
-                                          let newValues = [...selectedValues];
-                                          if (e.target.checked) {
-                                            newValues.push(option);
-                                          } else {
-                                            newValues = newValues.filter(v => v !== option);
-                                          }
-                                          handleAnswerChange(answer.questionId, newValues.join(','));
-                                        }}
-                                        className="rounded border-slate-300 text-brand-primary focus:ring-brand-primary"
+                              (() => {
+                                const displayValue = isOtherValue(currentAnswer) ? OTHER_OPTION : currentAnswer;
+                                const otherText = isOtherValue(currentAnswer) ? parseOtherText(currentAnswer) : '';
+                                return (
+                                  <>
+                                    <select
+                                      value={displayValue}
+                                      onChange={(e) => handleAnswerChange(answer.questionId, e.target.value === OTHER_OPTION ? encodeOtherAnswer('') : e.target.value)}
+                                      className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
+                                    >
+                                      <option value="">Select an option</option>
+                                      {question.options?.map((option, idx) => (
+                                        <option key={idx} value={option}>{option}</option>
+                                      ))}
+                                    </select>
+                                    {displayValue === OTHER_OPTION && (
+                                      <Input
+                                        type="text"
+                                        placeholder="Please specify"
+                                        value={otherText}
+                                        onChange={(e) => handleAnswerChange(answer.questionId, encodeOtherAnswer(e.target.value))}
+                                        className="mt-2"
                                       />
-                                      <span className="text-sm text-slate-700">{option}</span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
+                                    )}
+                                  </>
+                                );
+                              })()
+                            ) : question.questionType === 'multiselect' ? (
+                              (() => {
+                                const selectedValues = currentAnswer.split(',').map(v => v.trim()).filter(v => v.length > 0);
+                                const otherSegment = selectedValues.find(isOtherValue);
+                                const isOtherChecked = !!otherSegment;
+                                const otherText = otherSegment ? parseOtherText(otherSegment) : '';
+                                return (
+                                  <div className="space-y-2">
+                                    {question.options?.map((option, idx) => {
+                                      if (option === OTHER_OPTION) {
+                                        return (
+                                          <div key={idx} className="space-y-2">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={isOtherChecked}
+                                                onChange={(e) => {
+                                                  const withoutOther = selectedValues.filter(v => !isOtherValue(v));
+                                                  handleAnswerChange(answer.questionId, e.target.checked
+                                                    ? [...withoutOther, encodeOtherAnswer('')].join(',')
+                                                    : withoutOther.join(','));
+                                                }}
+                                                className="rounded border-slate-300 text-brand-primary focus:ring-brand-primary"
+                                              />
+                                              <span className="text-sm text-slate-700">Other</span>
+                                            </label>
+                                            {isOtherChecked && (
+                                              <Input
+                                                type="text"
+                                                placeholder="Please specify"
+                                                value={otherText}
+                                                onChange={(e) => {
+                                                  const withoutOther = selectedValues.filter(v => !isOtherValue(v));
+                                                  handleAnswerChange(answer.questionId, [...withoutOther, encodeOtherAnswer(e.target.value)].join(','));
+                                                }}
+                                                className="ml-6"
+                                              />
+                                            )}
+                                          </div>
+                                        );
+                                      }
+                                      const isChecked = selectedValues.includes(option);
+                                      return (
+                                        <label key={idx} className="flex items-center gap-2 cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={(e) => {
+                                              let newValues = [...selectedValues];
+                                              if (e.target.checked) {
+                                                newValues.push(option);
+                                              } else {
+                                                newValues = newValues.filter(v => v !== option);
+                                              }
+                                              handleAnswerChange(answer.questionId, newValues.join(','));
+                                            }}
+                                            className="rounded border-slate-300 text-brand-primary focus:ring-brand-primary"
+                                          />
+                                          <span className="text-sm text-slate-700">{option}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()
                             ) : question.questionType === 'number' ? (
                               <Input
                                 type="number"

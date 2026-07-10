@@ -1,5 +1,18 @@
 import { supabase } from './supabase';
 
+// ── "Other" free-text answer encoding ──────────────────────────────────────
+// A select/multiselect answer is always stored as a single flat string
+// (multiselect joins choices with `,`). When the "Other" option is picked,
+// the free-text explanation is encoded directly into that same string in
+// place of the bare "Other" token, so no schema change is needed anywhere
+// this is read (opportunity_application_responses, startup_application_answers,
+// guest_opportunity_applications).
+export const OTHER_OPTION = 'Other';
+const OTHER_PREFIX = 'Other: ';
+export function encodeOtherAnswer(otherText: string): string { return `${OTHER_PREFIX}${otherText}`; }
+export function isOtherValue(value: string): boolean { return value === OTHER_OPTION || value.startsWith(OTHER_PREFIX); }
+export function parseOtherText(value: string): string { return value.startsWith(OTHER_PREFIX) ? value.slice(OTHER_PREFIX.length) : ''; }
+
 export interface ApplicationQuestion {
   id: string;
   questionText: string;

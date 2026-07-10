@@ -653,11 +653,13 @@ const GrantOpportunitiesPage: React.FC = () => {
                                       type="button" 
                                       className="flex-1" 
                                       onClick={() => {
-                                        // Store the opportunity ID and redirect to register/login
+                                        // No account needed to apply anymore — go straight to the
+                                        // program page's application form (registration is optional,
+                                        // offered after submitting).
                                         const url = new URL(window.location.origin);
-                                        url.searchParams.set('page', 'register');
+                                        url.searchParams.set('view', 'program');
                                         url.searchParams.set('opportunityId', opp.id);
-                                        url.searchParams.set('programName', opp.programName);
+                                        url.searchParams.set('autoApply', 'true');
                                         window.location.href = url.toString();
                                       }}
                                     >

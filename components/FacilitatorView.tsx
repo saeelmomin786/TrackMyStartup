@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Startup, NewInvestment, StartupAdditionRequest, ComplianceStatus } from '../types';
+import { Startup, NewInvestment, StartupAdditionRequest, ComplianceStatus, IncubationType, FeeType } from '../types';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import Input from './ui/Input';
-import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, Mail, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download, GraduationCap, Calendar, Clock, Plus, ChevronDown, ChevronUp, BookOpen, AlertCircle, MessageCircle, Handshake } from 'lucide-react';
+import { LayoutGrid, PlusCircle, FileText, Video, Gift, Film, Edit, Users, Eye, CheckCircle, Check, Search, Share2, Trash2, Mail, UserPlus, Heart, FileQuestion, Star, Settings, X, Globe, ExternalLink, Linkedin, Briefcase, Shield, Building2, User, Send, Download, GraduationCap, Calendar, Clock, Plus, ChevronDown, ChevronUp, BookOpen, AlertCircle, MessageCircle, Handshake, Bell } from 'lucide-react';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
 import PortfolioDistributionChart from './charts/PortfolioDistributionChart';
 import PortfolioHealthCharts from './charts/PortfolioHealthCharts';
@@ -44,8 +44,11 @@ import { advisorConnectionRequestService, AdvisorConnectionRequest } from '../li
 import FacilitatorProfileForm from './facilitator/FacilitatorProfileForm';
 import FacilitatorCard from './facilitator/FacilitatorCard';
 import PartnerNetworkTab from './facilitator/PartnerNetworkTab';
-import { existingDataService, ExistingStartup, EXISTING_DATA_PROGRAM, TemplateConfig, TemplateQuestion } from '../lib/existingDataService';
+import { existingDataService, ExistingStartup, EXISTING_DATA_PROGRAM, TemplateConfig, TemplateQuestion, ExistingStartupAgreement } from '../lib/existingDataService';
 import { reportsService, ReportAnswerHistory } from '../lib/reportsService';
+import { storageService } from '../lib/storage';
+import CloudDriveInput from './ui/CloudDriveInput';
+import { startupActivityService, ActivityLogEntry } from '../lib/startupActivityService';
 
 interface FacilitatorViewProps {
   startups: Startup[];
@@ -80,6 +83,7 @@ type ReceivedApplication = {
   opportunityId: string;
   status: 'pending' | 'accepted' | 'rejected';
   pitchDeckUrl?: string;
+  pitchDeckViewedAt?: string;
   pitchVideoUrl?: string;
   diligenceStatus: 'none' | 'requested' | 'approved';
   agreementUrl?: string;
@@ -369,6 +373,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [isEmailDraftSelectModalOpen, setIsEmailDraftSelectModalOpen] = useState(false);
   const [selectedEmailDraftId, setSelectedEmailDraftId] = useState<string>('');
   const [selectedApplicationForEmail, setSelectedApplicationForEmail] = useState<ReceivedApplication | null>(null);
+  const [selectedGroupEmailAppIds, setSelectedGroupEmailAppIds] = useState<Set<string>>(new Set());
+  const [groupEmailApps, setGroupEmailApps] = useState<ReceivedApplication[] | null>(null);
+  const [activityUnreadCounts, setActivityUnreadCounts] = useState<Record<number, number>>({});
+  const [viewingActivityForApp, setViewingActivityForApp] = useState<ReceivedApplication | null>(null);
+  const [activityLogEntries, setActivityLogEntries] = useState<ActivityLogEntry[]>([]);
+  const [isLoadingActivityLog, setIsLoadingActivityLog] = useState(false);
   const [isSavingEmailDraft, setIsSavingEmailDraft] = useState(false);
   const [editingEmailDraftId, setEditingEmailDraftId] = useState<string | null>(null);
   const [emailDraftForm, setEmailDraftForm] = useState({
@@ -475,6 +485,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [editingExistingStartupEmail, setEditingExistingStartupEmail] = useState('');
   const [editingExistingStartupData, setEditingExistingStartupData] = useState<Record<string, string | Record<string, string>>>({});
   const [isSavingExistingStartupEdit, setIsSavingExistingStartupEdit] = useState(false);
+  const [viewingAgreement, setViewingAgreement] = useState<ExistingStartupAgreement | null>(null);
+  const [editingAgreementData, setEditingAgreementData] = useState<ExistingStartupAgreement>({
+    incubationType: null, feeType: null, feeAmount: null, shares: null, pricePerShare: null,
+    equityAllocated: null, investmentAmount: null, postMoneyValuation: null, signedAgreementUrl: null,
+  });
+  const [pendingAgreementFile, setPendingAgreementFile] = useState<File | null>(null);
+  const [isLoadingAgreement, setIsLoadingAgreement] = useState(false);
+  const [isUploadingAgreementFile, setIsUploadingAgreementFile] = useState(false);
 
   // ============ TEMPLATE MODAL ============
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
@@ -682,6 +700,28 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     window.open(`https://mail.google.com/mail/?${params.toString()}`, '_blank', 'noopener');
   };
 
+  // Group send: recipients go in BCC (so they don't see each other's emails),
+  // "to" is the facilitator's own address. Recipient-specific placeholders
+  // like {{startup_name}} aren't substituted since multiple startups are
+  // selected — subject/body are used as typed.
+  const openGmailDraftForMultiple = (draft: EmailDraft, apps: ReceivedApplication[]) => {
+    const recipients = apps.map(a => a.founderEmail).filter((e): e is string => !!e);
+    if (recipients.length === 0) {
+      messageService.warning('No Recipients', 'None of the selected startups have an email on file.');
+      return;
+    }
+    const to = currentUser?.email || '';
+    const params = new URLSearchParams({
+      view: 'cm',
+      fs: '1',
+      to,
+      su: draft.subject || '',
+      body: draft.body || '',
+      bcc: recipients.join(',')
+    });
+    window.open(`https://mail.google.com/mail/?${params.toString()}`, '_blank', 'noopener');
+  };
+
   const handleOpenEmailDraftSelect = (app: ReceivedApplication) => {
     if (!app.founderEmail) {
       messageService.info('Email Not Available', 'Startup email is not available.');
@@ -694,6 +734,29 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     setSelectedApplicationForEmail(app);
     setSelectedEmailDraftId(emailDrafts[0]?.id || '');
     setIsEmailDraftSelectModalOpen(true);
+  };
+
+  const handleOpenGroupEmailSelect = (apps: ReceivedApplication[]) => {
+    const withEmail = apps.filter(a => a.founderEmail);
+    if (withEmail.length === 0) {
+      messageService.info('Email Not Available', 'None of the selected startups have an email on file.');
+      return;
+    }
+    if (emailDrafts.length === 0) {
+      messageService.info('No Drafts', 'Please create an email draft first.');
+      return;
+    }
+    setGroupEmailApps(withEmail);
+    setSelectedEmailDraftId(emailDrafts[0]?.id || '');
+    setIsEmailDraftSelectModalOpen(true);
+  };
+
+  const toggleGroupEmailAppSelection = (appId: string) => {
+    setSelectedGroupEmailAppIds(prev => {
+      const next = new Set(prev);
+      if (next.has(appId)) next.delete(appId); else next.add(appId);
+      return next;
+    });
   };
 
   // ============ FEATURE 1: SHORTLISTING SYSTEM ============
@@ -1512,7 +1575,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         if (pinnedOpp) {
           const apps = await supabase
             .from('opportunity_applications')
-            .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, form2_requested, startups!inner(id,name,user_id, founders(email))')
+            .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_deck_viewed_at, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, form2_requested, startups!inner(id,name,user_id, founders(email))')
             .eq('opportunity_id', pinnedOpp)
             .order('created_at', { ascending: false });
           
@@ -1552,6 +1615,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               opportunityId: a.opportunity_id,
               status: a.status || 'pending',
               pitchDeckUrl: a.pitch_deck_url || undefined,
+              pitchDeckViewedAt: a.pitch_deck_viewed_at || undefined,
               pitchVideoUrl: a.pitch_video_url || undefined,
               diligenceStatus: a.diligence_status || 'none',
               agreementUrl: a.agreement_url || undefined,
@@ -1564,7 +1628,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               isShortlisted: a.is_shortlisted || false
               };
             });
-            
+
             setMyReceivedApplications(appsMapped);
           }
         }
@@ -2203,7 +2267,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             try {
             const { data: apps, error: appsError } = await supabase
               .from('opportunity_applications')
-              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, timeline, startup_status, startups!inner(id,name,user_id, founders(email))')
+              .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_deck_viewed_at, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, timeline, startup_status, startups!inner(id,name,user_id, founders(email))')
               .in('opportunity_id', oppIds)
               .order('created_at', { ascending: false });
             
@@ -2229,7 +2293,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                   // Try without the inner join
                   const { data: fallbackApps, error: fallbackAppsError } = await supabase
                     .from('opportunity_applications')
-                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, timeline, startup_status')
+                    .select('id, opportunity_id, status, startup_id, pitch_deck_url, pitch_deck_viewed_at, pitch_video_url, diligence_status, agreement_url, domain, stage, created_at, diligence_urls, is_shortlisted, timeline, startup_status')
                     .in('opportunity_id', oppIds)
                     .order('created_at', { ascending: false });
                   
@@ -2247,6 +2311,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                       diligenceStatus: a.diligence_status,
                       agreementUrl: a.agreement_url,
                       pitchDeckUrl: a.pitch_deck_url,
+                      pitchDeckViewedAt: a.pitch_deck_viewed_at || undefined,
                       pitchVideoUrl: a.pitch_video_url,
                       sector: a.domain,
                       stage: a.stage,
@@ -2312,6 +2377,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 opportunityId: a.opportunity_id,
                 status: a.status || 'pending',
                 pitchDeckUrl: a.pitch_deck_url || undefined,
+                pitchDeckViewedAt: a.pitch_deck_viewed_at || undefined,
                 pitchVideoUrl: a.pitch_video_url || undefined,
                 diligenceStatus: a.diligence_status || 'none',
                 agreementUrl: a.agreement_url || undefined,
@@ -2969,6 +3035,35 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   }, [activeTab, trackMyStartupsSubTab, facilitatorId]);
 
+  // Batch-fetch activity bell unread counts for all accepted startups —
+  // one query for the whole list rather than one per row.
+  useEffect(() => {
+    if (!facilitatorId || activeTab !== 'trackMyStartups' || trackMyStartupsSubTab !== 'portfolio') return;
+    const acceptedStartupIds = Array.from(new Set(
+      myReceivedApplications.filter(a => a.status === 'accepted').map(a => a.startupId)
+    ));
+    if (acceptedStartupIds.length === 0) {
+      setActivityUnreadCounts({});
+      return;
+    }
+    startupActivityService.getUnreadCounts(facilitatorId, acceptedStartupIds).then(setActivityUnreadCounts);
+  }, [facilitatorId, activeTab, trackMyStartupsSubTab, myReceivedApplications]);
+
+  const handleOpenActivityLog = async (app: ReceivedApplication) => {
+    setViewingActivityForApp(app);
+    setIsLoadingActivityLog(true);
+    try {
+      const entries = await startupActivityService.getActivityLog(app.startupId);
+      setActivityLogEntries(entries);
+      if (facilitatorId) {
+        await startupActivityService.markSeen(facilitatorId, app.startupId);
+        setActivityUnreadCounts(prev => ({ ...prev, [app.startupId]: 0 }));
+      }
+    } finally {
+      setIsLoadingActivityLog(false);
+    }
+  };
+
   const loadExistingStartups = async () => {
     if (!facilitatorId) return;
     setIsLoadingExistingData(true);
@@ -3072,28 +3167,71 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   };
 
-  const handleStartEditExistingStartup = (startup: ExistingStartup) => {
+  const handleOpenExistingStartupModal = async (startup: ExistingStartup, startInEditMode: boolean) => {
+    setViewingExistingStartup(startup);
+    setIsEditingExistingStartup(false);
+    setPendingAgreementFile(null);
+    setIsLoadingAgreement(true);
+    try {
+      const agreement = await existingDataService.getAgreement(startup.responseId);
+      setViewingAgreement(agreement);
+      if (startInEditMode) {
+        handleStartEditExistingStartup(startup, agreement);
+      }
+    } finally {
+      setIsLoadingAgreement(false);
+    }
+  };
+
+  const handleStartEditExistingStartup = (startup: ExistingStartup, agreement?: ExistingStartupAgreement) => {
     setEditingExistingStartupName(startup.startupName);
     setEditingExistingStartupEmail(startup.email);
     setEditingExistingStartupData({ ...startup.data });
+    setEditingAgreementData(agreement || viewingAgreement || {
+      incubationType: null, feeType: null, feeAmount: null, shares: null, pricePerShare: null,
+      equityAllocated: null, investmentAmount: null, postMoneyValuation: null, signedAgreementUrl: null,
+    });
+    setPendingAgreementFile(null);
     setIsEditingExistingStartup(true);
   };
 
   const handleCancelEditExistingStartup = () => {
     setIsEditingExistingStartup(false);
     setEditingExistingStartupData({});
+    setPendingAgreementFile(null);
   };
 
   const handleSaveExistingStartupEdit = async () => {
     if (!viewingExistingStartup || !facilitatorId) return;
     setIsSavingExistingStartupEdit(true);
     try {
-      const ok = await existingDataService.updateStartupData(facilitatorId, viewingExistingStartup.responseId, {
-        startupName: editingExistingStartupName.trim(),
-        email: editingExistingStartupEmail.trim(),
-        answers: editingExistingStartupData,
-      });
-      if (ok) {
+      let agreementToSave = editingAgreementData;
+      if (pendingAgreementFile) {
+        setIsUploadingAgreementFile(true);
+        const uploadResult = await storageService.uploadFile(
+          pendingAgreementFile,
+          'startup-documents',
+          `agreements/existing-data/${viewingExistingStartup.responseId}/signed_agreement_${Date.now()}_${pendingAgreementFile.name}`
+        );
+        setIsUploadingAgreementFile(false);
+        if (!uploadResult.success || !uploadResult.url) {
+          messageService.error('Upload Failed', uploadResult.error || 'Could not upload the agreement file.');
+          setIsSavingExistingStartupEdit(false);
+          return;
+        }
+        agreementToSave = { ...agreementToSave, signedAgreementUrl: uploadResult.url };
+      }
+
+      const [dataOk, agreementOk] = await Promise.all([
+        existingDataService.updateStartupData(facilitatorId, viewingExistingStartup.responseId, {
+          startupName: editingExistingStartupName.trim(),
+          email: editingExistingStartupEmail.trim(),
+          answers: editingExistingStartupData,
+        }),
+        existingDataService.upsertAgreement(viewingExistingStartup.responseId, agreementToSave),
+      ]);
+
+      if (dataOk && agreementOk) {
         const updated: ExistingStartup = {
           ...viewingExistingStartup,
           startupName: editingExistingStartupName.trim(),
@@ -3102,10 +3240,12 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         };
         setExistingStartups(prev => prev.map(s => s.responseId === updated.responseId ? updated : s));
         setViewingExistingStartup(updated);
+        setViewingAgreement(agreementToSave);
+        setPendingAgreementFile(null);
         setIsEditingExistingStartup(false);
         messageService.success('Saved', 'Startup data updated successfully.', 2000);
       } else {
-        messageService.error('Error', 'Could not save changes.');
+        messageService.error('Error', 'Could not save all changes. Please try again.');
       }
     } catch (err) {
       console.error('Error saving existing startup edit:', err);
@@ -3394,9 +3534,13 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     setIsPitchVideoModalOpen(true);
   };
 
-  const handleViewPitchDeck = (deckUrl: string) => {
-    setSelectedPitchDeck(deckUrl);
+  const handleViewPitchDeck = (app: ReceivedApplication) => {
+    setSelectedPitchDeck(app.pitchDeckUrl || '');
     setIsPitchDeckModalOpen(true);
+    const viewedAt = new Date().toISOString();
+    setMyReceivedApplications(prev => prev.map(a => a.id === app.id ? { ...a, pitchDeckViewedAt: viewedAt } : a));
+    supabase.from('opportunity_applications').update({ pitch_deck_viewed_at: viewedAt }).eq('id', app.id)
+      .then(({ error }) => { if (error) console.error('Error recording pitch deck view:', error); });
   };
 
   const handleSetTimeline = async (appId: string, year: string) => {
@@ -4601,6 +4745,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   {app.sector && (
                                     <p className="text-xs text-slate-500 mt-0.5">{app.sector}</p>
                                   )}
+                                  {app.pitchDeckViewedAt && (
+                                    <p className="text-xs text-blue-500 mt-0.5">Viewed on {new Date(app.pitchDeckViewedAt).toLocaleDateString()}</p>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -4613,7 +4760,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   <Button 
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => handleViewPitchDeck(app.pitchDeckUrl!)}
+                                    onClick={() => handleViewPitchDeck(app)}
                                     className="flex items-center gap-1.5 hover:bg-slate-100"
                                     title="View Pitch Deck"
                                   >
@@ -5127,6 +5274,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 )}
 
                 {/* Accepted Startups Table */}
+                {filteredAcceptedApps.length > 0 && (
+                  <div className="flex items-center justify-end mb-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={selectedGroupEmailAppIds.size === 0}
+                      onClick={() => handleOpenGroupEmailSelect(filteredAcceptedApps.filter(a => selectedGroupEmailAppIds.has(a.id)))}
+                      className="flex items-center gap-1.5"
+                    >
+                      <Mail className="h-4 w-4" />
+                      Email Selected {selectedGroupEmailAppIds.size > 0 ? `(${selectedGroupEmailAppIds.size})` : ''}
+                    </Button>
+                  </div>
+                )}
                 <div className="overflow-x-auto">
                   {filteredAcceptedApps.length === 0 ? (
                     <div className="text-center py-12">
@@ -5144,6 +5305,25 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     <table className="w-full divide-y divide-slate-200">
                       <thead className="bg-gradient-to-r from-slate-50 to-slate-100">
                         <tr>
+                          <th className="px-4 py-4 text-center">
+                            <input
+                              type="checkbox"
+                              checked={filteredAcceptedApps.length > 0 && filteredAcceptedApps.every(a => selectedGroupEmailAppIds.has(a.id))}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setSelectedGroupEmailAppIds(prev => new Set([...prev, ...filteredAcceptedApps.map(a => a.id)]));
+                                } else {
+                                  setSelectedGroupEmailAppIds(prev => {
+                                    const next = new Set(prev);
+                                    filteredAcceptedApps.forEach(a => next.delete(a.id));
+                                    return next;
+                                  });
+                                }
+                              }}
+                              className="h-4 w-4 text-blue-600 rounded"
+                              title="Select all"
+                            />
+                          </th>
                           <th className="px-4 py-4 text-left text-sm font-semibold text-slate-700">Startup</th>
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Contact</th>
                           <th className="px-4 py-4 text-center text-sm font-semibold text-slate-700">Agreement</th>
@@ -5164,6 +5344,14 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                           const agreementUrl = signedAgreementUrl || app.agreementUrl;
                           return (
                             <tr key={app.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-4 py-4 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedGroupEmailAppIds.has(app.id)}
+                                  onChange={() => toggleGroupEmailAppSelection(app.id)}
+                                  className="h-4 w-4 text-blue-600 rounded"
+                                />
+                              </td>
                               <td className="px-4 py-4">
                                 <div className="flex items-center gap-3">
                                   <div>
@@ -5203,7 +5391,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => handleViewPitchDeck(app.pitchDeckUrl!)}
+                                      onClick={() => handleViewPitchDeck(app)}
                                       className="flex items-center gap-1.5 hover:bg-slate-100"
                                       title="View Pitch Deck"
                                     >
@@ -5321,6 +5509,20 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                     <Mail className="h-4 w-4" />
                                     <span>Email</span>
                                   </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleOpenActivityLog(app)}
+                                    className="relative flex items-center gap-1.5 hover:bg-slate-100"
+                                    title="Activity log — updates this startup made in their dashboard"
+                                  >
+                                    <Bell className="h-4 w-4" />
+                                    {!!activityUnreadCounts[app.startupId] && (
+                                      <span className="absolute -top-1.5 -right-1.5 h-4 min-w-[1rem] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center">
+                                        {activityUnreadCounts[app.startupId]}
+                                      </span>
+                                    )}
+                                  </Button>
                                 </div>
                               </td>
                             </tr>
@@ -5415,10 +5617,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                                   </td>
                                   <td className="px-4 py-3 text-right flex items-center justify-end gap-3">
                                     <button
-                                      onClick={() => setViewingExistingStartup(startup)}
+                                      onClick={() => handleOpenExistingStartupModal(startup, false)}
                                       className="text-blue-600 hover:text-blue-800 text-xs font-medium"
                                     >
                                       View Data
+                                    </button>
+                                    <button
+                                      onClick={() => handleOpenExistingStartupModal(startup, true)}
+                                      className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
+                                    >
+                                      Edit
                                     </button>
                                     <button
                                       onClick={() => handleDeleteExistingStartup(startup.responseId, startup.startupName)}
@@ -5942,7 +6150,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 isOpen={!!viewingExistingStartup}
                 onClose={() => {
                   setViewingExistingStartup(null);
+                  setViewingAgreement(null);
                   setIsEditingExistingStartup(false);
+                  setPendingAgreementFile(null);
                 }}
                 title={`Uploaded Data — ${viewingExistingStartup.startupName}`}
               >
@@ -6059,6 +6269,111 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     </div>
                   )}
 
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Agreement & Fees</p>
+                    {isLoadingAgreement ? (
+                      <p className="text-sm text-slate-400 italic">Loading...</p>
+                    ) : isEditingExistingStartup ? (
+                      <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs text-slate-500 mb-1 block">Incubation Type</label>
+                            <select
+                              value={editingAgreementData.incubationType || ''}
+                              onChange={e => setEditingAgreementData(prev => ({ ...prev, incubationType: e.target.value || null }))}
+                              className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              <option value="">— Select —</option>
+                              {Object.values(IncubationType).map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-500 mb-1 block">Fee Type</label>
+                            <select
+                              value={editingAgreementData.feeType || ''}
+                              onChange={e => setEditingAgreementData(prev => ({ ...prev, feeType: (e.target.value || null) as ExistingStartupAgreement['feeType'] }))}
+                              className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              <option value="">— Select —</option>
+                              {Object.values(FeeType).map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </div>
+                          {(editingAgreementData.feeType === 'Fees' || editingAgreementData.feeType === 'Hybrid') && (
+                            <div>
+                              <label className="text-xs text-slate-500 mb-1 block">Fee Amount</label>
+                              <input type="number" value={editingAgreementData.feeAmount ?? ''} onChange={e => setEditingAgreementData(prev => ({ ...prev, feeAmount: e.target.value === '' ? null : Number(e.target.value) }))} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </div>
+                          )}
+                          {(editingAgreementData.feeType === 'Equity' || editingAgreementData.feeType === 'Hybrid') && (
+                            <>
+                              <div>
+                                <label className="text-xs text-slate-500 mb-1 block">Shares</label>
+                                <input type="number" value={editingAgreementData.shares ?? ''} onChange={e => setEditingAgreementData(prev => ({ ...prev, shares: e.target.value === '' ? null : Number(e.target.value) }))} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-slate-500 mb-1 block">Price per Share</label>
+                                <input type="number" step="0.01" value={editingAgreementData.pricePerShare ?? ''} onChange={e => setEditingAgreementData(prev => ({ ...prev, pricePerShare: e.target.value === '' ? null : Number(e.target.value) }))} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-slate-500 mb-1 block">Investment Amount</label>
+                                <input type="number" value={editingAgreementData.investmentAmount ?? ''} onChange={e => setEditingAgreementData(prev => ({ ...prev, investmentAmount: e.target.value === '' ? null : Number(e.target.value) }))} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-slate-500 mb-1 block">Equity Allocated (%)</label>
+                                <input type="number" step="0.01" value={editingAgreementData.equityAllocated ?? ''} onChange={e => setEditingAgreementData(prev => ({ ...prev, equityAllocated: e.target.value === '' ? null : Number(e.target.value) }))} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-slate-500 mb-1 block">Post-Money Valuation</label>
+                                <input type="number" value={editingAgreementData.postMoneyValuation ?? ''} onChange={e => setEditingAgreementData(prev => ({ ...prev, postMoneyValuation: e.target.value === '' ? null : Number(e.target.value) }))} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <CloudDriveInput
+                          value={editingAgreementData.signedAgreementUrl || ''}
+                          onChange={url => { setEditingAgreementData(prev => ({ ...prev, signedAgreementUrl: url })); if (url) setPendingAgreementFile(null); }}
+                          onFileSelect={file => { setPendingAgreementFile(file); setEditingAgreementData(prev => ({ ...prev, signedAgreementUrl: null })); }}
+                          label="Signed Agreement"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          maxSize={10}
+                          documentType="signed agreement"
+                        />
+                        {pendingAgreementFile && (
+                          <p className="text-xs text-green-600">File selected: {pendingAgreementFile.name} ({(pendingAgreementFile.size / 1024 / 1024).toFixed(2)} MB)</p>
+                        )}
+                        {isUploadingAgreementFile && (
+                          <p className="text-xs text-slate-500">Uploading agreement...</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 space-y-2">
+                        {viewingAgreement && (viewingAgreement.incubationType || viewingAgreement.feeType) ? (
+                          <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div><p className="text-xs text-slate-500">Incubation Type</p><p className="text-slate-900">{viewingAgreement.incubationType || '—'}</p></div>
+                            <div><p className="text-xs text-slate-500">Fee Type</p><p className="text-slate-900">{viewingAgreement.feeType || '—'}</p></div>
+                            {(viewingAgreement.feeType === 'Fees' || viewingAgreement.feeType === 'Hybrid') && (
+                              <div><p className="text-xs text-slate-500">Fee Amount</p><p className="text-slate-900">{viewingAgreement.feeAmount ?? '—'}</p></div>
+                            )}
+                            {(viewingAgreement.feeType === 'Equity' || viewingAgreement.feeType === 'Hybrid') && (
+                              <>
+                                <div><p className="text-xs text-slate-500">Shares</p><p className="text-slate-900">{viewingAgreement.shares ?? '—'}</p></div>
+                                <div><p className="text-xs text-slate-500">Price/Share</p><p className="text-slate-900">{viewingAgreement.pricePerShare ?? '—'}</p></div>
+                                <div><p className="text-xs text-slate-500">Investment Amount</p><p className="text-slate-900">{viewingAgreement.investmentAmount ?? '—'}</p></div>
+                                <div><p className="text-xs text-slate-500">Equity Allocated (%)</p><p className="text-slate-900">{viewingAgreement.equityAllocated ?? '—'}</p></div>
+                                <div><p className="text-xs text-slate-500">Post-Money Valuation</p><p className="text-slate-900">{viewingAgreement.postMoneyValuation ?? '—'}</p></div>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-400 italic">No agreement/fee terms recorded yet.</p>
+                        )}
+                        {viewingAgreement?.signedAgreementUrl ? (
+                          <a href={viewingAgreement.signedAgreementUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm inline-block">View Signed Agreement</a>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="flex justify-end gap-2 pt-2">
                     {isEditingExistingStartup ? (
                       <>
@@ -6080,13 +6395,16 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                     ) : (
                       <>
                         <button
-                          onClick={() => setViewingExistingStartup(null)}
+                          onClick={() => {
+                            setViewingExistingStartup(null);
+                            setViewingAgreement(null);
+                          }}
                           className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
                         >
                           Close
                         </button>
                         <button
-                          onClick={() => handleStartEditExistingStartup(viewingExistingStartup)}
+                          onClick={() => handleStartEditExistingStartup(viewingExistingStartup, viewingAgreement || undefined)}
                           className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
                         >
                           Edit
@@ -8766,6 +9084,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             <Input label="Application Deadline" id="deadline" name="deadline" type="date" value={newOpportunity.deadline} onChange={handleInputChange} required min={new Date().toISOString().split('T')[0]} />
             <div className="border-t pt-4 mt-2 space-y-4">
               <Input label="Poster/Banner Image" id="posterUrl" name="posterUrl" type="file" accept="image/*" onChange={handlePosterChange} />
+              <p className="text-xs text-slate-500 -mt-2">Recommended size: 1200 × 630px (landscape, 16:9-ish). Images are shown with object-contain, so other sizes still work but may have empty space on the sides.</p>
               {posterPreview && <img src={posterPreview} alt="Poster preview" className="mt-2 rounded-lg max-h-40 w-auto" />}
               <p className="text-center text-sm text-slate-500">OR</p>
               <Input label="YouTube Video Link" id="videoUrl" name="videoUrl" type="url" placeholder="https://www.youtube.com/watch?v=..." value={newOpportunity.videoUrl} onChange={handleInputChange} />
@@ -8911,20 +9230,32 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         </div>
       </Modal>
 
-      {/* Email Draft Select Modal */}
+      {/* Email Draft Select Modal (single-startup or group send) */}
       <Modal
         isOpen={isEmailDraftSelectModalOpen}
         onClose={() => {
           setIsEmailDraftSelectModalOpen(false);
           setSelectedApplicationForEmail(null);
+          setGroupEmailApps(null);
         }}
-        title={`Select Email Draft - ${selectedApplicationForEmail?.startupName || ''}`}
+        title={groupEmailApps
+          ? `Select Email Draft - ${groupEmailApps.length} Startups`
+          : `Select Email Draft - ${selectedApplicationForEmail?.startupName || ''}`}
         size="2xl"
       >
         <div className="space-y-4">
           <div className="text-sm text-slate-600">
-            To: <span className="font-medium text-slate-900">{selectedApplicationForEmail?.founderEmail || 'N/A'}</span>
+            {groupEmailApps ? (
+              <>To (BCC): <span className="font-medium text-slate-900">{groupEmailApps.length} recipient{groupEmailApps.length !== 1 ? 's' : ''}</span> — each won't see the others' addresses.</>
+            ) : (
+              <>To: <span className="font-medium text-slate-900">{selectedApplicationForEmail?.founderEmail || 'N/A'}</span></>
+            )}
           </div>
+          {groupEmailApps && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">
+              Note: for group emails, placeholders like {'{{startup_name}}'} won't be substituted per recipient — write a general message.
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Choose Draft</label>
             <select
@@ -8937,11 +9268,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               ))}
             </select>
           </div>
-          {selectedApplicationForEmail && selectedEmailDraftId && (() => {
+          {(groupEmailApps || selectedApplicationForEmail) && selectedEmailDraftId && (() => {
             const draft = emailDrafts.find(d => d.id === selectedEmailDraftId);
             if (!draft) return null;
-            const previewSubject = applyEmailPlaceholders(draft.subject || '', selectedApplicationForEmail);
-            const previewBody = applyEmailPlaceholders(draft.body || '', selectedApplicationForEmail);
+            const previewSubject = groupEmailApps ? (draft.subject || '') : applyEmailPlaceholders(draft.subject || '', selectedApplicationForEmail!);
+            const previewBody = groupEmailApps ? (draft.body || '') : applyEmailPlaceholders(draft.body || '', selectedApplicationForEmail!);
             return (
               <Card>
                 <div className="space-y-2 text-sm">
@@ -8965,10 +9296,15 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             </Button>
             <Button
               onClick={() => {
-                if (!selectedApplicationForEmail) return;
                 const draft = emailDrafts.find(d => d.id === selectedEmailDraftId);
                 if (!draft) return;
-                openGmailDraft(draft, selectedApplicationForEmail);
+                if (groupEmailApps) {
+                  openGmailDraftForMultiple(draft, groupEmailApps);
+                } else if (selectedApplicationForEmail) {
+                  openGmailDraft(draft, selectedApplicationForEmail);
+                } else {
+                  return;
+                }
                 setIsEmailDraftSelectModalOpen(false);
               }}
             >
@@ -8977,6 +9313,59 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           </div>
         </div>
       </Modal>
+
+      {/* Activity Log Modal (bell) */}
+      {viewingActivityForApp && (
+        <Modal
+          isOpen={!!viewingActivityForApp}
+          onClose={() => setViewingActivityForApp(null)}
+          title={`Activity — ${viewingActivityForApp.startupName}`}
+        >
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">Updates this startup made in their own dashboard (Profile, Financial, Compliance, Cap Table).</p>
+            {isLoadingActivityLog ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2" />
+                <p className="text-slate-500 text-sm">Loading...</p>
+              </div>
+            ) : activityLogEntries.length === 0 ? (
+              <div className="text-center py-8 bg-slate-50 rounded-lg">
+                <Bell className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm text-slate-500">No activity recorded yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {activityLogEntries.map(entry => (
+                  <div key={entry.id} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-900">{entry.label}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        entry.action === 'INSERT' ? 'bg-green-100 text-green-700' :
+                        entry.action === 'DELETE' ? 'bg-red-100 text-red-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>
+                        {entry.action === 'INSERT' ? 'Added' : entry.action === 'DELETE' ? 'Removed' : 'Updated'}
+                      </span>
+                    </div>
+                    {entry.changedFields.length > 0 && (
+                      <p className="text-xs text-slate-500 mt-1">Changed: {entry.changedFields.join(', ')}</p>
+                    )}
+                    <p className="text-xs text-slate-400 mt-1">{new Date(entry.changedAt).toLocaleString()}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setViewingActivityForApp(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Accept Application Modal */}
       <Modal isOpen={isAcceptModalOpen} onClose={() => setIsAcceptModalOpen(false)} title={`Accept Application: ${selectedApplication?.startupName}`}>

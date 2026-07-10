@@ -12,7 +12,7 @@ import { adminProgramsService, AdminProgramPost } from '../../lib/adminProgramsS
 import { toDirectImageUrl } from '../../lib/imageUrl';
 import ReferenceApplicationDraft from '../ReferenceApplicationDraft';
 import DraftAnswersView from '../DraftAnswersView';
-import { questionBankService, OpportunityQuestion, StartupAnswer } from '../../lib/questionBankService';
+import { questionBankService, OpportunityQuestion, StartupAnswer, isOtherValue, encodeOtherAnswer, parseOtherText, OTHER_OPTION } from '../../lib/questionBankService';
 import { storageService } from '../../lib/storage';
 import FeatureGuard from '../FeatureGuard';
 import UpgradePrompt from '../UpgradePrompt';
@@ -1259,51 +1259,115 @@ const OpportunitiesTab: React.FC<OpportunitiesTabProps> = ({ startup, crmRef, on
                                                 required={oq.isRequired}
                                             />
                                         ) : (question.questionType === 'select' || question.questionType === 'multiselect') && (!oq.selectionType || oq.selectionType === 'single') ? (
-                                            <select
-                                                value={answer}
-                                                onChange={(e) => {
-                                                    const newMap = new Map(questionAnswers);
-                                                    newMap.set(oq.questionId, e.target.value);
-                                                    setQuestionAnswers(newMap);
-                                                }}
-                                                className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary sm:text-sm ${isMissing ? 'border-red-400 bg-white' : 'border-slate-300'}`}
-                                                required={oq.isRequired}
-                                            >
-                                                <option value="">Select an option</option>
-                                                {question.options?.map((option, idx) => (
-                                                    <option key={idx} value={option}>{option}</option>
-                                                ))}
-                                            </select>
-                                        ) : (question.questionType === 'select' || question.questionType === 'multiselect') && oq.selectionType === 'multiple' ? (
-                                            <div className="space-y-2">
-                                                {question.options?.map((option, idx) => {
-                                                    const selectedOptions = answer ? answer.split(',').filter(v => v.trim()) : [];
-                                                    const isChecked = selectedOptions.includes(option);
-                                                    return (
-                                                        <label key={idx} className="flex items-center gap-2">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={isChecked}
+                                            (() => {
+                                                const displayValue = isOtherValue(answer) ? OTHER_OPTION : answer;
+                                                const otherText = isOtherValue(answer) ? parseOtherText(answer) : '';
+                                                return (
+                                                    <>
+                                                        <select
+                                                            value={displayValue}
+                                                            onChange={(e) => {
+                                                                const newMap = new Map(questionAnswers);
+                                                                newMap.set(oq.questionId, e.target.value === OTHER_OPTION ? encodeOtherAnswer('') : e.target.value);
+                                                                setQuestionAnswers(newMap);
+                                                            }}
+                                                            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary sm:text-sm ${isMissing ? 'border-red-400 bg-white' : 'border-slate-300'}`}
+                                                            required={oq.isRequired}
+                                                        >
+                                                            <option value="">Select an option</option>
+                                                            {question.options?.map((option, idx) => (
+                                                                <option key={idx} value={option}>{option}</option>
+                                                            ))}
+                                                        </select>
+                                                        {displayValue === OTHER_OPTION && (
+                                                            <Input
+                                                                type="text"
+                                                                placeholder="Please specify"
+                                                                value={otherText}
                                                                 onChange={(e) => {
                                                                     const newMap = new Map(questionAnswers);
-                                                                    let selected = answer ? answer.split(',').filter(v => v.trim()) : [];
-                                                                    if (e.target.checked) {
-                                                                        if (!selected.includes(option)) {
-                                                                            selected.push(option);
-                                                                        }
-                                                                    } else {
-                                                                        selected = selected.filter(v => v !== option);
-                                                                    }
-                                                                    newMap.set(oq.questionId, selected.join(','));
+                                                                    newMap.set(oq.questionId, encodeOtherAnswer(e.target.value));
                                                                     setQuestionAnswers(newMap);
                                                                 }}
-                                                                className="h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+                                                                className="mt-2"
                                                             />
-                                                            <span className="text-sm text-slate-700">{option}</span>
-                                                        </label>
-                                                    );
-                                                })}
-                                            </div>
+                                                        )}
+                                                    </>
+                                                );
+                                            })()
+                                        ) : (question.questionType === 'select' || question.questionType === 'multiselect') && oq.selectionType === 'multiple' ? (
+                                            (() => {
+                                                const selectedOptions = answer ? answer.split(',').filter(v => v.trim()) : [];
+                                                const otherSegment = selectedOptions.find(isOtherValue);
+                                                const isOtherChecked = !!otherSegment;
+                                                const otherText = otherSegment ? parseOtherText(otherSegment) : '';
+                                                return (
+                                                    <div className="space-y-2">
+                                                        {question.options?.map((option, idx) => {
+                                                            if (option === OTHER_OPTION) {
+                                                                return (
+                                                                    <div key={idx} className="space-y-2">
+                                                                        <label className="flex items-center gap-2">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={isOtherChecked}
+                                                                                onChange={(e) => {
+                                                                                    const newMap = new Map(questionAnswers);
+                                                                                    const withoutOther = selectedOptions.filter(v => !isOtherValue(v));
+                                                                                    newMap.set(oq.questionId, e.target.checked
+                                                                                        ? [...withoutOther, encodeOtherAnswer('')].join(',')
+                                                                                        : withoutOther.join(','));
+                                                                                    setQuestionAnswers(newMap);
+                                                                                }}
+                                                                                className="h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+                                                                            />
+                                                                            <span className="text-sm text-slate-700">Other</span>
+                                                                        </label>
+                                                                        {isOtherChecked && (
+                                                                            <Input
+                                                                                type="text"
+                                                                                placeholder="Please specify"
+                                                                                value={otherText}
+                                                                                onChange={(e) => {
+                                                                                    const newMap = new Map(questionAnswers);
+                                                                                    const withoutOther = selectedOptions.filter(v => !isOtherValue(v));
+                                                                                    newMap.set(oq.questionId, [...withoutOther, encodeOtherAnswer(e.target.value)].join(','));
+                                                                                    setQuestionAnswers(newMap);
+                                                                                }}
+                                                                                className="ml-6"
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            const isChecked = selectedOptions.includes(option);
+                                                            return (
+                                                                <label key={idx} className="flex items-center gap-2">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={isChecked}
+                                                                        onChange={(e) => {
+                                                                            const newMap = new Map(questionAnswers);
+                                                                            let selected = answer ? answer.split(',').filter(v => v.trim()) : [];
+                                                                            if (e.target.checked) {
+                                                                                if (!selected.includes(option)) {
+                                                                                    selected.push(option);
+                                                                                }
+                                                                            } else {
+                                                                                selected = selected.filter(v => v !== option);
+                                                                            }
+                                                                            newMap.set(oq.questionId, selected.join(','));
+                                                                            setQuestionAnswers(newMap);
+                                                                        }}
+                                                                        className="h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+                                                                    />
+                                                                    <span className="text-sm text-slate-700">{option}</span>
+                                                                </label>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                );
+                                            })()
                                         ) : question.questionType === 'number' ? (
                                             <Input
                                                 type="number"

@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
-import { ArrowLeft, Share2, Calendar, User, Video, Download, FileText } from 'lucide-react';
+import Input from './ui/Input';
+import { ArrowLeft, Share2, Calendar, User, Video, Download, FileText, CheckCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { messageService } from '../lib/messageService';
 import Modal from './ui/Modal';
 import { toDirectImageUrl } from '../lib/imageUrl';
 import { getQueryParam, setQueryParam } from '../lib/urlState';
+import { questionBankService, OpportunityQuestion, isOtherValue, encodeOtherAnswer, parseOtherText, OTHER_OPTION } from '../lib/questionBankService';
 
 interface OpportunityItem {
     id: string;
@@ -24,7 +26,15 @@ const PublicProgramView: React.FC = () => {
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
     const [selectedImageUrl, setSelectedImageUrl] = useState<string>('');
     const [selectedImageAlt, setSelectedImageAlt] = useState<string>('');
-    const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+    const [viewMode, setViewMode] = useState<'details' | 'apply' | 'submitted'>('details');
+    const [opportunityQuestions, setOpportunityQuestions] = useState<OpportunityQuestion[]>([]);
+    const [loadingQuestions, setLoadingQuestions] = useState(false);
+    const [questionAnswers, setQuestionAnswers] = useState<Map<string, string>>(new Map());
+    const [guestEmail, setGuestEmail] = useState('');
+    const [guestStartupName, setGuestStartupName] = useState('');
+    const [pitchDeckUrl, setPitchDeckUrl] = useState('');
+    const [pitchVideoUrl, setPitchVideoUrl] = useState('');
+    const [isSubmittingGuestApp, setIsSubmittingGuestApp] = useState(false);
 
     const opportunityId = getQueryParam('opportunityId');
 
@@ -73,6 +83,12 @@ const PublicProgramView: React.FC = () => {
                         videoUrl: data.video_url || undefined,
                         facilitatorName: 'Program Facilitator'
                     });
+
+                    // Deep-linked here from a button that already means "apply"
+                    // (e.g. GrantOpportunitiesPage) — skip straight to the form.
+                    if (getQueryParam('autoApply') === 'true') {
+                        handleApplyClick();
+                    }
                 }
             } catch (err) {
                 console.error('Error loading opportunity:', err);
@@ -135,8 +151,73 @@ const PublicProgramView: React.FC = () => {
         }
     };
 
-    const handleApplyClick = () => {
-        setShowLoginPrompt(true);
+    const handleApplyClick = async () => {
+        setViewMode('apply');
+        setLoadingQuestions(true);
+        try {
+            const questions = await questionBankService.getOpportunityQuestions(opportunityId);
+            setOpportunityQuestions(questions);
+        } catch (err) {
+            console.error('Error loading application questions:', err);
+            messageService.error('Error', 'Failed to load application questions.');
+        } finally {
+            setLoadingQuestions(false);
+        }
+    };
+
+    const submitGuestApplication = async () => {
+        if (!opportunityId) return;
+
+        const requiredQuestions = opportunityQuestions.filter(q => q.isRequired);
+        const missingRequired = requiredQuestions.filter(q => {
+            const answer = questionAnswers.get(q.questionId);
+            return !answer || answer.trim() === '';
+        });
+        if (missingRequired.length > 0) {
+            messageService.warning('Missing Required Fields', 'Please fill in all required fields before submitting.');
+            return;
+        }
+        if (!guestEmail.trim() || !guestEmail.includes('@')) {
+            messageService.warning('Email Required', 'Please enter a valid email address.');
+            return;
+        }
+        if (!pitchDeckUrl.trim()) {
+            messageService.warning('Pitch Deck Required', 'Please provide a link to your pitch deck.');
+            return;
+        }
+
+        setIsSubmittingGuestApp(true);
+        try {
+            const answersObj: Record<string, string> = {};
+            questionAnswers.forEach((value, key) => { answersObj[key] = value; });
+
+            const { error } = await supabase
+                .from('guest_opportunity_applications')
+                .insert({
+                    opportunity_id: opportunityId,
+                    email: guestEmail.trim().toLowerCase(),
+                    startup_name: guestStartupName.trim() || null,
+                    answers: answersObj,
+                    pitch_deck_url: pitchDeckUrl.trim() || null,
+                    pitch_video_url: pitchVideoUrl.trim() || null,
+                });
+
+            if (error) {
+                if (error.code === '23505') {
+                    messageService.warning('Already Applied', "You've already submitted an application with this email for this program.");
+                } else {
+                    throw error;
+                }
+                return;
+            }
+
+            setViewMode('submitted');
+        } catch (err: any) {
+            console.error('Error submitting guest application:', err);
+            messageService.error('Submission Failed', err?.message || 'Failed to submit your application. Please try again.');
+        } finally {
+            setIsSubmittingGuestApp(false);
+        }
     };
 
     const handleLogin = () => {
@@ -177,6 +258,218 @@ const PublicProgramView: React.FC = () => {
                     <h1 className="text-2xl font-bold text-slate-900 mb-4">Program Not Found</h1>
                     <p className="text-slate-600 mb-6">This program may have been removed or is no longer available.</p>
                     <Button onClick={() => { window.location.href = '/'; }}>Go Home</Button>
+                </div>
+            </div>
+        );
+    }
+
+    if (viewMode === 'submitted') {
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+                <Card className="max-w-md w-full text-center">
+                    <CheckCircle className="h-14 w-14 text-green-500 mx-auto mb-4" />
+                    <h1 className="text-2xl font-bold text-slate-900 mb-2">Application Submitted!</h1>
+                    <p className="text-slate-600 mb-6">
+                        Your application to <span className="font-semibold">{opportunity.programName}</span> has been received.
+                    </p>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 text-left">
+                        <p className="text-sm text-blue-800">
+                            Want to track your application, get updates, and manage your startup profile? Registering is optional but recommended — and if you register with the same email you just used, your answers will already be filled in.
+                        </p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                        <Button onClick={handleRegister} className="w-full">Register to Track My Application</Button>
+                        <Button onClick={() => { window.location.href = '/'; }} variant="outline" className="w-full">Done, Maybe Later</Button>
+                    </div>
+                </Card>
+            </div>
+        );
+    }
+
+    if (viewMode === 'apply') {
+        return (
+            <div className="min-h-screen bg-slate-50">
+                <div className="max-w-3xl mx-auto px-4 py-8">
+                    <Button onClick={() => setViewMode('details')} variant="outline" className="mb-6">
+                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        Back
+                    </Button>
+                    <Card>
+                        <div className="mb-6">
+                            <h1 className="text-2xl font-bold text-slate-900">Apply to {opportunity.programName}</h1>
+                            <p className="text-sm text-slate-500 mt-1">
+                                No account needed to apply. Already registered? <button onClick={handleLogin} className="text-brand-primary underline">Log in instead</button>.
+                            </p>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <Input
+                                    label="Your Email"
+                                    type="email"
+                                    required
+                                    value={guestEmail}
+                                    onChange={(e) => setGuestEmail(e.target.value)}
+                                    placeholder="you@startup.com"
+                                />
+                                <Input
+                                    label="Startup Name (optional)"
+                                    type="text"
+                                    value={guestStartupName}
+                                    onChange={(e) => setGuestStartupName(e.target.value)}
+                                />
+                            </div>
+
+                            {loadingQuestions ? (
+                                <p className="text-sm text-slate-500 text-center py-4">Loading questions...</p>
+                            ) : opportunityQuestions.length === 0 ? (
+                                <p className="text-sm text-slate-500 text-center py-4">This opportunity has no application questions.</p>
+                            ) : (
+                                <div className="border-t pt-4 space-y-4">
+                                    <h4 className="text-md font-semibold text-slate-700">Application Questions</h4>
+                                    {opportunityQuestions.map((oq) => {
+                                        const question = oq.question;
+                                        if (!question) return null;
+                                        const answer = questionAnswers.get(oq.questionId) || '';
+
+                                        const setAnswer = (value: string) => {
+                                            const newMap = new Map(questionAnswers);
+                                            newMap.set(oq.questionId, value);
+                                            setQuestionAnswers(newMap);
+                                        };
+
+                                        return (
+                                            <div key={oq.questionId} className="space-y-2">
+                                                <label className="block text-sm font-medium text-slate-700">
+                                                    {question.questionText}
+                                                    {oq.isRequired && <span className="text-red-500 ml-1">*</span>}
+                                                </label>
+                                                {question.questionType === 'textarea' ? (
+                                                    <textarea
+                                                        value={answer}
+                                                        onChange={(e) => setAnswer(e.target.value)}
+                                                        className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary sm:text-sm"
+                                                        rows={4}
+                                                        required={oq.isRequired}
+                                                    />
+                                                ) : (question.questionType === 'select' || question.questionType === 'multiselect') && (!oq.selectionType || oq.selectionType === 'single') ? (
+                                                    (() => {
+                                                        const displayValue = isOtherValue(answer) ? OTHER_OPTION : answer;
+                                                        const otherText = isOtherValue(answer) ? parseOtherText(answer) : '';
+                                                        return (
+                                                            <>
+                                                                <select
+                                                                    value={displayValue}
+                                                                    onChange={(e) => setAnswer(e.target.value === OTHER_OPTION ? encodeOtherAnswer('') : e.target.value)}
+                                                                    className="block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary sm:text-sm"
+                                                                    required={oq.isRequired}
+                                                                >
+                                                                    <option value="">Select an option</option>
+                                                                    {question.options?.map((option, idx) => (
+                                                                        <option key={idx} value={option}>{option}</option>
+                                                                    ))}
+                                                                </select>
+                                                                {displayValue === OTHER_OPTION && (
+                                                                    <Input type="text" placeholder="Please specify" value={otherText} onChange={(e) => setAnswer(encodeOtherAnswer(e.target.value))} className="mt-2" />
+                                                                )}
+                                                            </>
+                                                        );
+                                                    })()
+                                                ) : (question.questionType === 'select' || question.questionType === 'multiselect') && oq.selectionType === 'multiple' ? (
+                                                    (() => {
+                                                        const selectedOptions = answer ? answer.split(',').filter(v => v.trim()) : [];
+                                                        const otherSegment = selectedOptions.find(isOtherValue);
+                                                        const isOtherChecked = !!otherSegment;
+                                                        const otherText = otherSegment ? parseOtherText(otherSegment) : '';
+                                                        return (
+                                                            <div className="space-y-2">
+                                                                {question.options?.map((option, idx) => {
+                                                                    if (option === OTHER_OPTION) {
+                                                                        return (
+                                                                            <div key={idx} className="space-y-2">
+                                                                                <label className="flex items-center gap-2">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={isOtherChecked}
+                                                                                        onChange={(e) => {
+                                                                                            const withoutOther = selectedOptions.filter(v => !isOtherValue(v));
+                                                                                            setAnswer(e.target.checked
+                                                                                                ? [...withoutOther, encodeOtherAnswer('')].join(',')
+                                                                                                : withoutOther.join(','));
+                                                                                        }}
+                                                                                        className="h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+                                                                                    />
+                                                                                    <span className="text-sm text-slate-700">Other</span>
+                                                                                </label>
+                                                                                {isOtherChecked && (
+                                                                                    <Input type="text" placeholder="Please specify" value={otherText} onChange={(e) => {
+                                                                                        const withoutOther = selectedOptions.filter(v => !isOtherValue(v));
+                                                                                        setAnswer([...withoutOther, encodeOtherAnswer(e.target.value)].join(','));
+                                                                                    }} className="ml-6" />
+                                                                                )}
+                                                                            </div>
+                                                                        );
+                                                                    }
+                                                                    const isChecked = selectedOptions.includes(option);
+                                                                    return (
+                                                                        <label key={idx} className="flex items-center gap-2">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={isChecked}
+                                                                                onChange={(e) => {
+                                                                                    let selected = [...selectedOptions];
+                                                                                    if (e.target.checked) {
+                                                                                        if (!selected.includes(option)) selected.push(option);
+                                                                                    } else {
+                                                                                        selected = selected.filter(v => v !== option);
+                                                                                    }
+                                                                                    setAnswer(selected.join(','));
+                                                                                }}
+                                                                                className="h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+                                                                            />
+                                                                            <span className="text-sm text-slate-700">{option}</span>
+                                                                        </label>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        );
+                                                    })()
+                                                ) : question.questionType === 'number' ? (
+                                                    <Input type="number" value={answer} onChange={(e) => setAnswer(e.target.value)} required={oq.isRequired} />
+                                                ) : question.questionType === 'date' ? (
+                                                    <Input type="date" value={answer} onChange={(e) => setAnswer(e.target.value)} required={oq.isRequired} />
+                                                ) : (
+                                                    <Input type="text" value={answer} onChange={(e) => setAnswer(e.target.value)} required={oq.isRequired} />
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            <div className="border-t pt-4 space-y-4">
+                                <Input
+                                    label="Pitch Deck Link"
+                                    type="url"
+                                    required
+                                    value={pitchDeckUrl}
+                                    onChange={(e) => setPitchDeckUrl(e.target.value)}
+                                    placeholder="https://drive.google.com/... or any shareable link"
+                                />
+                                <Input
+                                    label="Pitch Video (optional)"
+                                    type="url"
+                                    value={pitchVideoUrl}
+                                    onChange={(e) => setPitchVideoUrl(e.target.value)}
+                                    placeholder="https://youtube.com/... or https://vimeo.com/..."
+                                />
+                            </div>
+
+                            <Button onClick={submitGuestApplication} disabled={isSubmittingGuestApp} className="w-full">
+                                {isSubmittingGuestApp ? 'Submitting...' : 'Submit Application'}
+                            </Button>
+                        </div>
+                    </Card>
                 </div>
             </div>
         );
@@ -277,21 +570,6 @@ const PublicProgramView: React.FC = () => {
                         alt={selectedImageAlt} 
                         className="max-w-full max-h-96 mx-auto rounded-lg"
                     />
-                </div>
-            </Modal>
-
-            {/* Login Prompt Modal */}
-            <Modal isOpen={showLoginPrompt} onClose={() => setShowLoginPrompt(false)} title="Login Required">
-                <div className="text-center space-y-4">
-                    <p className="text-slate-600">To apply for this program, you need to be logged in.</p>
-                    <div className="flex gap-3 justify-center">
-                        <Button onClick={handleLogin} variant="outline">
-                            Login
-                        </Button>
-                        <Button onClick={handleRegister}>
-                            Register
-                        </Button>
-                    </div>
                 </div>
             </Modal>
         </div>

@@ -2649,7 +2649,7 @@ const InvestmentAdvisorView: React.FC<InvestmentAdvisorViewProps> = ({
     try {
       const result = await advisorAddedStartupService.sendInviteToTMS(
         startupId,
-        startupUser?.id || '',
+        currentUser.id,
         advisorCode
       );
       

@@ -30,7 +30,7 @@ import { startupInvitationService, StartupInvitation } from '../lib/startupInvit
 import { messageService } from '../lib/messageService';
 import MessageContainer from './MessageContainer';
 import QuestionSelector from './QuestionSelector';
-import { questionBankService, ApplicationQuestion } from '../lib/questionBankService';
+import { questionBankService, ApplicationQuestion, OpportunityQuestion, isOtherValue, parseOtherText } from '../lib/questionBankService';
 import { getVideoEmbedUrl } from '../lib/videoUtils';
 import { facilitatorMentorService, FacilitatorMentor, FacilitatorMentorAssignment, MentorMeetingRecord, MentorFacilitatorAssociation } from '../lib/facilitatorMentorService';
 import ApprovedMentorsTable from './mentor/ApprovedMentorsTable';
@@ -97,6 +97,20 @@ type ReceivedApplication = {
   fundingStage?: string;
   startupStatus?: string;
   timeline?: string;
+};
+
+// A no-login application submitted via the public program page — not yet
+// tied to a real startup account. See lib/existingDataService.ts-adjacent
+// guest_opportunity_applications table.
+type GuestApplication = {
+  id: string;
+  opportunityId: string;
+  email: string;
+  startupName: string | null;
+  answers: Record<string, string>;
+  pitchDeckUrl: string | null;
+  pitchVideoUrl: string | null;
+  submittedAt: string;
 };
 
 type ReportMandate = {
@@ -354,6 +368,11 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
   const [myPostedOpportunities, setMyPostedOpportunities] = useState<IncubationOpportunity[]>([]);
   const [opportunityApplicationCounts, setOpportunityApplicationCounts] = useState<Map<string, number>>(new Map());
   const [myReceivedApplications, setMyReceivedApplications] = useState<ReceivedApplication[]>([]);
+  const [guestApplications, setGuestApplications] = useState<GuestApplication[]>([]);
+  const [isLoadingGuestApplications, setIsLoadingGuestApplications] = useState(false);
+  const [viewingGuestApplication, setViewingGuestApplication] = useState<GuestApplication | null>(null);
+  const [guestApplicationQuestions, setGuestApplicationQuestions] = useState<OpportunityQuestion[]>([]);
+  const [isLoadingGuestApplicationAnswers, setIsLoadingGuestApplicationAnswers] = useState(false);
   const [recognitionRecords, setRecognitionRecords] = useState<any[]>([]);
   const [isLoadingRecognition, setIsLoadingRecognition] = useState(false);
   const [domainStageMap, setDomainStageMap] = useState<{ [key: number]: { domain: string; stage: string } }>({});
@@ -3064,6 +3083,63 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
     }
   };
 
+  // Guest (no-login) applications for the facilitator's own opportunities —
+  // shown in Intake Management tagged "Unregistered", separate from
+  // myReceivedApplications (which requires a real startup account).
+  useEffect(() => {
+    if (myPostedOpportunities.length === 0) {
+      setGuestApplications([]);
+      return;
+    }
+    loadGuestApplications();
+  }, [myPostedOpportunities]);
+
+  const loadGuestApplications = async () => {
+    setIsLoadingGuestApplications(true);
+    try {
+      const oppIds = myPostedOpportunities.map(o => o.id);
+      const { data, error } = await supabase
+        .from('guest_opportunity_applications')
+        .select('id, opportunity_id, email, startup_name, answers, pitch_deck_url, pitch_video_url, submitted_at')
+        .in('opportunity_id', oppIds)
+        .is('claimed_at', null)
+        .order('submitted_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading guest applications:', error);
+        return;
+      }
+
+      setGuestApplications((data || []).map((row: any) => ({
+        id: row.id,
+        opportunityId: row.opportunity_id,
+        email: row.email,
+        startupName: row.startup_name,
+        answers: row.answers || {},
+        pitchDeckUrl: row.pitch_deck_url,
+        pitchVideoUrl: row.pitch_video_url,
+        submittedAt: row.submitted_at,
+      })));
+    } catch (err) {
+      console.error('Error loading guest applications:', err);
+    } finally {
+      setIsLoadingGuestApplications(false);
+    }
+  };
+
+  const handleViewGuestApplication = async (guestApp: GuestApplication) => {
+    setViewingGuestApplication(guestApp);
+    setIsLoadingGuestApplicationAnswers(true);
+    try {
+      const questions = await questionBankService.getOpportunityQuestions(guestApp.opportunityId);
+      setGuestApplicationQuestions(questions);
+    } catch (err) {
+      console.error('Error loading questions for guest application:', err);
+    } finally {
+      setIsLoadingGuestApplicationAnswers(false);
+    }
+  };
+
   const loadExistingStartups = async () => {
     if (!facilitatorId) return;
     setIsLoadingExistingData(true);
@@ -4999,6 +5075,79 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
                 />
               </Card>
             )}
+
+            {/* Unregistered (guest, no-login) Applications */}
+            {(() => {
+              const filteredGuestApps = selectedOpportunityId
+                ? guestApplications.filter(g => g.opportunityId === selectedOpportunityId)
+                : guestApplications;
+              if (isLoadingGuestApplications || filteredGuestApps.length > 0) {
+                return (
+                  <Card className="p-6">
+                    <h3 className="text-lg font-semibold text-slate-700 mb-1">Unregistered Applications</h3>
+                    <p className="text-sm text-slate-500 mb-4">
+                      Submitted without creating an account yet. They'll move into the list above automatically once the applicant registers.
+                    </p>
+                    {isLoadingGuestApplications ? (
+                      <p className="text-sm text-slate-500 text-center py-6">Loading...</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full divide-y divide-slate-200">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Startup</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Program</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Submitted</th>
+                              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-slate-200">
+                            {filteredGuestApps.map(guestApp => (
+                              <tr key={guestApp.id} className="hover:bg-slate-50">
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-medium text-slate-900">{guestApp.startupName || guestApp.email}</span>
+                                    <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">Unregistered</span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5">{guestApp.email}</p>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-slate-700">
+                                  {myPostedOpportunities.find(o => o.id === guestApp.opportunityId)?.programName || '—'}
+                                </td>
+                                <td className="px-4 py-3 text-xs text-slate-500">
+                                  {guestApp.submittedAt ? new Date(guestApp.submittedAt).toLocaleDateString() : '—'}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex justify-end items-center gap-3 flex-wrap">
+                                    <button
+                                      onClick={() => handleViewGuestApplication(guestApp)}
+                                      className="text-blue-600 hover:text-blue-800 text-xs font-medium"
+                                    >
+                                      View Answers
+                                    </button>
+                                    {guestApp.pitchDeckUrl && (
+                                      <a href={guestApp.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-xs font-medium">
+                                        Pitch Deck
+                                      </a>
+                                    )}
+                                    {guestApp.pitchVideoUrl && (
+                                      <a href={guestApp.pitchVideoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-xs font-medium">
+                                        Pitch Video
+                                      </a>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </Card>
+                );
+              }
+              return null;
+            })()}
           </div>
         );
       case 'trackMyStartups':
@@ -9358,6 +9507,74 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => setViewingActivityForApp(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Guest (unregistered) Application Answers Modal */}
+      {viewingGuestApplication && (
+        <Modal
+          isOpen={!!viewingGuestApplication}
+          onClose={() => setViewingGuestApplication(null)}
+          title={`Application — ${viewingGuestApplication.startupName || viewingGuestApplication.email}`}
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="bg-slate-50 rounded-lg p-3">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Startup Name</p>
+                <p className="font-medium text-slate-900">{viewingGuestApplication.startupName || '—'}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Email</p>
+                <p className="font-medium text-slate-900">{viewingGuestApplication.email}</p>
+              </div>
+            </div>
+
+            {isLoadingGuestApplicationAnswers ? (
+              <p className="text-sm text-slate-500 text-center py-6">Loading questions...</p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Application Questions</p>
+                {guestApplicationQuestions.map(oq => {
+                  const question = oq.question;
+                  if (!question) return null;
+                  const rawAnswer = viewingGuestApplication.answers[oq.questionId] || '';
+                  const answer = isOtherValue(rawAnswer)
+                    ? `Other: ${parseOtherText(rawAnswer) || rawAnswer}`
+                    : rawAnswer;
+                  return (
+                    <div key={oq.questionId} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                      <p className="text-xs text-slate-500 mb-1">{question.questionText}</p>
+                      <p className="text-sm text-slate-900 whitespace-pre-wrap">
+                        {answer || <span className="italic text-slate-400">No answer</span>}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="border-t pt-3 flex flex-wrap gap-3">
+              {viewingGuestApplication.pitchDeckUrl && (
+                <a href={viewingGuestApplication.pitchDeckUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
+                  View Pitch Deck
+                </a>
+              )}
+              {viewingGuestApplication.pitchVideoUrl && (
+                <a href={viewingGuestApplication.pitchVideoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
+                  View Pitch Video
+                </a>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setViewingGuestApplication(null)}
                 className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
               >
                 Close

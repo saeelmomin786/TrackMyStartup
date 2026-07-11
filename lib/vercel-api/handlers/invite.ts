@@ -28,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { type } = req.body as { type: 'startup-advisor' | 'investor-advisor' | 'startup-mentor' | 'facilitator-startup' | 'center' | 'investor' };
+    const { type } = req.body as { type: 'startup-advisor' | 'investor-advisor' | 'startup-mentor' | 'facilitator-startup' | 'guest-application-confirmation' | 'center' | 'investor' };
 
     // Handle startup-mentor (simple email-only flow)
     if (type === 'startup-mentor') {
@@ -223,6 +223,95 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       return res.status(200).json({ success: true, message: 'Invitation email sent successfully' });
+    }
+
+    // Handle guest (no-login) application confirmation email
+    if (type === 'guest-application-confirmation') {
+      const {
+        email,
+        startupName,
+        programName,
+        opportunityId,
+        redirectUrl
+      } = req.body as {
+        email: string;
+        startupName?: string;
+        programName: string;
+        opportunityId: string;
+        redirectUrl?: string;
+      };
+
+      if (!email || !programName || !opportunityId) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: Number(process.env.SMTP_PORT || 587) === 465,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+
+      const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
+      const fromName = process.env.SMTP_FROM_NAME || 'TrackMyStartup';
+
+      let siteUrl = redirectUrl;
+      if (!siteUrl) {
+        const isDevelopment = process.env.NODE_ENV === 'development' ||
+          !process.env.VERCEL_ENV ||
+          process.env.VITE_SITE_URL?.includes('localhost');
+        siteUrl = isDevelopment
+          ? 'http://localhost:5173'
+          : (process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://trackmystartup.com');
+      }
+
+      const registerUrl = `${siteUrl}/?page=register&opportunityId=${encodeURIComponent(opportunityId)}`;
+      const greetingName = startupName || 'there';
+      const emailSubject = `Application Received — ${programName}`;
+      const emailText = [
+        `Hello ${greetingName},`,
+        ``,
+        `Your application to ${programName} has been received.`,
+        ``,
+        `You applied without creating a TrackMyStartup account. To track this application, get status updates, and hear about future opportunities, register on TrackMyStartup using this email address — your answers will already be filled in:`,
+        ``,
+        `Register here: ${registerUrl}`,
+        ``,
+        `Registration is optional, but recommended so you don't miss any updates.`,
+        ``,
+        `Best regards,`,
+        `TrackMyStartup Support`
+      ].join('\n');
+
+      const emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <p>Hello <strong>${greetingName}</strong>,</p>
+          <p>Your application to <strong>${programName}</strong> has been received.</p>
+          <p>You applied without creating a TrackMyStartup account. To track this application, get status updates, and hear about future opportunities, register using this same email address — your answers will already be filled in.</p>
+          <p><a href="${registerUrl}" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Register to Track My Application</a></p>
+          <p style="color:#6b7280;font-size:0.875em;">Or copy this link: ${registerUrl}</p>
+          <p style="color:#6b7280;font-size:0.875em;">Registration is optional, but recommended so you don't miss any updates.</p>
+          <p>Best regards,<br><strong>TrackMyStartup Support</strong></p>
+        </div>
+      `;
+
+      try {
+        await transporter.sendMail({
+          from: `${fromName} <${fromAddress}>`,
+          to: email,
+          subject: emailSubject,
+          text: emailText,
+          html: emailHtml
+        });
+      } catch (sendErr: any) {
+        console.error('Guest application confirmation email failed:', sendErr?.message || sendErr);
+        return res.status(500).json({ success: false, error: sendErr?.message || 'Email send failed' });
+      }
+
+      return res.status(200).json({ success: true, message: 'Confirmation email sent successfully' });
     }
 
     // Handle startup-advisor and investor-advisor (complex flows with user creation)

@@ -211,6 +211,25 @@ const PublicProgramView: React.FC = () => {
                 return;
             }
 
+            // Best-effort confirmation email — never block showing the
+            // "submitted" screen if this fails.
+            try {
+                await fetch('/api/invite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: 'guest-application-confirmation',
+                        email: guestEmail.trim().toLowerCase(),
+                        startupName: guestStartupName.trim() || undefined,
+                        programName: opportunity?.programName,
+                        opportunityId,
+                        redirectUrl: window.location.origin,
+                    }),
+                });
+            } catch (emailErr) {
+                console.warn('Guest application confirmation email failed (non-fatal):', emailErr);
+            }
+
             setViewMode('submitted');
         } catch (err: any) {
             console.error('Error submitting guest application:', err);

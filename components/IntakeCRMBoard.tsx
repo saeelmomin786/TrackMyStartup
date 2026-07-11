@@ -26,6 +26,11 @@ interface IntakeCRMApplication {
   createdAt: string;
   status: string;
   type: 'application';
+  // No real startup account yet (submitted via the no-login application
+  // form) — dragging between columns still works the same way since columns
+  // are just facilitator-defined labels with no "accept" semantics, but the
+  // card is badged so it's clear approving still needs registration first.
+  isGuest?: boolean;
 }
 
 interface IntakeCRMBoardProps {
@@ -142,6 +147,7 @@ export function IntakeCRMBoard(
             createdAt: app.createdAt || new Date().toISOString(),
             status: mappedStatus,
             type: 'application' as const,
+            isGuest: !!app.isGuest,
           };
         });
         setCrmItems(items);
@@ -466,9 +472,16 @@ export function IntakeCRMBoard(
                               <User className="h-4 w-4 text-slate-600" />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-slate-900 text-sm truncate">
-                                {app.startupName}
-                              </h4>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className="font-semibold text-slate-900 text-sm truncate">
+                                  {app.startupName}
+                                </h4>
+                                {app.isGuest && (
+                                  <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 rounded-full flex-shrink-0" title="Submitted without an account — approving requires them to register first">
+                                    Unregistered
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-xs text-slate-500 truncate">
                                 {app.sector || 'No sector'}
                               </p>

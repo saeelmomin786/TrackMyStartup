@@ -1945,9 +1945,13 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
             }
 
             // Claim any guest (no-login) applications submitted with this email —
-            // seed reusable draft answers for every match, and for the one
-            // matching the opportunity they registered through, copy answers/
-            // pitch materials 1:1 onto the real application created above.
+            // seed reusable draft answers for every match, and for EACH one,
+            // find-or-create the real application for that specific
+            // opportunity and copy answers/pitch materials onto it. This
+            // covers every guest submission regardless of which specific
+            // opportunity link they happened to register through (or none —
+            // a generic registration with no opportunityId in the URL at
+            // all still converts every pending guest application).
             if (startup?.id && userData.email) {
               try {
                 const { data: guestApps } = await authService.supabase
@@ -1967,23 +1971,48 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                       )
                     );
 
-                    // If this guest row is for the specific opportunity they just
-                    // registered through, copy it 1:1 onto the real application record.
-                    if (guestApp.opportunity_id === opportunityIdFromSession) {
-                      const { data: realApp } = await authService.supabase
-                        .from('opportunity_applications')
-                        .select('id')
-                        .eq('startup_id', startup.id)
-                        .eq('opportunity_id', opportunityIdFromSession)
-                        .maybeSingle();
+                    // Find (or create) the real application for THIS guest row's
+                    // opportunity — may already exist if it's the one created by
+                    // the sessionStorage block above.
+                    const { data: existingRealApp } = await authService.supabase
+                      .from('opportunity_applications')
+                      .select('id')
+                      .eq('startup_id', startup.id)
+                      .eq('opportunity_id', guestApp.opportunity_id)
+                      .maybeSingle();
 
-                      if (realApp) {
-                        if (answerEntries.length > 0) {
-                          await questionBankService.saveApplicationResponses(
-                            (realApp as any).id,
-                            answerEntries.map(([questionId, answerText]) => ({ questionId, answerText }))
-                          );
-                        }
+                    let realAppId: string | null = existingRealApp ? (existingRealApp as any).id : null;
+
+                    if (!realAppId) {
+                      const { data: createdRealApp, error: createErr } = await authService.supabase
+                        .from('opportunity_applications')
+                        .insert({
+                          startup_id: startup.id,
+                          opportunity_id: guestApp.opportunity_id,
+                          status: 'pending',
+                          pitch_deck_url: guestApp.pitch_deck_url || null,
+                          pitch_video_url: guestApp.pitch_video_url || null,
+                        })
+                        .select('id')
+                        .single();
+
+                      if (createErr) {
+                        console.error('❌ Error creating real application from guest data:', createErr);
+                      } else if (createdRealApp) {
+                        realAppId = (createdRealApp as any).id;
+                      }
+                    }
+
+                    if (realAppId) {
+                      if (answerEntries.length > 0) {
+                        await questionBankService.saveApplicationResponses(
+                          realAppId,
+                          answerEntries.map(([questionId, answerText]) => ({ questionId, answerText }))
+                        );
+                      }
+                      if (existingRealApp) {
+                        // Row already existed (e.g. created with no pitch
+                        // materials yet) — make sure they carry over too.
                         await authService.supabase
                           .from('opportunity_applications')
                           // @ts-expect-error - Type inference issue
@@ -1991,7 +2020,7 @@ export const CompleteRegistrationPage: React.FC<CompleteRegistrationPageProps> =
                             pitch_deck_url: guestApp.pitch_deck_url || null,
                             pitch_video_url: guestApp.pitch_video_url || null,
                           })
-                          .eq('id', (realApp as any).id);
+                          .eq('id', realAppId);
                       }
                     }
 

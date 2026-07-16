@@ -72,6 +72,8 @@ type IncubationOpportunity = {
   posterUrl?: string;
   videoUrl?: string;
   whatsappLink?: string;
+  facilitatorDescription?: string;
+  facilitatorWebsite?: string;
   facilitatorId: string;
   createdAt?: string;
 };
@@ -2276,6 +2278,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
             posterUrl: row.poster_url || undefined,
             videoUrl: row.video_url || undefined,
             whatsappLink: row.whatsapp_link || undefined,
+            facilitatorDescription: row.facilitator_description || undefined,
+            facilitatorWebsite: row.facilitator_website || undefined,
             facilitatorId: row.facilitator_id,
             createdAt: row.created_at
           }));
@@ -3622,8 +3626,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
       deadline: opp?.deadline || '',
       posterUrl: opp?.posterUrl || '',
       videoUrl: opp?.videoUrl || '',
-      facilitatorDescription: '',
-      facilitatorWebsite: '',
+      whatsappLink: opp?.whatsappLink || '',
+      facilitatorDescription: opp?.facilitatorDescription || '',
+      facilitatorWebsite: opp?.facilitatorWebsite || '',
     });
     setPosterPreview('');
     
@@ -4635,6 +4640,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
         poster_url: posterUrlToSave || null,
         video_url: newOpportunity.videoUrl || null,
         whatsapp_link: newOpportunity.whatsappLink || null,
+        facilitator_description: newOpportunity.facilitatorDescription || null,
+        facilitator_website: newOpportunity.facilitatorWebsite || null,
         facilitator_id: facilitatorId
       };
 
@@ -4655,6 +4662,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           posterUrl: data.poster_url || undefined,
           videoUrl: data.video_url || undefined,
           whatsappLink: data.whatsapp_link || undefined,
+          facilitatorDescription: data.facilitator_description || undefined,
+          facilitatorWebsite: data.facilitator_website || undefined,
           facilitatorId: data.facilitator_id,
           createdAt: data.created_at
         };
@@ -4685,6 +4694,8 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
           posterUrl: data.poster_url || undefined,
           videoUrl: data.video_url || undefined,
           whatsappLink: data.whatsapp_link || undefined,
+          facilitatorDescription: data.facilitator_description || undefined,
+          facilitatorWebsite: data.facilitator_website || undefined,
           facilitatorId: data.facilitator_id,
           createdAt: data.created_at
         };
@@ -9340,9 +9351,9 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
 
       <div className="animate-fade-in">{renderTabContent()}</div>
 
-      <Modal isOpen={isPostModalOpen} onClose={() => setIsPostModalOpen(false)} title={editingIndex !== null ? 'Edit Opportunity' : 'Post New Opportunity'} size="2xl">
+      <Modal isOpen={isPostModalOpen} onClose={() => setIsPostModalOpen(false)} title={editingIndex !== null ? 'Edit Opportunity' : 'Post New Opportunity'} fullScreen>
         <form onSubmit={handleSubmitOpportunity}>
-          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-4">
+          <div className="space-y-4 max-w-3xl mx-auto">
             <Input label="Program Name" id="programName" name="programName" value={newOpportunity.programName} onChange={handleInputChange} required />
                   <div>
               <label htmlFor="description" className="block text-sm font-medium text-slate-700 mb-1">Program Description</label>
@@ -9388,7 +9399,7 @@ const FacilitatorView: React.FC<FacilitatorViewProps> = ({
               />
             </div>
               </div>
-          <div className="flex justify-end gap-3 pt-4 border-t mt-4">
+          <div className="flex justify-end gap-3 pt-4 border-t mt-4 max-w-3xl mx-auto">
             <Button type="button" variant="secondary" onClick={() => setIsPostModalOpen(false)}>Cancel</Button>
             <Button type="submit">{editingIndex !== null ? 'Save Changes' : 'Post Opportunity'}</Button>
           </div>

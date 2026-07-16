@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Input from './ui/Input';
-import { ArrowLeft, Share2, Calendar, User, Video, Download, FileText, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Share2, Calendar, User, Video, Download, FileText, CheckCircle, Globe } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { messageService } from '../lib/messageService';
 import Modal from './ui/Modal';
@@ -18,6 +18,8 @@ interface OpportunityItem {
     posterUrl?: string;
     videoUrl?: string;
     facilitatorName?: string;
+    facilitatorDescription?: string;
+    facilitatorWebsite?: string;
 }
 
 const PublicProgramView: React.FC = () => {
@@ -81,7 +83,9 @@ const PublicProgramView: React.FC = () => {
                         deadline: data.deadline || '',
                         posterUrl: data.poster_url || undefined,
                         videoUrl: data.video_url || undefined,
-                        facilitatorName: 'Program Facilitator'
+                        facilitatorName: 'Program Facilitator',
+                        facilitatorDescription: data.facilitator_description || undefined,
+                        facilitatorWebsite: data.facilitator_website || undefined
                     });
 
                     // Deep-linked here from a button that already means "apply"
@@ -545,7 +549,18 @@ const PublicProgramView: React.FC = () => {
                             <div className="space-y-4">
                                 <Card className="bg-slate-50/70 !shadow-none border">
                                     <h3 className="text-lg font-semibold text-slate-700 mb-3">About {opportunity.facilitatorName || 'Program Facilitator'}</h3>
-                                    <p className="text-sm text-slate-600 mb-4">Programs from our facilitator network.</p>
+                                    <p className="text-sm text-slate-600 mb-4 whitespace-pre-wrap">{opportunity.facilitatorDescription || 'Programs from our facilitator network.'}</p>
+                                    {opportunity.facilitatorWebsite && (
+                                        <a
+                                            href={opportunity.facilitatorWebsite}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1.5 text-sm text-brand-primary hover:underline"
+                                        >
+                                            <Globe className="h-4 w-4" />
+                                            Visit Website
+                                        </a>
+                                    )}
                                 </Card>
                                 
                                 <div className="border-t pt-4">

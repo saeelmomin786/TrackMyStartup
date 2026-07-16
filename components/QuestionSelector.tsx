@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { questionBankService, ApplicationQuestion } from '../lib/questionBankService';
+import { questionBankService, ApplicationQuestion, OTHER_OPTION } from '../lib/questionBankService';
 import { messageService } from '../lib/messageService';
 import Button from './ui/Button';
 import Input from './ui/Input';
@@ -30,8 +30,9 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
   const [category, setCategory] = useState('');
   const [questionOptions, setQuestionOptions] = useState(''); // For select/multiselect options
   const [questionType, setQuestionType] = useState<'text' | 'textarea' | 'number' | 'date' | 'select' | 'multiselect'>('text');
+  const [includeOtherOption, setIncludeOtherOption] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  
+
   // Reset form when modal opens/closes
   useEffect(() => {
     if (!isOpen) {
@@ -39,6 +40,7 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
       setCategory('');
       setQuestionOptions('');
       setQuestionType('text');
+      setIncludeOtherOption(false);
     }
   }, [isOpen]);
 
@@ -63,8 +65,12 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
         options = questionOptions
           .split('\n')
           .map(line => line.trim())
-          .filter(line => line.length > 0);
-        
+          .filter(line => line.length > 0 && line !== OTHER_OPTION);
+
+        if (includeOtherOption) {
+          options.push(OTHER_OPTION);
+        }
+
         if (options.length < 2) {
           messageService.warning('Options Required', 'Please provide at least 2 options.');
           setIsSaving(false);
@@ -84,6 +90,7 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
       setCategory('');
       setQuestionOptions('');
       setQuestionType('text');
+      setIncludeOtherOption(false);
       onClose();
     } catch (error: any) {
       messageService.error('Failed to Add Question', error.message || 'Please try again.');
@@ -151,6 +158,15 @@ const CustomQuestionModal: React.FC<CustomQuestionModalProps> = ({ isOpen, onClo
             <p className="text-xs text-slate-500 mt-1">
               Enter each option on a new line. Users will select from these options.
             </p>
+            <label className="flex items-center gap-2 mt-2">
+              <input
+                type="checkbox"
+                checked={includeOtherOption}
+                onChange={(e) => setIncludeOtherOption(e.target.checked)}
+                className="h-4 w-4 text-brand-primary focus:ring-brand-primary border-slate-300 rounded"
+              />
+              <span className="text-sm text-slate-700">Include an "Other" option (lets respondents type a short answer)</span>
+            </label>
           </div>
         )}
         <div className="bg-blue-50 border border-blue-200 rounded-md p-3 flex items-start gap-2">

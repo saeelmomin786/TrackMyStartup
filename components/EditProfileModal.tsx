@@ -29,6 +29,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
     state: currentUser?.state || '',
     country: currentUser?.country || '',
     company: currentUser?.company || currentUser?.startup_name || '',
+    company_type: currentUser?.company_type || '',
     government_id: currentUser?.government_id || '',
     ca_license: currentUser?.ca_license || '',
     // Investment Advisor specific fields
@@ -52,6 +53,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
         state: currentUser?.state || '',
         country: currentUser?.country || '',
         company: currentUser?.company || currentUser?.startup_name || '',
+        company_type: currentUser?.company_type || '',
         government_id: currentUser?.government_id || '',
         ca_license: currentUser?.ca_license || '',
         // Investment Advisor specific fields
@@ -740,14 +742,12 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   <Building className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400" />
                   <input
                     type="text"
-                    value={currentUser?.company_type || 'Not specified'}
-                    disabled
-                    className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md bg-slate-50 text-slate-500 cursor-not-allowed"
+                    value={formData.company_type}
+                    onChange={(e) => handleInputChange('company_type', e.target.value)}
+                    className="w-full pl-7 sm:pl-10 pr-2 sm:pr-3 py-1.5 sm:py-2 text-sm sm:text-base border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    placeholder="e.g. Incubator, Accelerator, VC Firm"
                   />
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  Company type selected during registration (cannot be changed)
-                </p>
               </div>
 
             </div>
@@ -1109,21 +1109,25 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 </div>
               )}
 
-              {/* Logo Section - Only show for Investment Advisor users */}
+              {/* Logo Section - shown for organization-type accounts (Investment Advisor, Facilitation Center) */}
               {(() => {
-                const isInvestmentAdvisor = 
+                const isInvestmentAdvisor =
                   currentUser?.role === 'Investment Advisor' ||
                   currentUser?.role?.toLowerCase() === 'investment advisor' ||
                   !!currentUser?.investment_advisor_code ||
                   (currentUser?.investment_advisor_code && currentUser.investment_advisor_code.startsWith('IA-'));
-                
+                const isFacilitationCenter =
+                  currentUser?.role === 'Startup Facilitation Center' ||
+                  currentUser?.role?.toLowerCase() === 'startup facilitation center';
+
                 console.log('🔍 EditProfileModal - Logo Section Check:', {
                   currentUserRole: currentUser?.role,
                   currentUserInvestmentAdvisorCode: currentUser?.investment_advisor_code,
-                  isInvestmentAdvisor
+                  isInvestmentAdvisor,
+                  isFacilitationCenter
                 });
-                
-                return isInvestmentAdvisor;
+
+                return isInvestmentAdvisor || isFacilitationCenter;
               })() && (
                 <div>
                   <label className="block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2">
